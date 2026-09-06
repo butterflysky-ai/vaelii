@@ -388,12 +388,16 @@
 ;; same context — answered false.  One KB cannot say both.
 
 ;; relationTypeByArity is the one rule-bearing family.  Predicate and function mappings
-;; are its genl specializations rather than parallel arity/type rules, so one rule
+;; are its genl specializations rather than parallel arity/type rules, so one statement
 ;; covers every exact-arity type in either subdomain: a relation classified under a type
-;; that maps to an arity has that arity.  The converse (an exact arity classifying the
-;; relation under the type) is not stated; exact arity is declared through the type.
-(implies (and (relationTypeByArity ?type ?arity) (?type ?relation))
-         (arity ?relation ?arity))
+;; that maps to an arity has that arity.  It is a generator (docs/generators.md): the
+;; rule index is keyed by predicate, so (?type ?relation) cannot stand as a top-level
+;; antecedent, but as a hole the enclosing antecedent fills it is ground before the
+;; per-type rule is stamped — one minted rule per mapping fact, justified by that fact
+;; and withdrawn with it.  The converse (an exact arity classifying the relation under
+;; the type) is not stated; exact arity is declared through the type.
+(implies (relationTypeByArity ?type ?arity)
+         (implies (?type ?relation) (arity ?relation ?arity)))
 
 ;; The three relation-wide classifications separate each other: a relation takes ONE
 ;; exact number of arguments, so a second classification is a contradiction rather than

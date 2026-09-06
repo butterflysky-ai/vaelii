@@ -561,8 +561,8 @@
      ['relationTypeByArity
       (enforced {:shape {:args [:type :integer]} :storage [:none] :checked false
                  :family nil :facets #{}
-                 :notes "the relation-wide mappings are the premises of the one shared rule that derives a relation's exact arity from its type."}
-                "one ordinary CxCore rule derives exact arity from the relation-wide types")]
+                 :notes "the relation-wide mappings are the premises of one CxCore generator that stamps, per mapping fact, the rule deriving a relation's exact arity from its type."}
+                "one CxCore generator stamps the per-type exact-arity rules")]
      ['predicateTypeByArity
       (enforced {:shape {:args [:type :integer]} :storage [:none] :checked false
                  :family nil :facets #{}
