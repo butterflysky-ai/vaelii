@@ -213,6 +213,7 @@
          "(InstantFn ?year ?month ?day ?hour ?minute ?second) means the moment those six calendar fields name, so (InstantFn 2000 1 1 0 0 0) is midnight at the start of 2000. A time_point and not a temporal_thing: YearFn, MonthFn and DayFn name stretches, and this names the moments one of them lies between. Six fields always — its arity is not its precision — so every moment has exactly one spelling, which is what makes the end of one year and the start of the next the same term. An unreifiable_function application like the calendar constructors, structural so the fields stay readable. What startOf and endOf answer for a calendar term, computed and never stored. See docs/time.md.")
 (unreifiable_function InstantFn)
 (fixed_arity_function InstantFn)
+(arity InstantFn 6)
 (result InstantFn time_point)
 
 (comment instantNotAfter

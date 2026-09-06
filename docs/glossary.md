@@ -838,7 +838,7 @@ records, then recover — the repair for a stale on-disk index layout. See
 [indexing.md](indexing.md).
 
 **`relation`** ![kb](../.github/badges/cat-kb.svg): The common parent of
-`predicate` and `function` — every head that may be applied to arguments. The two
+`predicate` and `function` — every operator that may be applied to arguments. The two
 specializations remain disjoint: a predicate holds or fails; a function denotes or
 evaluates to a value. See [taxonomy.md](taxonomy.md#relations-and-arity-policy).
 

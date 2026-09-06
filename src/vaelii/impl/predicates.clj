@@ -561,18 +561,18 @@
      ['relationTypeByArity
       (enforced {:shape {:args [:type :integer]} :storage [:none] :checked false
                  :family nil :facets #{}
-                 :notes "the three relation-wide mappings are the premises of the shared exact-arity rules."}
-                "ordinary CxCore rules map exact arities to relation-wide types and back")]
+                 :notes "the relation-wide mappings are the premises of the one shared rule that derives a relation's exact arity from its type."}
+                "one ordinary CxCore rule derives exact arity from the relation-wide types")]
      ['predicateTypeByArity
       (enforced {:shape {:args [:type :integer]} :storage [:none] :checked false
                  :family nil :facets #{}
-                 :notes "ordinary CxCore inference projects this predicate-specific mapping into relationTypeByArity."}
-                "ordinary CxCore specialization rule into relationTypeByArity")]
+                 :notes "a genl specialization of relationTypeByArity; its facts are relationTypeByArity facts by ordinary CxCore inference."}
+                "genl specialization of relationTypeByArity")]
      ['functionTypeByArity
       (enforced {:shape {:args [:type :integer]} :storage [:none] :checked false
                  :family nil :facets #{}
-                 :notes "ordinary CxCore inference projects this function-specific mapping into relationTypeByArity."}
-                "ordinary CxCore specialization rule into relationTypeByArity")]
+                 :notes "a genl specialization of relationTypeByArity; its facts are relationTypeByArity facts by ordinary CxCore inference."}
+                "genl specialization of relationTypeByArity")]
      ['admitsArgnum
       (inert {:shape {:args [:relation :position]} :storage [:none] :checked false
               :family nil :facets #{}

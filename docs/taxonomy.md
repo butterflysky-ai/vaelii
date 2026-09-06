@@ -61,9 +61,10 @@ policy and the exact `arity` table are therefore relation-wide.
 `fixed_arity` and `variable_arity` classify two disjoint policies, with predicate and
 function specializations for each. Unsuffixed `unary`, `binary` and `ternary` classify
 exact relations; `unary_predicate` / `unary_function` and their binary and ternary peers
-specialize those relation-wide classes. `relationTypeByArity` owns the shared mapping,
-while `predicateTypeByArity` and `functionTypeByArity` specialize it without parallel
-rule families. `arityMin` states the lower bound of a variable-arity relation. Prefer
+specialize those relation-wide classes. `relationTypeByArity` owns the shared mapping;
+`predicateTypeByArity` and `functionTypeByArity` are its `genl` specializations, and one
+rule derives a relation's exact `arity` from whichever mapped type classifies it, with no
+parallel rule families. `arityMin` states the lower bound of a variable-arity relation. Prefer
 variable arity for a repeatable, homogeneously typed argument role. A relation may
 explicitly define a bounded optional tail instead, as `functionCorrespondingPredicate`
 does.

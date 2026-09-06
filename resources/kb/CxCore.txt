@@ -283,19 +283,16 @@
 (unary_predicate unary_function)
 (arg unary_function 1 function)
 (genl unary_function unary)
-(genl unary_function function)
 
 (comment binary_function "A function of exactly two arguments.")
 (unary_predicate binary_function)
 (arg binary_function 1 function)
 (genl binary_function binary)
-(genl binary_function function)
 
 (comment ternary_function "A function of exactly three arguments.")
 (unary_predicate ternary_function)
 (arg ternary_function 1 function)
 (genl ternary_function ternary)
-(genl ternary_function function)
 
 (comment relationTypeByArity
          "(relationTypeByArity ?type ?arity) maps a relation-wide exact-arity type to its arity. Its three declarations drive the shared arity/type rules.")
@@ -329,29 +326,19 @@
 (functionTypeByArity binary_function 2)
 (functionTypeByArity ternary_function 3)
 
-;; Predicate/function mappings specialize the relation-wide mapping extensionally.
-;; A genl edge is not the right level here: genl endpoints are types (unary predicates),
-;; while these three mappings are binary relations.  Ground rules state the complete
-;; six-member compatibility table without making the two subdomains unifiably overlap.
-(implies (and (predicateTypeByArity unary_predicate 1))
-         (relationTypeByArity unary_predicate 1))
-(implies (and (predicateTypeByArity binary_predicate 2))
-         (relationTypeByArity binary_predicate 2))
-(implies (and (predicateTypeByArity ternary_predicate 3))
-         (relationTypeByArity ternary_predicate 3))
-(implies (and (functionTypeByArity unary_function 1))
-         (relationTypeByArity unary_function 1))
-(implies (and (functionTypeByArity binary_function 2))
-         (relationTypeByArity binary_function 2))
-(implies (and (functionTypeByArity ternary_function 3))
-         (relationTypeByArity ternary_function 3))
+;; The predicate and function mappings are specializations of the relation-wide mapping:
+;; a genl edge between the predicates says so once, and every predicateTypeByArity or
+;; functionTypeByArity fact is thereby a relationTypeByArity fact.  No per-member
+;; compatibility table is needed.
+(genl predicateTypeByArity relationTypeByArity)
+(genl functionTypeByArity relationTypeByArity)
 
 (comment arity
          "(arity ?relation ?n) means that ?relation takes exactly ?n arguments and is fixed_arity. One maps to unary, two to binary and three to ternary; predicate and function specializations inherit those relation-wide classes.")
 (binary_predicate arity)
 (instance_relation_predicate arity)
 (functional arity)
-(arg arity 1 relation)
+(arg arity 1 fixed_arity)
 (arg arity 2 non_negative_integer)
 
 (comment arityMin
@@ -360,8 +347,6 @@
 (instance_relation_predicate arityMin)
 (arg arityMin 1 relation)
 (arg arityMin 2 non_negative_integer)
-
-(implies (and (arity ?relation ?arity)) (fixed_arity ?relation))
 
 (comment admitsArgnum
          "(admitsArgnum ?relation ?argnum) means that positive argument position ?argnum exists in a well-formed application of ?relation. It asks about one position, not the application's total arity. No WFF or query reader consumes it.")
@@ -403,20 +388,12 @@
 ;; same context — answered false.  One KB cannot say both.
 
 ;; relationTypeByArity is the one rule-bearing family.  Predicate and function mappings
-;; specialize its facts rather than carrying parallel arity/type rules.
-(implies (and (relationTypeByArity unary 1) (arity ?relation 1))
-         (unary ?relation))
-(implies (and (relationTypeByArity binary 2) (arity ?relation 2))
-         (binary ?relation))
-(implies (and (relationTypeByArity ternary 3) (arity ?relation 3))
-         (ternary ?relation))
-
-(implies (and (relationTypeByArity unary 1) (unary ?relation))
-         (arity ?relation 1))
-(implies (and (relationTypeByArity binary 2) (binary ?relation))
-         (arity ?relation 2))
-(implies (and (relationTypeByArity ternary 3) (ternary ?relation))
-         (arity ?relation 3))
+;; are its genl specializations rather than parallel arity/type rules, so one rule
+;; covers every exact-arity type in either subdomain: a relation classified under a type
+;; that maps to an arity has that arity.  The converse (an exact arity classifying the
+;; relation under the type) is not stated; exact arity is declared through the type.
+(implies (and (relationTypeByArity ?type ?arity) (?type ?relation))
+         (arity ?relation ?arity))
 
 ;; The three relation-wide classifications separate each other: a relation takes ONE
 ;; exact number of arguments, so a second classification is a contradiction rather than
@@ -424,15 +401,11 @@
 ;; two exact classes would derive two arities, and (functional arity) would otherwise
 ;; convict a clash the class declarations had already made.
 ;;
-;; The predicate specializations remain explicitly pairwise disjoint too, and NOT via a
-;; (sibling_disjoint predicate) mark: predicate's specializations include many compatible
-;; classifications.  The three pairs say only that one predicate cannot have two exact
-;; arities.  Their separation closes down the predicate hierarchy, so functional,
-;; symmetric, transitive and every other binary_predicate subtype remain separated from
-;; unary_predicate and ternary_predicate.
-(disjoint unary_predicate binary_predicate)
-(disjoint unary_predicate ternary_predicate)
-(disjoint binary_predicate ternary_predicate)
+;; The predicate and function specializations inherit that separation through their genl
+;; edges to the relation-wide classes (unary_predicate genl unary, and so on): restating
+;; the three predicate pairs here would only duplicate it.  Nothing marks predicate as
+;; (sibling_disjoint predicate) — its specializations include many compatible
+;; classifications, and only the exact-arity classes exclude one another.
 (disjoint unary binary)
 (disjoint unary ternary)
 (disjoint binary ternary)
@@ -446,7 +419,6 @@
 (modal_predicate believes)
 
 (comment binary_predicate     "A predicate of two arguments — a relation such as parentOf.")
-(genl binary_predicate predicate)
 
 (comment comment
          "(comment ?term ?text) means that ?text documents ?term. Ordinary sentexes, so the KB documents itself in its own representation and a comment is queried, retracted and justified like anything else. Written as a signature and a definition, as this one is, so that first clause doubles as the template an English gloss of any (?term …) sentence is composed from; everything after it is prose for a reader and no machine reads it.")
@@ -863,7 +835,7 @@
 (comment or
          "(or ?disjunct1 ?disjunct2 …) means the disjunction of the disjuncts inside an implies rule's antecedent. A syntactic connective rather than a predicate: it is never asserted on its own, and it never reaches a stored sentence — the rule is polycanonicalized into one rule per alternative, exactly as a conjunctive consequent is split into one rule per conjunct. A disjunctive conclusion is a choice rather than a derivation, and is written with set/assumptionRule instead. See docs/canonicalization.md.")
 
-(comment relation            "The type of all predicates and functions — every head that may be applied to arguments. Its two specializations remain disjoint: a predicate holds or fails, while a function denotes or evaluates to a value.")
+(comment relation            "The type of all predicates and functions — every operator that may be applied to arguments. Its two specializations remain disjoint: a predicate holds or fails, while a function denotes or evaluates to a value.")
 (genl relation thing)
 
 (comment function            "The type of all functions — the reifiable and unreifiable heads a non-atomic term is built from. A function is a relation, and is not a predicate: it denotes or evaluates to a value where a predicate holds or fails.")
@@ -963,7 +935,6 @@
 (arg transitiveInArgInverse 3 predicate)
 
 (comment ternary_predicate    "A predicate of three arguments, such as arg.")
-(genl ternary_predicate predicate)
 
 (comment target_following_predicate
          "(target_following_predicate ?predicate) means a (?predicate … (sentexHandle H) …) sentence is a meta-sentex that names sentex H and must not outlive it: retracting H retracts the meta with it (core/retract-following-metas!). Opt-in and belief-following — the engine's own except / exceptWhen deliberately do not carry it, so their orphan-on-retraction behavior is unchanged. koinii's reply acts declare it, so retracting a claim cascades to the replies about it, which a message bus cannot do.")
@@ -1050,7 +1021,6 @@
 (arg typeToInstancePred 2 instance_relation_predicate)
 
 (comment unary_predicate      "A predicate of one argument: every type (a snake_case unary predicate) and every one-place property such as flies.")
-(genl unary_predicate predicate)
 (genl unary_predicate unary)
 (genl unary_predicate fixed_arity_predicate)
 
