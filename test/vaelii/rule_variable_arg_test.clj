@@ -122,7 +122,7 @@
         p (tu/tmp-pred) rel (tu/tmp-pred)]
     (v/assert kb (list 'genl text 'thing) 'CxUniverse)
     (v/assert kb (list 'disjoint text 'unary_predicate) 'CxUniverse)
-    (v/assert kb (list 'arity rel 2) 'CxUniverse)
+    (v/assert kb (list 'binary_predicate rel) 'CxUniverse)
     (v/assert kb (list 'arg p 1 text) 'CxUniverse)
     (v/assert kb (list 'type_relation_predicate rel) 'CxUniverse)
     (v/assert kb (list 'genlArg rel 1 'thing) 'CxUniverse)   ; position 1 only

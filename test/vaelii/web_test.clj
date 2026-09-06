@@ -273,17 +273,24 @@
     ;; claim is that this context leads the ranking, and a fixed 400 makes that a bet
     ;; on the shipped ontology staying smaller than it — which CxCore, carrying an
     ;; argument declaration for every position of every predicate, does not.
-    (let [n (+ 50 (apply max 0 (map #(v/count-in-context kb %) (v/contexts kb))))]
+    (let [n (max 1000 (+ 50 (apply max 0 (map #(v/count-in-context kb %) (v/contexts kb)))))]
       (v/assert-many kb (for [i (range n)] (list heldBy (symbol (str "TmpBig" i))))
                      CxBiggest {:chain? false})
       (let [cap  (ns-resolve 'vaelii.impl.web 'lattice-cap)
-            body (with-redefs-fn {cap 0}                ; no lattice to draw, at any size
-                   #(:body (GET "/")))
+            locale (java.util.Locale/getDefault)
+            body (try
+                   (java.util.Locale/setDefault java.util.Locale/US)
+                   (with-redefs-fn {cap 0}             ; no lattice to draw, at any size
+                     #(:body (GET "/")))
+                   (finally (java.util.Locale/setDefault locale)))
             seg  (segment body "holding the most" 4000)
-            ns'  (mapv #(Long/parseLong (second %)) (re-seq #" — (\d+) sentexes" seg))]
+            ns'  (mapv #(Long/parseLong (str/replace (second %) "," ""))
+                       (re-seq #" — (\d{1,3}(?:,\d{3})*|\d+) sentexes" seg))]
+        (is (= locale (java.util.Locale/getDefault)) "rendering restores the default locale")
         (is (some? seg) "the fallback says what it is showing instead")
         (is (re-find (re-pattern (str ">" CxBiggest "</a><span class=\"muted\"> — "
-                                      n " sentexes"))
+                                      (String/format java.util.Locale/US "%,d" (to-array [n]))
+                                      " sentexes"))
                      seg)
             "the biggest context, named with what it holds")
         (is (seq ns') "and it is a list of counts, not of names alone")
