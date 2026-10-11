@@ -98,7 +98,7 @@
       (testing "the conclusion exists before the exception arrives"
         (is (some? h))
         (is (seq (v/sentexes-matching kb (list flies Opus) CxBird))))
-      (v/assert kb (list penguin Opus) CxBird)
+      (v/assert kb (list penguin Opus) CxBird {:strength :monotonic})
       (testing "belief is gone"
         (is (empty? (v/sentexes-matching kb (list flies Opus) CxBird))))
       (testing "and so is the storage — swept, not merely disbelieved"
@@ -108,6 +108,30 @@
             "the conclusion was swept, so handle-of must not still find it"))
       (testing "its justification went with it"
         (is (empty? (v/supporting-justifications kb h)))))))
+
+;; DECISION (design ruling 25): the sweep is for a `:monotonic` blocker.  A `:default`
+;; blocker is one a placed defeat can hide, so the firing is stored, in either order, with
+;; `(defeat (sentexHandle F))` resting on the blocker at the firing's own context, and the
+;; read walk decides belief.
+
+(tu/deftest-kb a-default-blocker-stores-the-conclusion-with-a-defeat-resting-on-it
+  (doseq [blocker-first? [false true]]
+    (tu/with-terms [bird penguin flies Opus CxBird]
+      (let [block #(v/assert kb (list penguin Opus) CxBird)
+            ph    (when blocker-first? (block))
+            _     (v/assert kb (except-rule (list penguin '?b) [(list bird '?b)] (list flies '?b))
+                            CxBird)
+            _     (v/assert kb (list bird Opus) CxBird)
+            ph    (or ph (block))
+            h     (v/handle-of kb (list flies Opus) CxBird)
+            d     (when h (v/handle-of kb (list 'defeat (list 'sentexHandle h)) CxBird))]
+        (testing (str "blocker first: " blocker-first?)
+          (is (some? h))
+          (is (some? d))
+          (is (empty? (v/sentexes-matching kb (list flies Opus) CxBird)))
+          (is (some #{ph} (mapcat :antecedents (v/supporting-justifications kb d))))
+          (v/retract! kb ph)
+          (is (= [h] (mapv :id (v/sentexes-matching kb (list flies Opus) CxBird)))))))))
 
 ;; ---- 4. revival is a re-derivation ---------------------------------------
 ;; DECISION (Garbage collection, not defeat): "Reviving costs a re-derivation
@@ -152,7 +176,7 @@
       (testing "both links of the chain are derived first"
         (is (some? fh))
         (is (some? ah)))
-      (v/assert kb (list penguin Opus) CxBird)
+      (v/assert kb (list penguin Opus) CxBird {:strength :monotonic})
       (testing "blocking the first rule removes the conclusion that rested on it"
         (is (empty? (v/sentexes-matching kb (list flies Opus)    CxBird)))
         (is (empty? (v/sentexes-matching kb (list airborne Opus) CxBird))))
@@ -174,10 +198,10 @@
     (v/assert kb (list bird Opus) CxBird)
     (testing "with neither conjunct, the rule fires"
       (is (seq (v/sentexes-matching kb (list flies Opus) CxBird))))
-    (v/assert kb (list penguin Opus) CxBird)
+    (v/assert kb (list penguin Opus) CxBird {:strength :monotonic})
     (testing "one conjunct is not the exception — the rule still fires"
       (is (seq (v/sentexes-matching kb (list flies Opus) CxBird))))
-    (v/assert kb (list young Opus) CxBird)
+    (v/assert kb (list young Opus) CxBird {:strength :monotonic})
     (testing "both conjuncts hold, so the exception holds and the conclusion goes"
       (is (empty? (v/sentexes-matching kb (list flies Opus) CxBird)))
       (is (nil? (v/handle-of kb (list flies Opus) CxBird))))))
@@ -346,12 +370,12 @@
                               [(list bird '?b)] (list flies '?b))
               CxBird)
     (v/assert kb (list bird Opus)    CxBird)
-    (v/assert kb (list penguin Opus) CxBird)
+    (v/assert kb (list penguin Opus) CxBird {:strength :monotonic})
     (testing "penguin is not yet a flightless bird, so the rule fires"
       (is (seq (v/sentexes-matching kb (list flies Opus) CxBird))))
     ;; the only thing that changes is a genl edge — no (flightless ...) fact,
     ;; and nothing with the exception's predicate is ever asserted
-    (v/assert kb (list 'genl penguin flightless) CxBird)
+    (v/assert kb (list 'genl penguin flightless) CxBird {:strength :monotonic})
     (testing "the edge alone makes the exception hold, and the conclusion is swept"
       (is (empty? (v/sentexes-matching kb (list flies Opus) CxBird)))
       (is (nil? (v/handle-of kb (list flies Opus) CxBird))))))
@@ -416,7 +440,7 @@
                               [(list bird '?b)] (list flies '?b))
               CxBird)
     (v/assert kb (list bird Opus)    CxBird)
-    (v/assert kb (list penguin Opus) CxBird)
+    (v/assert kb (list penguin Opus) CxBird {:strength :monotonic})
     (testing "there is no handle to ask about — the conclusion was never stored"
       (is (nil? (v/handle-of kb (list flies Opus) CxBird))))
     (let [wn (v/why-not kb (list flies Opus) CxBird)]
@@ -475,7 +499,7 @@
     (testing "so the far exception does not block"
       (is (seq (v/sentexes-matching kb (list flies Opus) CxHome))))
     (testing "the same exception asserted where the conclusion lives does block"
-      (v/assert kb (list penguin Opus) CxHome)
+      (v/assert kb (list penguin Opus) CxHome {:strength :monotonic})
       (is (empty? (v/sentexes-matching kb (list flies Opus) CxHome)))
       (is (nil? (v/handle-of kb (list flies Opus) CxHome))))))
 

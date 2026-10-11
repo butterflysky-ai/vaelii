@@ -30,6 +30,8 @@
             [vaelii.impl.disk.index-snapshot :as snap]
             [vaelii.impl.memory :as mem]
             [vaelii.impl.protocols :as p]
+            [vaelii.impl.reads :as reads]
+            [vaelii.impl.rules :as rules]
             [vaelii.impl.sentex :as sx]
             [vaelii.impl.types.snapshot :as snapshot-types]
             [vaelii.impl.types.trie :as trie-types])
@@ -107,28 +109,28 @@
       (both #(set (p/children % pfx)) mem col))
     ;; the secondary roots
     (doseq [c ctxs]
-      (both #(p/sentexes-in-context % c) mem col)
-      (both #(p/count-in-context % c) mem col))
+      (both #(reads/as-stored-in-context % c) mem col)
+      (both #(reads/stored-count-in-context % c) mem col))
     (doseq [pr preds]
       (both #(p/sentexes-with-functor % pr) mem col)
       (both #(p/count-with-functor % pr) mem col))
     (doseq [[pos t] args]
-      (both #(p/sentexes-with-arg % pos t) mem col)
-      (both #(p/count-with-arg % pos t) mem col)
+      (both #(reads/as-stored-with-arg-global % pos t) mem col)
+      (both #(reads/stored-count-with-arg-global % pos t) mem col)
       ;; the unary slice of the same node, which is a *superset* by design — so what the
       ;; two stores owe each other is the same superset, not merely a correct one
-      (both #(p/unary-sentexes-with-arg % t) mem col))
+      (both #(reads/as-stored-unary-with-arg-global % t) mem col))
     ;; multi-column narrowing + the inverted term index
     (doseq [s sentexes :let [b (sx/body s)]
             :when (and (sequential? b) (symbol? (first b)) (>= (count b) 3))]
       (both #(p/sentexes-with-args % (first b) [[1 (nth b 1)] [2 (nth b 2)]]) mem col))
-    (doseq [t terms] (both #(p/sentexes-with-term % t) mem col))
+    (doseq [t terms] (both #(reads/as-stored-with-term % t) mem col))
     (doseq [ts (partition-all 2 (seq terms))]
       (both #(p/sentexes-with-terms % (vec ts)) mem col))
     ;; the term roster — the vocabulary must be the same set and the same count, so a
     ;; name retired by the last unindex on one store is retired on the other
-    (both p/terms mem col)
-    (both p/term-count mem col)))
+    (both reads/stored-terms-global mem col)
+    (both reads/stored-term-count-global mem col)))
 
 ;; ---- the oracle ----------------------------------------------------------
 
@@ -157,7 +159,7 @@
         ;; a wipe leaves both empty and equal
         (p/clear-index! mem) (p/clear-index! col)
         (is (zero? (p/count-at col [])))
-        (is (zero? (p/term-count col)) "the roster is wiped with the index")
+        (is (zero? (reads/stored-term-count-global col)) "the roster is wiped with the index")
         (doseq [[s _] ops] (is (empty? (p/lookup col (sx/path s)))))
         (both #(p/count-at % []) mem col)))))
 
@@ -273,7 +275,7 @@
         (is (neg? (node-at trie wide)) "the node is gone, not merely empty")
         (is (zero? (p/count-at col [])))
         (both #(p/count-at % []) mem col)
-        (both p/terms mem col)))))
+        (both reads/stored-terms-global mem col)))))
 
 ;; ---- a number token is one token however it was boxed -------------------
 
@@ -296,7 +298,7 @@
       (both #(p/lookup % pth) mem col))
     (both #(p/count-at % (subvec (sx/path as-long) 0 2)) mem col)
     (both #(set (p/children % (subvec (sx/path as-long) 0 2))) mem col)
-    (both #(p/sentexes-with-arg % 2 (long 2)) mem col)
+    (both #(reads/as-stored-with-arg-global % 2 (long 2)) mem col)
     ;; and the removal has to find it under the other boxing too, or the node is orphaned
     (doseq [store [mem col]] (p/unindex-sentex! store as-long 4242))
     (both #(p/lookup % (sx/path as-int)) mem col)
@@ -320,7 +322,7 @@
       (is (= #{7} (p/lookup store pth)) (str label ": the stored handle is still at its leaf"))
       (is (= 1 (p/count-at store [])) (str label ": the root count is untouched"))
       (is (= 1 (p/count-at store (subvec pth 0 2))) (str label ": the shared prefix's count is untouched"))
-      (is (= #{7} (p/sentexes-with-term store 'SAnn)) (str label ": the term index is untouched"))
+      (is (= #{7} (reads/as-stored-with-term store 'SAnn)) (str label ": the term index is untouched"))
       (p/unindex-sentex! store kept 7)
       (p/unindex-sentex! store kept 7)                        ; a second removal of the same handle
       (is (empty? (p/lookup store pth)) (str label ": the real removal took"))
@@ -353,20 +355,20 @@
                          [(sx/sentex (rand-sentence rng) (pick rng ctxs)) (inc i)]))]
           (doseq [[s h] ops] (p/index-sentex mem s h) (p/index-sentex src s h))
           (doseq [store [mem src]]
-            (p/index-rule store 7001 '[p0 p1] 'p2 'C0)
-            (p/index-exception store 7001 '[penguin flies]))
+            (rules/index-rule store 7001 '[p0 p1] 'p2 'C0)
+            (rules/index-exception store 7001 '[penguin flies]))
 
           ;; write, read into a store that has never seen a sentex, and re-check
           ;; everything against the reference that was never snapshotted
           (is (= :saved (:index (snap/save! dir src constant-stamp))))
           (is (= :mapped (:index (snap/load! dir dst constant-stamp))))
           (compare-all mem dst (map first ops))
-          (is (= (p/rules-by-antecedent mem 'p0) (p/rules-by-antecedent dst 'p0)))
-          (is (= (p/rules-by-consequent mem 'p2) (p/rules-by-consequent dst 'p2)))
-          (is (= #{7001} (p/rules-by-consequent dst 'p2 '#{C0}) (p/rules-by-consequent mem 'p2 '#{C0})))
-          (is (= (p/rules-with-exception-on mem 'penguin) (p/rules-with-exception-on dst 'penguin)))
-          (is (= (p/exception-rules mem) (p/exception-rules dst)))
-          (is (true? (p/exception-rule? dst 7001)))
+          (is (= (reads/as-stored-rules-by-antecedent-global mem 'p0) (reads/as-stored-rules-by-antecedent-global dst 'p0)))
+          (is (= (reads/as-stored-rules-by-consequent-global mem 'p2) (reads/as-stored-rules-by-consequent-global dst 'p2)))
+          (is (= #{7001} (reads/as-stored-rules-by-consequent-in dst 'p2 '#{C0}) (reads/as-stored-rules-by-consequent-in mem 'p2 '#{C0})))
+          (is (= (reads/watched-rules-on mem 'penguin) (reads/watched-rules-on dst 'penguin)))
+          (is (= (reads/watched-rules mem) (reads/watched-rules dst)))
+          (is (true? (reads/watched-rule? dst 7001)))
 
           ;; a mapped store is written to exactly like any other — the trie thaws its leaf
           ;; run out of the mapping and the roots thaw wholesale
@@ -391,29 +393,29 @@
         col (columnar/columnar-index-store {:space 72})]
     (p/clear-index! mem) (p/clear-index! col)
     (doseq [store [mem col]]
-      (p/index-rule store 10 '[p0 p1] 'p2 'C0)
-      (p/index-rule store 11 '[p1] 'p0 'C1)
-      (p/index-exception store 10 '[penguin flies])
-      (p/index-exception store 11 '[t0]))
+      (rules/index-rule store 10 '[p0 p1] 'p2 'C0)
+      (rules/index-rule store 11 '[p1] 'p0 'C1)
+      (rules/index-exception store 10 '[penguin flies])
+      (rules/index-exception store 11 '[t0]))
     (doseq [pr '[p0 p1 p2 penguin flies t0]]
-      (both #(p/rules-by-antecedent % pr) mem col)
-      (both #(p/rules-by-consequent % pr) mem col)
-      (both #(p/rules-with-exception-on % pr) mem col)
+      (both #(reads/as-stored-rules-by-antecedent-global % pr) mem col)
+      (both #(reads/as-stored-rules-by-consequent-global % pr) mem col)
+      (both #(reads/watched-rules-on % pr) mem col)
       ;; the consequent index ends in the context: a scoped read keeps the rules stated there
       (doseq [cs '[#{C0} #{C1} #{C0 C1} #{C2}]]
-        (both #(p/rules-by-consequent % pr cs) mem col)))
-    (is (= #{10} (p/rules-by-consequent col 'p2 '#{C0})))
-    (is (= #{11} (p/rules-by-consequent col 'p0 '#{C1 C2})))
-    (both p/exception-rules mem col)
-    (doseq [h [10 11 12]] (both #(p/exception-rule? % h) mem col))
+        (both #(reads/as-stored-rules-by-consequent-in % pr cs) mem col)))
+    (is (= #{10} (reads/as-stored-rules-by-consequent-in col 'p2 '#{C0})))
+    (is (= #{11} (reads/as-stored-rules-by-consequent-in col 'p0 '#{C1 C2})))
+    (both reads/watched-rules mem col)
+    (doseq [h [10 11 12]] (both #(reads/watched-rule? % h) mem col))
     ;; retract one rule + its exception and re-compare
     (doseq [store [mem col]]
-      (p/unindex-rule! store 10 '[p0 p1] 'p2 'C0)
-      (p/unindex-exception! store 10 '[penguin flies]))
+      (rules/unindex-rule! store 10 '[p0 p1] 'p2 'C0)
+      (rules/unindex-exception! store 10 '[penguin flies]))
     (doseq [pr '[p0 p1 p2 penguin flies t0]]
-      (both #(p/rules-by-antecedent % pr) mem col)
-      (both #(p/rules-with-exception-on % pr) mem col))
-    (both p/exception-rules mem col)))
+      (both #(reads/as-stored-rules-by-antecedent-global % pr) mem col)
+      (both #(reads/watched-rules-on % pr) mem col))
+    (both reads/watched-rules mem col)))
 
 ;; ---- the frozen layout is a layout, so it has to be fixed ---------------
 

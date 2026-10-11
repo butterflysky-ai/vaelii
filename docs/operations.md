@@ -232,7 +232,8 @@ VAELII_API_TOKEN=… lein serve 4200 /var/lib/vaelii --listen 0.0.0.0   # off-ma
   exits **2** before it opens a KB. `lein run -m vaelii.web --listen 0.0.0.0` is refused
   on the same terms and, with the token set, answers **401** to a request that does not
   carry it — the browser's write routes include two (`/kbs/export`, `/kbs/load`) that
-  write the host filesystem at a path the request names. A **loopback** bind is
+  write the host filesystem, and both servers' `/op :export` writes it too, at a path the
+  request names only when `VAELII_REQUEST_PATHS` is on. A **loopback** bind is
   unchanged on both: the token is used by the daemon when set, the browser never asks
   for it, and its absence is a startup warning naming the flag that would require one.
   [why a refusal rather than a warning](defenses.md#what-a-server-binds-decides-what-it-requires)
@@ -321,8 +322,8 @@ VAELII_API_TOKEN=… lein serve 4200 /var/lib/vaelii --listen 0.0.0.0   # off-ma
   `:ask-within`, `:prove-within`, `:kb-integrity`. `:kb-integrity` has two more dials,
   `:max-work` (**10000**) and `:max-results` (**1000**), held the same way and filled with
   the ceiling when a request omits them or sends no option map, so a served sweep always
-  runs under all three ([integrity.md](integrity.md)). **No write's bound is held to a ceiling.** Seven
-  writes name one: `:assert`, `:assert-many`, `:assert-rule` and `:forward-chain` read
+  runs under all three ([integrity.md](integrity.md)). **No write's bound is held to a ceiling.** Eight
+  writes name one: `:assert`, `:try-assert`, `:assert-many`, `:assert-rule` and `:forward-chain` read
   `:max-depth` and `:max-derivations`, and `:edit`, `:edit-with-consequences` and
   `:preview` read the same two keys off each batch entry's opts. Both keys bound the
   forward-chaining fixpoint (64 and 100,000 when the request names neither), a request
@@ -356,13 +357,13 @@ VAELII_API_TOKEN=… lein serve 4200 /var/lib/vaelii --listen 0.0.0.0   # off-ma
 
   | Re-sent write | Answers |
   |---|---|
-  | `:assert`, `:assert-many`, `:assert-rule` | the same handles, and nothing new is stored: a sentence dedups to its canonical form's handle ([canonicalization.md](canonicalization.md)) |
+  | `:assert`, `:try-assert`, `:assert-many`, `:assert-rule` | the same handles, and nothing new is stored: a sentence dedups to its canonical form's handle ([canonicalization.md](canonicalization.md)) |
   | `:edit`, `:edit-with-consequences` | with `:add` alone, the same handles; with a `:remove`, refused `:unknown-handle`, and the KB stays as the first send left it |
   | `:retract` | `{:removed-sentexes 0 :removed-justifications 0}` |
   | `:forward-chain` | `{:derived 0}`, the fixpoint being reached |
   | `:add-provenance` | the same merged map |
   | `:abduce-discard` | zero counts |
-  | `:export` | refused `:not-empty`, and the first dump stands |
+  | `:export` (under `VAELII_REQUEST_PATHS`) | refused `:not-empty`, and the first dump stands |
   | `:abduce` with `{:keep? true}` | **a second scratch context**, each one discarded through the context its own answer names; without `:keep?` the KB is left as it was found either time |
   | `:watch` | **a second subscription**; the first counts toward the 64 until it has gone five minutes unpolled and a later feed call reaps it |
 
@@ -485,16 +486,24 @@ VAELII_API_TOKEN=… lein serve 4200 /var/lib/vaelii --listen 0.0.0.0   # off-ma
   a remote client rendering a term otherwise asks a dozen questions about it and pays a
   round trip for each, and this answers them together. `:why-not` needs no table entry of
   its own for the near-miss option — the op table `apply`s the `vaelii.core` var, so a new
-  arity crosses the wire the moment the API grows one. `:kb-diff`'s second side is a
-  **path on the daemon's host**, for the reason `:export`'s destination is one: the daemon
-  owns the KB, a KB value does not cross an EDN wire, and a text export is a directory the
-  daemon can read — so the remote reading is "what has the live KB done since this export
-  was taken".
+  arity crosses the wire the moment the API grows one. `:kb-diff`'s second side names a
+  KB the server serves, since a KB value does not cross an EDN wire: the browser's
+  catalog key of another loaded entry, diffed against the active one. A string naming no
+  served KB is refused with **403** `:path-not-served` and nothing is read, so a daemon,
+  which serves one KB, refuses every wire `:kb-diff`. The server decides which KBs it
+  serves, and a request names no path: a path side would load a whole KB per request
+  and read any file the process can read, `..` and symlinks included.
+  `VAELII_REQUEST_PATHS=1` at the server's start lets a request name a text KB on the
+  server's host. The browser's `/kbs/load` and `/kbs/export` refuse a `dir` the same way
+  and write under the catalog's `write-root` ([catalog.md](catalog.md#where-the-server-writes)).
+  `:export` names a directory on the server's host, so it is refused with **403**
+  `:path-not-served` before anything is written unless the switch is on.
 - **`:query-status` says whether the depth bound cut an answer.** A query truncated at
   `:max-depth` answers the same empty or short seq as a goal the KB does not entail, and
   over the wire the bound in force is often the daemon's `VAELII_MAX_QUERY_DEPTH` rather
   than the caller's. `:query-status` answers `query`'s answers with `:status`
-  (`:complete` or `:truncated`) and the run's counters, under the same depth ceiling as
+  (`:complete`, `:truncated`, or `:incomplete` when a transitive goal with both ends open
+  answered its extent) and the run's counters, under the same depth ceiling as
   `:query` ([api.md](api.md)).
 - **Six reads are served beside a read on the wire that answers the same kind of
   question**: `:find-sentexes-all` beside `:find-sentexes`,
@@ -502,7 +511,8 @@ VAELII_API_TOKEN=… lein serve 4200 /var/lib/vaelii --listen 0.0.0.0   # off-ma
   `:functional-at-instant-violations` and `:all-functional-at-instant-violations` beside
   the `predAllSpecified` pair `:specified-violations` and `:all-specified-violations`,
   and `:last-program`, the question the edge solver was last asked, beside `:conflicts`.
-- **Export runs on the daemon's host** (`:export`). It is a write to the *filesystem*
+- **Export runs on the daemon's host** (`:export`), and only under `VAELII_REQUEST_PATHS`
+  (above). It is a write to the *filesystem*
   rather than to the KB, and the directory it names is resolved where the daemon runs —
   the only place it can be, since the daemon owns the KB and there is no stream to hand a
   client back. Two consequences follow: it reports **no progress** (`:on-progress`
@@ -936,6 +946,10 @@ the read still found one of them. Set a new floor by rounding the first mention 
 | `VAELII_MAX_BODY_BYTES` | `src/vaelii/host/guard.clj:160+` | a positive whole number of bytes; blank is unset | `16777216` (16 MiB) | The request-body ceiling both servers refuse above, with 413. |
 | `VAELII_MAX_QUERY_MS` | `src/vaelii/impl/config.clj:330+` | a whole number of milliseconds, 0 or more | `30000` | The wall clock a served read may name. A request may name less and is refused (`:over-ceiling`, 400) for naming more; a read naming none is given this, the four backward-search entry points included. `0` lifts the ceiling. |
 | `VAELII_MAX_QUERY_DEPTH` | `src/vaelii/impl/config.clj:340+` | a whole number of rule expansions, 0 or more | `256` | The rule-expansion depth a served read may name, refused the same way. `0` lifts it. |
+| `VAELII_REQUEST_PATHS` | `src/vaelii/impl/config.clj:430+` | the boolean vocabulary | `false` | Whether a served request may name a path for the server to read or write. Off, a wire `:kb-diff` side names a KB the server serves and a string naming none is refused (`:path-not-served`, 403), a wire `:export` is refused the same way, and the browser's `/kbs/load` and `/kbs/export` refuse a `dir` (`:path-not-served`) and write under the catalog's `write-root`; on, the string is read as a text KB on the server's host, `:export` writes the directory it names, and the two routes take a `dir`. |
+| `VAELII_SANDBOX_MAX` | `src/vaelii/impl/config.clj:440+` | a whole number ≥ 1 | `256` | How many browser sandboxes a KB holds. Opening one more resets the sandbox the roster ranks lowest ([web.md](web.md#how-many-sandboxes-a-kb-holds)). Read at each admission. |
+| `VAELII_SANDBOX_IDLE_MINUTES` | `src/vaelii/impl/config.clj:450+` | a whole number of minutes ≥ 1 | `1440` | How long a browser sandbox may go unused before an admission resets it ahead of every used one. |
+| `VAELII_SANDBOX_KEY` | `src/vaelii/browser/sandbox.clj:80+` | any string; blank or whitespace-only is unset | unset (32 random bytes per process) | The key the browser's sandbox cookies are tagged with (HMAC-SHA256). Set it to keep sessions across a restart or across replicas behind one name; unset, a restart re-mints every cookie. |
 | `VAELII_WEB_PORT` | `src/vaelii/browser/web.clj:5830+` | a port number | `3000` | The port the browser binds. An unparseable value, or a number outside 0–65535, is logged at `:warn` and falls through to the property rather than failing the start. |
 | `vaelii.web.port` | `src/vaelii/browser/web.clj:5830+` | a port number | `3000` | The same port, read after the variable, and logged the same way when unusable. |
 | `VAELII_KB_DIR` | `src/vaelii/browser/web.clj:6930+` | a KB directory: a store, a dump or a corpus; blank is unset | unset | The directory the browser loads at startup, as a catalog job with belief recovered, while it serves the starter. The KB becomes the active one when the load finishes. A path holding no KB is logged and the browser stays on the starter. The three `scripts/start-vaelii*.sh` set it. |
@@ -1033,6 +1047,7 @@ CI sets these too; nothing in a deployment does.
 | `VAELII_FULL_KB_WORK` | `scripts/test-full-kb.sh:0+` | a directory on the same volume as KB-DIR | `target/full-kb` | Where `lein test-full-kb` puts each run's clone of KB-DIR, deleted after the run. KB-DIR itself is what the run upgrades. The clone is an APFS clone, so another volume turns it into a full copy. The script's `VAELII_HEAP` default is `44g`. |
 | `VAELII_TEST_LOG_LEVEL` | `project.clj:130+` | `error` `warn` `info` `debug` `trace`; blank is unset | `error` | The floor the `:test` profile installs the engine's logging at, through `set-log-level` itself. |
 | `VAELII_TEST_NS_COUNTS` | `project.clj:150+` | the boolean vocabulary | `false` | Prints one `NSCOUNT <namespace> <assertions>` line per test namespace. Two runs diffed name the namespace whose count moved, which is what `test-backends.sh`'s assertion-count check cannot say on its own. |
+| `VAELII_TEST_HEAP` | `project.clj:40+` | a JVM heap size (`4g`, `6144m`) | `4g` | The `-Xmx` the `:test` profile gives a test JVM. Unset, a `JVM_OPTS` that already names `-Xmx` keeps its own, which is how `lein test-full-kb` passes `VAELII_HEAP`. The profile also sets G1 to return freed heap (`MaxHeapFreeRatio=30`, a 15 s periodic collection) and two parallel and one concurrent collector thread per JVM. |
 | `VAELII_BENCH_LOG_LEVEL` | `project.clj:170+` | `error` `warn` `info` `debug` `trace`; blank is unset | `error` | The same floor for the `:bench` profile, so `lein perf` and the `bench-*` harnesses print readings rather than the logging their workloads provoke. |
 | `VAELII_RETE` | `test/vaelii/test_util.clj:30+` | the boolean vocabulary | `false` | Runs the suite's forward chaining through the incremental matcher instead of the reference. |
 | `VAELII_HIER` | `test/vaelii/test_util.clj:60+` | the boolean vocabulary | `true` | The set-algebra context-scoped retrieval. `0` routes every match through the reference nested fan-out instead. |
@@ -1047,6 +1062,9 @@ CI sets these too; nothing in a deployment does.
 | `VAELII_GATE_TIMINGS` | `scripts/test-parallel.sh:40+` | a file | `target/gate/test-timings.tsv` | The per-namespace timings the test stage bin-packs its shards from. **Per checkout, not per run** — they are feedback for the *next* gate, so they sit above the run directory and every run shares them. Inside a per-run directory each gate starts blind and falls back to round-robin sharding, which is slower and silent. |
 | `GATE_JOBS` | `scripts/gate.sh:60+` | a whole number | unset | The test stage's shard count. **Unpinned** — see below. |
 | `PERF_TOLERANCE` | `scripts/gate.sh:60+` | a multiplier (`1.5`) | unset | Passed through to `lein perf --tolerance`, for a loaded box. **Unpinned.** |
+| `GATE_MAX_CONCURRENT` | `scripts/lib/slots.sh:280+` | a whole number; `0` disables | `2` | How many `lein gate` test stages run at once on the box, from any worktree: each holds one `gate-lock.<i>` file in the shared git directory's `vaelii-matrix/`. A gate over the cap runs lint and waits for a slot, naming the holders once a minute, and its test stage reads its shard count after admission. **Unpinned.** |
+| `GATE_NO_WAIT` | `scripts/lib/slots.sh:280+` | any non-empty value | unset | Makes `lein gate` exit 75 instead of waiting when every gate slot is held. **Unpinned.** |
+| `PERF_NO_WAIT` | `scripts/lib/slots.sh:280+` | any non-empty value | unset | Makes `lein perf` and `lein perf-ab` exit 75 instead of waiting while another perf run holds `perf-lock`. **Unpinned.** |
 | `TEST_BACKENDS_OUT` | `scripts/test-backends.sh:70+` | a directory | `target/test-backends/run-<pid>` | Where `lein test-backends` writes one log per run; the default is per-run, with `latest` pointing at the newest. **Unpinned.** |
 | `TEST_SWEEPS_OUT` | `scripts/test-sweeps.sh:50+` | a directory | `target/test-sweeps` | Where `lein test-sweeps` writes one log per run. **Unpinned.** |
 | `SUITE_PROGRESS` | `scripts/lib/suite-marks.sh:40+` | `marks` `lines` `auto` | `auto` | How `lein test-backends` and `lein test-sweeps` report a namespace as it finishes: `marks` is the ✔/✘ rows a terminal animates, `lines` is one named, counted and timed line each — what a log, a pipe or CI gets, since a row of ticks in a file names nothing. `auto` reads the terminal. **Unpinned.** |
@@ -1054,6 +1072,7 @@ CI sets these too; nothing in a deployment does.
 | `MATRIX_JOBS` | `scripts/test-matrix.sh:50+` | a whole number | performance cores − 2, less the vaelii JVMs already running (`scripts/lib/slots.sh`) | How many of the fourteen configurations run at once. One run is about one core of test work, so more slots than cores buys nothing and costs a JVM each. `lein test-matrix --set-jobs <n>` changes the running matrix's count; its scheduler re-reads it every pass, launching more at once on a raise and nothing new on a lower until fewer are running. **Unpinned.** |
 | `MATRIX_OWED_MAX` | `scripts/test-matrix.sh:50+` | a whole number; `0` disables | `4` | The most configurations `lein test-matrix --owed` starts: the ones a changed file names itself first, then the ones a group word brought in, each half in the (shuffled) launch order; the rest are on the `not run:` line. A queued owed run is capped the same way. **Unpinned.** |
 | `MATRIX_RED_COOLDOWN` | `scripts/lib/slots.sh:200+` | seconds; `0` disables | `1800` | How long after a red `lein test-matrix` run no matrix starts or queues. The refusal (exit 75) names the red run's directory, its failing tests per configuration with a one-test re-run command each, who requested it, and the queued requests it dropped; the red run drops the queue, and a green run lifts the cooldown. **Unpinned.** |
+| `MATRIX_YIELD` | `scripts/test-matrix.sh:50+` | `0` disables | `1` | Whether a running `lein test-matrix --owed` ends at its first configuration verdict when a request is queued behind it. On a green verdict it stops the configurations still running, queues its own baseline and exits 75, and the next matrix runs every queued baseline's owed set at the primary's HEAD; on a red one it halts as a red run. A configuration a yield leaves without a verdict runs first in the next owed run that owes it, and that run does not yield before the configuration has a verdict. A run named by group or configuration never yields. **Unpinned.** |
 | `TEST_MATRIX_SEED` | `scripts/test-matrix.sh:50+` | a whole number | a fresh one per run | The seed the launch order is shuffled with. `lein test-matrix` shuffles by default, so a run stopped early — by `--fail-fast`, by ^C, by the box — has covered a random subset of the roster rather than the same prefix every time; the seed is printed with the header and again with the verdict, and giving it back runs that order again. `--ordered` ignores it and schedules the longest configuration first instead, which is ~1 minute faster over the routine roster. **Unpinned.** |
 | `MATRIX_JVM_OPTS` | `scripts/test-matrix.sh:50+` | JVM flags | unset | Extra `JVM_OPTS` for every configuration. `-XX:ActiveProcessorCount=2` is the one worth measuring on a loaded box — each JVM otherwise sizes its GC and JIT pools from every core while doing one core of work. It lands in each configuration's log header (`# env … lein test …`, under the revision stamp), so a run stays reproducible by copying that line. **Unpinned.** |
 | `ALLOW_WORKTREE_RUN` | `scripts/lib/slots.sh:70+` | any non-empty value | unset | Lets `lein test-matrix`, `test-backends`, `test-sweeps`, `test-shuffle` and `perf` run from a linked worktree, which each refuses otherwise (exit 3): a second fleet of JVMs beside the primary's drops every runner to one slot. For a release gated in a scratch worktree at the carved sha. **Unpinned.** |

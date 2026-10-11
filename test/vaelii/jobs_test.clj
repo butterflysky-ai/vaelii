@@ -309,6 +309,26 @@
       (is (some? (get-in after [:jobs "3"])))
       (is (some? (get-in after [:jobs "4"])) "ninety-nine hours in, and still counted"))))
 
+(deftest the-registry-holds-at-most-the-newest-settled-reports-and-every-running-job
+  (let [cap @#'jobs/max-settled-jobs
+        n   (+ cap 20)
+        t   (System/currentTimeMillis)
+        ids (mapv str (range n))
+        s   {:jobs  (-> (into {} (for [id ids] [id {:id id :status :done :started t :finished t}]))
+                        (assoc "w" {:id "w" :status :running :started 0}))
+             :order (into ["w"] ids)}
+        after (#'jobs/sweep s)]
+    (is (= (into ["w"] (subvec ids 20)) (:order after))
+        "the oldest settled reports go past the cap, and the running job is outside it")
+    (testing "a flood of no-op jobs leaves the registry at the cap"
+      (dotimes [_ (+ cap 30)] (settled (jobs/submit {:label "no-op" :kind :chain} (constantly {}))))
+      (is (= cap (count (jobs/jobs)))))
+    (testing "a listing read sweeps, so an idle registry drops what has aged out"
+      (swap! @#'jobs/state update :jobs
+             (fn [js] (update-vals js #(assoc % :finished 0 :started 0))))
+      (is (empty? (jobs/jobs)))
+      (is (empty? (:jobs @@#'jobs/state))))))
+
 (deftest the-writer-claim-survives-a-sweep-run-by-a-job-that-claims-nothing
   ;; The hole this closes, and the reason it needed a *second* job to open: `submit`'s writer
   ;; test reads the registry before the sweep in its own registration, so a writing job

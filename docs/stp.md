@@ -153,14 +153,17 @@ directly.
 
 Constraints spanning **more than one dimension** are refused rather than mixed: `problem`
 returns nil, and no metric goal is answered. Gaps in metres are not durations — the same
-gate `totalDuration` applies to its components.
+gate `totalDuration` applies to its components. The interval network reading the refused
+problem is unsatisfiable, as it is over an unsatisfiable one ("The interval algebra reads
+it"), so no Allen goal is answered in the context either, and every firing that rested on
+an Allen entailment there is withdrawn until the refusal ends.
 
 That refusal is **reported** to the `(violations kb)` ledger as
 `:metric-temporal-mixed-dimensions`, naming the context, the dimensions and the base units
 they would have been summed in. `totalDuration` refusing a mismatched sum withdraws one
-goal; this refusal withdraws every metric goal in the context, the gaps stated outright
-included, and one mis-spelt unit is enough to cause it. It is reported once per KB and
-context.
+goal; this refusal withdraws every metric and every Allen goal in the context, the gaps
+stated outright included, and one mis-spelt unit is enough to cause it. It is reported
+once per KB and context.
 
 ## Bind or check
 
@@ -198,7 +201,7 @@ it.
 **The support is the path, not the network.** A bound between P and Q is the least-weight
 chain between them, so the constraints on that chain produced it. Naming the whole network
 would be sound but would withdraw the conclusion whenever any unrelated constraint was
-retracted, and locality is one of the four properties the engine holds everywhere. `hi` is
+retracted, and locality is one of the five properties the engine holds everywhere. `hi` is
 the chain from P to Q and `lo` the chain back, so the support is the union of the two. Each
 constraint brings the `dimensionOf` / `conversionFactor` rows its magnitude converted
 through. A check additionally names the stated measure's own conversion rows.
@@ -282,8 +285,11 @@ read: the interval network reading it is then unsatisfiable, answers no goal, an
 withdraws the firings it licensed ([qcn.md](qcn.md), "A network can have a second
 reader"). The reading also describes the clash as a `:metric` source: the pairs
 unsatisfiable as written, the instants on a negative cycle, and the handles behind the
-constraints among them, so `qualitative-network` over `:allen` names the cycle. An interval missing one of its bounding instants, or with one stated of
-two *different* instants, is not read at all.
+constraints among them, so `qualitative-network` over `:allen` names the cycle. A problem
+refused for spanning more than one dimension is read the same way: one pair emptied,
+supported by every constraint read, its `:metric` source naming the `:dimensions` in
+place of pairs and a cycle. An interval missing one of its bounding instants, or with one
+stated of two *different* instants, is not read at all.
 
 ### The interval algebra reads it
 

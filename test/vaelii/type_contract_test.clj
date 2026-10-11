@@ -384,7 +384,7 @@
     :bad-snapshot :bad-table-entry :base-is-overlay :body-too-large :budget-exhausted
     :choice-head-not-positive
     :compaction-failed :cover :cross-origin :daemon-error :damaged-dictionary
-    :damaged-frame :derived-only :disallowed-class
+    :damaged-frame :definitional-clash :derived-only :disallowed-class
     :disjoint :disjunction-too-wide :disk-locked :duplicate-handle :duplicate-tokens :error
     :exception-not-closed :export-busy :fork-base-overlap :frozen-base :functional
     :handle-ceiling
@@ -398,13 +398,13 @@
     :no-dump :no-foreign-reader :not-a-directory :not-assertible
     :not-checkable :not-edn :not-empty :not-encodable :not-indexable
     :not-a-report :not-found :not-ground :not-in-process :not-range-restricted :not-stratified
-    :not-watchable :not-well-formed :not-writable :over-ceiling :pattern-too-costly
+    :not-watchable :not-well-formed :not-writable :over-ceiling :path-not-served :pattern-too-costly
     :quantifier-not-local :quoted-arg-type
     :reset :shape :short-transfer :solver-failed :solver-unavailable
     :stacked-batch
     :stacked-fork :stale-index-layout :stale-index-records :still-exporting :still-loading :still-stopping
     :still-writing
-    :store-unusable :too-many-subscriptions :too-many-waiters
+    :store-unusable :too-many-kbs :too-many-kept :too-many-subscriptions :too-many-waiters
     :torn-snapshot :truncated-dump :unauthorized :unbound-deferred :uncleared-forcing
     :unforkable-index :unknown-backend
     :unknown-command :unknown-entry :unknown-frame :unknown-framing :unknown-handle
@@ -511,6 +511,10 @@
    :not-stratified          #{:context :cycle}
    :not-watchable           #{}
    :not-well-formed         #{}
+   ;; the daemon's bound past its ceiling and the browser's form past its sandbox's
+   ;; sentex ceiling, each naming what was asked and the most it may be
+   :over-ceiling            #{:option :requested :ceiling}
+   :path-not-served         #{:op}
    :pattern-too-costly      #{:scope}
    ;; a rule's own quantifier names its kind (`:thereExists` / `:aggregate`) and an
    ;; exception's carries `:exception` instead
@@ -524,6 +528,7 @@
    :torn-snapshot           #{}
    :truncated-dump          #{}
    :unauthorized            #{}
+   :unforkable-index        #{:index}
    :unknown-backend         #{:axis :kind :mismatch}
    :unknown-command         #{:cmd :commands}
    :unknown-entry           #{:key}
@@ -533,6 +538,8 @@
    :unknown-source          #{}
    :unknown-subscription    #{:token}
    :unknown-tactician       #{:known :tactician}
+   ;; `assert-inert`'s refusal of a sentence NAT and of a context slot with no constant
+   :unminted-nat            #{:context :sentence}
    ;; the browser editor's problem map and the text KB reader's refusal, each placing the
    ;; form that does not read by the line it opens on
    :unreadable              #{:line}

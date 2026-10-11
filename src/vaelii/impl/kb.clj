@@ -18,6 +18,7 @@
             [vaelii.impl.columnar :as columnar]
             [vaelii.impl.config :as config]
             [vaelii.impl.decide :as decide]
+            [vaelii.impl.decide.negation :as negation]
             [vaelii.impl.dense-kv :as dense]
             [vaelii.impl.disk.backend :as disk]
             [vaelii.impl.disk.files :as dfiles]
@@ -395,6 +396,18 @@
          (dense/drop-index-space! space)
          (columnar/drop-state-space! space)))))
 
+(defn release-engine-space!
+  "Drop the private in-RAM space `space` (`mem/engine-space`) from every RAM registry: the
+  records and their handle counter, the index, and a fork's bookkeeping
+  (`mount/meta-kv`).  `core/close!` calls this with the KB's `:engine-space`.  A no-op for
+  nil."
+  [space]
+  (when space
+    (mem/drop-record-space! space)
+    (release-index-space! space)
+    (mem/drop-index-space! (mount/meta-space space))
+    nil))
+
 (defn- sqlite-record-store-ctor
   "The `com.vaelii/sqlite` adapter's record-store constructor, resolved **lazily** — the
   same trick `create-tms` uses for the dense TMS — so the SSPL engine never loads the
@@ -752,7 +765,7 @@
       (when (and (.isDirectory (java.io.File. ^String root))
                  (= :stale (dfiles/index-layout-decision
                             root kv/index-layout-version
-                            (pos? (long (p/count-at index-store []))))))
+                            (pos? (long (reads/stored-count-at index-store []))))))
         (throw (ex-info (str "the durable index at " root " was written under another key "
                              "layout — every read whose key shape moved would miss.  A fork "
                              "mounts its base read-only and cannot rebuild it: open that "
@@ -853,8 +866,8 @@
 (defn- store-space?
   "Is `space` a value `:space` names a store with?  A whole number 0 or more, or a
   keyword, a symbol or a vector — the spelling of a **private** space, one no number can
-  name: `fork` takes `[::fork n]`, `diff` and the spindle take a vector of their own, and a
-  test takes a `gensym` or a namespaced keyword.
+  name: an ephemeral `fork` and a `kb-diff` side take `mem/engine-space`, the spindle takes a
+  vector of its own, and a test takes a `gensym` or a namespaced keyword.
 
   Each backend derives its store from the value — the memory registry keys on it, the
   disk backend names a directory `space-<value>` — so what is refused is a value that
@@ -1327,6 +1340,9 @@
     ;; settle re-finds them, the other threads read the index it began from
     ;; (`observe/hold-atom!`).
     :nogood-candidates (observe/held-atom {})
+    ;; the arity family's length entries (`vaelii.impl.decide.arity`), a weighted LRU
+    ;; the family makes on its first read
+    :arity-lengths (atom nil)
     ;; The inherited clashes `discovery/preserving-nogoods` found, keyed on
     ;; the stored claim, with what each was read under
     ;; (`discovery/preserving-entries`), so a standing report survives an
@@ -1374,34 +1390,45 @@
 
 (defn supporter-reaches?
   "Does a stored supporter of a relation rest on a target of the supporter `roster`
-  (`exc/supporter-roster`, entries `[key #{target}]`), the placed defeats' targets counted
-  only with `defeats?`: the taxonomy's reach callback (`tax/install-supporter-visibility!`).
-  `view` is the taxonomy's view of the relation's supporters: `:supports?` tests a handle,
-  `:count` counts them and `:handles` lists them.
-  Walks forward from the targets over the justifications resting on them while they are
-  no more than the supporters, else up each supporter's support (`exc/support`); either
-  stops at the first hit.  A target that is a supporter itself answers before either."
+  (`exc/supporter-roster`, entries `[functor (delay #{target})]`), the placed defeats'
+  targets counted only with `defeats?`: the taxonomy's reach callback
+  (`tax/install-supporter-visibility!`).  `view` is the taxonomy's view of the relation's
+  supporters: `:rel` names it, `:supports?` tests a handle, `:count` counts them and
+  `:handles` lists them.
+
+  For `genlCx`, the stored excepts' targets are walked forward while the excepts and the
+  walk are no more than the supporters, else each supporter's support is read past its
+  premises (`exc/genlCx-excepted?`); the reader classes of a `genlCx` move read the same
+  walk (`exc/genlCx-except-contexts`).  For another relation the walk goes forward from the
+  targets over the justifications resting on them while the stored facts of the roster's
+  functors are no more than the supporters, else up each supporter's support
+  (`exc/support`), which holds the supporter itself, with one `reads/stored-naming?` probe
+  per handle and functor and no target set built.  Either walk stops at the first hit, so
+  the read costs whichever side is smaller."
   [kb roster view defeats?]
-  (let [tms       (reasoning/tms kb)
-        supports? (:supports? view)
-        entries   (remove #(and (not defeats?) (= ::exc/defeated (key %))) roster)
-        targets   (delay (into #{} (mapcat val) entries))]
-    (cond
-      (some (fn [e] (some supports? (val e))) entries) true
-      (empty? @targets) false
-      (<= (count @targets) (long (:count view)))
-      (loop [seen #{}, stack (vec @targets)]
-        (if-let [d (peek stack)]
-          (let [stack (pop stack)]
-            (cond (supports? d)      true
-                  (contains? seen d) (recur seen stack)
-                  :else (recur (conj seen d)
-                               (into stack (comp (keep #(jtms/justification tms %)) (map :consequence))
-                                     (jtms/dependents tms d)))))
-          false))
-      :else
-      (boolean (some (fn [h] (some #(contains? @targets %) (exc/support tms h (constantly false))))
-                     ((:handles view)))))))
+  (if (= :genlCx (:rel view))
+    (exc/genlCx-excepted? kb view)
+    (let [idx       (:index kb)
+          tms       (reasoning/tms kb)
+          supports? (:supports? view)
+          entries   (into [] (remove #(and (not defeats?) (= sx/defeat-functor (key %)))) roster)
+          n         (transduce (map #(reads/stored-count-with-functor idx (key %))) + 0 entries)]
+      (cond
+        (zero? n) false
+        (<= n (long (:count view)))
+        (loop [seen #{}, stack (into [] (mapcat (comp deref val)) entries)]
+          (if-let [d (peek stack)]
+            (let [stack (pop stack)]
+              (cond (supports? d)      true
+                    (contains? seen d) (recur seen stack)
+                    :else (recur (conj seen d)
+                                 (into stack (comp (keep #(jtms/justification tms %)) (map :consequence))
+                                       (jtms/dependents tms d)))))
+            false))
+        :else
+        (let [named? (fn [h] (some #(reads/stored-naming? idx (key %) h) entries))]
+          (boolean (some (fn [h] (some named? (exc/support tms h (constantly false))))
+                         ((:handles view)))))))))
 
 (defn- attach-visibility!
   "Install the taxonomy's two visibility callbacks (`tax/install-supporter-visibility!`)
@@ -1432,12 +1459,12 @@
   [:records :index :provers :solver :naming])
 
 (def rebuild-own
-  "The KB fields a rebuild KB holds for itself.  `:dir`, `:snapshot-dir` and
-  `:index-space` are nil, so a close, an image write and a derived-index release stay the
+  "The KB fields a rebuild KB holds for itself.  `:dir`, `:snapshot-dir`, `:index-space`
+  and `:engine-space` are nil, so a close, an image write and a space release stay the
   open KB's.  `:oplog` is nil, so the rebuild logs no operation.  `:feed` and
   `:unrecovered` are new, so no listener hears the rebuild's settles and the rebuild's
   hazards are its own."
-  [:dir :snapshot-dir :index-space :oplog :feed :unrecovered])
+  [:dir :snapshot-dir :index-space :oplog :feed :unrecovered :engine-space])
 
 (defn rebuild-kb
   "A second KB over `kb`'s stores, for rebuilding `kb`'s belief beside `kb`
@@ -1582,7 +1609,7 @@
           ;; holds anything — which the trie's own root count answers in O(1), and
           ;; answers correctly whether the base index was durable or derived-and-built.
           (let [merged (mount/mount-index own-istore (:index base))]
-            [merged (pos? (long (p/count-at merged [])))])
+            [merged (pos? (long (reads/stored-count-at merged [])))])
           (index-store-for ikind rkind opts))
         snapshot? (snapshot-mode? rkind ikind)
         ;; Resolved once, and read twice: the directory `close!` releases, and — on a KB
@@ -1628,6 +1655,10 @@
               ;; the RAM derived-index registry key `close!` forgets (nil unless the
               ;; index is derived and the records durable) — `release-index-space!`
               :index-space index-space
+              ;; the engine-allocated RAM space of this KB's own stores, which `close!`
+              ;; drops: a fork's own half for an `:overlay` KB, else the KB's `:space`
+              :engine-space (let [own (if overlay? (:space ov-opts) space)]
+                              (when (mem/engine-space? own) own))
               :provers  (atom provers/default-provers)
               :solver   (atom solve/local-solver)
               :feed      (feed/create-feed)
@@ -1695,7 +1726,7 @@
       (let [root     (str (disk/disk-dir opts) "/index")
             decision (dfiles/index-layout-decision
                       root kv/index-layout-version
-                      (pos? (long (p/count-at istore []))))]
+                      (pos? (long (reads/stored-count-at istore []))))]
         (case decision
           ;; a fresh directory needs the stamp and no rebuild; this KB owns it, so
           ;; this is where the write `index-layout-decision` refuses to make happens
@@ -1743,8 +1774,8 @@
           ;; `[:put]` per key in hash order, so a lost tail is arbitrary keys — the
           ;; seal may survive and the counts may still agree, and only the length says
           ;; the file is not the one that was closed.
-          (let [indexed  (long (p/count-at istore []))
-                sealed   (long (p/count-at istore kv/sealed-prefix))
+          (let [indexed  (long (reads/stored-count-at istore []))
+                sealed   (long (reads/stored-count-at istore kv/sealed-prefix))
                 damaged  (:damaged (:backend istore))
                 ;; the record count, not the roster: on a store whose enumeration is a
                 ;; query this is the difference between one row and the whole table, and
@@ -1794,7 +1825,7 @@
       (let [root     (str (disk/disk-dir ov-opts) "/index")
             decision (dfiles/index-layout-decision
                       root kv/index-layout-version
-                      (pos? (long (p/count-at own-istore []))))]
+                      (pos? (long (reads/stored-count-at own-istore []))))]
         (case decision
           :unstamped (dfiles/stamp-index-layout! root kv/index-layout-version)
           :stale (do (dfiles/mark-index-rebuilding! root)
@@ -1806,8 +1837,8 @@
           nil)
         (when (and recover? (not= :stale decision))
           (let [stored   (cap/count-sentexes (:records kb))
-                sealed   (long (p/count-at istore kv/sealed-prefix))
-                indexed  (long (p/count-at istore []))
+                sealed   (long (reads/stored-count-at istore kv/sealed-prefix))
+                indexed  (long (reads/stored-count-at istore []))
                 damaged  (:damaged (:backend own-istore))]
             (when (or damaged
                       (if (pos? sealed) (not= sealed stored) (not= indexed stored)))
@@ -1882,7 +1913,7 @@
         ;; index snapshot populates the derived index without a `reindex`, and a
         ;; `:recover? :warn` recovers nothing at all.
         (note-hazards! kb {:no-belief (not (jtms/any-node? (reasoning/tms kb)))
-                           :no-index  (zero? (long (p/count-at (:index kb) [])))})
+                           :no-index  (zero? (long (reads/stored-count-at (:index kb) [])))})
         ;; ...and saying so, which `{:recover? false}` was silent about entirely.  The
         ;; warning above describes what a *read* gets, and `false` asks not to hear it —
         ;; a caller managing recovery itself already knows.  What that caller could not
@@ -1915,7 +1946,7 @@
       ;; silence about an unrecovered store, not for an index that answers out of
       ;; records nobody holds, and the drop is what docs/storage.md promises happens on
       ;; the next open.
-      (and (not index-durable?) (pos? (p/count-at (:index kb) [])))
+      (and (not index-durable?) (pos? (reads/stored-count-at (:index kb) [])))
       (do (p/clear-index! (:index kb))
           (trove/log! {:level :warn :id ::stale-derived-index
                        :msg (str "dropped a derived index left over from an earlier life of "
@@ -1955,7 +1986,7 @@
       ()
       (cond->> (if (sequential? t)
                  (p/sentexes-with-terms (:index kb) (sx/probe-atoms t))
-                 (p/sentexes-with-term (:index kb) t))
+                 (reads/as-stored-with-term (:index kb) t))
         true            (map #(p/get-sentex (:records kb) %))
         true            (filter some?)
         (sequential? t) (filter #(sx/mentions? % t))))))
@@ -2000,7 +2031,7 @@
      ;; nesting) or even every one holding it at argument 1 — this runs on every unary
      ;; assert, via disjoint-problem, and a term at argument 1 of n binary facts cost n
      ;; record fetches here to find the handful of types it holds
-     ;; (`protocols/unary-sentexes-with-arg`).  The read is a superset, so the arity and
+     ;; (`reads/as-stored-unary-with-arg-global`).  The read is a superset, so the arity and
      ;; argument tests below decide the answer.
      ;;
      ;; The filters are one `keep` rather than a stack of threaded stages: every
@@ -2009,7 +2040,7 @@
      ;; reads.  Lazy, so a caller looking for one type does not pay for a long posting
      ;; — which is also why this is not a transducer: at these lengths `sequence` spends
      ;; more on building the pipeline than the pipeline saves.
-     (->> (p/unary-sentexes-with-arg (:index kb) x)
+     (->> (reads/as-stored-unary-with-arg-global (:index kb) x)
           (keep (fn [h]
                   (when-not (hidden? h)
                     (when-let [s (p/get-sentex recs h)]
@@ -2071,7 +2102,9 @@
   believed declaration), or nil: its `(arity P n)` declaration (`tax/declared-arity`, a
   map read), else its exact-arity class membership (`tax/exact-arity-classes`).  The reader
   for a caller outside the arity check (the provers, `describe`, the quality pass); the
-  check reads the same two spellings through its per-assert membership reader."
+  check reads the same two spellings through its per-assert membership reader.  The
+  believed reading, which any believed membership and edge give; the arity nogood reads
+  the roster bindings instead (docs/taxonomy.md, \"Arity\")."
   [kb pred context]
   (or (let [n (tax/declared-arity (reasoning/taxonomy kb) pred context)]
         (when (and (integer? n) (pos? n)) n))
@@ -2082,7 +2115,8 @@
   `context` (nil: every believed declaration): a `relation-arity` of two or more, or a
   `variable_arity` membership.  A `genl` edge between two relations makes each a node of
   the `genl` hierarchy; such a node is not a type, and a node with an arity of one or
-  none is.  No spelling is read."
+  none is.  No spelling is read.  The believed reading of an arity (docs/taxonomy.md,
+  \"Arity\")."
   [kb term context]
   (let [n (tax/declared-arity (reasoning/taxonomy kb) term context)]
     (if (and (integer? n) (pos? n))
@@ -2147,7 +2181,9 @@
 (defn disjoint?
   "Are types `a` and `b` provably disjoint (via disjoint declarations, closed
   under genl) — anywhere, or (with `context`) using only the declarations and
-  genl edges visible from it?"
+  genl edges visible from it?
+
+  The 3-arity is the KB-wide reading `vaelii.core/disjoint?` documents."
   ([kb a b] (tax/disjoint? (reasoning/taxonomy kb) a b))
   ([kb a b context] (tax/disjoint? (reasoning/taxonomy kb) a b context)))
 
@@ -2161,7 +2197,10 @@
   deliberately reuses an outer run's map: a nested run on a *second* KB (a chaining
   callback asserting elsewhere) shares the cache, and two KBs declaring nothing
   symmetric would otherwise stamp the one shared empty set — KB-B reading KB-A's
-  handles."
+  handles.
+
+  The set is read unscoped: the stamp keys the stored spelling, which every reader
+  shares."
   [kb]
   [(:records kb) (tax/props (reasoning/taxonomy kb) :symmetric)])
 
@@ -2318,7 +2357,7 @@
           (if (and stamp (= sentence (sx/sentence-of built))
                    (functor-cache-authoritative? kb stamp built))
             nil
-            (let [direct (stored-at kb built (p/leaf-at (:index kb) (sx/path built)))]
+            (let [direct (stored-at kb built (reads/as-stored-leaf (:index kb) (sx/path built)))]
               (when direct
                 ;; The cache says "this sentence is stored at this handle" — true until the
                 ;; sentex is removed, which is a choke point.  **Filled only when the
@@ -2423,29 +2462,6 @@
   [kb seeds]
   (defeat-walk kb seeds nil))
 
-(defn retire-defeated-reads!
-  "Evict the scoped `genl` closures the `defeat` sentex `d`, stored, removed or relabelled,
-  can move (`tax/retire-scoped-genl!`): the `genl` edges whose supporters a forward walk
-  from its target meets (`defeat-walk`), read at the readers that see its context.  Only
-  while the `genl` filter is on (`tax/defeat-moves-scoped?`); otherwise no scoped closure
-  can hold a defeat, and the filter gate reads the roster's identity."
-  [kb d]
-  (let [tax (reasoning/taxonomy kb)]
-    (when-let [target (and (tax/defeat-moves-scoped? tax) (defeat-target (:sentence d)))]
-      (tax/retire-scoped-genl! tax (tax/supported-edges tax :genl (defeat-walk kb [target] nil))
-                               (:context d) false))))
-
-(defn note-defeat!
-  "Evict the scoped `genl` closures a `defeat` stored (`add?` true) or removed can move
-  (`retire-defeated-reads!`), from the sentex itself.  Called at the store primitive
-  (`create-sentex`) and the removal choke point (`integrate/sentex-removed!`); a no-op
-  for every other sentence.  A placed defeat is stored before its justification, OUT, and
-  the relabel that takes it IN evicts (`special/reconcile-belief-change`)."
-  [kb sentex add?]
-  (when (and (defeat-target (:sentence sentex))
-             (or (not add?) (jtms/in? (reasoning/tms kb) (:id sentex))))
-    (retire-defeated-reads! kb sentex)))
-
 ;; ---- the rule rosters ----------------------------------------------------
 
 (defn create-sentex
@@ -2490,7 +2506,7 @@
      ;; count is a profiled index read and the refresh call resolves nothing, so both stay
      ;; behind the gate rather than being evaluated for a directory with no image in it.
      (when-let [d (:snapshot-dir kb)]
-       (disk/maybe-refresh-index-snapshot! d (p/count-at (:index kb) [])))
+       (disk/maybe-refresh-index-snapshot! d (reads/stored-count-at (:index kb) [])))
      ;; the add-side boundary for an incremental matcher's alpha memories — a no-op
      ;; unless one is engaged (docs/inference.md, "Incremental rule matching")
      (observe/notify-add kb s h)
@@ -2503,10 +2519,7 @@
      ;; store holds; a caller looking it up by some other spelling misses and fills its
      ;; own key off the index, since a miss costs exactly the trie walk and no more
      (observe/cache-handle! (canon-stamp kb) (sx/sentence-of s) (:context s) h)
-     ;; a defeat moves what a scoped read memoized; the remove mirror is
-     ;; `integrate/sentex-removed!`
-     (note-defeat! kb s true)
-     ;; ...and the candidates of the nogood families the settle places
+     ;; the candidates of the nogood families the settle places
      (decide/note-candidate! kb s true)
      [h s])))
 
@@ -2560,18 +2573,17 @@
     (p/unindex-sentex! idx sx h)
     (observe/notify-remove kb sx)
     (observe/forget-handle! (sx/sentence-of sx) (:context sx))
-    (note-defeat! kb sx false)
     (decide/note-candidate! kb sx false)
     ;; ...and the new spelling in — `create-sentex`'s half, with the handle it already has
     (p/put-sentex (:records kb) s')
     (p/index-sentex idx s' h)
     (when-let [d (:snapshot-dir kb)]
-      (disk/maybe-refresh-index-snapshot! d (p/count-at idx [])))
+      (disk/maybe-refresh-index-snapshot! d (reads/stored-count-at idx [])))
     (observe/notify-add kb s' h)
     (observe/note-change)
     (observe/cache-handle! (canon-stamp kb) (sx/sentence-of s') (:context s') h)
-    (note-defeat! kb s' true)
     (decide/note-candidate! kb s' true)
+    (negation/note-respelled! kb s')
     s'))
 
 (defn find-or-create-sentex
@@ -2844,7 +2856,10 @@
   "Does `sentence` reach `res/raw-match`'s arrangement fan — a symmetric literal, or one
   whose predicate declares a commuting group?  The gate `stored-once-per-handle` opens
   on, and the same question `raw-match` asks itself, so the reader pays for the dedup set
-  exactly where a fan can put one handle in the result twice."
+  exactly where a fan can put one handle in the result twice.
+
+  Read unscoped, as `res/raw-match` reads it: the fan reaches every stored spelling,
+  and `res/without-unbelieved-spellings` hides the one a reader's belief rules out."
   [kb sentence]
   (let [tax (reasoning/taxonomy kb)
         f   (when (sequential? sentence) (first sentence))]
@@ -2935,11 +2950,13 @@
 
 (caches/register-derived
  {:id :S7 :label "Last edge program" :kind :index :keyed-by :global :reads [:records :S5]
+  :holds-content? false
   :retired-by {:image-install :R}
   :computed :write :imaged? :state :at [[:program]]
   :note "the last Program handed to the solver, with its classification (`vaelii.impl.asp.label`); registered here because that namespace loads on its first `do/label`"})
 
 (caches/register-derived
  {:id :R12 :label "Call-scoped memos" :kind :pass :keyed-by :value :reads [:index :T1]
+  :holds-content? false
   :retired-by {} :computed :pass :imaged? false
   :note "volatiles and memoized fns one call holds: `memberships`, `membership-reader` here; `checks/declaration-reader`, `stratification-readers`; `plan/memoizing`, `plan-pairs`; `special/visibility-seeds`, `supersession-map`, `lift-statements`; `inherit/rejoin-rules`; `asp.label/local-analysis`, `component-classifier`"})

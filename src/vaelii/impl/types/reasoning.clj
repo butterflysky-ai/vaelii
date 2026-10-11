@@ -81,13 +81,18 @@
 ;; here: the settle places each nogood (`vaelii.impl.decide`, docs/nmtms.md, "The nogood
 ;; families").
 ;;
+;; `arity-lengths` holds the arity family's length entries, a weighted LRU keyed by functor
+;; carrying the `genl` generation and relation epoch it last read under `:gen` and `:epoch`
+;; (`vaelii.impl.decide.arity`).  Nil until the family first reads it, and reset by
+;; `recover`.
+;;
 ;; `kb/empty-reasoning` states what the remaining fields hold, beside the expression that
 ;; makes each one.
 (defrecord Reasoning [tms taxonomy program violations recheck refused
                       settle-stats chain-stats preserved-clashes
                       supersessions qcn qcn-joined matches closures
                       respell except-moves
-                      mint-queues nogood-candidates])
+                      mint-queues nogood-candidates arity-lengths])
 
 (defn of
   "The `Reasoning` value `kb` holds now."
@@ -148,6 +153,12 @@
   {:inline (fn [kb] `(:nogood-candidates (deref (:reasoning ~kb))))}
   [kb]
   (:nogood-candidates @(:reasoning kb)))
+
+(defn arity-lengths
+  "`kb`'s `:arity-lengths` atom."
+  {:inline (fn [kb] `(:arity-lengths (deref (:reasoning ~kb))))}
+  [kb]
+  (:arity-lengths @(:reasoning kb)))
 
 (defn preserved-clashes
   "`kb`'s `:preserved-clashes` atom."

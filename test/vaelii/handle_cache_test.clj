@@ -172,6 +172,20 @@
       (is (not (jtms/has-justification? tms 'other [11 22 33] 9911)) "the informant counts")
       (is (not (jtms/has-justification? tms 'rule [11 22 33] 9912)) "so does the conclusion"))))
 
+(tu/deftest-kb justification-dedup-keys-the-subsumptions
+  ;; two firings that pair the same antecedents with different literals are two supports
+  (let [tms  (reasoning/tms kb)
+        subs '#{[kind inspace] [sort intime]}
+        k    #(jtms/justification-key 'rule [11 22] %)]
+    (jtms/ensure-node tms 9921 0)
+    (jtms/add-justification tms (jtms/->just 99021 'rule [11 22] 9921 {} :monotonic subs))
+    (doseq [ask [#(%) #(jtms/with-dedup-cache tms (%))]]
+      (ask (fn []
+             (is (jtms/has-justification? tms 'rule [22 11] 9921 (k subs)))
+             (is (not (jtms/has-justification? tms 'rule [11 22] 9921)))
+             (is (not (jtms/has-justification? tms 'rule [11 22] 9921
+                                               (k '#{[sort inspace] [kind intime]})))))))))
+
 ;; ---- the engine-level gate ----------------------------------------------
 
 (tu/deftest-kb chaining-a-join-pyramid-keeps-one-justification-per-witness

@@ -11,8 +11,8 @@
   wrong one:
 
   - **a reader wired under `sub` before the edge, holding nothing of its own.**  This is
-    the case `context-edge-reader-ancestors` names when it rejects `context-up(super)` as
-    a candidate set.  Narrowing *candidates* that way loses the merge; narrowing *readers*
+    the case `tax/context-move`'s `:seen` covers and `context-up(super)` misses as a
+    candidate set.  Narrowing *candidates* that way loses the merge; narrowing *readers*
     keeps it, because that reader is in `context-down(sub)`.  A change that confuses the
     two fails here.
   - **a reader seeing a half `sub` cannot.**  The case that separates `context-down(sub)`
@@ -60,7 +60,7 @@
   kb)
 
 (deftest a-reader-wired-under-sub-before-the-edge-still-gains-the-merge
-  ;; The case `context-edge-reader-ancestors` rejects `context-up(super)` over: the reader
+  ;; The case `tax/context-move`'s `:seen` covers and `context-up(super)` misses: the reader
   ;; holds nothing itself, and both halves reach it only once the edge lands.
   (tu/with-neutral-kb [kb tu/fresh]
     (tu/with-terms [parentOf Tom MumA MumB CxLeft CxRight CxSub CxRead]

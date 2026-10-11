@@ -147,15 +147,17 @@
       (finally (tu/clear-kb! inc-kb) (tu/clear-kb! exh-kb)))))
 
 (defn- settled
-  "`ops` into one KB under `incremental?`, returning the snapshot after the last."
-  [ops incremental?]
-  (let [kb (if incremental? (tu/fresh) (tu/isolated-fresh))]
-    (try
-      (binding [discovery/*incremental-preserving* incremental?]
-        (build-ontology! kb)
-        (run! #(apply-op! kb %) ops)
-        (snapshot kb))
-      (finally (tu/clear-kb! kb)))))
+  "`ops` into one KB under `incremental?`, returning `(observe kb)` after the last,
+  `snapshot` by default."
+  ([ops incremental?] (settled ops incremental? snapshot))
+  ([ops incremental? observe]
+   (let [kb (if incremental? (tu/fresh) (tu/isolated-fresh))]
+     (try
+       (binding [discovery/*incremental-preserving* incremental?]
+         (build-ontology! kb)
+         (run! #(apply-op! kb %) ops)
+         (observe kb))
+       (finally (tu/clear-kb! kb))))))
 
 (defn- divergence [[step op si se]]
   (str "diverged at step " step " on " (pr-str op) "\n" (pr-str (diff si se))))
@@ -166,6 +168,43 @@
   (doseq [seed (range 10)]
     (let [rng (java.util.Random. (long seed))
           r   (run-stream (repeatedly 40 #(rand-op rng)))]
+      (is (nil? r) (str "seed " seed " " (when r (divergence r)))))))
+
+(defn- rand-separated-op
+  "One write over memberships of the shared types in three metatypes, `ic_down` preserved
+  down `genl` and `ic_up` up it: a membership or its retraction at a random context and
+  strength, a `genl` edge, a declaration, a separation of two of the metatypes asserted or
+  retracted, or a `genlCx` edge to `CxIcJoin`.  Three writes in four are `:monotonic`, so
+  a reading is often known-true."
+  [^java.util.Random rng]
+  (let [pick   (fn [xs] (nth xs (.nextInt rng (count xs))))
+        ctx    #(pick ctxs)
+        str8   #(if (zero? (.nextInt rng 4)) {} {:strength :monotonic})
+        member #(list (pick '[ic_down ic_up ic_plain]) (pick types))
+        edge   #(let [[a b] (pick edges)] (list 'genl a b))
+        sep    #(pick '[(disjoint ic_down ic_up) (disjoint ic_down ic_plain)
+                        (partition ic_whole ic_up ic_plain)])]
+    (case (.nextInt rng 12)
+      (0 1 2) [:assert (member) (ctx) (str8)]
+      3       [:retract (member) (ctx)]
+      (4 5)   [:assert (edge) (ctx) (str8)]
+      6       [:retract (edge) (ctx)]
+      7       [:assert (pick '[(transitiveInArgInverse ic_down 1 genl) (transitiveInArg ic_up 1 genl)])
+               (first ctxs) (str8)]
+      8       [:assert (sep) (ctx) (str8)]
+      9       [:retract (sep) (ctx)]
+      10      [:assert (list 'genlCx 'CxIcJoin (nth ctxs 1)) 'CxUniverse {:strength :monotonic}]
+      11      [:assert (list 'genlCx 'CxIcJoin (nth ctxs 2)) 'CxUniverse {:strength :monotonic}])))
+
+(def ^:private separated-declarations
+  '[[:assert (transitiveInArgInverse ic_down 1 genl) CxIcBase {:strength :monotonic}]
+    [:assert (transitiveInArg ic_up 1 genl) CxIcBase {:strength :monotonic}]])
+
+(deftest randomized-streams-over-separated-memberships-find-the-same-inherited-clashes
+  (doseq [seed (range 10)]
+    (let [rng (java.util.Random. (long seed))
+          r   (run-stream (into separated-declarations
+                                (repeatedly 60 #(rand-separated-op rng))))]
       (is (nil? r) (str "seed " seed " " (when r (divergence r)))))))
 
 ;; ---- oracle 2: directed streams -----------------------------------------
@@ -267,7 +306,7 @@
 (def ^:private swept-claim
   "A standing clash whose stored side a guarded rule concludes, beside a second entry.
   The reading is known-true and the conclusion `:default`, so the conclusion loses the
-  clash and nothing is reported.  Blocking the firing sweeps the conclusion, so the
+  clash and nothing is reported.  A `:monotonic` blocker sweeps the conclusion, so the
   settle's second pass reads a region handle with no record; the release derives it
   again."
   '[[:assert (transitiveInArgInverse ibig 1 genl) CxIcBase {:strength :monotonic}]
@@ -280,7 +319,7 @@
      CxIcBase {}]
     [:assert (icLink ic_side ic_low) CxIcBase {}]
     [:assert (ibig ic_far ic_side) CxIcBase {}]
-    [:assert (ic_skip ic_side) CxIcBase {}]
+    [:assert (ic_skip ic_side) CxIcBase {:strength :monotonic}]
     [:retract (ic_skip ic_side) CxIcBase]
     [:retract (icLink ic_side ic_low) CxIcBase]])
 
@@ -288,6 +327,45 @@
   (is (seq (:standing (settled (take 7 swept-claim) true))) "the derived claim clashes")
   (is (empty? (:standing (settled (take 8 swept-claim) true))) "the block sweeps it")
   (is (nil? (run-stream swept-claim))))
+
+(def ^:private hidden-claim
+  "`swept-claim` with its blocker `:default`: the firing is stored, and its guard defeat at
+  the firing's own placement joins the nogood's defeat of the same loser as one `defeat`
+  handle.  The clash stands, since detection reads the network (design rulings 13 and 20)."
+  (assoc-in swept-claim [7 3] {}))
+
+(defn- hidden-reads
+  "The conclusion `(ibig ic_side ic_low)` at CxIcBase: whether it is stored and believed,
+  the informants of its `defeat`'s justifications, and the standing clashes."
+  [kb]
+  (let [f (v/handle-of kb '(ibig ic_side ic_low) 'CxIcBase)
+        d (when f (v/handle-of kb (list 'defeat (list 'sentexHandle f)) 'CxIcBase))]
+    {:stored?    (some? f)
+     :believed?  (boolean (and f (v/believed? kb f 'CxIcBase)))
+     :informants (into #{} (map :informant) (when d (:support (v/why kb d))))
+     :standing   (:standing (snapshot kb))}))
+
+(defn- below-reads
+  "Whether CxIcBelow, under CxIcBase and excepting the blocker, believes the blocker and
+  the conclusion."
+  [kb]
+  (let [b (v/handle-of kb '(ic_skip ic_side) 'CxIcBase)
+        f (v/handle-of kb '(ibig ic_side ic_low) 'CxIcBase)]
+    (v/assert kb '(genlCx CxIcBelow CxIcBase) 'CxUniverse {:strength :monotonic})
+    (v/assert kb (list 'except (list 'sentexHandle b)) 'CxIcBelow {})
+    {:blocker (v/believed? kb b 'CxIcBelow) :claim (v/believed? kb f 'CxIcBelow)}))
+
+(deftest a-guard-defeat-joins-the-nogoods-defeat-and-the-clash-stands
+  (let [clash (:standing (settled (take 7 hidden-claim) true))
+        r8    (settled (take 8 hidden-claim) true hidden-reads)
+        r9    (settled (take 9 hidden-claim) true hidden-reads)]
+    (is (seq clash))
+    (is (= {:stored? true :believed? false :informants '#{guard nogood} :standing clash} r8))
+    (is (= {:stored? true :believed? false :informants '#{nogood} :standing clash} r9)
+        "the blocker's retraction takes the guard justification")
+    (is (= {:blocker false :claim false} (settled (take 8 hidden-claim) true below-reads))
+        "the guard is out of force at CxIcBelow, and the nogood's defeat keeps the claim out")
+    (is (nil? (run-stream hidden-claim)))))
 
 (def ^:private retracted-reasons
   "A standing conflict beside a second entry, its members `:monotonic`, then the mark, the

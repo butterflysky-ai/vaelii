@@ -18,18 +18,18 @@
 
   It stays a full `KvBackend` so the existing composition (an embedded `KvIndexStore`
   over it) is unchanged: only the recognized index families are int-routed; any other key
-  — the slot roster and the term roster (whose members are *names*, not handles), a
-  scalar, a counter, the contract test's synthetic keys — falls back to a plain in-memory
-  backend (in the columnar store the trie is native, so no `[:trie …]` key ever reaches
-  here).
+  — a counter keyed by the vocabulary, a scalar, the contract test's synthetic keys —
+  falls back to a plain in-memory backend (in the columnar store the trie is native, so no
+  `[:trie …]` key ever reaches here).
 
   **Every handle family routes**, the count tries' leaves included: an argument leaf's
   `(pred, pos, ctx)` scope, and any other count trie leaf's context scope `(ctx, 0, ctx)`,
   is interned to a dense id of its own (`argfam-id`) and rides the `pos` field, which
-  the flat families do not use.  The tries' child sets route as packed keys too, their
-  members held as context ids.  So the fallback holds only vocabulary-scaled name sets
-  and counters, and the fact-scaled mass is one packed map — or, under a snapshot, one
-  mapped run.  Single-writer, like every index;
+  the flat families do not use.  The tries' child sets and every name set (the term,
+  slot and membership rosters, the keys a handle installs) route as packed keys too, their
+  members held as ids in the shared dictionary.  So the fallback holds only the
+  vocabulary's counters, and the fact-scaled mass is one packed map — or, under a
+  snapshot, one mapped run.  Single-writer, like every index;
   `kv-members` / `kv-intersect` materialize a fresh Clojure set at the boundary — but
   `kv-intersect` builds it at the size of the *answer*, narrowing through
   `postings/intersect-postings` in whichever representation each posting is in, a mapped run
@@ -68,8 +68,8 @@
 ;; own representation, a mapped run included.
 ;;
 ;; The predicate-AGNOSTIC reads cost one lookup more.  The index layer takes them over the
-;; slot roster — `[:argument-slot pos term]` → the predicates present there, a fallback
-;; key because its members are names rather than handles — and unions the scoped postings.
+;; slot roster — `[:argument-slot pos term]` → the predicates present there, a name set
+;; packed under the position and the term — and unions the scoped postings.
 ;; That roster is *one predicate* in the common case (a term occupies a given position
 ;; under one predicate), so the union is a single set handed straight back and the cost
 ;; over a maintained node union is the roster read itself.  A handful of predicates is a
@@ -78,7 +78,7 @@
 ;; Maintaining an agnostic union here instead would mean a second posting per
 ;; `(pos, term)` holding what the scoped postings already hold — the family's whole
 ;; fact-scaled mass, stored twice — to save one lookup on a read that is usually a union
-;; of one.  The roster is already maintained and already vocabulary-scaled.
+;; of one.  The roster is already maintained, one predicate id per argument node.
 
 (defn dense-roots
   "A key-interning `KvBackend` sharing `dict` (the columnar trie's token dictionary) so a
@@ -89,11 +89,11 @@
                                   nil nil nil 0))
 
 (defn fallback-entries
-  "The entries the routed families do **not** claim: the term roster and the two slot
-  rosters, whose members are *names* rather than handles, and the predicate-extent and
-  rule-index node counts, one per predicate or rule key.  All are **vocabulary-scaled**, which
-  is what lets a snapshot write them as one nippy blob and load them resident without
-  the blob tracking the fact count (`disk/index_snapshot.clj`, \"The residency split\")."
+  "The entries the routed families do **not** claim: the counters keyed by a predicate,
+  functor, rule key or kind, and the one `:mint-in` node's children.  All are
+  **vocabulary-scaled**, which is what lets a snapshot write them as one nippy blob and
+  load them resident without the blob tracking the fact count (`disk/index_snapshot.clj`,
+  \"The residency split\")."
   [^DenseRoots b] (p/kv-entries (.-fallback b)))
 
 (defn load-fallback! [^DenseRoots b entries] (p/kv-load (.-fallback b) entries) nil)

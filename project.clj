@@ -34,7 +34,27 @@
                 (concat on-path installs))))
       "bash"))
 
-(defproject com.vaelii/vaelii "0.24.0"
+;; The `:test` profile's heap and collector flags. A test JVM's live set after a full
+;; collection is 0.22-0.43 GB (three matrix configurations, 2026-10-10), and with no
+;; `-Xmx` the ceiling is a quarter of RAM, so G1 grew each JVM to 1-2 GB of mostly dead
+;; young generation; a dozen of them beside a full-KB load paged the machine.
+;;
+;; `VAELII_TEST_HEAP` sets the ceiling, 4g by default. A `JVM_OPTS` that already names
+;; `-Xmx` keeps it (`lein test-full-kb` passes `VAELII_HEAP`'s there), because leiningen
+;; places these flags after `JVM_OPTS` and the last `-Xmx` wins. The free-ratio pair and
+;; the periodic collection return freed heap to the OS between tests. Two parallel and
+;; one concurrent collector thread per JVM keep a dozen concurrent suites from running
+;; ~100 collector threads on ten cores.
+(def test-jvm-opts
+  (let [heap     (some-> (System/getenv "VAELII_TEST_HEAP") .trim not-empty)
+        ;; the launcher's variable, read through `env` for the reason `bash` gives
+        env      #(System/getenv %)
+        jvm-opts (str (env "JVM_OPTS"))]
+    (cond-> ["-XX:MinHeapFreeRatio=10" "-XX:MaxHeapFreeRatio=30"
+             "-XX:G1PeriodicGCInterval=15000" "-XX:ParallelGCThreads=2" "-XX:ConcGCThreads=1"]
+      (or heap (not (re-find #"-Xmx" jvm-opts))) (conj (str "-Xmx" (or heap "4g"))))))
+
+(defproject com.vaelii/vaelii "0.25.0"
   :description "Vaelii — a contextualized common-sense knowledge base with a
                 count-aware trie index, forward/backward inference,
                 and JTMS truth maintenance, over an in-memory or on-disk store."
@@ -215,7 +235,7 @@
              ;; gitignored profiles.clj may redefine :dev and replace it wholesale
              :test {:dependencies [[org.clojure/test.check "1.1.3"]]
                     ;; the bash a test drives a script with: `bash` above, and why
-                    :jvm-opts [~(str "-Dvaelii.test.bash=" bash)]
+                    :jvm-opts ~(into [(str "-Dvaelii.test.bash=" bash)] test-jvm-opts)
                     ;; Quiet the engine's own logging under test. Trove's default
                     ;; backend is the console one at `:info` and nothing sets it, so
                     ;; a GREEN run printed 777 lines of `:warn`/`:info` — two thirds

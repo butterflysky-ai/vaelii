@@ -48,7 +48,7 @@
           (is (not (v/premise? kb h1)) "derived, not something the reader wrote")
           (is (seq (:support (v/why kb h1))) "and it has a proof"))
 
-        (v/assert kb penguin sbx)
+        (v/assert kb penguin sbx {:strength :monotonic})
         (testing "step 2 — one more true thing, and the conclusion is *gone*"
           (is (nil? (v/handle-of kb flies sbx)) "not merely OUT — there is no handle")
           (is (nil? (v/sentex kb h1)) "the record itself was swept")
@@ -194,7 +194,7 @@
       (try
         (v/assert kb bird sbx)
         (is (v/ask? kb travel sbx) "step 1: flying earned → travelling answerable via hierarchy")
-        (v/assert kb penguin sbx)
+        (v/assert kb penguin sbx {:strength :monotonic})
         (is (not (v/ask? kb travel sbx)) "step 2: flying defeated → travelling unanswerable")
         (v/retract! kb (v/handle-of kb penguin sbx))
         (is (v/ask? kb travel sbx) "step 3: flying restored → travelling answerable again")

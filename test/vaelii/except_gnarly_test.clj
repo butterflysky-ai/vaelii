@@ -10,8 +10,10 @@
   (:require [clojure.test :refer [deftest is testing use-fixtures]]
             [vaelii.core :as v]
             [vaelii.impl.sentex :as sx]
+            [vaelii.impl.special :as special]
             [vaelii.impl.taxonomy :as tax]
             [vaelii.impl.types.reasoning :as reasoning]
+            [vaelii.order-independence-test :as oi]
             [vaelii.test-util :as tu]))
 
 (use-fixtures :each (tu/neutral-fresh tu/fresh))
@@ -136,6 +138,248 @@
           (v/retract! kb right-edge)
           (is (not (v/ask? kb (list r Item) CxBottom))))))))
 
+(defn- late-edge-reading
+  "CxHide and CxSub each see CxTop, which holds P = (pp Rex) and the forward rule
+  (pp ?x) ∧ (ss ?x) ⇒ (qq ?x).  Assert P, then the steps `ops` in order: the edge
+  `(genlCx CxSub CxHide)`, `(except P)` in CxHide, the rule, and (ss Rex) in CxSub.  Read
+  [CxSub stores (qq Rex), CxSub believes it] with the edge in and again after retracting
+  it, then retract the rest."
+  [kb ops]
+  (tu/with-terms [pp ss qq Rex CxTop CxHide CxSub]
+    (let [M       {:strength :monotonic}
+          hs      (volatile! (mapv #(v/assert kb (list 'genlCx % CxTop) 'CxUniverse M) [CxHide CxSub]))
+          p       (v/assert kb (list pp Rex) CxTop M)
+          edge    (volatile! nil)
+          reading (fn [] [(boolean (some #(= (list qq Rex) (v/sentence-of %))
+                                         (v/sentexes-in-context kb CxSub)))
+                          (boolean (v/ask? kb (list qq Rex) CxSub))])]
+      (vswap! hs conj p)
+      (doseq [op ops]
+        (vswap! hs conj
+                (case op
+                  :edge   (vreset! edge (v/assert kb (list 'genlCx CxSub CxHide) 'CxUniverse M))
+                  :except (v/assert kb (list 'except (sx/sentex-handle p)) CxHide M)
+                  :rule   (v/assert-rule kb [(list pp '?x) (list ss '?x)] (list qq '?x) CxTop
+                                         {:direction :forward :strength :monotonic})
+                  :fact   (v/assert kb (list ss Rex) CxSub M))))
+      (let [with (reading)]
+        (v/retract! kb @edge)
+        (let [without (reading)]
+          (doseq [h (rseq @hs)] (when (v/sentex kb h) (v/retract! kb h)))
+          [with without])))))
+
+(tu/deftest-kb a-late-genlCx-edge-sweeps-what-the-except-it-reveals-blocks-and-its-retraction-restores-it
+  ;; The firing is placed at CxSub, the common descendant of CxTop and CxSub.  The edge
+  ;; shows CxSub the except of P, so the firing is swept there whether the edge arrived
+  ;; before the except, the rule or the fact, or after them
+  ;; (`special/recheck-except-ancestors`); retracting the edge places it again.
+  (is (= #{[[false false] [true true]]}
+         (into #{} (map #(late-edge-reading kb %)) (oi/permutations [:edge :except :rule :fact])))))
+
+(defn- excepted-edge-reading
+  "CxQ, CxB and CxS each see CxUniverse.  E1 = (genlCx CxQ CxB), the forward rule
+  (genlCx CxQ ?b) ⇒ (genlCx CxS ?b), which derives E2 = (genlCx CxS CxB), an except of E1
+  in CxS, (pp Xx) in CxB, (ss Xx) in CxS and the forward rule (pp ?x) ∧ (ss ?x) ⇒ (qq ?x)
+  in CxB arrive in `order`; `direct?` also asserts E2 first.  Reads [CxS sees CxB under
+  the belief reading, under the network reading, (pp Xx) asked at CxS, (qq Xx) stored at
+  CxS, (qq Xx) asked at CxS] after the six writes and again after retracting the except,
+  then retracts the rest."
+  [kb order direct?]
+  (tu/with-terms [pp ss qq Xx CxQ CxB CxS]
+    (let [M       {:strength :monotonic}
+          hs      (volatile! (mapv #(v/assert kb (list 'genlCx % 'CxUniverse) 'CxUniverse M) [CxQ CxB CxS]))
+          e1      (volatile! nil)
+          ex      (volatile! nil)
+          reading (fn []
+                    (let [up #(binding [tax/*network-belief* %]
+                                (contains? (tax/context-up (reasoning/taxonomy kb) CxS) CxB))]
+                      [(up false) (up true)
+                       (boolean (v/ask? kb (list pp Xx) CxS))
+                       (boolean (some #(= (list qq Xx) (v/sentence-of %)) (v/sentexes-in-context kb CxS)))
+                       (boolean (v/ask? kb (list qq Xx) CxS))]))]
+      (when direct? (vswap! hs conj (v/assert kb (list 'genlCx CxS CxB) 'CxUniverse M)))
+      (doseq [op order]
+        (vswap! hs conj
+                (case op
+                  :edge    (vreset! e1 (v/assert kb (list 'genlCx CxQ CxB) 'CxUniverse M))
+                  :cx-rule (v/assert-rule kb [(list 'genlCx CxQ '?b)] (list 'genlCx CxS '?b) 'CxUniverse
+                                          {:direction :forward :strength :monotonic})
+                  :except  (vreset! ex (v/assert kb (list 'except (sx/sentex-handle @e1)) CxS M))
+                  :pp      (v/assert kb (list pp Xx) CxB M)
+                  :ss      (v/assert kb (list ss Xx) CxS M)
+                  :rule    (v/assert-rule kb [(list pp '?x) (list ss '?x)] (list qq '?x) CxB
+                                          {:direction :forward :strength :monotonic}))))
+      (let [with (reading)]
+        (v/retract! kb @ex)
+        (let [without (reading)]
+          (doseq [h (rseq @hs)] (when (and (not= h @ex) (v/sentex kb h)) (v/retract! kb h)))
+          [with without])))))
+
+(defn- excepted-edge-orders
+  "Every order of the six writes in which the except follows the edge it names."
+  []
+  (remove #(< (.indexOf ^java.util.List % :except) (.indexOf ^java.util.List % :edge))
+          (oi/permutations [:edge :cx-rule :except :pp :ss :rule])))
+
+(defn- excepted-edge-readings
+  "The distinct readings over `orders`, without and with E2 asserted directly."
+  [kb orders]
+  (into #{} (for [direct? [false true], order orders] [direct? (excepted-edge-reading kb order direct?)])))
+
+(def ^:private excepted-edge-expected
+  ;; E2's one justification rests on E1, which the except hides at CxS, so CxS does not
+  ;; see CxB under either reading: (pp Xx) is not asked true there and the firing that
+  ;; needs both antecedents is not placed there.  Retracting the except shows CxB, and
+  ;; (qq Xx) is stored and believed at CxS.  With E2 also asserted directly, its premise
+  ;; justification rests on no excepted edge and CxS sees CxB throughout.
+  #{[false [[false false false false false] [true true true true true]]]
+    [true [[true true true true true] [true true true true true]]]})
+
+(tu/deftest-kb a-genlCx-edge-resting-on-an-excepted-genlCx-edge-leaves-the-excepting-reader-for-reads-and-chain
+  ;; A sample of 15 of the 360 orders; the ^:slow twin below reads every one.
+  (is (= excepted-edge-expected (excepted-edge-readings kb (take-nth 24 (excepted-edge-orders))))))
+
+(tu/deftest-kb ^:slow a-genlCx-edge-resting-on-an-excepted-genlCx-edge-leaves-the-excepting-reader-in-every-order
+  (is (= excepted-edge-expected (excepted-edge-readings kb (excepted-edge-orders)))))
+
+(defn- hidden-super-except-reading
+  "CxTop and CxSub see CxUniverse; E2 = (genlCx CxSup CxTop) with an except of E2 stated in
+  CxSup.  (ff Aa) in CxSub, the forward rule (ff ?x) ⇒ (gg ?x) in CxSub, an except of
+  (ff Aa) stated in CxTop and E = (genlCx CxSub CxSup) arrive in `order`.  Reads [(gg Aa)
+  stored at CxSub, (gg Aa) asked at CxSub, (ff Aa) asked at CxSub] after the writes and
+  again after retracting E, then retracts the rest."
+  [kb order]
+  (tu/with-terms [ff gg Aa CxTop CxSup CxSub]
+    (let [M       {:strength :monotonic}
+          hs      (volatile! (mapv #(v/assert kb (list 'genlCx % 'CxUniverse) 'CxUniverse M) [CxTop CxSub]))
+          e2      (v/assert kb (list 'genlCx CxSup CxTop) 'CxUniverse M)
+          _       (vswap! hs conj e2 (v/assert kb (list 'except (sx/sentex-handle e2)) CxSup M))
+          f       (volatile! nil)
+          e       (volatile! nil)
+          reading (fn []
+                    [(boolean (some #(= (list gg Aa) (v/sentence-of %)) (v/sentexes-in-context kb CxSub)))
+                     (boolean (v/ask? kb (list gg Aa) CxSub))
+                     (boolean (v/ask? kb (list ff Aa) CxSub))])]
+      (doseq [op order]
+        (vswap! hs conj
+                (case op
+                  :edge (vreset! e (v/assert kb (list 'genlCx CxSub CxSup) 'CxUniverse M))
+                  :fact (vreset! f (v/assert kb (list ff Aa) CxSub M))
+                  :exf  (v/assert kb (list 'except (sx/sentex-handle @f)) CxTop M)
+                  :rule (v/assert-rule kb [(list ff '?x)] (list gg '?x) CxSub
+                                       {:direction :forward :strength :monotonic}))))
+      (let [with (reading)]
+        (v/retract! kb @e)
+        (let [without (reading)]
+          (doseq [h (rseq @hs)] (when (and (not= h @e) (v/sentex kb h)) (v/retract! kb h)))
+          [with without])))))
+
+(tu/deftest-kb an-except-in-a-context-the-sub-reaches-past-a-hidden-edge-is-rechecked-when-the-edge-arrives
+  ;; CxSup does not see CxTop (its edge is excepted there), but CxSub's raw ancestor set
+  ;; holds CxTop once E arrives, and the excepts in force are read off the raw set: the
+  ;; except of (ff Aa) hides the fact and sweeps the firing at CxSub in every order, and
+  ;; retracting E gives both back.
+  (is (= #{[[false false false] [true true true]]}
+         (into #{} (map #(hidden-super-except-reading kb %))
+               (remove #(< (.indexOf ^java.util.List % :exf) (.indexOf ^java.util.List % :fact))
+                       (oi/permutations [:edge :fact :exf :rule]))))))
+
+(defn- reader-below-sub-reading
+  "CxY, CxSub under CxUniverse; CxSup under CxY; CxR under CxSub; E' = (genlCx CxSub CxY)
+  with an except of E' stated in CxR.  (pp Xx) in CxY, (ss Xx) in CxR, the forward rule
+  (pp ?x) ∧ (ss ?x) ⇒ (qq ?x) in CxR and E = (genlCx CxSub CxSup) arrive in `order`.  Reads
+  [CxR sees CxY, (pp Xx) asked at CxR, (qq Xx) stored at CxR, (qq Xx) asked at CxR] after
+  the writes and again after retracting E, then retracts the rest."
+  [kb order]
+  (tu/with-terms [pp ss qq Xx CxY CxSub CxR CxSup]
+    (let [M       {:strength :monotonic}
+          hs      (volatile! (mapv #(v/assert kb (apply list 'genlCx %) 'CxUniverse M)
+                                   [[CxY 'CxUniverse] [CxSub 'CxUniverse] [CxSup CxY] [CxR CxSub]]))
+          esy     (v/assert kb (list 'genlCx CxSub CxY) 'CxUniverse M)
+          _       (vswap! hs conj esy (v/assert kb (list 'except (sx/sentex-handle esy)) CxR M))
+          e       (volatile! nil)
+          reading (fn []
+                    [(contains? (set (tax/context-up (reasoning/taxonomy kb) CxR)) CxY)
+                     (boolean (v/ask? kb (list pp Xx) CxR))
+                     (boolean (some #(= (list qq Xx) (v/sentence-of %)) (v/sentexes-in-context kb CxR)))
+                     (boolean (v/ask? kb (list qq Xx) CxR))])]
+      (doseq [op order]
+        (vswap! hs conj
+                (case op
+                  :edge (vreset! e (v/assert kb (list 'genlCx CxSub CxSup) 'CxUniverse M))
+                  :pp   (v/assert kb (list pp Xx) CxY M)
+                  :ss   (v/assert kb (list ss Xx) CxR M)
+                  :rule (v/assert-rule kb [(list pp '?x) (list ss '?x)] (list qq '?x) CxR
+                                       {:direction :forward :strength :monotonic}))))
+      (let [with (reading)]
+        (v/retract! kb @e)
+        (let [without (reading)]
+          (doseq [h (rseq @hs)] (when (and (not= h @e) (v/sentex kb h)) (v/retract! kb h)))
+          [with without])))))
+
+(tu/deftest-kb a-genlCx-edge-shows-a-reader-below-its-sub-what-the-sub-already-saw
+  ;; CxSub sees CxY over E' before E arrives; CxR does not, because the except of E' is
+  ;; stated there.  E shows CxR CxY through CxSup, so the rule at CxR fires over (pp Xx) in
+  ;; every order, and retracting E hides CxY from CxR again.
+  (is (= #{[[true true true true] [false false false false]]}
+         (into #{} (map #(reader-below-sub-reading kb %)) (oi/permutations [:edge :pp :ss :rule])))))
+
+(defn- context-move-row
+  "Asserts the `genlCx` edges `[sub super]` of `edges` and an except of each edge `excepted`
+  maps to its stating context, then reads, per reader under `sub`, the ancestor sets before
+  and after `(genlCx sub super)` = `edge`, effective (`tax/context-up`) and raw
+  (`tax/context-up-global`).  Returns [the per-reader diffs unioned, effective and raw,
+  `special/context-move` after the edge arrives, and after it is retracted]."
+  [kb edges excepted [sub super]]
+  (let [M     {:strength :monotonic}
+        tx    (reasoning/taxonomy kb)
+        hs    (volatile! [])
+        by    (into {} (map (fn [e] (let [h (v/assert kb (apply list 'genlCx e) 'CxUniverse M)]
+                                      (vswap! hs conj h)
+                                      [e h])))
+                    edges)
+        _     (doseq [[e c] excepted]
+                (vswap! hs conj (v/assert kb (list 'except (sx/sentex-handle (by e))) c M)))
+        views (fn [] (into {} (map (fn [d] [d [(set (tax/context-up tx d)) (set (tax/context-up-global tx d))]]))
+                           (tax/context-down-global tx sub)))
+        before (views)
+        eh     (v/assert kb (list 'genlCx sub super) 'CxUniverse M)
+        after  (views)
+        diff   (fn [i] (into #{} (mapcat (fn [[d v]] (remove (nth (get before d) i #{}) (nth v i)))) after))
+        shown  (special/context-move kb sub super)
+        _      (v/retract! kb eh)
+        hidden (special/context-move kb sub super)]
+    (doseq [h (rseq @hs)] (when (v/sentex kb h) (v/retract! kb h)))
+    [(diff 0) (diff 1) shown hidden]))
+
+(tu/deftest-kb context-move-names-what-each-reader-gains-through-the-edge
+  ;; Each row: the effective `:shown` equals the per-reader diff of `context-up` and the
+  ;; raw stratum the diff of `context-up-global`.  After the retraction `:hidden` holds at
+  ;; least the diff: an except reached only through the edge leaves force with it, and
+  ;; the except family re-checks what it hid (`recheck-except-ancestors`).
+  (doseq [row [:plain :seen-elsewhere :reader-below-sub :hidden-super :distant-except]]
+    (tu/with-terms [CxA CxB CxC CxD CxR]
+      (let [[edges excepted edge]
+            (case row
+              ;; CxA, CxB under CxUniverse, CxC under CxA
+              :plain            [[[CxA 'CxUniverse] [CxB 'CxUniverse] [CxC CxA]] {} [CxA CxB]]
+              ;; CxA sees CxD already, through CxC
+              :seen-elsewhere   [[[CxA CxC] [CxC CxD] [CxB CxD] [CxD 'CxUniverse]] {} [CxA CxB]]
+              ;; W2: CxR under CxA does not see CxD, whose edge from CxA is excepted at CxR
+              :reader-below-sub [[[CxD 'CxUniverse] [CxA 'CxUniverse] [CxB CxD] [CxR CxA] [CxA CxD]]
+                                 {[CxA CxD] CxR} [CxA CxB]]
+              ;; W1: CxB does not see CxD, its edge excepted at CxB
+              :hidden-super     [[[CxD 'CxUniverse] [CxA 'CxUniverse] [CxB CxD]]
+                                 {[CxB CxD] CxB} [CxA CxB]]
+              ;; SYMPTOMS 3: an except of a genlCx edge no reader under CxA reaches
+              :distant-except   [[[CxA 'CxUniverse] [CxB 'CxUniverse] [CxC 'CxUniverse] [CxD CxC]]
+                                 {[CxD CxC] CxD} [CxA CxB]])
+            [eff raw shown hidden] (context-move-row kb edges excepted edge)]
+        (is (= [eff raw] [(:shown shown) (:raw shown)]) (str row " shown"))
+        (is (= #{} (:hidden shown)) (str row))
+        (is (every? (:hidden hidden) eff) (str row " hidden"))
+        (is (= raw (:raw hidden)) (str row " raw hidden"))))))
+
 ;; ---- 3. chain of 212 excepts --------------------------------------------
 
 (tu/deftest-kb chain-of-212-excepts
@@ -242,6 +486,28 @@
             (v/retract! kb eh)
             (is (= #{CxParent CxChild CxOther} (down)))))))))
 
+(tu/deftest-kb context-down-under-a-genlCx-except-is-held-per-reading
+  ;; A belief search (`tax/*search*` :belief) reads no except, so CxChild sees CxParent
+  ;; there and not under the visibility or the network reading.  In every order of the
+  ;; three reads, each answers what a fresh memo answers.
+  (doseq [order (oi/permutations [:plain :network :search])]
+    (tu/with-terms [CxChild CxParent CxOther]
+      (let [M     {:strength :monotonic}
+            in    {:plain {} :network {#'tax/*network-belief* true} :search {#'tax/*search* :belief}}
+            down  (fn [r tx] (with-bindings (in r) (tax/context-down tx CxParent)))]
+        (v/assert kb (list 'genlCx CxParent 'CxWell) 'CxUniverse M)
+        (v/assert kb (list 'genlCx CxOther CxParent) 'CxUniverse M)
+        (v/assert kb (list 'except (sx/sentex-handle (v/assert kb (list 'genlCx CxChild CxParent) 'CxUniverse M)))
+                  CxChild M)
+        (testing (vec order)
+          (is (= {:plain #{CxParent CxOther} :network #{CxParent CxOther}
+                  :search #{CxParent CxChild CxOther}}
+                 (into {} (map (fn [r] [r (down r (reasoning/taxonomy kb))])) order)))
+          (is (= {:plain #{CxParent CxOther} :network #{CxParent CxOther}
+                  :search #{CxParent CxChild CxOther}}
+                 (into {} (map (fn [r] [r (down r (reasoning/taxonomy kb))])) order))
+              "read again from the memo"))))))
+
 (tu/deftest-kb an-except-on-an-unrelated-fact-leaves-context-down-on-the-raw-path
   ;; The whole-KB gate says an except exists; the relation gate says whether it reaches
   ;; a `genlCx` supporter.  One on an ordinary fact reaches none, so no candidate pays a
@@ -267,8 +533,8 @@
 ;; functor is in the special-predicate table, so it is dispatched on the sentence's
 ;; shape (`special/structural-integrate`).  The derivation path has to reach that arm
 ;; too, and the two halves of what it does there are what these pin: `recheck-except`
-;; queues the firings that used the hidden handle, and `reconcile-belief-change` moves
-;; the supporter-visibility generation the scoped reads are memoized on.
+;; queues the firings that used the hidden handle, and the scoped reads, memoized under
+;; the change clock, read the except at the next read.
 ;;
 ;; Neither is visible from a cold KB, because a cold read computes rather than recalls
 ;; and a fresh derivation has no standing firing to sweep.  Both tests therefore *warm*
@@ -299,11 +565,10 @@
 
 (tu/deftest-kb a-rule-derived-except-retires-the-scoped-reads-a-stated-one-retires
   ;; The second half, and the one a memo can hide.  `relation-filter-active?` and
-  ;; `context-down`'s reverse answer are both stamped on the supporter-visibility
-  ;; generation; the roster they read is written at the store primitive, which no
-  ;; generation follows.  So an except that arrives without moving the generation is
-  ;; hidden from every warm read — and the KB then disagrees with `recover` over one
-  ;; store, which is the property the derivation path exists to keep.
+  ;; `context-down`'s reverse answer are both memoized; the roster they read is written
+  ;; at the store primitive.  A memo the derived except does not retire hides it from
+  ;; every warm read — and the KB then disagrees with `recover` over one store, which is
+  ;; the property the derivation path exists to keep.
   (tu/with-terms [shiny gold hide trigger CxChild CxParent CxOther]
     (v/assert kb (list 'forced_monotonic_predicate hide) 'CxUniverse)
     (let [tx (reasoning/taxonomy kb)]

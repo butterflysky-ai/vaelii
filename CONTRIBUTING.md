@@ -170,25 +170,33 @@ golden, the SPI interfaces, the refusal types) exclude it, because freezing an a
 there would put its development inside the engine's compatibility contract. What koinii
 needs and the API lacks gets published in `vaelii.core`, never reached around.
 
-### 2.2 Four properties that hold everywhere
+### 2.2 Five properties that hold everywhere
 
 Breaking one of these is a bug however well it tests. They are the reason several
 tests look more paranoid than a unit test needs to be.
 
 - **Order independence.** The same knowledge, given in any order, yields the same
-  beliefs. Belief is computed from current state, never accumulated, and every
-  tie-break keys on **content**, never on a handle — handles are allocated in
+  beliefs. Belief is a function of current state, however the engine maintains it, and
+  every tie-break keys on **content**, never on a handle — handles are allocated in
   assertion order, so a tie-break on one is an order dependence in disguise.
   `order_independence_test.clj` enumerates every permutation of a scenario and demands
-  one answer. [`docs/nmtms.md`](docs/nmtms.md)
+  one answer. The property is about belief over the stored knowledge: `try-assert`
+  refuses a clashing write, so arrival order decides what it stores.
+  [`docs/nmtms.md`](docs/nmtms.md)
 - **Locality.** No operation recomputes the whole graph; a relabel is scoped to the
   affected region with the rest held fixed.
 - **Context scoping.** A read sees what its context sees, up the `genlCx` ancestor set —
   facts, rules, taxonomy edges and the definitional checks alike.
   [`docs/contexts.md`](docs/contexts.md)
-- **Belief filtering.** A stored sentex is not a believed one. Matching, the taxonomy
-  closures and the cached relations all follow belief.
+- **Belief filtering.** A stored sentex is not a believed one. Matching, closures and
+  cached relations answer from belief, and a raw index read goes through
+  `reads/believed-…` or `reads/as-stored-…`, which name the reading the caller gets.
   [`docs/taxonomy.md`](docs/taxonomy.md)
+- **Separated state.** Knowledge lives in the KB, belief-free indexes live in the
+  IndexStore, and belief and every structure that reads it live outside both. A cache
+  filled at a read may sit anywhere. `lein lint`'s `derived` check fails a structure
+  holding content outside the KB or a belief-free index outside the IndexStore.
+  [`docs/nmtms.md`](docs/nmtms.md#3-separated-state)
 
 ## 3. Coding conventions
 

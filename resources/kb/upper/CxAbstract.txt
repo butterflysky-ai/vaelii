@@ -25,6 +25,7 @@
 ;; formation substance.  Bread, an apple and sea salt are a made, a natural and a
 ;; formation food, and an apple is biological food.
 (orthogonal organism made)
+(orthogonal animal made)
 (orthogonal organism natural)
 (orthogonal body_part made)
 (orthogonal body_part natural)
@@ -76,11 +77,11 @@
 (comment largerThan
          "(largerThan ?kind1 ?kind2) means that a ?kind1 is bigger than a ?kind2. A claim about two KINDS rather than about two things — a type_relation_predicate — so (largerThan dog cat) says dogs are bigger than cats and says nothing whatever about any particular dog. Transitive and asymmetric, so a cycle of size claims is a contradiction the KB reports rather than a chain it walks. Declared transitiveInArgInverse on both positions along genl, which is what carries a claim down to subkinds: a kind of dog is larger than a kind of cat. That distribution is itself a claim about largerThan, which is why it is declared rather than assumed — the same inheritance is false of a chihuahua and a maine coon, and nothing in a sentence says which case it is in.")
 (binary_predicate largerThan)
-(type_relation_predicate largerThan)
+(set/monotonic (type_relation_predicate largerThan))
 (genlArg largerThan 1 tangible)
 (genlArg largerThan 2 tangible)
-(transitive largerThan)
-(asymmetric largerThan)
+(set/monotonic (transitive largerThan))
+(set/monotonic (asymmetric largerThan))
 (set/monotonic (transitiveInArgInverse largerThan 1 genl))
 (set/monotonic (transitiveInArgInverse largerThan 2 genl))
 
@@ -96,10 +97,10 @@
 (comment locatedIn
          "(locatedIn ?object ?place) means that ?object sits within ?place. Declared transitive, so a chain of containments is walked by the closure prover rather than materialized, and a joined rule carries location down parthood — a part is located wherever its whole is. Both arguments are physical objects: a region is CxSpace's business, and partOfRegion is the relation to reach for there.")
 (binary_predicate locatedIn)
-(instance_relation_predicate locatedIn)
+(set/monotonic (instance_relation_predicate locatedIn))
 (arg locatedIn 1 tangible)
 (arg locatedIn 2 tangible)
-(transitive locatedIn)
+(set/monotonic (transitive locatedIn))
 
 (comment machine "An artifact with moving parts that does work under power.")
 (genl machine made)
@@ -113,12 +114,19 @@
 (comment madeOf
          "(madeOf ?object ?substance) means that ?object is made of ?substance. About one particular object and the stuff it is made of, so it is instance-level; what a whole kind is made of is a claim about that kind. Partial rather than exhaustive — a thing may be made of several substances, and saying it is made of one does not deny the others.")
 (binary_predicate madeOf)
-(instance_relation_predicate madeOf)
+(set/monotonic (instance_relation_predicate madeOf))
 (arg madeOf 1 tangible)
 (arg madeOf 2 substance)
 
 (comment metal "A hard, dense, conducting substance — iron, copper, gold.")
 (genl metal substance)
+
+(comment mercury "The metallic element quicksilver, as stuff: the metal in an old thermometer, a barometer or a dental amalgam. Mercury is liquid at ordinary room temperature and pressure. Mercury freezes at about -39 °C, so its state of matter depends on the temperature a context assumes.")
+(genl mercury metal)
+;; A portion of mercury is an individual, so mercury is a first-order `type`.  Mercury is
+;; not a stuff_type_by_substance: that metatype separates its members, and mercury is
+;; below metal, one of them.
+(type mercury)
 
 (comment natural "A tangible whose form no living thing's action gave it: a wild sheep, a coral reef, a rock, a river, a star. Contrast made.")
 ;; A wild sheep is natural and biological.  A cloned sheep is made and biological.  So
@@ -130,15 +138,15 @@
 (comment partOf
          "(partOf ?part ?whole) means that ?part is a component of ?whole. Declared transitive, so a part of a part is a part and the chain is answered by the closure prover rather than stored. Structural parthood between physical objects — not membership in a collection, and not the spatial containment partOfRegion states of regions.")
 (binary_predicate partOf)
-(instance_relation_predicate partOf)
+(set/monotonic (instance_relation_predicate partOf))
 (arg partOf 1 tangible)
 (arg partOf 2 tangible)
-(transitive partOf)
+(set/monotonic (transitive partOf))
 
 (comment partType
          "(partType ?wholeKind ?partKind) means that a ?wholeKind has a ?partKind among its parts. The type-level reading of partOf: (partType bird wing) says birds have wings, where (partOf LeftWing Pingu) says one thing is part of another. Declared transitiveInArgInverse along genl on the FIRST position only, and the asymmetry is the claim: a kind of bird has whatever parts birds have, so penguins have wings without a word being written about penguins, while the second position preserves nothing — birds having wings says nothing about which kinds of wing they have. Linked to partOf by typeToInstancePred, which records that the two are readings of one relation and deliberately moves no claim between them: going from the kinds to their members needs a quantifier reading (every bird has SOME wing) that nothing here fixes, and guessing it is how a claim about kinds quietly becomes a false claim about individuals.")
 (binary_predicate partType)
-(type_relation_predicate partType)
+(set/monotonic (type_relation_predicate partType))
 (genlArg partType 1 tangible)
 (genlArg partType 2 tangible)
 (set/monotonic (transitiveInArgInverse partType 1 genl))
@@ -147,9 +155,6 @@
 (comment petal "A coloured body part of a flower.")
 (genl petal body_part)
 
-
-(comment relation_type "A type whose instances are relations between things.")
-(genl relation_type aspatial)
 
 (comment root "The body part a plant anchors itself and draws water with.")
 (genl root body_part)
@@ -202,6 +207,8 @@
 ;; CxCore, so the edge lives here beside causal; with the disjointness above it also
 ;; keeps every tangible out of acausal.
 (genl tangible causal)
+;; Every cause is in time, so nothing atemporal is a cause.
+(genl atemporal acausal)
 
 ;; A body of people can be a cause too: a company hires; a court rules. organization
 ;; is aspatial, and nothing separates aspatial from causal.
@@ -215,17 +222,25 @@
 (comment acausal_event "An event that is not a cause (an observation or receipt is one): the intersection of acausal and event.")
 (intersection acausal_event acausal event)
 
+;; --- causes: a causal thing brings a situation about ---------------------------
+(comment causes
+         "(causes ?cause ?effect) means that ?cause brings ?effect about: the flattery made the crow sing, the rock dented the car, the drought ruined the harvest. The cause is a causal thing: a causal event, a tangible or an organization. The effect is a situation: an event or a held state. Declared transitive, so a chain of causes is itself a cause and the chain is answered by the closure prover rather than stored.")
+(set/monotonic (instance_relation_predicate causes))
+(arg causes 1 causal)
+(arg causes 2 situation)
+(set/monotonic (transitive causes))
+
 ;; --- doneBy / performedBy: an event's doer -----------------------------------
 (comment doneBy
          "(doneBy ?event ?doer) means that ?doer brought about ?event, intentionally or not. The doer can be any thing — a person, an animal, a machine, a process — so the second position declares no type: agent names a registered participant rather than something that can act, and no type below thing covers every doer. performedBy is the intentional case.")
 (binary_predicate doneBy)
-(instance_relation_predicate doneBy)
+(set/monotonic (instance_relation_predicate doneBy))
 (arg doneBy 1 event)
 
 (comment performedBy
          "(performedBy ?event ?doer) means that ?doer intentionally initiated ?event. Specializes doneBy through a genl edge, so every performing is a doing and a doing is not concluded a performing.")
 (binary_predicate performedBy)
-(instance_relation_predicate performedBy)
+(set/monotonic (instance_relation_predicate performedBy))
 (arg performedBy 1 event)
 (genl performedBy doneBy)
 
@@ -238,19 +253,19 @@
 ;; relations.
 (comment input "(input ?event ?thing) means that ?thing went into ?event: the lettuce in a salad, the ore in smelting, the plank in sawing. An instrument the event used and left unchanged, like the knife or the saw, is not an input. Contrast output.")
 (binary_predicate input)
-(instance_relation_predicate input)
+(set/monotonic (instance_relation_predicate input))
 (arg input 1 event)
 (termsRelated input output)
 
 (comment destroyedInput "(destroyedInput ?event ?thing) means that ?thing went into ?event and ceased to exist there: the ore in smelting, the plank in sawing, the egg in an omelet. The lettuce in a salad is an input but not a destroyed one.")
 (binary_predicate destroyedInput)
-(instance_relation_predicate destroyedInput)
+(set/monotonic (instance_relation_predicate destroyedInput))
 (arg destroyedInput 1 event)
 (genl destroyedInput input)
 
 (comment preservedInput "(preservedInput ?event ?thing) means that ?thing went into ?event and still exists when ?event ends: the lettuce in a salad, the thread in a woven cloth.")
 (binary_predicate preservedInput)
-(instance_relation_predicate preservedInput)
+(set/monotonic (instance_relation_predicate preservedInput))
 (arg preservedInput 1 event)
 (genl preservedInput input)
 ;; No thing is both a destroyed and a preserved input of one event.  The KB does not
@@ -259,13 +274,13 @@
 (comment output
          "(output ?event ?thing) means that ?event gave ?thing the form or content it has, as something it left behind: a chair from its making, sawdust from sawing, a footprint from a step, a file from a program run. Whether that was the point of the event does not matter.")
 (binary_predicate output)
-(instance_relation_predicate output)
+(set/monotonic (instance_relation_predicate output))
 (arg output 1 event)
 
 (comment tangibleOutput
          "(tangibleOutput ?event ?thing) means that ?thing is a tangible output of ?event: a chair from its making, steel from smelting, sawdust from sawing, a footprint from a step.")
 (binary_predicate tangibleOutput)
-(instance_relation_predicate tangibleOutput)
+(set/monotonic (instance_relation_predicate tangibleOutput))
 (arg tangibleOutput 1 event)
 (arg tangibleOutput 2 tangible)
 (genl tangibleOutput output)
@@ -273,7 +288,7 @@
 (comment intangibleOutput
          "(intangibleOutput ?event ?thing) means that ?thing is an intangible output of ?event: a file from a program run, a receipt from a tool call, a recorded measurement from an observation.")
 (binary_predicate intangibleOutput)
-(instance_relation_predicate intangibleOutput)
+(set/monotonic (instance_relation_predicate intangibleOutput))
 (arg intangibleOutput 1 event)
 (arg intangibleOutput 2 intangible)
 (genl intangibleOutput output)
@@ -310,13 +325,17 @@
 ;; Neither an organism nor a part it grew is stuff; stated once of biological, it reaches
 ;; both parts and every kind below them.
 (set/monotonic (disjoint biological substance))
+;; A container is a made object that holds others: never an organism, never stuff and
+;; never a person, so each disjoint reaches building and every other kind of container.
+(set/monotonic (disjoint container organism))
+(set/monotonic (disjoint container person))
+(set/monotonic (disjoint container substance))
 (set/monotonic (disjoint building furniture))
 (set/monotonic (disjoint building tool))
 (set/monotonic (disjoint building vehicle))
 (set/monotonic (disjoint clothing building))
 (set/monotonic (disjoint clothing furniture))
 (set/monotonic (disjoint clothing vehicle))
-(set/monotonic (disjoint formula relation))
 (set/monotonic (disjoint liquid stone))
 (set/monotonic (disjoint relation context))
 (set/monotonic (disjoint_metatype stuff_type_by_state_of_matter))

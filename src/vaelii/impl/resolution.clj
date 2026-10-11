@@ -493,18 +493,23 @@
   ([kb pred context] (concluding-rule-handles kb pred context nil))
   ([kb pred context visible]
    (let [idx        (:index kb)
-         var-conseq (set (p/rules-by-consequent idx p/var-consequent-key visible))]
+         by-conseq  (fn [k] (if visible
+                              (reads/as-stored-rules-by-consequent-in idx k visible)
+                              (reads/as-stored-rules-by-consequent-global idx k)))
+         var-conseq (set (by-conseq p/var-consequent-key))]
      (cond
        (sx/variable? pred)
-       (into var-conseq (reads/as-stored-rules-in idx :rule visible))
+       (into var-conseq (if visible
+                          (reads/as-stored-rules-in idx :rule visible)
+                          (reads/as-stored-rules-in-global idx :rule)))
 
        (symbol? pred)
        (into var-conseq
-             (mapcat #(p/rules-by-consequent idx % visible))
+             (mapcat by-conseq)
              (tax/specs (reasoning/taxonomy kb) pred context))
 
        :else
-       (into var-conseq (p/rules-by-consequent idx pred visible))))))
+       (into var-conseq (by-conseq pred))))))
 
 (defn rule-visible-from?
   "May a rule stored in `rule-ctx` answer a goal asked from `context`?
@@ -866,7 +871,10 @@
   equational rewriting `kb/rewrite-term*` applies after it (`rewrite/normalize-sentence`)
   is a walk over argument terms that does not read these marks, so a schematic `equals`
   normalizes inside a quoted position as it does outside one.  It skips an equality
-  relation's arguments, the one mention position both halves share."
+  relation's arguments, the one mention position both halves share.
+
+  The mention marks are read unscoped: whether an argument is a mention is a fact
+  about the sentence (`tax/mention-marks`)."
   [kb visible? term]
   (if-let [marks (tax/mention-marks (reasoning/taxonomy kb))]
     (representative-term-mention kb visible? marks term false)
@@ -933,7 +941,9 @@
   "The `{old-term representative}` rewrites `sentence` undergoes under `visible?`, computed
   the way `representative-term` actually rewrites it — so a quoted mention held opaque to a
   `sameAs` is not reported displaced by `why-not`.  Gated on `tax/mention-marks`: a KB declaring
-  no `quoting_function` and no `modal_predicate` takes the flat walk unchanged."
+  no `quoting_function` and no `modal_predicate` takes the flat walk unchanged.
+
+  The mention marks are read unscoped, as `representative-term` reads them."
   [kb visible? sentence]
   (if-let [marks (tax/mention-marks (reasoning/taxonomy kb))]
     (displacements-mention kb visible? marks sentence false {})
@@ -1010,7 +1020,10 @@
   nil)
 
 (defn- spelling-opts
-  "`sx/sentex`'s canonicalization reads restricted to the permuting-mark `entries`."
+  "`sx/sentex`'s canonicalization reads restricted to the permuting-mark `entries`.
+
+  The groups are read unscoped: the fold decides the stored key, which every reader
+  shares."
   [tax entries]
   {:symmetric? #(contains? entries [:prop :symmetric %])
    :groups-of  (fn [f _arity] (into #{} (filter #(contains? entries [:commuting f %]))
@@ -1290,7 +1303,11 @@
 
   The one definition of the fan and the dedup: `raw-match` calls it with `match-one`, the
   rete alpha matcher (`vaelii.impl.rete`) with its alpha-memory probe, so the two
-  retrieval paths cannot fan differently."
+  retrieval paths cannot fan differently.
+
+  The `symmetric` mark is read unscoped, as `kb-sentex` reads it;
+  `without-unbelieved-spellings` drops the mirror at a reader that does not believe
+  the mark."
   [kb probe sentence]
   (let [hits (probe sentence)
         tax  (reasoning/taxonomy kb)
@@ -1366,7 +1383,10 @@
   spelling under a `reifiable_function` mark some reader does not believe: it names a
   constant minted for a function the reader does not believe reifiable, or holds an
   application of one it does, outside a `termOfUnit` or `rewriteOf` payload.  Nil when
-  every reader believes every such mark."
+  every reader believes every such mark.
+
+  The marks are read unscoped, a superset that the per-reader test narrows to
+  `view-context`."
   [kb view-context]
   (let [tax   (reasoning/taxonomy kb)
         ents  (fn [f] (let [k [:prop :reifiable f]] {k (tax/supporters tax k)}))
@@ -1675,7 +1695,7 @@
     :scoped   false
     :agnostic true
     ;; :auto — read whichever side is smaller
-    (<= (long (p/count-with-arg ix pos term)) (count specs))))
+    (<= (long (reads/stored-count-with-arg-global ix pos term)) (count specs))))
 
 (defn- trie-prefix?
   "Is a non-permuting literal of `args` a ground prefix, which `lead-candidates` leads by
@@ -1710,8 +1730,7 @@
     (if up
       (when (and (< (count up) c)
                  (some (fn [[pos term]]
-                         (when-some [n (reads/stored-count-with-arg-in ix pd pos term up)]
-                           (< (long n) limit)))
+                         (< (long (reads/stored-count-with-arg-in ix pd pos term up)) limit))
                        ground))
         ground)
       ;; every bound argument holds the c tuples, so c > k ≥ 1 needs c ≥ 2
@@ -1719,8 +1738,8 @@
         (when-some [[_ g] (first
                            (sort-by first
                                     (keep (fn [[pos term :as g]]
-                                            (when-some [[n k] (reads/stored-census-with-arg
-                                                               ix pd pos term)]
+                                            (let [[n k] (reads/stored-census-with-arg-global
+                                                         ix pd pos term)]
                                               (when (and (< (long n) limit) (< (long k) c))
                                                 [k g])))
                                           ground)))]
@@ -1777,8 +1796,8 @@
 
       (seq ground)
       (let [cnt (fn [[pos term]]
-                  (reduce (fn [n pz] (+ n (p/count-with-arg ix pz term)))
-                          (p/count-with-arg ix pos term)
+                  (reduce (fn [n pz] (+ n (reads/stored-count-with-arg-global ix pz term)))
+                          (reads/stored-count-with-arg-global ix pos term)
                           (alt pos)))
             ;; A lone ground column needs no count: there is nothing to compare it
             ;; against, so pricing it here would be a read the belief-settle diet (`≤1`
@@ -1850,7 +1869,10 @@
 
 (defn- matches-hierarchical-over
   "`matches-hierarchical` over `specs`, the functor's spec closure (nil for a variable
-  functor or a shape it does not handle)."
+  functor or a shape it does not handle).
+
+  The marks are read unscoped: the fold decides the stored key, and
+  `without-unbelieved-spellings` hides the spelling a reader's belief rules out."
   [kb sentence view-context specs]
   (if (or (not (hierarchical-literal? sentence)) (folded-spec? specs))
     (matches-visible* kb sentence view-context)
@@ -2086,7 +2108,9 @@
   call `B` retired, is confirmed against the structural walk before it drops the
   sentence.  A positive **equation** is never retired at all (`equation?`): migration
   never restates one, so dropping it would leave a believed equation that no read
-  returns under any spelling."
+  returns under any spelling.
+
+  The mention marks are read unscoped, as `representative-term` reads them."
   [kb visible merged? sentence]
   (let [marks (tax/mention-marks (reasoning/taxonomy kb))]
     (cond
@@ -2274,7 +2298,10 @@
 
   The supers are sorted, so which declaration a refusal names — and the order the
   entailments are drawn in — is a function of the vocabulary rather than of the closure's
-  hash order."
+  hash order.
+
+  The roster is read unscoped, a superset: it is intersected with the `genls`
+  `context` sees, and the caller reads each declaration from `context`."
   [kb kind pred context]
   (let [tax       (reasoning/taxonomy kb)
         declaring (tax/props tax (tax/arg-declaration-props kind))]
@@ -2530,7 +2557,7 @@
 (defn defeated-index
   "What the backward chainers filter a rule-expanded answer against: `{:standing
   {sentence #{handle}} :functors #{functor}}` over the targets of the placed defeats
-  (`reads/as-stored-named`) and, while an `except` is stored, the members of the placed
+  (`reads/as-stored-named-global`) and, while an `except` is stored, the members of the placed
   `(contradicts …)`, since a reader whose excepts lower a conflict member's class reads it
   defeated — or **nil** when the walk reads nothing (`exc/placed-reads?`).
 
@@ -2562,7 +2589,7 @@
                       (update :functors conj (nm/functor (sx/sentence-of sx))))
                   idx))
               {:standing {} :functors #{}}
-              (into (reads/as-stored-named (:index kb) sx/defeat-functor) members)))))
+              (into (reads/as-stored-named-global (:index kb) sx/defeat-functor) members)))))
 
 (defn defeatable-goal?
   "Could an answer to `goal` be one belief has already defeated — is its functor one some

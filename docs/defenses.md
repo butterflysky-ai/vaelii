@@ -172,9 +172,9 @@ and by review. Which is why it is written into the `Tms` docstring beside the th
 obligations that do have gates: an implementation that is never told about a claim cannot
 be held to it.
 
-### Where the four properties stop
+### Where the five properties stop
 
-The README states four properties that hold everywhere. The places below are where a
+The README states five properties that hold everywhere. The places below are where a
 subsystem holds one of them short, each for a reason its own page states. A reader who
 holds a subsystem to the README checks it against this list first. A place that departs
 from a property and is not listed here is a defect, and so is a row whose reason is
@@ -189,7 +189,7 @@ missing. The last column names the test that pins the departure, or `none`.
 | order | the browser's listings ([web.md](web.md#a-cap-is-not-an-answer-rank-first-then-cap)) | A listing is in handle order, because paging re-slices one sequence at an offset and a content order moves under every write. | `web_test/a-term-with-thousands-of-sentexes-is-walkable-to-the-end` |
 | order | an ASP solve at the time limit ([asp.md](asp.md#the-time-limit)) | Under an installed `:asp` solver, a solve the wall clock stops decides nothing that round, and which solves it stops depends on the machine's speed and load. `VAELII_ASP_SOLVE_LIMIT` stops a search by its conflict count instead, by default at 100,000, at the same point on every machine ([asp.md](asp.md#the-solve-limit)). The time limit stays as the backstop against a process that does not stop, and is the only limit when the solve limit is set to 0. | `asp_aspif_test/a-solve-past-the-time-limit-is-interrupted-not-answered` |
 | locality | an aggregate over a transitive relation ([aggregate.md](aggregate.md#what-it-costs)) | Every arriving `(ancestorOf a b)` re-joins the rule over every node, and each grouping re-reads its ancestor set. | `none` (`lein bench-aggchain` measures it) |
-| locality | the supersession reconcile ([equality.md](equality.md#what-a-merge-does)) | A `genlCx` edge stored or removed, or a schematic rewrite rule removed, re-examines every superseded datum while any is superseded, since either can retire an entry no class move names (`special/reconcile-context-edge`, `special/reconcile-removed-supersession!`). | `none` |
+| locality | the supersession reconcile ([equality.md](equality.md#what-a-merge-does)) | A `genlCx` edge stored or removed, or a schematic rewrite rule removed, re-examines every superseded datum while any is superseded, since either can retire an entry no class move names (`special/reconcile-move`, `special/reconcile-removed-supersession!`). | `none` |
 | locality | the structural `genlCx` producer ([context-nat.md](context-nat.md#the-structural-genlcx-producer)) | The reconcile re-runs over every context of a declared function, and pairing one sibling group is O(k²) in it. It runs once per edge, on the transition into belief. | `none` |
 | locality | a `conversionFactor` arriving ([quantity.md](quantity.md#what-a-comparison-rests-on)) | The datum re-joins every forward rule with a comparison antecedent, since nothing connects the unit table to a comparison by predicate. | `computed_support_test/the-unit-table-may-arrive-last` |
 | locality | a metric bound's support ([stp.md](stp.md#what-a-derived-bound-rests-on)) | Past the walk bound, a bound rests on every supporter in its network, a sound superset. The walk is bounded because a successor chain can go round a zero-weight cycle without end. | `none` |
@@ -200,6 +200,8 @@ missing. The last column names the test that pins the departure, or `none`.
 | scoping | the browser's term graph ([web.md](web.md#a-terms-shape-drawn)) | One edge in two contexts is drawn once, and the graph labels no edge with a context. | `none` |
 | belief | levels 0 and 1 ([levels.md](levels.md#operators)) | The two levels answer about storage, so a defeated sentex keeps its handle there. The floor defaults to level 2. | `property_cells_test/levels-read-no-defeated-fact` |
 | belief | `CxEverything` ([contexts.md](contexts.md#cxeverything-syntactic-and-a-named-opt-out-of-belief-filtering)) | The named opt-out reads the store with no belief and no context filter. The as-stored reads (`reads/as-stored-…`, lint E16) and a profile's counts read storage the same way, under names that say so. | `query_context_test/cxeverything-sees-a-defeated-default` |
+| state | the refusal record ([exceptions.md](exceptions.md), [nmtms.md](nmtms.md#3-separated-state)) | Refused rule firings and the `:constraint`, `:lift` and `:mint` entries are sentences no store holds, so `recover` re-derives them, and a `:constraint` entry of a rule no trigger watches is not re-derived. | `lein lint`'s `derived` check, `HOLDS_CONTENT` |
+| state | the rete matcher's alpha memories ([nmtms.md](nmtms.md#3-separated-state)) | Under `VAELII_RETE=1` or `rete/track!`, the matcher keeps stored facts by functor and argument in its own index beside the IndexStore. | `lein lint`'s `derived` check, `OUTSIDE_INDEX` |
 | belief | a reader thread beside the writer ([storage.md](storage.md#the-single-writer-contract)) | A read takes the postings and then belief per candidate, so a match stored or withdrawn between the two reads is missing. Beside a settle, belief is held but the taxonomy closures are read as the settle moves them. One state per read needs a realized answer and a retry, or a versioned store. | `none` |
 
 A quantity comparison in a forward rule reads the unit table at `'?ctx` and is not a row:
@@ -323,7 +325,7 @@ is a memo on the recomputation, not an optimization to taste.
 One check per standing pair per settle is quadratic in the clashes a load creates: measured
 at roughly 35 ms an assert with 300 standing definitional clashes against under 10 ms with
 50; `lein perf`'s `clash-arbitration` and `negation-arbitration` hold the per-assert cost
-against the standing set. The index is sound because it reads as **values** every input a
+flat in the standing set. The index is sound because it reads as **values** every input a
 separation reads — the separating and covering rosters, the disjoint metatypes' membership
 and the `siblingDisjointException` exemptions (`tax/separation-stamp`) — and the lower end of
 every `genl` edge that moved (`tax/moves-since`), and reads the separations again over the
@@ -849,7 +851,8 @@ fan-out.
 
 ### Child count is its own read
 
-`p/count-children` answers a node's width off a cardinality directly — the set's
+`family-child-count` (`reads/stored-count-children`) answers a node's width off a
+cardinality directly — the set's
 own count in the KV family, an edge-array span or a map's size in the columnar trie
 — rather than by materializing the child set and counting it. The query planner's
 cost model asks this once per literal per plan, so the cost of answering it is paid

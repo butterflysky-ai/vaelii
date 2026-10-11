@@ -83,8 +83,8 @@
   one already past any ceiling cannot grow into a failure.  A probe that comes in under
   its ceiling says so, and leaves this map."
   {:spindle "the sync did not return by its deadline (2026-09-28): 95% of samples in the
-             settle after its retractions, `clash-nogoods` re-examining remembered clash
-             pairs through `arbitrable-violations` and `taxonomy/closure-of`"
+             settle after its retractions, re-examining remembered clash pairs and the
+             genl closures of their types"
    :genl    "a genl edge onto a corpus type did not return by its deadline (2026-09-27)"
    :context "a genlCx edge under a corpus context did not return by its deadline (2026-09-27)"})
 

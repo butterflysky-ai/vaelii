@@ -167,6 +167,12 @@ process's one writer, and the registry refuses a second job that wants it — na
 that holds it. An `:already-loaded` refusal is still the catalog's, since that is a
 question about the entries rather than about the writer.
 
+**The catalog holds 16 entries at most** (`max-entries`). A load past that is refused with
+`:too-many-kbs`, whose `:entries` names the keys held, and nothing is evicted: a loaded KB
+is one a reader chose to open, and unloading it unasked loses their work. The generator is
+the source that reaches the cap, since each of its loads files a new `generated#N`.
+`register!` (a start's KB, an attached daemon) files past the cap.
+
 **The entry outlives the report, so it files the terminal status onto itself.** A settled
 job ages out of the registry after an hour and its entry stays, which makes "reads its
 status" a claim with an end: from that point the entry answers from its own fields, so a
@@ -230,8 +236,28 @@ and a store rebuild belief instead (`:belief?` / `:recover?`), which is a differ
 question from deriving what the rules conclude.
 
 The KB an entry loads into is in memory by default, over a space the catalog claims
-(from 100 up, clear of the block the test suite owns). Name a `:dir` and it is a durable
-`:disk-log` KB there instead — which is what a corpus far past what RAM holds wants.
+(from 100 up, clear of the block the test suite owns). A corpus or dump card's
+`:durable?` flag makes it a `:disk-log` KB on disk instead, which is what a corpus far past
+what RAM holds wants; the directory is the server's choice ([Where the server
+writes](#where-the-server-writes)), and the entry's card names it.
+
+## Where the server writes
+
+A durable load's store and an export's dump go under `write-root`: the first search-path
+entry that is not itself a KB (`./kbs` by default). `start-load` and `export-entry!` name a
+new directory there after the entry key and the local time to the second
+(`starter-export-20261009-142301`), with `-2`, `-3`… past a name already taken. A dump
+written there is a `:dump` source as soon as it lands. When every search-path entry is a
+KB there is no `write-root`, and a durable load or a blank-destination export is refused
+with `:no-destination`.
+
+A request names no directory. `/kbs/load` with a `dir`, `/kbs/export` with a `dir` and
+`/op :export` are refused with `:path-not-served` before anything is written, because the server decides
+which KBs it serves and where it writes: a request-named directory created a store or a
+dump wherever the process could write, `..` included. `VAELII_REQUEST_PATHS=1` at the
+server's start offers the `:dir` field on the corpus and dump cards and the destination
+field on the export form, and lets both routes take one ([operations.md](operations.md)).
+The in-process `load-source`, `load-dir` and `export-entry!` take a `:dir` either way.
 
 ## A loaded KB states this engine's spindle
 

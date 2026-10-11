@@ -39,7 +39,13 @@ ints and keywords keep their type. The whole layout:
 | `[:argument-slot pos term]` | set | the predicates present at that slot (names, not handles) |
 | `[:unary-slot term]` | set | the predicates `term` is the lone argument of (names, not handles) |
 | `[:unary-multi]` | set | every term the unary roster lists two or more predicates of (terms, not handles) |
-| `[:shape-count f n]` | integer | how many positive facts of functor `f` hold `n` arguments |
+| `[:unary-kept pred]` | set | the terms of `[:unary-multi]` whose unary roster lists `pred` (terms, not handles) |
+| `[:unary-kept-types]` | set | every predicate whose `[:unary-kept pred]` holds a term (names, not handles) |
+| `[:unary-denied pred]` | set | every term a stored `(not (pred term))` names (terms, not handles) |
+| `[:unary-denied-types]` | set | every predicate whose `[:unary-denied pred]` holds a term (names, not handles) |
+| `[:shape-tuple :count [f n]]` | integer | how many positive facts of functor `f` hold `n` arguments, in every context |
+| `[:shape-tuple :children [f n]]` | set | the contexts that state such a fact |
+| `[:shape-tuple :handles [f n ctx]]` | set | the handles of those facts stated in `ctx` |
 | `[:shape-lengths f]` | set | the argument counts the positive facts of `f` are stored at (numbers, not handles) |
 | `[:rule-antecedent :count [key]]` | integer | how many rules take an antecedent on `key` (a predicate, or `[:not pred]`) |
 | `[:rule-antecedent :children [key]]` | set | the contexts that state such a rule |
@@ -58,6 +64,11 @@ ints and keywords keep their type. The whole layout:
 | `[:self-tuple :count [pred]]` | integer | how many ground positive binary self tuples `(pred a a)` are stored |
 | `[:self-tuple :children [pred]]` | set | the contexts that state such a tuple |
 | `[:self-tuple :handles [pred ctx]]` | set | the handles of those tuples stated in `ctx` |
+| `[:arity-binding :count [pred kind value]]` | integer | how many facts bind `pred`'s length as `kind` (`:exact`, `:min` or `:var`) to `value` (nil for `:var`) |
+| `[:arity-binding :children [pred kind value]]` | set | the contexts that state such a fact |
+| `[:arity-binding :handles [pred kind value ctx]]` | set | the handles of those facts stated in `ctx` |
+| `[:arity-binding-kinds pred]` | set | the `[kind value]` of every `:arity-binding` node of `pred` (pairs, not handles) |
+| `[:arity-bound]` | set | every predicate holding a stored length binding (names, not handles) |
 | `[:opposed-in ctx]` | set | the handles of the facts stated in `ctx` of every body stored in both polarities |
 | `[:tax-support :count k]` | integer | how many handles support taxonomy key `k` (`[:genl a b]`, `[:genlCx a b]` or a flat-cache key) |
 | `[:tax-support :children k]` | set | the contexts that state a supporter of `k` |
@@ -75,16 +86,15 @@ ints and keywords keep their type. The whole layout:
 | `[:mint-in :children []]` | set | the contexts holding a filed mint |
 | `[:mint-in :handles [ctx]]` | set | the handles of the mints filed in `ctx` |
 
-The tries keep explicit counters — the positional trie and the ten **count tries
-that end in the context**: the argument roots, the predicate extent, the two rule indexes,
-the rule extent, the opposed bodies, the self tuples, the taxonomy's supporters and the
-mint family's two — because a node's count aggregates the leaves beneath it, and so does
-the shape roster, whose count per functor and length decides when a length leaves
-(`[:shape-count f n]`). Every other index is a flat set whose cardinality is its own set
-size, so a count cannot drift from its extent.
+The registry's `:shape` ([below](#the-index-family-registry)) says which families keep
+explicit counters: the positional trie and the count tries, because a node's count
+aggregates the leaves beneath it. Every other
+family is a flat set whose cardinality is its own size, so a count cannot drift from its
+extent.
 
-The ten count tries share one shape. A node is the path above the context — `[pred pos
-term]`, `[pred]`, `[key]`, `[kind]`, `[body]`, a taxonomy key, `[term]`, `[]` — and holds three keys: its count, its children (the contexts
+The count tries share one shape. A node is the path above the context — `[pred pos
+term]`, `[pred]`, `[key]`, `[kind]`, `[body]`, `[f n]`, `[pred kind value]`, a taxonomy key,
+`[term]`, `[]` — and holds three keys: its count, its children (the contexts
 that state something under it) and, per child, the leaf of that context's handles. So
 "what is stated under this node in the contexts a reader sees" is the node's children
 intersected with the reader's ancestor set, then one leaf read per context kept
@@ -133,6 +143,51 @@ through `vaelii.impl.reads`, whose entry point names say which answer the caller
 `lein lint`'s **E16** rosters the implementers — this namespace, `columnar`, the disk
 snapshot, `kb` and `resolution`, and the dump — and fails a raw read anywhere else
 ([nmtms.md](nmtms.md#belief-filtering-is-a-namespace-boundary)).
+
+## The index-family registry
+
+`kv/index-families` holds one row per key tag, the first element of every key above, and
+three readers decide from it rather than from spelled tags:
+
+| Field | Values | Decides |
+|---|---|---|
+| `:shape` | `:trie`, `:count-trie`, `:set`, `:counter` | which keys the family writes: a count trie's are `[tag :count\|:children node]` and `[tag :handles (conj node ctx)]` |
+| `:leaf` | `:handles`, `:names`, nil | whether a posting holds handles; `dense-kv` packs a `:handles` leaf into int postings ([density.md](density.md)) |
+| `:context-last?` | boolean | whether the key's last level is the context |
+| `:children?` | boolean | whether a node lists the contexts below it, which a by-context read intersects ([By-context reads](#by-context-reads)); the context root and `[:opposed-in ctx]` list none |
+| `:root` | a family tag | the roster one level above the family's nodes (`[:rule-antecedent-keys]`, `[:opposed-bodies]`, `[:mint-terms]`, …), which the key builders read |
+| `:canon?` | boolean | whether a key term is `sx/canon`'d: the argument root, the two slot rosters and the term index |
+| `:source` | `:sentex`, `:rule`, `:justification`, `:taxonomy` | which write posts the family; a records-only import skips the `:justification` families (`kv/justification-family-entry?`), since it stores no justification |
+| `:class` | `:access-path`, `:scan-recoverable`, `:sole-witness` | what a KB without the family would lose, with `:class-evidence` |
+
+`dense-roots` routes the families it packs from its own table, keyed by family tag; a tag
+absent from that table goes to its fallback.
+
+**The class says what a missing family costs.** A missing family does not make a question
+slower: the read answers less than the truth and the KB reports it as complete, as an
+index in an unrecognized layout does (`kv/index-layout-version` and its checks exist for
+that case).
+
+- **`:access-path`**: another path returns the identical answer at a cost bounded by
+  something smaller than the KB. `:class-evidence` names the differential oracle
+  (`:oracle`) and the families that other path reads (`:via`). The argument root's other
+  path is the trie (`arg_root_retrieval_test`, `matches_hierarchical_test`); the predicate
+  extent's and the two slot rosters' is the term index, filtered by the record
+  (`arg_root_retrieval_test/the-families-agree-with-the-term-index`).
+- **`:scan-recoverable`**: a scan of the whole store returns the identical answer, at a
+  cost linear in the KB. `:class-evidence` names the writes that read the family
+  (`:writes`). A write's cost is bounded whatever the content, so only a family no write
+  reads could be served by a scan, and only the term roster is one: `vaelii.core/terms`
+  and the vocabulary pass read it. The term index is read on writes (the `sentexHandle`
+  meta lookups, the trigger entailments, the transitive seeds).
+- **`:sole-witness`**: no other path answers, and without the family an answer changes or
+  a belief goes stale: the trie, the rule indexes and the rule extent, the exception
+  index, the taxonomy's supporters and the mint family. `:class-evidence` names the
+  readers.
+
+Every KB writes every family; no option declines one. `index_test/every-key-the-starter-writes-names-a-registry-row-with-a-class`
+fails a key whose tag has no row, a row without a class, and an oracle that does not
+resolve.
 
 ## 1. The count-aware trie
 
@@ -269,7 +324,8 @@ key](defenses.md#handles-get-a-key-separate-from-tokens): handles under
 handle; `p/children` reads only the child set, so it is correct at such a node and
 `plan/prefix-estimate`'s fan-out carries no phantom branches.
 
-**How many children is its own read**, not `(count (children …))`. `p/count-children`
+**How many children is its own read**, not `(count (children …))`. `family-child-count`
+(`reads/stored-count-children`)
 answers the width off a cardinality — the set's own count in the KV family, an edge-array
 span or a map's size in the columnar trie — where `children` *materializes* the child set
 to answer at all. That is the distinct-value count the query planner's cost model divides
@@ -365,9 +421,9 @@ at argument 1 and kept the arity-1 ones: a densely described individual paid its
 description on every assert of a type for it, to find the handful of types it holds.
 
 The roster's members are predicates, so it is vocabulary-scaled beside the slot roster
-rather than a second copy of the postings, and `unary-sentexes-with-arg` reads it exactly
-as `sentexes-with-arg` reads the other — one roster read, then the predicate-scoped
-postings.
+rather than a second copy of the postings, and `reads/as-stored-unary-with-arg-global`
+reads it exactly as `reads/as-stored-with-arg-global` reads the other — one roster read,
+then the predicate-scoped postings.
 
 **It is a deliberate superset.** The entry is written by every unary fact rather than
 reference-counted on the first, because the node that reference-counts the other rosters
@@ -385,10 +441,24 @@ joins when an entry is its second predicate and leaves when an entry leaves it o
 read off the roster's size before the write (`kv/slot-adds`, `slot-retires`). The
 membership candidates read it at recover for the terms that can hold two memberships of
 distinct types (`reads/as-stored-unary-multi-terms`); it inherits the roster's superset.
+`[:unary-kept pred]` lists the same terms under each predicate their roster lists, and
+`[:unary-kept-types]` the predicates listing one. The write that adds a term's second
+predicate lists the term under both, a further predicate lists it under that one, and the
+write leaving a term one predicate takes it out under both (`kv/kept-adds`,
+`kept-retires`). A declaration or a `genl` edge moving reads the kept terms under the
+types it moves there (`reads/as-stored-unary-kept-terms`): the members of a type holding
+no second type are not read, which `lein perf`'s `membership-declaration-arrival` holds
+flat in them. `[:unary-denied pred]` lists each term a stored `(not (pred term))` names, and
+`[:unary-denied-types]` the predicates listing one: the first denial of a body lists its
+term and the last takes it out, read off the trie's `[:false (pred term)]` count before the
+write (`kv/denied-adds`, `denied-retires`). A cover or a `genl` edge moving reads the
+terms with a denial under the types whose cover nogoods it moves there
+(`reads/as-stored-unary-denied-terms`), so a cover arriving reads none of the denials
+under other types.
 
 They are read through `core`: `sentexes-in-context` / `count-in-context`,
 `sentexes-with-functor` / `count-with-functor`, `sentexes-with-arg` /
-`count-with-arg`, `unary-sentexes-with-arg`. Two places rely on them for speed rather than
+`count-with-arg`, and the unary roster through `reads/as-stored-unary-with-arg-global`. Two places rely on them for speed rather than
 convenience: `core/types-of` goes straight to the unary roster instead of scanning every
 sentex mentioning `x` anywhere, or every one holding it at argument 1; and
 the provers' `est-bindings` cost
@@ -558,16 +628,18 @@ a reader sees. The read takes the reader's ancestor set, intersects it with the 
 children — the children filtered by membership in the set, or the set probed against
 the children, whichever is smaller — and reads the leaf of each context it keeps. It costs **min(|children|, |ancestor set|)
 membership probes plus one leaf read per kept context**, whatever is stated in the
-contexts the reader does not see. A nil set reads every child.
+contexts the reader does not see. A nil set reads every child on the named reads below; a
+family method takes `p/every-context` for that instead and refuses nil (see "The family
+methods" below).
 
 | Read | Family | Reached from |
 |---|---|---|
 | `sentexes-with-args pred pos-terms ctxs` | argument roots | `matches-hierarchical`, `candidate-handles` |
 | `lookup pattern ctxs` | positional trie, its last level | the `:hier-trie-prefix` lead |
 | `sentexes-with-args pred [] ctxs` (`reads/as-stored-with-functor-in`) | predicate extent | the functor-extent leads, `:context-extent`, `exc/visible-exception-index` |
-| `kv/extent-contexts pred ctxs` (`reads/stores-in?`) | predicate extent, its children only: no leaf read | `exc/sees-defeat?` |
-| `kv/rule-extent :rule ctxs` (`reads/as-stored-rules-in`) | rule extent | `concluding-rule-handles` for an open functor |
-| `rules-by-consequent pred ctxs` | consequent index | `concluding-rule-handles`, from `provers/candidate-rules` |
+| `family-children :predicate-extent [pred] ctxs` (`reads/stores-in?`) | predicate extent, its children only: no leaf read | `exc/sees-defeat?`, `exc/exempting-at?` |
+| `family-handles :rule-extent [:rule] ctxs` (`reads/as-stored-rules-in`) | rule extent | `concluding-rule-handles` for an open functor |
+| `family-handles :rule-consequent [pred] ctxs` (`reads/as-stored-rules-by-consequent-in`) | consequent index | `concluding-rule-handles`, from `provers/candidate-rules` |
 
 `lein perf`'s `scoped-defeat-read` asks "is a `defeat` stated where `CxPerf` sees" with
 1,000 and 16,000 placed defeats in sixteen contexts `CxPerf` does not see, and
@@ -587,6 +659,25 @@ matches, so the argument-root superset would be wrong there.
 
 The roots also underwrite the incremental forward-chain matcher's RAM alpha memories
 ([inference.md](inference.md), "Incremental rule matching").
+
+### The family methods
+
+Every family outside the named reads above is read through `IndexStore`'s `family-*`
+methods ([storage.md](storage.md), "The family methods"), and only from a
+`vaelii.impl.reads` entry point: lint E16 fails a `p/family-*` read, a `p/count-at` or a
+`p/leaf-at` anywhere else under `src/` but the two implementers and the image writer.
+The entry point names the family and tallies its `:reads` ([profile.md](profile.md)).
+
+A read over every context passes `p/every-context`, and a family method given nil for its
+contexts throws `:bad-args`, so no forgotten ancestor set reads past the reader. The
+`reads` entry point that passes the sentinel ends in `-global`
+(`as-stored-supporters-global`, `as-stored-rules-in-global`, …), and E16 fails a call to
+one from a `(file, top-level def)` pair outside `E16_GLOBAL_ROSTER`, in the style of
+E17's taxonomy roster. A composite read costs the same backend reads as one: a
+supporter read is the node's children and a leaf per child, the functor census
+(`as-stored-contexts-with-functor`) a children count and then the children in the set,
+and the argument census (`stored-census-with-arg-global`) the node's count and its
+children count.
 
 ### The bodies stored in both polarities
 
@@ -615,7 +706,7 @@ which every settle asks before placing a pair (`reads/stores-opposed?`).
 
 `[:opposed-in ctx]` keys the members by context first, beside the trie that ends in the
 context, for one read: a moved `genlCx` edge's placement pass reads the members stated in
-the contexts the edge exposes (`decide/edge-reach`'s `:below`). Read off the context-last
+the contexts the edge exposes (the `:below` of the settle's `genlCx` moves, `special/drain-context-moves!`). Read off the context-last
 trie, that is every opposed body's children intersected with the exposed contexts. Measured
 at one exposed context stating no member (`:memory`), the context-last read costs 1.40 ms
 at 1,000 opposed bodies and 22.18 ms at 16,000, and the context-first read 0.6 µs and
@@ -630,14 +721,31 @@ so a tally can count it.
 
 ### The shape roster
 
-`[:shape-lengths f]` holds the argument counts the positive facts of functor `f` are
-stored at, and `[:shape-count f n]` how many facts hold each, so a count leaves the set
-with its last fact (`kv/shape-adds`, `shape-retires`). The index write posts both from the
-sentence in hand: one count and one set add per positive fact, and one count read per
-retraction. The arity candidates read a functor's lengths here
-(`reads/as-stored-shape-lengths`) and a candidate shape's tuples off the functor's
-extent, filtered by length; the positional trie cannot answer it, since a positive fact's
-path carries no length.
+A positive fact of functor `f` holding `n` arguments enters the count trie
+`:shape-tuple` under the node `[f n]`, the context last, and `[:shape-lengths f]`, the
+trie's root level, holds the argument counts `f`'s positive facts are stored at, so a
+length leaves the set with its node's last fact (`kv/shape-adds`, `shape-retires`). The
+index write posts both from the sentence in hand. The arity candidates read a functor's
+lengths here (`reads/as-stored-shape-lengths`) and a candidate shape's tuples off its
+node (`reads/as-stored-shape-tuples-global`), so a shape of one tuple reads one handle
+however many tuples of another length its functor holds; the positional trie cannot
+answer it, since a positive fact's path carries no length.
+
+### The arity bindings
+
+A stored fact binding a relation's length (`sx/arity-binding`: `(arity P n)`, an
+exact-arity class membership, a `variable_arity` membership or `(arityMin P m)`) enters
+the count trie `:arity-binding` under the node `[P kind value]`, the context last. Two
+levels sit above the node: `[:arity-binding-kinds P]` lists the `[kind value]` of P's
+nodes, and `[:arity-bound]` every predicate holding one. The index write posts all three
+from the sentence in hand (`kv/fact-nodes`, `binding-adds`, `binding-retires`): a kind
+enters with its node's first handle and leaves with its last, read off the node's count
+before the write, and a predicate enters `[:arity-bound]` with its first kind and leaves
+with its last. The arity candidates read a predicate's kinds and its bindings in the
+contexts a reader sees here (`reads/as-stored-arity-binding-kinds`,
+`as-stored-arity-bindings`), and the lengths stored above a type probe `[:arity-bound]`
+once per type they read (`reads/stored-arity-bound?`), so no binding record is read and
+recover rebuilds no roster of them.
 
 ## 3. The rule index
 
@@ -662,8 +770,8 @@ its own key because its members are keys rather than contexts. The rule extent i
 by `index-sentex` from the rule's own record, so it answers "which contexts state a rule"
 and "the solve rules a reader sees" without an antecedent to start from.
 
-A rule is posted once per key: `index-rule` writes a node only where its leaf does not
-already hold the handle, and `unindex-rule!` retires one only where it does, so a rule
+A rule is posted once per key: `rules/index-rule` writes a node only where its leaf does
+not already hold the handle, and `rules/unindex-rule!` retires one only where it does, so a rule
 registered twice, or one whose antecedents repeat a key, leaves every count right. A
 backward read from a context passes the reader's ancestor set (`provers/candidate-rules`),
 so it reads no rule the visibility filter after it would drop.
@@ -782,9 +890,10 @@ It stores **no truth value**. It answers "which rules might need re-checking", n
 it from the cached genl closures, which *do* assert something and therefore had to be
 made belief-following (see [taxonomy.md](taxonomy.md)); there is nothing here to drift.
 
-The predicates are passed to `index-exception` / `unindex-exception!` as a seq rather
-than read off the sentex, so the index does not depend on how a rule spells its
-exception. `rules-with-exception-on` and `exception-rules` read the two sets back.
+The predicates are passed to `rules/index-exception` / `rules/unindex-exception!` as a
+seq rather than read off the sentex, so the index does not depend on how a rule spells its
+exception. `reads/watched-rules-on` and `reads/watched-rules` read the two sets back, and
+`reads/watched-rule?` probes the roster.
 
 ## 5. The inverted term index
 
@@ -835,8 +944,8 @@ vocabulary-bound, measured at exactly 1.00× over a 3× corpus.
 Note the division of labour with the argument root: this index answers "*anywhere*,
 any nesting", which is what a term page or a general search wants. When the position
 is known — `types-of` looking for `(T x)`, i.e. `x` at argument 1 — the position-1
-argument roots (`sentexes-with-arg`, a union of the scoped roots over the slot
-roster) are the precise, and much smaller, answer.
+argument roots (`reads/as-stored-unary-with-arg-global`, a union of the scoped roots over
+the unary roster) are the precise, and much smaller, answer.
 
 Term keys are canonicalized (`term-key` runs `sentex/canon`) so a reader-literal
 compound query term matches the stored, canon-built subterm.
@@ -974,7 +1083,7 @@ section rather than on average:
 | roots' key and offset columns | the vocabulary, at the default `*min-indexed-depth*` |
 | argument-root scope table | distinct `(predicate, position)` pairs, `(predicate, position, context)` triples and one `(context, 0, context)` scope per context |
 | token dictionary | the vocabulary, on the same condition |
-| `roots-fallback.nippy` | the term roster and the two slot rosters — names, not handles — and the predicate-extent and rule-index counts, one per key |
+| `roots-fallback.nippy` | the counters keyed by a predicate, functor, rule key or kind: the predicate-extent, rule-index, self-tuple and shape counts |
 
 The scope table is what lets the count tries ride the mapped run with every other
 family. An argument leaf's key carries a predicate, a position and a context beside its
@@ -986,13 +1095,14 @@ the same remap as the keys. The table decodes the scope ids, is bounded by predi
 arities × the contexts each is stated in, plus one entry per context, rather than by
 facts, and rides
 `roots.csr` — the file whose key column is its only reader, so the two are written in
-one pass and discarded as one unit. An argument node's count is no section:
-`dense-roots` sums its leaves. The predicate-extent and rule-index counts are in the
-fallback blob.
+one pass and discarded as one unit. A node's count in the argument, supporter,
+length-binding, opposed and mint tries is no section: `dense-roots` sums its leaves. The
+predicate-extent, rule-index, self-tuple and shape counts are in the fallback blob, and
+every name set rides the run as token ids.
 
 The blob's entry count and byte length are stamped and checked like a CSR section's all
-the same: the slot roster is what a predicate-agnostic argument read descends through, so
-a blob that thawed short would answer `#{}` at every position rather than fail.
+the same: the predicate extent's count is what the planner prices a scan by, so a blob
+that thawed short would price every predicate at 0 rather than fail.
 
 It is a cache of derived state, so validity is the whole design: stamped with the record
 store's slot fingerprint, checked on **every** open, discarded to `reindex` on any doubt.
@@ -1009,9 +1119,10 @@ each supporter under the key it installs, before the in-memory write that instal
 `genl` fact is posted under `[:genl sub super]`; a `covering`, `separating` or `partition`
 declaration under `[:genl part whole]` for each part and under its own `[:cover …]` key,
 so the node of an edge lists every declaration that installs it. `[:tax-installs h]` is
-the reverse: the keys one handle installs. Both writes read before they write: a post
-skips a handle already under the key, and a retirement reads which context's leaf holds
-the handle and whether the leaf and the node empty. The equality partition and the
+the reverse: the keys one handle installs. A post or a retirement writes both in one
+`family-apply!` batch: a post skips a handle already under the key, and a retirement
+passes `p/any-context`, so the store finds which context's leaf holds the handle and
+whether the leaf and the node empty. The equality partition and the
 rewrite rules post nothing here (docs/taxonomy.md).
 
 The key a declaration installs is a function of the special-predicate table, and a
@@ -1052,10 +1163,11 @@ mint justification onto the surviving row files that row (`special/refile-mint!`
 records-only import stores no justification, so it replays a dump's index without these
 entries (`kv/justification-family-entry?`).
 
-The `:mint` trie answers by term, and its root level `[:mint-terms]` lists and counts the
-terms (`reads/as-stored-mints-about`, `reads/as-stored-mint-terms`).  The `:mint-in` trie
+A post or a retirement is one `family-apply!` batch over `:mint` and `:mint-in`. The
+`:mint` trie answers by term, and its root level `[:mint-terms]` lists and counts the
+terms (`reads/as-stored-mints-about-global`, `reads/as-stored-mint-terms`).  The `:mint-in` trie
 holds the same handles keyed by the context alone: its node count answers whether any mint
-is stored, and its leaves answer the mints stated in the contexts a `genlCx` edge exposes
+is stored (`reads/stored-mint-count-global`), and its leaves answer the mints stated in the contexts a `genlCx` edge exposes
 (`reads/as-stored-mints-in`).  The context-first leaf departs from context-last keys,
 as `[:opposed-in ctx]` does, and the read needs it: through `:mint` alone, the mints in a set of
 contexts cost a probe per mint term whatever the set

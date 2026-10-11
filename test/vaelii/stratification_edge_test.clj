@@ -233,8 +233,8 @@
   [f]
   (let [n    (atom 0)
         wrap (fn [orig] (fn [& args] (swap! n inc) (apply orig args)))]
-    (with-redefs [reads/as-stored-rules-by-antecedent (wrap reads/as-stored-rules-by-antecedent)
-                  reads/as-stored-rules-by-consequent (wrap reads/as-stored-rules-by-consequent)
+    (with-redefs [reads/as-stored-rules-by-antecedent-global (wrap reads/as-stored-rules-by-antecedent-global)
+                  reads/as-stored-rules-by-consequent-global (wrap reads/as-stored-rules-by-consequent-global)
                   reads/watched-rules-on              (wrap reads/watched-rules-on)]
       (f))
     @n))

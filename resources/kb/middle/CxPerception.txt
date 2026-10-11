@@ -1,0 +1,58 @@
+;; CxPerception — perception relations: an entity taking in a located thing through
+;; sight. Sees the shared upper ontology via CxUniverse. CxWell does not see it: a
+;; context opts in by placing itself under CxPerception.
+;;
+;; Arg 1 of every relation here names the perceiver and carries no arg declaration:
+;; vaelii's `agent` names a registered koinii participant
+;; (resources/kb/koinii/CxRegistry.txt), which is a membership mark for an
+;; adjudication registry rather than a general type for an entity with agency, and
+;; the upper ontology ships no such type, so no type below `thing` covers the
+;; position (`ontology_test`'s `untyped-positions` roster, which `(arg … 1 thing)`
+;; would convict: `starter_test`/`no-shipped-declaration-makes-an-argument-a-thing`).
+;; `seeImage` and `watchVideo`'s second argument is the same: a thing of any kind, so
+;; it carries no declaration either.
+;;
+;; `sees` types its second argument `spatial`, and an image or a video need not be
+;; located.  A genl edge from seeImage or watchVideo to sees would carry that declaration
+;; down and mint `(spatial Img)` from `(seeImage Ann Img)`, so a rule guarded by the
+;; argument type concludes `sees` instead.
+
+(genlCx CxPerception CxUniverse)
+
+;; ---- the perception chain ------------------------------------------------
+(comment perceives
+         "(perceives ?perceiver ?perceived) means ?perceiver takes in ?perceived through some sense. The most general perception relation; sees specializes it, and seeImage and watchVideo reach it through sees for a spatial second argument.")
+(set/monotonic (instance_relation_predicate perceives))
+(arg perceives 2 spatial)
+
+(comment sees
+         "(sees ?seer ?seen) means ?seer takes in ?seen through sight. Spec of perceives.")
+(set/monotonic (instance_relation_predicate sees))
+(arg sees 2 spatial)
+(genl sees perceives)
+
+(comment seeImage
+         "(seeImage ?seer ?image) means ?seer takes in a static image through sight and perceives what it shows. Its second argument is the image itself, which need not be located, so it concludes sees only of a spatial image (the rule below).")
+(set/monotonic (instance_relation_predicate seeImage))
+(set/forwardRule
+  (implies (and (seeImage ?x ?y) (spatial ?y))
+           (sees ?x ?y)))
+
+(comment watchVideo
+         "(watchVideo ?watcher ?video) means ?watcher takes in a video, a temporal sequence of images, through sight. The video need not be located, so it concludes sees only of a spatial video (the rule below).")
+(set/monotonic (instance_relation_predicate watchVideo))
+(set/forwardRule
+  (implies (and (watchVideo ?x ?y) (spatial ?y))
+           (sees ?x ?y)))
+
+;; ---- image_viewing: the ability, read as an event kind -------------------
+;; CxLife's hasCapability takes an event kind as its second argument
+;; (resources/kb/upper/CxLife.txt): (hasCapability ?x ?eventKind) means ?x can be the
+;; doer of an event of that kind. image_viewing pairs with seeImage the way flying
+;; pairs with flies: the relation states who is looking, the event kind states the
+;; ability to be its doer. Taking in an image changes nothing about what it depicts,
+;; so image_viewing is a kind of acausal_event, CxAbstract's intersection of acausal
+;; and event, whose own comment names an observation as an example.
+(comment image_viewing
+         "An event of taking in a static image through sight and perceiving what it shows. The event-kind counterpart of seeImage: (hasCapability ?x image_viewing) means ?x can be the doer of one.")
+(genl image_viewing acausal_event)

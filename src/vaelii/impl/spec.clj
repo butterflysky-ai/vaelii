@@ -48,12 +48,12 @@
 
 (s/def ::kb map?)                          ; a KB record satisfies map?
 ;; A context is a Cx-prefixed CapitalCamelCase symbol, the open `?ctx` variable the read
-;; paths default to — or a **context-denoting application** `(CxTimeFn CxMonad (DatetimeFn
-;; "2000"))`, which the entry points reify to its `cx/` constant before anything downstream reads
-;; it (docs/context-nat.md).  The spec admits the *shape*; whether the head is a declared
-;; `context_denoting_function` and the application ground is the entry point's own `:shape` check,
-;; which needs the KB.  Narrower than the entry point, instrumentation would refuse a write into a
-;; context the engine accepts.
+;; paths default to — or a **context application** `(CxTimeFn CxMonad (DatetimeFn "2000"))`,
+;; which the entry points reify to its `cx/` constant before anything downstream reads it
+;; (docs/context-nat.md).  The spec admits the *shape*; whether the application is ground, and
+;; on a read whether a `(result CxTimeFn context)` is believed, is the entry point's own `:shape`
+;; check, which needs the KB.  Narrower than the entry point, instrumentation would refuse a
+;; write into a context the engine accepts.
 (s/def ::context (s/or :name symbol? :context-nat seq?))
 (s/def ::sentence some?)                   ; a sentence (a list) — never nil
 (s/def ::goal (s/or :one seq?              ; a single goal formula …
@@ -114,10 +114,10 @@
 ;; **Generated**, not written: the kinds are the `:prop` storage targets the declarations
 ;; name, so a kind the engine records and this set omits — a legal `has-prop?` call that
 ;; instrumentation refuses — is now unrepresentable rather than tested for.  What the
-;; twenty-two values *are* is pinned by `special-table-test/frozen-table`, which states
+;; thirty-one values *are* is pinned by `special-table-test/frozen-table`, which states
 ;; each functor's kind in a table written out that nothing derives.
 ;;
-;; `:reifiable` / `:unreifiable` / `:quoting` / `:context-denoting` are a *function*'s kind
+;; `:reifiable` / `:unreifiable` / `:quoting` are a *function*'s kind
 ;; rather than a predicate's, which `::term` admits either way; the four `:declares-*` say
 ;; that a predicate is the **subject** of an argument constraint rather than that it
 ;; carries a property, which is what lets the descension ask whose declarations bind a
@@ -150,6 +150,11 @@
 ;; `opts` is nilable: the lower arities delegate to the full one with `opts nil`
 ;; (`(assert kb s c)` → `(assert kb s c nil)`), so instrumentation sees the nil.
 (s/fdef vaelii.core/assert
+  :args (s/cat :kb ::kb :sentence ::sentence
+               :context (s/? ::context) :opts (s/? (s/nilable ::opts)))
+  :ret  (s/or :one ::handle :many (s/coll-of ::handle)))
+
+(s/fdef vaelii.core/try-assert
   :args (s/cat :kb ::kb :sentence ::sentence
                :context (s/? ::context) :opts (s/? (s/nilable ::opts)))
   :ret  (s/or :one ::handle :many (s/coll-of ::handle)))
@@ -416,6 +421,7 @@
   this namespace's docstring and pinned by `vaelii.spec-test`."
   '[vaelii.core/open-kb
     vaelii.core/assert
+    vaelii.core/try-assert
     vaelii.core/assert-rule
     vaelii.core/assert-inert
     vaelii.core/ist

@@ -12,7 +12,8 @@
 ;; ---- the inherited clashes --------------------------------------------------
 ;;
 ;; A stored claim against a known-true claim argument preservation reaches at its tuple or
-;; at its converse's (`inherit/clashing-claim`, `inherit/converse-claim`) is found by the
+;; at its converse's (`inherit/clashing-claim`, `inherit/converse-claim`), or a stored
+;; membership against one of a separated type (`inherit/separated-claims`), is found by the
 ;; settle's detector (`discovery/discover-inherited!`) with the most general contexts that
 ;; read it whole, and placed there (`chain/place-inherited!`).  `:inherited` keeps what the
 ;; detector found, `{:by-set {members ngmap} :members #{h}}`, for the reports.
@@ -57,13 +58,14 @@
   "The inherited family's entry in `decide/registry`.  Its rows are installed by the
   settle's detector, not noted at the store.  Each nogood of it is placed as a conclusion
   (`chain/place-inherited!`)."
-  {:handles   (fn [c] (:members (:inherited c)))
-   :holds?    (fn [c h] (contains? (:members (:inherited c)) h))})
+  {:handles   (fn [_ c] (:members (:inherited c)))
+   :holds?    (fn [_ c h] (contains? (:members (:inherited c)) h))})
 
 ;; ---- derived state (docs/caches.md, "The derived-state register") ----------------
 
 (caches/register-derived
  {:id :N7 :label "Inherited clashes" :kind :index :keyed-by :value :reads [:D3]
+  :holds-content? false
   :retired-by {:inherited :W :recover :R :image-install :R}
   :computed :settle :imaged? :state :at [[:nogood-candidates :inherited]]
   :note "the inherited clashes and their vantages, installed again by every settle's detector"})

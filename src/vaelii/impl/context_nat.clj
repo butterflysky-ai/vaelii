@@ -23,11 +23,9 @@
   Materialization reuses the derived-sentex pattern `special/deduce-lift` uses:
   `find-or-create-sentex`, then `special/derived-sentex-added` to reach the genlCx closure
   and post the re-check triggers, then a JTMS justification under the
-  `contextArgSubrelation` informant — and then, on the transition into belief,
-  `special/reconcile-context-edge`, the same entry point the assert and rule-conclusion paths
-  call.  A `genlCx` edge widens which merges a context can see, and an edge nobody
-  asserted widens it exactly as much as one somebody did (vaelii#56); the merge it
-  yields is handed back up to `core`, which owns the follow-through."
+  `contextArgSubrelation` informant.  What the edge shows the contexts under it is the
+  settle's (`special/drain-context-moves!`), as for an edge somebody asserted (vaelii#56),
+  so the caller settles once an edge was built."
   (:require [vaelii.impl.datetime :as datetime]
             [vaelii.impl.except :as exc]
             [vaelii.impl.jtms :as jtms]
@@ -138,63 +136,37 @@
 
 ;; ---- materialization ------------------------------------------------------
 
-(defn- combine
-  "Merge the `{:new :superseded :violations}` results of several materializations into
-  one, or nil when every one of them was nil.  nil rather than an empty accumulator for
-  the reason `special/reconcile-context-edge` returns nil: the producer runs on the
-  assert maintenance path of every KB that declares a context function, and the common
-  case is a sweep that re-derives edges it already has and merges nothing."
+(defn- any-built?
+  "Did one of the materializations `ms` add a justification?  Realizes every one."
   [ms]
-  (let [ms (remove nil? ms)]
-    (when (seq ms)
-      (apply merge-with into {:new [] :superseded [] :violations []} ms))))
+  (reduce #(or %2 %1) false ms))
 
 (defn- materialize-edge
   "Deduce `(genlCx sub super)` in CxUniverse, justified by `antes`, unless a violation
   refuses it (a genlCx edge over two `cx/` contexts is admissible except a self-edge, which
   the caller already excludes).  Idempotent: a second call with the same antecedents adds
-  no justification, and a different route adds another supporter of the one edge.
+  no justification, and a different route adds another supporter of the one edge.  What
+  the edge shows the contexts under `sub` is the settle's (`special/drain-context-moves!`),
+  as for an asserted or a concluded edge.  Returns true when it added a justification.
 
   Bare: it adds one derived sentex and one justification, and the JTMS withdraws the edge
   when an antecedent stops being believed — nothing here destroys stored knowledge, so
-  nothing in this chain carries a `!`.
-
-  **Returns what the edge merged**, `{:new :superseded :violations}` or nil — not the
-  handle, which no caller ever read.  A `genlCx` edge widens which merges a context can
-  see, and until vaelii#56 a *computed* edge was the one entry point that never said so: the
-  three equality reconcilers were spelled out by hand in the assert path and in the
-  rule-conclusion path, and a calendar month→year edge ran neither, so two fillers of one
-  functional slot that this edge made jointly visible for the first time stayed unmerged
-  and uncontradicted.  `special/reconcile-context-edge` is now the single entry point all three
-  call, and the caller carries the result out to `core`, which owns the follow-through
-  (`refresh-supersessions`, the chaining seeds, the violation ledger) for the assert path
-  already.
-
-  **Reconciled exactly on the transition into belief**, which is both halves of the
-  budget question.  *After* the justification, because the three sweeps read the
-  belief-filtered `genlCx` closure and a line earlier the edge is a node nothing supports
-  — they would enumerate the pre-edge ancestor set and find nothing.  And only when the edge was
-  not believed before this call, because the producer is idempotent and a declaration or
-  a revival re-runs it over every pair of a function's contexts: each edge owes exactly
-  one sweep in its life.  A second route to
-  an edge already believed widens no ancestor set, so it owes none at all."
+  nothing in this chain carries a `!`."
   [kb sub super antes]
   (let [edge (list 'genlCx sub super)
         tms  (reasoning/tms kb)]
     (when-not (special/inadmissible kb edge universal-context)
       (let [[h2 s2 new?] (kb/find-or-create-sentex kb edge universal-context)
             _            (when new? (special/derived-sentex-added kb s2 h2))
-            believed?    (and (not new?) (jtms/in? tms h2))]
-        (let [depth (inc (reduce max 0 (map #(jtms/depth tms %) antes)))
-              antes (vec antes)]
-          (jtms/ensure-node tms h2 depth)
-          (when-not (jtms/has-justification? tms 'contextArgSubrelation antes h2)
-            (let [jid  (p/next-id (:records kb))
-                  just (jtms/->just jid 'contextArgSubrelation antes h2 {} :monotonic)]
-              (p/put-justification (:records kb) just)
-              (jtms/add-justification tms just))))
-        (when (and (not believed?) (jtms/in? tms h2))
-          (special/reconcile-context-edge kb edge))))))
+            depth        (inc (reduce max 0 (map #(jtms/depth tms %) antes)))
+            antes        (vec antes)]
+        (jtms/ensure-node tms h2 depth)
+        (when-not (jtms/has-justification? tms 'contextArgSubrelation antes h2)
+          (let [jid  (p/next-id (:records kb))
+                just (jtms/->just jid 'contextArgSubrelation antes h2 {} :monotonic)]
+            (p/put-justification (:records kb) just)
+            (jtms/add-justification tms just)
+            true))))))
 
 (defn- order-group
   "Materialize the genlCx edges within one sibling group under declaration `[pos R declH]`:
@@ -203,10 +175,9 @@
   members; `pair?` takes `[ksub asub ksup asup]`, the two contexts and their `pos`
   arguments, and is tested before the `R` oracle.
 
-  Returns the group's merged `{:new :superseded :violations}`, or nil — see
-  `materialize-edge`, whose result this is carrying out."
+  Returns true when an edge gained a justification."
   [kb pos r declH nats pair?]
-  (combine
+  (any-built?
    (for [[ksub esub th-sub] nats
          [ksup esup th-sup] nats
          :when (not= ksub ksup)
@@ -222,10 +193,10 @@
 (defn- reconcile-function
   "Materialize the structural genlCx edges for every declaration of function `f`, over
   the ordered sibling pairs of `f`'s context NATs that `pair?` admits (`order-group`), or
-  over every pair.  Returns their merged `{:new :superseded :violations}`, or nil."
+  over every pair.  Returns true when an edge gained a justification."
   ([kb f] (reconcile-function kb f (constantly true)))
   ([kb f pair?]
-   (combine
+   (any-built?
     (for [[_ pos r declH] (subrelation-declarations kb #(= f %))
           :let [groups (group-by #(sibling-key (second %) pos) (context-nats-of kb f))]
           [k nats] groups
@@ -261,10 +232,7 @@
   no pair and reconciles nothing.  A no-op — one functor count — on a KB that declares no
   `contextArgSubrelation`.
 
-  **Returns what the edges it computed merged** — `{:new :superseded :violations}`, or
-  nil when they merged nothing.  A computed edge widens which merges a context can see
-  exactly as a stated one does, and the caller owes it the same follow-through
-  (`core/assert`)."
+  Returns true when an edge gained a justification, which the caller settles."
   [kb sentence]
   (when (and (any-context-subrelations? kb) (sequential? sentence) (seq sentence))
     (let [[head x y] sentence]
@@ -276,7 +244,7 @@
         (reconcile-function kb (first y) (fn [ksub _ ksup _] (or (= x ksub) (= x ksup))))
 
         :else
-        (combine
+        (any-built?
          (for [f (functions-ordered-by kb head)]
            (reconcile-function kb f (fn [_ asub _ asup] (and (= x asub) (= y asup))))))))))
 
@@ -295,17 +263,12 @@
 
   Idempotent (`materialize-edge` adds no duplicate justification) and **local**: scoped to
   the declared context functions, each reconciled only over its own contexts — bounded by
-  the context-NAT population, never the whole graph.  Behind the **free** in-memory
-  `context_denoting_function` gate first — a KB with no `cx/` context to order pays neither
-  the `any-context-subrelations?` functor-count index read nor anything else, so the retract
-  hot path is untouched on every KB that declares no context function
-  (`assert_cost_test`).
+  the context-NAT population, never the whole graph.  Behind `nat/any-reified-constants?`
+  first, so a KB with no reified constant pays no `any-context-subrelations?` read.
 
-  Returns the merged `{:new :superseded :violations}` of whatever it rebuilt, or nil —
-  a revived edge widens an ancestor set like any other, so the teardown owes it the same
-  follow-through the assert path gives a computed edge."
+  Returns true when an edge gained a justification, which the caller settles."
   [kb]
-  (when (and (nat/any-context-denoting-functions? kb) (any-context-subrelations? kb))
-    (combine
+  (when (and (nat/any-reified-constants? kb) (any-context-subrelations? kb))
+    (any-built?
      (for [f (distinct (map first (subrelation-declarations kb (constantly true))))]
        (reconcile-function kb f)))))

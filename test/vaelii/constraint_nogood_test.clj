@@ -152,6 +152,47 @@
           (is (v/ask? kb opposing 'CxUniverse) (str label ": the known-true member stands"))
           (is (not (v/ask? kb arriving 'CxUniverse)) (str label ": the default one loses")))))))
 
+(deftest try-assert-refuses-each-clash-assert-stores
+  ;; The last row's arriving sentence is a `forced_decontextualized_predicate` declaration,
+  ;; and the clash forms when it moves a premise stored in an unwired context into
+  ;; CxUniverse.  `kept` is that premise, which stays where it was stored.
+  (doseq [row-index (range 7)]
+    (tu/with-kb [kb]
+      (tu/with-terms [dog_t cat_t root_t species animal_t ageOf measureOf ageOfSub Muffet CxElse]
+        (let [m {:strength :monotonic}
+              [label setup opposing arriving _grounds kept]
+              (nth (conj (clash-shapes {:dog_t dog_t :cat_t cat_t :root_t root_t :species species
+                                        :animal_t animal_t :ageOf ageOf :measureOf measureOf
+                                        :ageOfSub ageOfSub :Muffet Muffet})
+                         ["functional, through a premise the forced declaration moves"
+                          #(do (v/assert % (list 'binary_predicate ageOf) 'CxUniverse m)
+                               (v/assert % (list 'functional ageOf) 'CxUniverse m)
+                               (v/assert % (list ageOf Muffet 4) CxElse))
+                          (list ageOf Muffet 3)
+                          (list 'forced_decontextualized_predicate ageOf)
+                          [(list 'functional ageOf)]
+                          [(list ageOf Muffet 4) CxElse]])
+                   row-index)]
+          (setup kb)
+          (let [h (v/assert kb opposing 'CxUniverse)
+                e (try (v/try-assert kb arriving 'CxUniverse)
+                       (catch clojure.lang.ExceptionInfo e (ex-data e)))]
+            (is (= [:definitional-clash (if (< row-index 4) :disjoint :functional)
+                    [{:handle h :sentence opposing :context 'CxUniverse}]]
+                   [(:type e) (:violation e) (:clashes-with e)])
+                label)
+            (is (nil? (v/handle-of kb arriving 'CxUniverse)) (str label ": nothing stored"))
+            (when-let [[s ctx] kept]
+              (is (= [ctx] (v/contexts-of kb s)) (str label ": the premise is not moved")))))))))
+
+(tu/deftest-kb try-assert-stores-a-sentence-that-opens-no-clash
+  (tu/with-terms [dog_t cat_t Muffet Rex]
+    (v/assert kb (list 'disjoint dog_t cat_t) 'CxUniverse)
+    (v/assert kb (list dog_t Muffet) 'CxUniverse)
+    (let [h (v/try-assert kb (list cat_t Rex) 'CxUniverse)]
+      (is (integer? h))
+      (is (= h (v/handle-of kb (list cat_t Rex) 'CxUniverse))))))
+
 ;;; ── a verdict lives as long as its grounds ────────────────────────────
 
 (tu/deftest-kb retracting-the-separation-revives-the-loser-decided-or-not
@@ -497,6 +538,31 @@
                (v/handle-of kb (list fish_t Rex) 'CxUniverse)}
              (:nogood (first cs)))))
     (is (empty? (v/contradictions kb)) "an irreducible clash is not a dilemma")))
+
+(deftest a-membership-beside-a-denial-of-a-supertype-of-its-type-is-a-nogood-in-every-order
+  ;; (dog Rex), dog ⊑ mammal ⊑ animal and (not (animal Rex)) cannot all hold, and no cover
+  ;; is stored: a known-true pair is a `:supertype` conflict, and a default membership
+  ;; loses to the known-true denial, taking the reached (animal Rex) with it.
+  (doseq [[member expect] [[:monotonic :conflict] [:default :loses]]
+          order           (permutations [:edge :member :deny])]
+    (tu/with-kb [kb]
+      (tu/with-terms [dog mammal animal Rex]
+        (let [m      {:strength :monotonic}
+              denial (list 'not (list animal Rex))
+              writes {:edge   #(v/assert kb (list 'genl mammal animal) 'CxUniverse m)
+                      :member #(v/assert kb (list dog Rex) 'CxUniverse {:strength member})
+                      :deny   #(v/assert kb denial 'CxUniverse m)}]
+          (v/assert kb (list 'genl dog mammal) 'CxUniverse m)
+          (doseq [w order] ((writes w)))
+          (let [hs   #{(v/handle-of kb (list dog Rex) 'CxUniverse)
+                       (v/handle-of kb denial 'CxUniverse)}
+                mine (fn [rs] (filterv #(= hs (:nogood %)) rs))]
+            (testing [member order]
+              (case expect
+                :conflict (is (= [:supertype] (mapv :kind (mine (v/conflicts kb)))))
+                :loses    (is (= [false false true]
+                                 (mapv #(v/ask? kb % 'CxUniverse)
+                                       [(list dog Rex) (list animal Rex) denial])))))))))))
 
 ;;; ── recomputed, never accumulated ─────────────────────────────────────
 

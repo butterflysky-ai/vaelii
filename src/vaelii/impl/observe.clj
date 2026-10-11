@@ -647,12 +647,14 @@
 
 (caches/register-derived
  {:id :X3 :label "Change clock" :kind :counter :keyed-by :global :reads []
+  :holds-content? false
   :retired-by (caches/on-every :G*) :computed :write :imaged? false :var #'clock
   :value (fn [_] (.get clock))
   :note "bumped by every mutation of any KB in the process; R1, R2 and R3 stamp entries with it"})
 
 (caches/register-derived
  {:id :R3 :label "Resident derived values" :cache :resident :kind :cache :keyed-by :context
+  :holds-content? false
   :reads [:index :M1]
   :retired-by (assoc (caches/on-every :G*) :caches-cleared :W :cleared :W)
   :computed :read :imaged? false :at [[:qcn]]
@@ -663,11 +665,13 @@
 
 (caches/register-derived
  {:id :R7 :label "Search-step memos" :cache :closure-neighbours :kind :pass :keyed-by :node
+  :holds-content? false
   :reads [:index :M1] :retired-by {} :computed :pass :imaged? false :var #'*reach-memo*
   :note "`*reach-memo*` (neighbour sets) and `*pin*` (pinned resident values), bound for one search step or one datum"})
 
 (caches/register-derived
  {:id :R8 :label "Stored handles" :cache :stored-handles :kind :pass :keyed-by :literal
+  :holds-content? false
   :reads [:index :records] :retired-by {:removed :K :respelled :K} :computed :pass
   :imaged? false :var #'*handle-cache*
   :note "`[sentence ctx]` to handle for one chaining run, and the chain authority memo (`kb/*chain-authoritative-functors*`); a removal forgets its handle and a `canon-stamp` step clears both"})

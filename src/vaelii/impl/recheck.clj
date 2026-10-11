@@ -197,13 +197,30 @@
               (filter #(= rh (:informant (jtms/justification tms %)))))
         closures))
 
+(defn- names-moved?
+  "Do the bindings `b` of a firing or a refusal bind a variable to one of `moved`?"
+  [moved b]
+  (boolean (some moved (vals b))))
+
+(defn- separation-candidates
+  "The members of `firings` whose bindings name a type of the `{::separation types}`
+  markers' sets `seps`: a separation moved only for pairs below what moved, and a
+  firing binds the pair its `disjoint` antecedent read."
+  [kb firings seps]
+  (let [moved (into #{} cat seps)]
+    (filter (fn [jid]
+              (when-let [j (p/get-justification (:records kb) jid)]
+                (names-moved? moved (:bindings j))))
+            firings)))
+
 (defn exception-candidates
   "The justifications of the queued rules whose block condition the queued triggers could
   have flipped.  One record fetch per rule, and none for a rule queued `:all`, which
   keeps every firing.  The block literals are the exception conjuncts read through
   their query frames (`rules/watched-literals`), the NAF inner queries and the aggregate
   bodies (docs/naf.md).  A withdrawal marker adds the firings its own test keeps
-  (`entailment-candidates`, `preserving-candidates`, `except-candidates`)."
+  (`entailment-candidates`, `preserving-candidates`, `except-candidates`,
+  `separation-candidates`), and `::computed` keeps every firing."
   [kb queued]
   (let [tms      (reasoning/tms kb)
         cross?   (memoize #(cross-argument-predicate? kb %))
@@ -225,7 +242,8 @@
                                                            (apply concat (provers/rule-exceptions kb rh)))
                                                    (rules/naf-queries rsx)
                                                    (rules/aggregate-queries rsx)))
-                              pres   (keep ::special/preserving marks)]
+                              pres   (keep ::special/preserving marks)
+                              seps   (keep ::special/separation marks)]
                           (cond
                             (and (seq sens) (or (= :all shapes) (empty? block-lits)))
                             firings                        ; nothing to narrow by
@@ -243,6 +261,10 @@
                                          firings)))
                              (when (some #{::special/entailment} marks)
                                (entailment-candidates kb rsx firings block-lits blocked))
+                             ;; a computed answer moves with every source the prover
+                             ;; reads, which no argument of the firing names
+                             (when (some #{::special/computed} marks) firings)
+                             (when (seq seps) (separation-candidates kb firings seps))
                              (when (seq pres)
                                (preserving-candidates kb rsx firings pres test-for
                                                       norm))
@@ -283,7 +305,11 @@
                (nil? recs)        acc
                (= :overflow recs) (update acc :overflow conj rh)
                :else
-               (let [shapes (if (and (set? triggers) (some withdrawal-marker? triggers))
+               (let [seps   (when (set? triggers) (keep ::special/separation triggers))
+                     ;; separation markers alone keep the refusals naming a moved type
+                     moved? (when (and (seq seps) (every? ::special/separation triggers))
+                              (partial names-moved? (into #{} cat seps)))
+                     shapes (if (and (set? triggers) (some withdrawal-marker? triggers))
                               :all             ; a marker keeps every refusal, as `:all` does
                               (trigger-shapes triggers norm))
                      rsx    (when-not (= :all shapes) (p/get-sentex (:records kb) rh))
@@ -299,9 +325,10 @@
                              :dead (do (chain/drop-refusal! kb rh e) acc)
                              acc))
                          acc
-                         (if (seq lits)
-                           (let [reach? (firing-test kb lits shapes cross? norm)]
-                             (filter #(reach? (:bindings %)) recs))
-                           recs))))))
+                         (cond
+                           moved?      (filter #(moved? (:bindings %)) recs)
+                           (seq lits)  (let [reach? (firing-test kb lits shapes cross? norm)]
+                                         (filter #(reach? (:bindings %)) recs))
+                           :else       recs))))))
          {:free [] :overflow []}
          queued)))))

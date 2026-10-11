@@ -357,12 +357,10 @@
 ;; permutation of one conjunction; this makes it over every conjunction the suite runs,
 ;; the same shape `VAELII_HIER` takes for retrieval.
 ;;
-;; **The claim does not hold unqualified, and the sweep is what established that.**  Six
-;; tests pin the ranking back rather than stand aside, because in each the ranking is
-;; what supplies an answer: a registered evaluatable's placement, where the event
-;; calculus stops, and — the one that is not about a single query — the completeness of
-;; incremental forward chaining over a prover extent that grows.  docs/inference.md,
-;; "Where the ranking is required", carries all three with their witnesses.
+;; **The claim does not hold unqualified, and the sweep is what established that.**  One
+;; test pins the ranking back rather than stand aside, because the ranking supplies its
+;; answer: where the event calculus stops (`calendar_test`).  docs/inference.md, "Where
+;; the ranking is required", carries it with its witness.
 ;;
 ;; Spelled positively for `VAELII_HIER`'s reason — the value says what it selects.
 (when-not (config/prop-bool "VAELII_PLAN" true)
@@ -445,13 +443,22 @@
 
 (defn- overlay? [] (= :overlay (:backend *storage*)))
 
+(defonce ^:private fork-seq (atom 0))
+
+(defn- fork-space
+  "A fresh own space for an overlay-arm fork.  The suite's own spelling rather than
+  `mem/engine-space`: `close!` drops an engine space, and a test closing its KB must not
+  drop the slot's store."
+  []
+  [::fork (swap! fork-seq inc)])
+
 (defn- drop-fork-space!
   "Forget every RAM store a fork's own half held under `own`: its records, its index and
   its bookkeeping (`mount/meta-kv`)."
   [own]
   (mem/drop-record-space! own)
   (mem/drop-index-space! own)
-  (mem/drop-index-space! [::mount/meta own]))
+  (mem/drop-index-space! (mount/meta-space own)))
 
 (defn- slot-opts
   "The KB opts for the store slot `s` holds now.  Under the overlay arm that store is a
@@ -461,7 +468,7 @@
   (let [common {:recover? false :tms tms-kind}]
     (if (overlay?)
       (let [own (or (@fork-spaces s)
-                    ((swap! fork-spaces update s #(or % (:space (mount/fresh-overlay-opts)))) s))]
+                    ((swap! fork-spaces update s #(or % (fork-space))) s))]
         (merge common {:backend :overlay
                        :base    overlay-base-space
                        :overlay {:backend :memory :space own}}))
@@ -500,7 +507,7 @@
       ;; counter and re-issues no handle a record holds.
       (when (and (empty? (p/sentex-ids base)) (empty? (p/justification-ids base)))
         (p/clear-records! base))
-      (swap! fork-spaces assoc s (:space (mount/fresh-overlay-opts)))
+      (swap! fork-spaces assoc s (fork-space))
       (some-> old drop-fork-space!)
       (v/open-kb (merge (slot-opts s) opts)))
     (doto (v/open-kb (merge (slot-opts s) opts)) (clear-kb!))))
@@ -827,7 +834,7 @@
   ordering when it is not, the two are indistinguishable at the call site, and the second
   passes right up until a tactician reorders it or the fixture grows a second witness.
   `VAELII_QUERY_STRATEGY` exists to reorder exactly this, and order independence is one
-  of the four properties the engine holds everywhere — so a test that quietly depends on
+  of the five properties the engine holds everywhere — so a test that quietly depends on
   an order is worth failing where it is written rather than under a sweep.
 
   `what` names the goal for the failure message.  The first answer comes back whatever

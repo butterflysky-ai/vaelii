@@ -167,6 +167,15 @@ it (the schematic `equals` of [equational.md](equational.md)) walks argument ter
 reading the marker, so a schematic equation normalizes inside a quoted position as it does
 outside one.
 
+NAT reification does not read the marker either. A ground reifiable NAT inside the
+proposition reifies to its constant before the congruence walk runs, and the constant is
+found through the `termOfUnit` map under the merges `CxUniverse` holds
+([nat.md](nat.md#what-reification-does-not-cover)). With `(sameAs Apple Pomme)` in
+`CxUniverse` and `(likes Tom (FruitFn Apple))` in `CxAgentAnn`, `(believes Ann (likes Tom
+(FruitFn Pomme)))` is true, although `CxAgentAnn` does not see the merge. A stored `(believes
+A P)` holds the constant in place of the application, so a merge `CxUniverse` holds folds
+the stored belief as well.
+
 ## More than one modal predicate
 
 Which predicates project is a KB property, not a hard-coded set. `believes` ships granted

@@ -2,7 +2,8 @@
 ;; Copyright © 2026 Vaelii LLC and the Vaelii contributors.
 (ns vaelii.impl.decide.membership
   "The membership families: two memberships of one term whose types a separation holds
-  apart (`disjoint`), and a membership under a cover's whole beside a denial of each part
+  apart (`disjoint`), a membership beside a denial of a supertype of its type
+  (`supertype`), and a membership under a cover's whole beside a denial of each part
   (`covering`), placed as nogoods (`chain/place-memberships!`).  See docs/nmtms.md, \"A
   nogood placed as a conclusion\"."
   (:require [vaelii.impl.caches :as caches]
@@ -16,21 +17,22 @@
 ;; ---- the membership families ---------------------------------------------
 ;;
 ;; A `disjoint` nogood is two memberships of one term whose types a separation a reader
-;; sees holds apart, and a `covering` nogood is a membership under a cover's whole with
-;; one denial of each part or of a supertype of it.  Both are keyed by the term, so the
+;; sees holds apart, a `supertype` nogood is a membership beside a denial of a strict
+;; supertype of its type, and a `covering` nogood is a membership under a cover's whole
+;; with one denial of each part or of a supertype of it.  All three are keyed by the term, so the
 ;; candidate index keeps each term holding two memberships, or a membership and a denial,
 ;; under `::mem` as `{x {h [type context positive?]}}`, read off the term's unary roster
-;; once and kept in step after.  `::by-type` holds the kept terms by the types their
-;; memberships hold, `{t {x #{h}}}`, one entry per membership.  `::sep` holds, per kept
-;; term, the pairs of its types the unscoped taxonomy separates with no exception read,
+;; once and kept in step after, its memberships by type under `::types`, `{x {t
+;; #{h}}}`, and its denials by type under `::denials`.  The kept terms under a type are
+;; read off the index (`reads/as-stored-unary-kept-terms`, `reads/as-stored-unary-denied-terms`,
+;; `listed-under`).  `::sep` holds, per kept term, the pairs of its types the unscoped taxonomy separates with no exception read,
 ;; `{x {[ta tb] how}}`, `how` `:spared` when a stored `siblingDisjointException` exempts the pair and
 ;; `:sep` otherwise.  A pair is tested when its second type arrives at the term, and again
 ;; when `tax/separation-stamp` or a `genl` edge moves over one of its types
 ;; (`sync-memberships`), which reads no membership.  A term holding a separated pair, or a
-;; membership under a cover beside a denial, is live under `::live-mem`, and its
+;; membership beside a denial its nogoods convict, is live under `::live-mem`, and its
 ;; memberships and denials there are the family's candidates under `:membership`.
-;; `::denied` holds the kept terms with a denial, and `::moved` the terms whose nogoods
-;; the settle places again (`take-moved!`).  Recover keeps the terms of two unary
+;; `::moved` holds the terms whose nogoods the settle places again (`take-moved!`).  Recover keeps the terms of two unary
 ;; predicates (`reads/as-stored-unary-multi-terms`) and of a unary body stored in both
 ;; polarities that hold two memberships or a membership and a denial, read off their
 ;; unary rosters (`recovered-terms`).
@@ -50,7 +52,7 @@
 
 (defn- term-entries
   "`{h [t context positive?]}` of the stored memberships and denials of `x`, read off its
-  unary roster (`p/unary-sentexes-with-arg`, a superset filtered here), so the facts
+  unary roster (`reads/as-stored-unary-with-arg-global`, a superset filtered here), so the facts
   holding `x` at argument 1 of a longer tuple are not fetched."
   [kb x]
   (let [recs (:records kb)]
@@ -59,7 +61,7 @@
                   (when-let [sx (p/get-sentex recs h)]
                     (when-let [[x' t pos] (membership-of sx)]
                       (when (= x x') [h [t (:context sx) pos]])))))
-          (p/unary-sentexes-with-arg (:index kb) x))))
+          (reads/as-stored-unary-with-arg-global (:index kb) x))))
 
 (defn- held?
   "Can the entries `m` of one term form a nogood: two memberships, or a membership and a
@@ -105,50 +107,46 @@
               (if-let [how (and (not= b t) (f b))]
                 (assoc-in c [::sep x (pair-of t b)] how)
                 c))
-            c (into #{} (keep (fn [[b _ pos]] (when pos b))) (vals (get-in c [::mem x]))))
+            c (keys (get-in c [::types x])))
     c))
 
 (defn- add-entry
-  "`c` with the entry `e` of handle `h` added to term `x`: a membership under `::by-type`,
+  "`c` with the entry `e` of handle `h` added to term `x`: a membership under `::types`,
   its type tested against the term's others when it is new to the term (`test-type`), or
-  a denial under `::denied`."
+  a denial under `::denials`."
   [test c x h [t _ pos :as e]]
   (let [c (assoc-in c [::mem x h] e)]
     (if-not pos
-      (update c ::denied (fnil conj #{}) x)
-      (let [fresh? (empty? (get-in c [::by-type t x]))
-            c      (update-in c [::by-type t x] (fnil conj #{}) h)]
+      (update-in c [::denials x t] (fnil conj #{}) h)
+      (let [fresh? (empty? (get-in c [::types x t]))
+            c      (update-in c [::types x t] (fnil conj #{}) h)]
         (if fresh? (test-type test c x t) c)))))
 
-(defn- drop-type
-  "`c` with term `x` out of `::by-type` under type `t`, and the separated pairs of `x`
-  holding `t` dropped."
-  [c x t]
-  (let [xs (dissoc (get-in c [::by-type t]) x)]
-    (untest (if (seq xs) (assoc-in c [::by-type t] xs) (update c ::by-type dissoc t)) x t)))
-
 (defn- remove-entry
-  "`c` with handle `h`'s entry removed from term `x`: a membership's type leaves the term
-  when no other membership of `x` holds it (`drop-type`), and `x` leaves `::denied` with
-  its last denial."
+  "`c` with handle `h`'s entry removed from term `x`: a membership's type leaves the term,
+  with the separated pairs holding it (`untest`), when no other membership of `x` holds
+  it, and a denial's type when no other denial of `x` holds it."
   [c x h]
   (if-let [[t _ pos] (get-in c [::mem x h])]
-    (let [c (update-in c [::mem x] dissoc h)]
-      (if-not pos
-        (if (some #(not (nth % 2)) (vals (get-in c [::mem x])))
-          c
-          (update c ::denied #(some-> % (disj x))))
-        (let [hs (disj (get-in c [::by-type t x]) h)]
-          (if (seq hs) (assoc-in c [::by-type t x] hs) (drop-type c x t)))))
+    (let [c   (update-in c [::mem x] dissoc h)
+          k   (if pos ::types ::denials)
+          hs  (disj (get-in c [k x t]) h)]
+      (cond
+        (seq hs) (assoc-in c [k x t] hs)
+        pos      (untest (update-in c [::types x] dissoc t) x t)
+        :else    (update-in c [::denials x] dissoc t)))
     c))
+
+(defn- denied?
+  "Does the candidate index `c` keep a denial of term `x`?"
+  [c x]
+  (boolean (seq (get-in c [::denials x]))))
 
 (defn- drop-term
   "`c` with term `x` and every row naming it dropped."
   [c x]
-  (as-> c c
-    (reduce #(drop-type %1 x %2) c (into #{} (keep (fn [[t _ pos]] (when pos t)))
-                                         (vals (get-in c [::mem x]))))
-    (-> c (update ::mem dissoc x) (update ::sep dissoc x) (update ::denied #(some-> % (disj x))))))
+  (-> c (update ::mem dissoc x) (update ::types dissoc x) (update ::denials dissoc x)
+      (update ::sep dissoc x)))
 
 (defn- combinations
   "The cartesian product of the collections `colls`, each product a vector."
@@ -159,43 +157,58 @@
   "The membership nogoods of term `x` (`::mem`), each `{:members #{h} :kind k}`: two
   memberships of a pair of types a separation holds apart (`::sep`, a superset over every
   reader), `:disjoint`, marked `:spared? true` for a pair a stored exception exempts;
-  and a membership under a cover's whole with, for each part, a denial of the part or of
-  a supertype of it, `:cover`, one nogood per choice of denials.  Read through the write
-  view `w` (`decide/write-view`)."
+  a membership beside a denial of a strict supertype of its type, `:supertype`; and a
+  membership under a cover's whole with, for each part, a denial of the part or of a
+  supertype of it, `:cover`, one nogood per choice of denials, less a member set the
+  `:supertype` arm already holds.  Read through the write view `w` (`decide/write-view`)."
   [tax w c x]
-  (concat
-   (for [[[a b] how] (get-in c [::sep x])
-         h1 (get-in c [::by-type a x])
-         h2 (get-in c [::by-type b x])]
-     (cond-> {:members #{h1 h2} :kind :disjoint}
-       (= :spared how) (assoc :spared? true)))
-   (when (and (contains? (::denied c) x) (seq (tax/coverings tax)))
-     (let [m     (get-in c [::mem x])
-           pos   (filterv #(nth (val %) 2) m)
-           neg   (filterv #(not (nth (val %) 2)) m)
-           above (:genls-global w)]
-       (for [[h [s]]   pos
-             [_ parts] (distinct (tax/covers-over tax s nil))
-             :let [per (for [p (distinct parts)
-                             :let [ups (above p)]]
-                         (for [[d [q]] neg :when (contains? ups q)] d))]
-             :when (every? seq per)
-             combo (combinations per)]
-         {:members (into #{h} combo) :kind :cover})))))
+  (let [above (:genls-global w)
+        types (get-in c [::types x])
+        ;; a denied type's specializations where they number no more than the term's
+        ;; types, else each type's closure up, so a write reads the smaller of the two
+        sups  (for [[q ds] (get-in c [::denials x])
+                    :let [below (tax/specs-global-within tax q (count types))]
+                    s (if below
+                        (filter #(contains? types %) below)
+                        (filter #(contains? (above %) q) (keys types)))
+                    :when (not= s q)
+                    h (get types s), d ds]
+                {:members #{h d} :kind :supertype})
+        held  (into #{} (map :members) sups)]
+    (concat
+     (for [[[a b] how] (get-in c [::sep x])
+           h1 (get-in c [::types x a])
+           h2 (get-in c [::types x b])]
+       (cond-> {:members #{h1 h2} :kind :disjoint}
+         (= :spared how) (assoc :spared? true)))
+     sups
+     (when (and (denied? c x) (seq (tax/coverings tax)))
+       (let [m   (get-in c [::mem x])
+             pos (filterv #(nth (val %) 2) m)
+             neg (filterv #(not (nth (val %) 2)) m)]
+         (for [[h [s]]   pos
+               [_ parts] (distinct (tax/covers-over tax s nil))
+               :let [per (for [p (distinct parts)
+                               :let [ups (above p)]]
+                           (for [[d [q]] neg :when (contains? ups q)] d))]
+               :when (every? seq per)
+               combo (combinations per)
+               :let [ms (into #{h} combo)]
+               :when (not (held ms))]
+           {:members ms :kind :cover}))))))
 
 (defn- place-term
   "`c` with term `x`'s nogoods read again through the unscoped taxonomy (`term-nogoods`),
   kept under `::ngs` while it has one; their members are under `::live-mem` and in step
-  in `:membership`.  A term with no separated pair (`::sep`) and no denial under a stored
-  cover has none, and is read no further.  A term whose nogoods moved, or every term
+  in `:membership`.  A term with no separated pair (`::sep`) and no denial has none, and
+  is read no further.  A term whose nogoods moved, or every term
   holding one when `force?`, is queued under `::moved` with the members of its nogoods
   before and after, for the settle to place (`take-moved!`)."
   [w c x force?]
   (let [tax (:tax w)
         old (get-in c [::live-mem x])
         was (get-in c [::ngs x])
-        ngs (when (or (seq (get-in c [::sep x]))
-                      (and (contains? (::denied c) x) (seq (tax/coverings tax))))
+        ngs (when (or (seq (get-in c [::sep x])) (denied? c x))
               (not-empty (vec (term-nogoods tax w c x))))
         new (not-empty (into #{} (mapcat :members) ngs))]
     (as-> c c
@@ -210,17 +223,56 @@
             (journal/note (concat old new))
             (update ::live-mem #(if new (assoc (or % {}) x new) (dissoc % x))))))))
 
-(defn- types-under
-  "The types `::by-type` holds at or below one of the types `ends` over the unscoped
-  `genl` closure (`w`, `decide/write-view`).  Reads the types `::by-type` holds or the
-  specializations of `ends`, whichever is fewer."
-  [w c ends]
+(def ^:private listings
+  "The index's lists of terms by unary predicate, each `[count types terms]` over the
+  index: the terms of two unary predicates under each (`:kept`), and the terms a stored
+  denial names under its predicate (`:denied`)."
+  {:kept   [reads/stored-count-unary-kept-types reads/as-stored-unary-kept-types
+            reads/as-stored-unary-kept-terms]
+   :denied [reads/stored-count-unary-denied-types reads/as-stored-unary-denied-types
+            reads/as-stored-unary-denied-terms]})
+
+(defn- listed-under
+  "`[t xs]` for each type `t` at or below one of the types `ends` over the unscoped `genl`
+  closure (`w`, `decide/write-view`) under which one of the index's lists `ks`
+  (`listings`) holds terms, `xs` those terms.  The terms of two unary predicates are a
+  superset of the kept terms holding an entry of `t` beside an entry of another type, and
+  the terms denied `t` hold the kept terms whose every entry is of `t`.  Reads the types
+  the lists hold, each by one walk up to the first of `ends` over one memo
+  (`tax/genls-global-meets?`), or the specializations of `ends`, whichever is fewer, then
+  one set per type and list."
+  [kb w ends ks]
   (when (seq ends)
-    (let [held (::by-type c)
-          ends (set ends)]
-      (if (< (count held) (* 4 (count ends)))
-        (filter #(some ends ((:genls-global w) %)) (keys held))
-        (distinct (filter #(contains? held %) (mapcat (:specs-global w) ends)))))))
+    (let [idx  (:index kb)
+          ends (set ends)
+          ls   (map listings ks)
+          ts   (if (< (transduce (map #((first %) idx)) + ls) (* 4 (count ends)))
+                 (let [missed (volatile! #{})]
+                   (into #{} (comp (mapcat #((second %) idx))
+                                   (filter #((:genls-global-meets? w) % ends missed)))
+                         ls))
+                 (distinct (mapcat (:specs-global w) ends)))]
+      (into [] (keep (fn [t] (let [xs (into #{} (mapcat #((nth % 2) idx t)) ls)]
+                               (when (seq xs) [t xs]))))
+            ts))))
+
+(defn- holding
+  "The pairs `[x t]` of the listed `[t xs]` whose term `x` the candidate index `c` keeps
+  with a membership of `t`."
+  [c listed]
+  (for [[t xs] listed, x xs :when (seq (get-in c [::types x t]))] [x t]))
+
+(defn- cover-wholes-under
+  "The wholes of the stored covers with a part at or below one of the types `ends` over
+  the unscoped `genl` closure (`w`, `decide/write-view`): a `genl` edge moving at such a
+  part moves which denials cover it.  Each part is read by one walk up to the first of
+  `ends` over one memo (`tax/genls-global-meets?`)."
+  [w ends]
+  (let [ends   (set ends)
+        missed (volatile! #{})
+        under? #((:genls-global-meets? w) % ends missed)]
+    (into #{} (keep (fn [[whole pks]] (when (some #(some under? (first %)) pks) whole)))
+          (tax/coverings (:tax w)))))
 
 (defn- membership-synced?
   "Is `c`'s membership index read under the taxonomy as it stands: the declarations
@@ -238,13 +290,15 @@
   "`c` with `::sep` and the kept nogoods read again under the taxonomy as it stands.  The
   pairs holding a type at or below a type whose separations the declarations moved
   (`tax/separation-moves`), or at or below the lower end of a moved `genl` edge
-  (`tax/moves-since`), are tested again (`types-under`), since no other pair's separation
-  moved.  With no stamp to compare, or the `genl` relation rebuilt from nothing, every
-  kept term's pairs are.  The terms tested are placed again, and so are the terms with a
-  denial when the declarations or the edges moved; every one is queued when an edge
-  moved.  On a full test every term holding nogoods is placed again too.  Reads no
-  membership."
-  [w c]
+  (`tax/moves-since`), are tested again (`listed-under`), since no other pair's
+  separation moved.  With no stamp to compare, or the `genl` relation rebuilt from nothing,
+  every kept term's pairs are.  The terms tested are placed again, and so are the terms
+  with a denial and a membership at or below a type whose cover nogoods the move can move:
+  the lower end of a moved edge, the whole of a cover with a part at or below one
+  (`cover-wholes-under`), and the whole of a moved cover (`tax/cover-moves`).  Every term
+  placed is queued when an edge moved.  On a full test every term holding nogoods is
+  placed again too.  Reads no membership."
+  [kb w c]
   (let [tax    (:tax w)
         st     (tax/separation-stamp tax)
         old    (::sep-stamp c)
@@ -257,18 +311,21 @@
         decl?  (not= st old)
         retest (fn [c x ts] (reduce #(test-type test (untest %1 x %2) x %2) c ts))
         [c xs] (if full
-                 [(reduce-kv (fn [c x m]
-                               (retest c x (into #{} (keep (fn [[t _ pos]] (when pos t))) (vals m))))
-                             (assoc c ::sep {}) (::mem c))
+                 [(reduce-kv (fn [c x ts] (retest c x (keys ts)))
+                             (assoc c ::sep {}) (::types c))
                   (keys (::mem c))]
-                 (let [ends (cond-> #{}
-                              decl? (into (tax/separation-moves old st))
-                              edge? (into (tax/moves-since tax :genl seen)))
-                       hits (for [t (types-under w c ends), x (keys (get-in c [::by-type t]))] [x t])]
-                   [(reduce (fn [c [x t]] (retest c x [t])) c hits) (map first hits)]))
+                 (let [lows   (when edge? (tax/moves-since tax :genl seen))
+                       ends   (cond-> (set lows) decl? (into (tax/separation-moves old st)))
+                       hits   (holding c (listed-under kb w ends [:kept]))
+                       covers (cond-> (set lows)
+                                (seq lows) (into (cover-wholes-under w lows))
+                                decl?      (into (tax/cover-moves old st)))]
+                   [(reduce (fn [c [x t]] (retest c x [t])) c hits)
+                    (concat (map first hits)
+                            (keep (fn [[x _]] (when (denied? c x) x))
+                                  (holding c (listed-under kb w covers [:kept :denied]))))]))
         xs     (cond-> (set xs)
-                 (or decl? edge?) (into (::denied c))
-                 full             (into (keys (::ngs c))))
+                 full (into (keys (::ngs c))))
         c      (assoc c ::sep-stamp st ::genl-seen g)]
     (reduce #(place-term w %1 %2 edge?) c xs)))
 
@@ -299,13 +356,13 @@
   a denial.  A term that read holds denials and no membership is noted under `::no-pos`,
   so a further denial of it reads nothing, and its first membership reads the roster once
   and keeps it.  A declaration arriving reads nothing here: `sync-memberships` reads its
-  separations over `::by-type`."
+  separations over the kept terms under its types (`listed-under`)."
   [kb w sx stored?]
   (when-let [[x t pos] (membership-of sx)]
     (let [h     (:id sx)
           e     [t (:context sx) pos]
           cands (reasoning/nogood-candidates kb)
-          sync  #(if (membership-synced? (:tax w) %) % (sync-memberships w %))
+          sync  #(if (membership-synced? (:tax w) %) % (sync-memberships kb w %))
           place (fn [c] (place-term w (if (held? (get-in c [::mem x])) c (drop-term c x)) x false))]
       (cond
         (contains? (::mem @cands) x)
@@ -370,20 +427,17 @@
 
 (defn terms-under
   "The kept terms with a nogood (`::ngs`) holding a type at or below one of the types
-  `ends` over the unscoped `genl` closure (`w`, `decide/write-view`), in a membership
-  (`types-under`) or a denial: those whose nogoods a separation over `ends` arriving can
-  give a route."
-  [w c ends]
-  (when (and (seq ends) (seq (::ngs c)))
-    (let [ngs   (::ngs c)
-          ends  (set ends)
-          under (memoize (fn [t] (some ends ((:genls-global w) t))))]
-      (-> #{}
-          (into (comp (mapcat #(keys (get-in c [::by-type %]))) (filter #(contains? ngs %)))
-                (types-under w c ends))
-          (into (filter (fn [x] (and (contains? ngs x)
-                                     (some #(under (first %)) (vals (get-in c [::mem x]))))))
-                (::denied c))))))
+  `ends` over the unscoped `genl` closure (`w`, `decide/write-view`), in a membership or a
+  denial (`listed-under`): those whose nogoods a separation over `ends` arriving can give
+  a route."
+  [kb w c ends]
+  (when (seq (::ngs c))
+    (let [ngs (::ngs c)]
+      (into #{} (mapcat (fn [[t xs]]
+                          (filter #(and (contains? ngs %)
+                                        (or (get-in c [::types % t]) (get-in c [::denials % t])))
+                                  xs)))
+            (listed-under kb w ends [:kept :denied])))))
 
 (defn nogoods-terms
   "The kept terms holding a nogood under the candidate index `c`."
@@ -408,13 +462,34 @@
 
 (defn kind-of
   "The kind of the membership nogood over the member handles `ms`, read off their
-  sentences: `:disjoint` for two memberships of one term in distinct types, `:cover` for
-  one membership of a term beside denials of it, else nil."
-  [recs ms]
+  sentences and the unscoped `genl` closure of the write view `w` (`decide/write-view`):
+  `:disjoint` for two memberships of one term in distinct types, `:supertype` for one
+  membership of a term beside one denial of a strict supertype of its type, `:cover` for
+  any other membership of a term beside denials of it, else nil."
+  [w recs ms]
   (when-let [[_ pos neg] (member-types recs ms)]
     (cond
       (and (empty? neg) (= 2 (count pos) (count ms))) :disjoint
+      (and (= 1 (count pos) (count neg)) (= 2 (count ms))
+           (not= (first pos) (first neg))
+           ((:genl?-global w) (first pos) (first neg)))
+      :supertype
       (and (= 1 (count pos)) (seq neg))               :cover)))
+
+(defn- cover-routes
+  "The routes of a cover nogood over the held type `s` and the denied types `neg`
+  (`routes`), read off every stored cover: a route is a superset over every reader, and
+  the placement decides which contexts see it."
+  [w s neg]
+  (for [[whole parts] (distinct (tax/covers-over (:tax w) s nil))
+        :let [qs (map (fn [p] (first (filter #(contains? ((:genls-global w) p) %) neg)))
+                      parts)]
+        :when (every? some? qs)
+        [ps kind] (tax/covers-of (:tax w) whole)
+        :when (= ps parts)]
+    {:keys #{[:cover [whole parts] kind]}
+     :links (into [] (remove (fn [[a b]] (= a b)))
+                  (cons [s whole] (map vector parts qs)))}))
 
 (defn routes
   "Each way the declarations convict the membership nogood `ng` over the unscoped
@@ -423,27 +498,24 @@
   and the separated pair.  For a `:cover` one, a cover over a whole above the held type
   with a member denial at or above each part: the cover's key, the subsumption from the
   held type to the whole and from each part to the first such denial's type, and no
-  pair.  Empty when the members are not one term's.  Read over the write view `w`
-  (`decide/write-view`): a route is a superset over every reader, and the placement
-  decides which contexts see it."
+  pair.  For a `:supertype` one, the subsumption from the held type to the denied type
+  with no key, and each cover route besides.  Empty when the members are not one term's.
+  Read over the write view `w` (`decide/write-view`): a route is a superset over every
+  reader, and the placement decides which contexts see it."
   [w recs {:keys [members kind]}]
   (when-let [[_ pos neg] (member-types recs members)]
     (case kind
       :disjoint
       (when (= 2 (count pos))
         (let [[a b] (seq pos)] (tax/separation-routes (:tax w) a b)))
+      :supertype
+      (when (= 1 (count pos) (count neg))
+        (let [s (first pos) q (first neg)]
+          (cond->> (cover-routes w s neg)
+            ((:genl?-global w) s q) (cons {:keys #{} :links [[s q]]}))))
       :cover
       (when (= 1 (count pos))
-        (let [s (first pos)]
-          (for [[whole parts] (distinct (tax/covers-over (:tax w) s nil))
-                :let [qs (map (fn [p] (first (filter #(contains? ((:genls-global w) p) %) neg)))
-                              parts)]
-                :when (every? some? qs)
-                [ps kind] (tax/covers-of (:tax w) whole)
-                :when (= ps parts)]
-            {:keys #{[:cover [whole parts] kind]}
-             :links (into [] (remove (fn [[a b]] (= a b)))
-                          (cons [s whole] (map vector parts qs)))})))
+        (cover-routes w (first pos) neg))
       nil)))
 
 (defn exempt-at?
@@ -477,23 +549,24 @@
                     (swap! (reasoning/nogood-candidates kb)
                            #(dissoc (reduce-kv add-held % held) ::sep-stamp ::genl-seen)))))
    :synced?   (fn [tax c] (or (empty? (::mem c)) (membership-synced? tax c)))
-   :sync      (fn [_ w c] (sync-memberships w c))
-   :handles   :membership
-   :holds?    (fn [c h] (contains? (:membership c) h))})
+   :sync      (fn [kb w c] (sync-memberships kb w c))
+   :handles   (fn [_ c] (:membership c))
+   :holds?    (fn [_ c h] (contains? (:membership c) h))})
 
 ;; ---- derived state (docs/caches.md, "The derived-state register") ----------------
 
 (caches/register-derived
  {:id :N5 :label "Membership candidates" :kind :cache :keyed-by :term
+  :holds-content? false
   :reads [:index :records :T1 :T2 :J5]
   :retired-by {:stored :K :removed :K :respelled :K :edge :K :declared :S :edge-belief :K
                :settle-pass :K :recover :R :image-install :R}
   :computed :read :imaged? :state
   :at [[:nogood-candidates :membership] [:nogood-candidates ::mem]
        [:nogood-candidates ::sep] [:nogood-candidates ::sep-stamp]
-       [:nogood-candidates ::live-mem] [:nogood-candidates ::denied]
-       [:nogood-candidates ::ngs] [:nogood-candidates ::by-type]
+       [:nogood-candidates ::live-mem] [:nogood-candidates ::denials]
+       [:nogood-candidates ::ngs] [:nogood-candidates ::types]
        [:nogood-candidates ::genl-seen] [:nogood-candidates ::no-pos]
        [:nogood-candidates ::moved]]
   :bound "the stored memberships and denials of each term holding two memberships, or a membership and a denial"
-  :note "the unary members, the kept terms by type and each term's separated type pairs, read off a term's unary roster at its first write and at recover; synced at a read by `tax/separation-stamp` and the relation moves (J5)"})
+  :note "the unary members, each kept term's memberships and denials by type and its separated type pairs, read off a term's unary roster at its first write and at recover, and the kept terms under a type off the index; synced at a read by `tax/separation-stamp` and the relation moves (J5)"})

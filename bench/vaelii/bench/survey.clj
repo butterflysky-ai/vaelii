@@ -84,7 +84,7 @@
         (update :dirs (fn [d] (update d (:engines rec) (fnil inc 0))))
         ;; backward-chain shape: |antecedents| is the per-goal join/branching cost;
         ;; consequent-predicate frequency is the candidate-set size a goal on that
-        ;; predicate reads (`rules-by-consequent`).
+        ;; predicate reads (`reads/as-stored-rules-by-consequent-in`).
         (update :ante-counts (fn [m] (update m (count (:antecedent rec)) (fnil inc 0))))
         (update :conseq (fn [m] (if-let [c (functor (:consequent rec))] (update m c (fnil inc 0)) m)))
         (cond-> (:defeasible rec) (update :defeasible inc)))

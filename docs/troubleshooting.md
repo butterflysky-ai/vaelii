@@ -135,6 +135,10 @@ Three other causes, each with its own tell:
 - **A rival defeated it.** `why-not` names the defeater; `(v/conflicts kb)` lists what was
   arbitrated. A `:default` losing to a `:monotonic` rival is the ordinary case.
   [nmtms.md](nmtms.md).
+- **The conclusion is on the forced-monotonic roster.** `why-not` answers
+  `:forced-conclusion`, naming the rule and its antecedent predicates off the roster. A
+  `(forced_monotonic_predicate P)` declaration for each one puts the rule's firings on
+  the roster. [nmtms.md](nmtms.md#the-forced-monotonic-roster).
 - **Another rule already concluded it**, so the firing added nothing to see. `(:subsumption
   (v/kb-quality kb))` names the rules a broader one covers, with the substitution;
   `(:clashes (v/kb-quality kb))` names the pairs whose conclusions would fight if both
@@ -211,13 +215,14 @@ without storing anything, and answers with the identical problem.
 | `:naming` | a symbol's spelling does not match its role — [naming.md](naming.md) |
 | `:not-ground` | a fact with a variable in it; write a universal as a rule |
 | `:shape` | not an s-expression at all — a string, `nil`, a map, a bare symbol — or a **vector**, which is a query's conjunction.  Refused at the read entry points as well as the write ones, carrying `:goal` or `:conjunct` ([api.md](api.md)) |
-| `:not-well-formed` | a malformed connective frame, such as a bare `(implies)`, a bare symbol or variable under `not` or a `set/*` wrapper, a bare variable as a rule's antecedent, exception or consequent literal (a derived sentence whose predicate a firing binds is `(?pred . ?args)`), or an `exceptWhen` around a fact ([exceptions.md](exceptions.md)) — or a `thereExists`, `forall` or head `exists` whose binder is not a variable ([naf.md](naf.md)) — or an `or` somewhere the polycanonicalization cannot expand it away: a conclusion, a closed-query body, an `exceptWhen` query, under `not` ([canonicalization.md](canonicalization.md)) — or a combination of `set/*` wrappers the record cannot hold: two different directions, two different head wrappers, or a choice or constraint under a direction or `set/defaultRule` ([canonicalization.md](canonicalization.md#rule-wrappers-become-fields)) |
+| `:not-well-formed` | a malformed connective frame, such as a bare `(implies)`, a bare symbol or variable under `not` or a `set/*` wrapper, a bare variable as a rule's antecedent, exception or consequent literal (a derived sentence whose predicate a firing binds is `(?pred . ?args)`), or an `exceptWhen` around a fact ([exceptions.md](exceptions.md)) — or a `thereExists`, `forall` or head `exists` whose binder is not a variable ([naf.md](naf.md)) — or an `or` somewhere the polycanonicalization cannot expand it away: a conclusion, a closed-query body, an `exceptWhen` query, under `not` ([canonicalization.md](canonicalization.md)) — or a combination of `set/*` wrappers the record cannot hold: two different directions, two different head wrappers, or a choice or constraint under a direction or `set/defaultRule` ([canonicalization.md](canonicalization.md#rule-wrappers-become-fields)) — or a predicate a prover computes and nothing stores: `different`, a query operator, an aggregate, `bravely`/`cautiously`, `totalDuration`/`overlapDuration` ([duration.md](duration.md)) — or an individual or a value in a position that names a type, such as either side of `genl` ([taxonomy.md](taxonomy.md#well-formedness-vaeliiimplwff)) |
 | `:not-range-restricted` | a rule variable in the consequent that no antecedent binds — asked per alternative of a disjunctive antecedent, and the message names the disjunct |
 | `:disjunction-too-wide` | a disjunctive antecedent over the 16-alternative cap; the message names the count — [canonicalization.md](canonicalization.md) |
 | `:arg-type` / `:arg-genl` | an `arg` / `genlArg` constraint convicted it — [argtypes.md](argtypes.md) |
 | `:arg-variable` | a **rule** variable two argument constraints demand disjoint types of — [taxonomy.md](taxonomy.md) |
 | `:disjoint` / `:functional` / `:asymmetric` | a definitional clash that names no stored member; a clash naming its members is stored, and `contradictions` or `conflicts` reports it — [nmtms.md](nmtms.md#1-order-independence) |
 | `:cover` | a `covering` declaration every part of which is now denied of a term the whole holds — [taxonomy.md](taxonomy.md) |
+| `:definitional-clash` | `try-assert` only: the sentence, or a membership its argument declarations mint, clashes with believed content. `assert` stores it, and `check` does not report it — [api.md](api.md#refusing-a-clash) |
 | `:unknown-option` | an option key nothing reads, or a non-map `opts` — `:mismatch` says which. A refused `VAELII_*` or `vaelii.*` switch is named under `:switch`, and under `:property`, the older key |
 
 The one worth knowing in advance: **snake_case means arity 1.** An underscored functor
@@ -527,6 +532,7 @@ so one vocabulary reads both.
 | `:daemon-error` | the daemon refused and its reply carried no `:type` of its own — the client's fallback | [operations.md](operations.md) |
 | `:damaged-dictionary` | a tokenized frame cites a token id the dictionary has no entry for | [storage.md](storage.md) |
 | `:damaged-frame` | a frame inside a log the open reads whole — `tokens.log`, the index's `kv.log`, the operation log — does not decode, and frames follow it; the refusal names the file, the byte offset and the frame | [storage.md](storage.md) |
+| `:definitional-clash` | `try-assert` refused a sentence that would open a clash with believed content, or whose argument-type mints would; `:violation` names the clash kind and `:clashes-with` the other members | [api.md](api.md#refusing-a-clash) |
 | `:derived-only` | a `defeat` literal in an asserted sentence, its negation, a rule or an `exceptWhen` query; only the engine derives a defeat | [glossary.md](glossary.md#d) |
 | `:disjoint` | a definitional clash between two disjoint types — see [`assert` refused it](#assert-refused-it) | [exceptions.md](exceptions.md) |
 | `:disjunction-too-wide` | a disjunctive antecedent over the alternative cap | [canonicalization.md](canonicalization.md) |
@@ -560,7 +566,7 @@ so one vocabulary reads both.
 | `:nippy-version-unreadable` | nippy's own Maven descriptor could not be read, so the class-name check cannot say which release it is guarding | [defenses.md](defenses.md) |
 | `:no-base` | an `:overlay` backend was opened with neither `:base` nor `:base-stores` | [overlay.md](overlay.md) |
 | `:no-depth-bound` | the node engine was asked a goal with no `:max-depth` and no `*max-depth*` binding | [inference.md](inference.md) |
-| `:no-destination` | an export was asked for with a blank destination directory | [catalog.md](catalog.md) |
+| `:no-destination` | an export or a durable load names no directory, and every KB search-path entry is itself a KB, so there is none to write under | [catalog.md](catalog.md#where-the-server-writes) |
 | `:no-dump` | the directory holds no `meta.edn`, so it is not a dump | [storage.md](storage.md) |
 | `:no-foreign-reader` | this build reads no such format — see [A foreign KB will not load](#a-foreign-kb-will-not-load) | [foreign.md](foreign.md) |
 | `:not-a-directory` | an export destination, or a disk KB's directory, names a file — or, for the directory, a path under a file | [storage.md](storage.md) |
@@ -579,6 +585,7 @@ so one vocabulary reads both.
 | `:not-watchable` | a `watch` that could never deliver — no listener, a goal nothing unifies with, or an unscoped goal | [feed.md](feed.md) |
 | `:not-well-formed` | a malformed connective frame, or an `or` somewhere polycanonicalization cannot expand it away | [canonicalization.md](canonicalization.md) |
 | `:not-writable` | a disk KB's directory is not writable by this process, and every open, reads included, creates the single-writer lock file there — see [The disk KB will not open](#the-disk-kb-will-not-open) | [storage.md](storage.md) |
+| `:path-not-served` | a wire `:kb-diff` side is a string naming no KB the server serves, a wire `:export` names a directory, or a browser `/kbs/load` or `/kbs/export` names a `dir`; the server reads or writes no path a request names unless `VAELII_REQUEST_PATHS` is on | [operations.md](operations.md) |
 | `:pattern-too-costly` | a `find-terms` regex read past its per-term or scan-wide character budget | [api.md](api.md) |
 | `:quantifier-not-local` | a bound existential or universal variable appears outside its own quantifier | [aggregate.md](aggregate.md) |
 | `:quoted-arg-type` | a `quotedArg` constraint convicted the argument on its EDN kind as a term | [argtypes.md](argtypes.md) |
@@ -597,6 +604,8 @@ so one vocabulary reads both.
 | `:still-stopping` | an unload was asked for while the loader has not reached an interruptible point | [catalog.md](catalog.md) |
 | `:still-writing` | an unload was asked for while a job — a chaining run, a spindle sync — writes that KB | [catalog.md](catalog.md) |
 | `:store-unusable` | a disk store stopped: it was closed, a thread interrupt closed one of its channels, or a write or an fsync failed. `:reason` says which, and every call refuses until the directory is opened again | [storage.md](storage.md#a-store-that-stops) |
+| `:too-many-kbs` | the catalog already holds its maximum of loaded KBs; `:entries` names them — unload one first | [catalog.md](catalog.md#loading) |
+| `:too-many-kept` | an `abduce` with `{:keep? true}` while the KB already holds its maximum of kept abduction contexts; `:contexts` names them — `abduce-discard!` one first | [abduction.md](abduction.md#isolation) |
 | `:too-many-subscriptions` | the daemon already holds its maximum of feed subscriptions | [feed.md](feed.md) |
 | `:too-many-waiters` | the daemon already has its maximum of long polls parked | [feed.md](feed.md) |
 | `:torn-snapshot` | a durable index part reloaded at a size its own metadata contradicts | [storage.md](storage.md) |
@@ -604,7 +613,7 @@ so one vocabulary reads both.
 | `:unauthorized` | the token presented is not the one the daemon holds — see [Every call to the daemon is refused](#every-call-to-the-daemon-is-refused) | [operations.md](operations.md) |
 | `:unbound-deferred` | a computed antecedent reached the join with an input no earlier antecedent bound | [generators.md](generators.md) |
 | `:uncleared-forcing` | a retraction named a roster declaration whose predicate has no unforced semantics yet (`:predicate`, `:missing`); its declaration stays, and `genlCx` is always forced | [nmtms.md](nmtms.md#the-forced-monotonic-roster) |
-| `:unforkable-index` | a `:columnar` index cannot be forked, since its trie is not written over a KV backend | [overlay.md](overlay.md) |
+| `:unforkable-index` | a `:columnar` index cannot be forked, since its trie is not written over a KV backend; a taxonomy probe over an index keeping no family backend refuses too | [overlay.md](overlay.md) |
 | `:unknown-backend` | a backend selection the storage layer refuses; `:axis` says which axis, `:kind` what was named, `:mismatch` which kind of wrong (`:unknown-name`, `:reserved-name`, `:illegal-pair`, `:illegal-position`) — see [`open-kb` refuses an unknown backend](#open-kb-refuses-an-unknown-backend) | [storage.md](storage.md) |
 | `:unknown-command` | the CLI was given a word that is not one of its commands | [api.md](api.md) |
 | `:unknown-entry` | an operation named a loaded KB the catalog does not hold | [catalog.md](catalog.md) |

@@ -14,26 +14,41 @@
             [vaelii.core :as v]
             [vaelii.impl.decide :as decide]
             [vaelii.impl.decide.arity :as arity]
+            [vaelii.impl.profile :as prof]
             [vaelii.impl.protocols :as p]
+            [vaelii.impl.reads :as reads]
+            [vaelii.impl.sentex :as sx]
             [vaelii.impl.taxonomy :as tax]
             [vaelii.impl.types.reasoning :as reasoning]
+            [vaelii.order-independence-test :as oi]
             [vaelii.test-util :as tu]))
 
 (defn- held
-  "The arity half of `kb`'s candidate index."
+  "The arity half of `kb`'s candidate index, synced (a recover owes it whole until the
+  first sync computes it)."
   [kb]
-  (let [c @(reasoning/nogood-candidates kb)]
+  (let [c (decide/synced kb)]
     {:cand-shapes (set (::arity/cand-shapes c))
      :pairs       (set (::arity/pairs c))
      :arity       (set (:arity c))
      :arity-pairs (set (:arity-pairs c))}))
 
+(defn- stored-bindings
+  "`{P {h [kind value context]}}`, every stored record binding a length, off the records."
+  [kb]
+  (let [recs (:records kb)]
+    (reduce (fn [m h]
+              (let [r (p/get-sentex recs h)]
+                (if-let [[q kind v] (when (and r (nil? (:antecedent r))) (sx/arity-binding (:sentence r)))]
+                  (assoc-in m [q h] [kind v (:context r)])
+                  m)))
+            {} (p/sentex-ids recs))))
+
 (defn- oracle
-  "The arity candidates by definition, off the bindings the index tracks, one whole
+  "The arity candidates by definition, off the stored binding records, one whole
   `genls-global` closure per functor, and every stored record's shape."
   [kb]
-  (let [c     @(reasoning/nogood-candidates kb)
-        bs    (::arity/bindings c)
+  (let [bs    (stored-bindings kb)
         tax   (reasoning/taxonomy kb)
         recs  (:records kb)
         shape @#'arity/fact-shape
@@ -57,6 +72,14 @@
      :arity       (into #{} (filter #(contains? cand (some-> (p/get-sentex recs %) shape)))
                         (p/sentex-ids recs))
      :arity-pairs (into #{} (for [pr pairs, q pr, [h [k]] (get bs q) :when (= :exact k)] h))}))
+
+(defn- rows
+  "The arity rows of `kb`'s candidate index, synced, with the conflict rows."
+  [kb]
+  (let [c (decide/synced kb)]
+    (assoc (held kb)
+           :at-conflict (set (::arity/at-conflict c))
+           :conflict-up (set (::arity/conflict-up c)))))
 
 (defn- random-stream
   "A seeded shuffle of predicate and type `genl` edges (mostly downhill, some closing a
@@ -116,13 +139,14 @@
           (testing "kept up as facts arrive"
             (is (= (oracle kb) (held kb)) where))
           (decide/rebuild-candidates! kb)
-          (let [rebuilt @(reasoning/nogood-candidates kb)]
+          (let [rebuilt (rows kb)]
             (testing "rebuilt from storage"
               (is (= (oracle kb) (held kb)) where))
             (testing "rebuilt with the whole closure in place of the cut"
-              (with-redefs [tax/genls-global-among (fn [tax t _ _] (tax/genls-global tax t))]
-                (decide/rebuild-candidates! kb))
-              (is (= rebuilt @(reasoning/nogood-candidates kb)) where)))
+              (with-redefs [tax/genls-global-union (fn [tax t xf _] (into #{} xf (tax/genls-global tax t)))]
+                (decide/rebuild-candidates! kb)
+                (decide/synced kb))
+              (is (= rebuilt (rows kb)) where)))
           (testing "kept up as bindings leave, which replaces the pairs of what is below them"
             (let [before (:pairs (held kb))]
               (doseq [[s h] (sort-by (fn [_] (.nextInt rnd)) @handles)
@@ -241,11 +265,77 @@
             reads  (atom 0)
             real   tax/genls-global]
         (with-redefs [tax/genls-global (fn [tax t] (swap! reads inc) (real tax t))]
-          (decide/rebuild-candidates! kb))
+          (decide/rebuild-candidates! kb)
+          (decide/synced kb))
         (is (zero? @reads) "no closure is read")
         (is (= before (held kb)) "and the index is the one kept up as facts arrived")
         (is (contains? (:cand-shapes before) [fatherOf 3])
             "which holds the ternary tuple under the binary super")))))
+
+(defn- rebuild-fetches
+  "The records the candidate index's rebuild and first read fetch, over `n` predicates
+  each bound to two arguments."
+  [n]
+  (tu/with-neutral-kb [kb tu/isolated-fresh]
+    (dotimes [_ n]
+      (v/assert kb (list 'binary_predicate (tu/fresh-term :predicate 'rel)) 'CxUniverse))
+    (prof/start)
+    (decide/rebuild-candidates! kb)
+    (decide/synced kb)
+    (get-in (prof/stop) [:fetches :sentex] 0)))
+
+(deftest a-rebuild-reads-no-binding-record
+  ;; the bindings are an index family, so the rebuild owes the candidates whole and the
+  ;; first read computes them off the family
+  (is (= (rebuild-fetches 4) (rebuild-fetches 64))))
+
+(deftest a-predicate-storing-two-lengths-pairs-with-a-length-above-it-after-a-rebuild
+  ;; the rebuild reads no binding of a predicate with no tuple and no `genl` parent, so
+  ;; the edge that gives it a parent recomputes it
+  (tu/with-neutral-kb [kb tu/isolated-fresh]
+    (let [[a b] (repeatedly 2 #(tu/fresh-term :predicate 'rel))]
+      (v/assert kb (list 'arity a 2) 'CxUniverse)
+      (v/assert kb (list 'arity a 3) 'CxUniverse)
+      (decide/rebuild-candidates! kb)
+      (decide/synced kb)
+      (v/assert kb (list 'genl a b) 'CxUniverse)
+      (v/assert kb (list 'arity b 2) 'CxUniverse)
+      (is (= (oracle kb) (held kb)))
+      (is (contains? (:pairs (held kb)) [a b])))))
+
+(deftest a-binding-stored-beside-the-first-sync-after-a-rebuild-is-a-candidate
+  ;; The reader R reads the bound predicates in the first sync after a rebuild and waits;
+  ;; the writer W stores a binding, and R commits before W's settle reads the index.  The
+  ;; hooked read returns the bound predicates as R read them before the barrier.
+  (tu/with-neutral-kb [kb tu/isolated-fresh]
+    (let [q        (tu/fresh-term :predicate 'rel)
+          [a b c]  (repeatedly 3 #(tu/fresh-term :individual 'Thing))
+          t        (v/assert kb (list q a b c) 'CxUniverse)
+          r-thread (volatile! nil)
+          [read go done] (repeatedly 3 promise)
+          bound    reads/as-stored-arity-bound
+          note     decide/note-candidate!]
+      (decide/rebuild-candidates! kb)
+      (with-redefs [reads/as-stored-arity-bound
+                    (fn [idx]
+                      (let [s (bound idx)]
+                        (when (and (identical? (Thread/currentThread) @r-thread)
+                                   (deliver read true))
+                          (deref go 10000 nil))
+                        s))
+                    decide/note-candidate!
+                    (fn [kb sx stored?]
+                      (note kb sx stored?)
+                      (when (and (= 'arity (first (:sentence sx))) (deliver go true))
+                        (deref done 10000 nil)))]
+        (let [r (future (vreset! r-thread (Thread/currentThread))
+                        (decide/synced kb)
+                        (deliver done true))]
+          (deref read 10000 nil)
+          (v/assert kb (list 'arity q 2) 'CxUniverse)
+          (deref r 10000 nil)))
+      (is (contains? (:arity (decide/synced kb)) t) "the tuple is a candidate")
+      (is (not (v/believed? kb t 'CxUniverse)) "and its nogood is placed"))))
 
 (deftest a-rebuild-reads-the-bound-predicates-only-under-a-conflict
   ;; Where every type binds its own length, as a converted ontology whose every collection
@@ -268,9 +358,13 @@
       (let [before (held kb)
             reads  (atom [])
             union  tax/genls-global-union]
-        ;; `genls-global-among` reads through `genls-global-union`, so this sees both
-        (with-redefs [tax/genls-global-union (fn [tax t xf memo] (swap! reads conj t) (union tax t xf memo))]
-          (decide/rebuild-candidates! kb))
+        ;; the cuts that answer predicates are the pair cuts; a lengths cut answers numbers
+        (with-redefs [tax/genls-global-union (fn [tax t xf memo]
+                                               (let [r (union tax t xf memo)]
+                                                 (when (some symbol? r) (swap! reads conj t))
+                                                 r))]
+          (decide/rebuild-candidates! kb)
+          (decide/synced kb))
         (is (= [fatherOf] @reads) "the one functor under a conflict reads the predicates")
         (is (= before (held kb)) "and the index is the one kept up as facts arrived")
         (is (= #{[fatherOf parentOf]} (:pairs before)) "which holds the pair")))))
@@ -292,9 +386,13 @@
       (let [before (held kb)
             cuts   (atom [])
             union  tax/genls-global-union]
-        ;; `genls-global-among` reads through `genls-global-union`, so this sees both
-        (with-redefs [tax/genls-global-union (fn [tax t xf memo] (let [r (union tax t xf memo)] (swap! cuts conj r) r))]
-          (decide/rebuild-candidates! kb))
+        ;; the cuts that answer predicates are the pair cuts; a lengths cut answers numbers
+        (with-redefs [tax/genls-global-union (fn [tax t xf memo]
+                                               (let [r (union tax t xf memo)]
+                                                 (when (some symbol? r) (swap! cuts conj r))
+                                                 r))]
+          (decide/rebuild-candidates! kb)
+          (decide/synced kb))
         (is (= (count types) (count @cuts)) "every type reads once")
         (is (every? #(= #{root} %) @cuts) "and reads the root alone")
         (is (= before (held kb)) "and the index is the one kept up as facts arrived")
@@ -321,7 +419,7 @@
           (v/assert kb (list 'genl (chain i) (chain (dec i))) 'CxUniverse))
         (v/assert kb (list 'arity (chain 0) 1) 'CxUniverse)
         (v/assert kb (list leaf a) 'CxUniverse)
-        (is (= n (count (::arity/at-conflict @(reasoning/nogood-candidates kb)))))
+        (is (= n (count (::arity/at-conflict (decide/synced kb)))))
         (let [k    (atom 0)
               real tax/genl?-global]
           (with-redefs [tax/genl?-global (fn [tax sub super] (swap! k inc) (real tax sub super))]
@@ -339,12 +437,12 @@
   `genl?-global`."
   [kb]
   (let [tax (reasoning/taxonomy kb)
-        c   @(reasoning/nogood-candidates kb)
+        c   (decide/synced kb)
         ac  (::arity/at-conflict c)]
     (into []
           (remove (fn [t]
                     (= (into #{} (filter #(or (= t %) (tax/genl?-global tax % t))) ac)
-                       (second (@#'arity/conflicts-below (decide/write-view tax) c t #{})))))
+                       (second (@#'arity/conflicts-below kb (decide/write-view tax) c t #{})))))
           (tax/types tax))))
 
 (deftest the-functors-under-a-conflict-below-a-type-are-the-reachability-filter-s
@@ -365,7 +463,7 @@
                              (keep #(when (< (.nextInt rnd 2) 1) (list 'genl % hub)) (sort terms)))
               stored (assert-all! kb (sort-by (fn [_] (.nextInt rnd)) hubbed))
               where  (str "trial " trial)]
-          (swap! found + (count (::arity/at-conflict @(reasoning/nogood-candidates kb))))
+          (swap! found + (count (::arity/at-conflict (decide/synced kb))))
           (is (= [] (conflicts-below-mismatches kb)) where)
           (doseq [[s h] (sort-by (fn [_] (.nextInt rnd)) stored)
                   :when (and (= 'genl (first s)) (< (.nextInt rnd 3) 1))]
@@ -383,8 +481,8 @@
 (defn- reader-binding-by-definition
   "What binds `q`'s length at a reader with ancestor set `up`, read off `q`'s whole scoped
   closure."
-  [kb bindings q up]
-  (let [vis (fn [p] (@#'arity/visible-bindings kb bindings p up nil))
+  [kb q up]
+  (let [vis (fn [p] (@#'arity/visible-bindings kb p up nil))
         own (vis q)]
     (cond
       (seq (:var own))   (when (= 1 (count (:min own)))
@@ -411,10 +509,9 @@
             (doseq [s (random-stream rnd)]
               (try (v/assert kb s (ctxs (.nextInt rnd (count ctxs))))
                    (catch clojure.lang.ExceptionInfo _)))
-            (let [c     @(reasoning/nogood-candidates kb)
-                  bs    (::arity/bindings c)
+            (let [bs    (stored-bindings kb)
                   tax   (reasoning/taxonomy kb)
-                  above (@#'arity/bound-above tax bs)
+                  above (@#'arity/bound-above kb tax)
                   recs  (:records kb)
                   fs    (into (into #{} (keep #(some-> (p/get-sentex recs %) (@#'arity/fact-shape) first))
                                     (p/sentex-ids recs))
@@ -422,8 +519,8 @@
               (doseq [cx ctxs
                       :let [up (tax/context-up-global tax cx)]
                       q (sort fs)
-                      :let [want (reader-binding-by-definition kb bs q up)
-                            got  (@#'arity/reader-binding kb bs above q up nil)]]
+                      :let [want (reader-binding-by-definition kb q up)
+                            got  (@#'arity/reader-binding kb above q up nil)]]
                 (when want (swap! seen inc))
                 (when (not= want got)
                   (swap! bad conj {:trial trial :context cx :functor q :want want :got got}))))))))
@@ -451,10 +548,9 @@
           (with-redefs [tax/genl-path            (count! :path @#'tax/genl-path)
                         tax/reachable-filtered?  (count! :walk @#'tax/reachable-filtered?)
                         tax/visible-neighbours   (count! :nodes @#'tax/visible-neighbours)]
-            (let [bs (::arity/bindings @(reasoning/nogood-candidates kb))]
-              (is (= 6 (count (:grounds (@#'arity/reader-binding kb bs (@#'arity/bound-above tax bs)
-                                                                 q up nil))))
-                  "every bound predicate above q grounds the conviction")))
+            (is (= 6 (count (:grounds (@#'arity/reader-binding kb (@#'arity/bound-above kb tax)
+                                                               q up nil))))
+                "every bound predicate above q grounds the conviction"))
           (is (nil? (:path @walks)) "no path is read per bound predicate")
           (is (nil? (:walk @walks)) "and no pair walks")
           (is (<= (:nodes @walks 0) 6) "one walk enters each node below the top once"))))))
@@ -466,9 +562,8 @@
 
 (defn- descensions-by-definition
   [kb cands up]
-  (let [bs  (::arity/bindings cands)
-        tax (reasoning/taxonomy kb)
-        vis (fn [p] (@#'arity/visible-bindings kb bs p up nil))]
+  (let [tax (reasoning/taxonomy kb)
+        vis (fn [p] (@#'arity/visible-bindings kb p up nil))]
     (into #{}
           (mapcat (fn [[f g]]
                     (let [bf (vis f) bg (vis g)]
@@ -486,7 +581,7 @@
   [kb cands cx]
   (into #{} (comp (filter #(and (v/sees? kb cx (:context %)) (v/believed? kb (:id %) cx)))
                   (map #(into #{} (map second) (rest (:sentence %))))
-                  (filter #(= :arity-descension (arity/kind-of cands %))))
+                  (filter #(= :arity-descension (arity/kind-of kb cands %))))
         (v/sentexes-with-functor kb 'contradicts)))
 
 (deftest a-reader-s-arity-pairs-are-the-ones-its-ancestor-set-reaches
@@ -530,15 +625,79 @@
       (v/assert kb (list q (ind) (ind) (ind)) 'CxUniverse)
       (let [tax   (reasoning/taxonomy kb)
             cands (decide/synced kb)
-            bs    (::arity/bindings cands)
             calls (atom 0)
             real  @#'arity/visible-bindings]
         (is (contains? (::arity/cand-shapes cands) [q 3]) "the ternary shape is a candidate")
         (with-redefs [arity/visible-bindings (fn [& args] (swap! calls inc) (apply real args))]
-          (is (nil? (@#'arity/reader-binding kb bs (@#'arity/bound-above tax bs) q
+          (is (nil? (@#'arity/reader-binding kb (@#'arity/bound-above kb tax) q
                                              (tax/context-up-global tax 'CxUniverse) nil))
               "q is unbound, so its tuple breaks nothing"))
         (is (<= @calls 3) (str @calls " bindings read"))))))
+
+;; A `genl` edge whose belief moves while it stays stored moves the lengths above every
+;; type below its lower end.  A defeat and an except leave the edge in the unscoped closure
+;; the candidates read, and each reader scopes the conviction; an equality superseding the
+;; edge's spelling takes it out of that closure, and its retraction brings it back with no
+;; write to the edge.
+
+(defn- edge-belief-trial
+  "Write `order` (a permutation of :binding :edge :tuple :hide), the hide as `how` says: a
+  monotonic denial of the `genl` edge, whose placed nogood defeats it, an except of it, or
+  a `rewriteOf` deprecating its lower end.  Then lift the hide, and answer
+  `[believed-while-hidden believed-after]` for the ternary tuple under the binary super."
+  [order how]
+  (tu/with-neutral-kb [kb tu/isolated-fresh]
+    (tu/with-terms [parentOf motherOf motherOfX Ada Bea Cy]
+      (let [M    {:strength :monotonic}
+            edge (list 'genl motherOfX parentOf)
+            hs   (volatile! {})
+            w    {:binding #(v/assert kb (list 'arity parentOf 2) 'CxUniverse M)
+                  :edge    #(v/assert kb edge 'CxUniverse)
+                  :tuple   #(v/assert kb (list motherOfX Ada Bea Cy) 'CxUniverse)
+                  :hide    #(v/assert kb (case how
+                                           :deny    (list 'not edge)
+                                           :except  (list 'except (list 'sentexHandle (:edge @hs)))
+                                           :rewrite (list 'rewriteOf motherOf motherOfX))
+                                      'CxUniverse M)}]
+        (doseq [k order] (vswap! hs assoc k ((w k))))
+        (let [hidden (v/believed? kb (:tuple @hs) 'CxUniverse)]
+          (v/retract! kb (:hide @hs))
+          [hidden (v/believed? kb (:tuple @hs) 'CxUniverse)])))))
+
+(deftest ^:slow a-tuple-under-an-edge-whose-belief-comes-back-is-convicted-in-every-order
+  (let [ks     [:binding :edge :tuple :hide]
+        orders (for [a ks, b ks, c ks, d ks
+                     :let [o [a b c d]]
+                     :when (= 4 (count (set o)))]
+                 o)
+        before (fn [^java.util.List o] (< (.indexOf o :edge) (.indexOf o :hide)))]
+    (doseq [[how os] [[:deny orders] [:except (filter before orders)]]]
+      (is (= {[true false] (count os)} (frequencies (map #(edge-belief-trial % how) os)))
+          (name how)))
+    ;; a superseded spelling is not believed, so only the answer after the lift is pinned
+    (is (= {false (count orders)}
+           (frequencies (map #(second (edge-belief-trial % :rewrite)) orders)))
+        "rewrite")))
+
+(deftest a-tuple-under-an-edge-whose-belief-comes-back-is-convicted
+  ;; the sampled twin of the sweep above: the orders where the edge or the tuple arrives
+  ;; after the equality, and one denial order
+  (is (= [false false false false]
+         (mapv #(second (edge-belief-trial % :rewrite))
+               [[:binding :edge :hide :tuple] [:hide :edge :tuple :binding]
+                [:edge :hide :binding :tuple] [:tuple :hide :edge :binding]])))
+  (is (= [true false] (edge-belief-trial [:binding :edge :hide :tuple] :deny))))
+
+(deftest a-defeat-placed-on-the-edge-after-the-tuple-lifts-its-nogood
+  (tu/with-neutral-kb [kb tu/isolated-fresh]
+    (tu/with-terms [parentOf motherOf Ada Bea Cy]
+      (let [M {:strength :monotonic}]
+        (v/assert kb (list 'arity parentOf 2) 'CxUniverse M)
+        (v/assert kb (list 'genl motherOf parentOf) 'CxUniverse)
+        (let [t (v/assert kb (list motherOf Ada Bea Cy) 'CxUniverse)]
+          (is (not (v/believed? kb t 'CxUniverse)) "the nogood is placed")
+          (v/assert kb (list 'not (list 'genl motherOf parentOf)) 'CxUniverse M)
+          (is (v/believed? kb t 'CxUniverse) "and leaves with the edge"))))))
 
 (defn- descension-pairs
   "Six predicates bound to three arguments under one bound to two, every binding and
@@ -558,3 +717,130 @@
     (is (= 6 (count (filter #(= :arity-descension (:kind %)) (v/conflicts kb)))))
     (is (= 6 (count (v/sentexes-with-functor kb 'contradicts))) "each pair is placed")
     (is (empty? (v/sentexes-with-functor kb 'defeat)) "and defeats no binding")))
+
+(deftest the-terms-under-the-ends-are-those-the-closures-read
+  ;; random predicate graphs, some edges closing a cycle, and end sets of every size:
+  ;; `under`'s two sides and its memo shared across two term sets, against each term's
+  ;; whole closure
+  (let [rnd   (java.util.Random. 4903)
+        under @#'arity/under
+        hit   (atom 0)]
+    (dotimes [trial 20]
+      (let [t  (tax/create-taxonomy)
+            w  (decide/write-view t)
+            ps (mapv #(symbol (str "auRel" %)) (range 30))]
+        (dotimes [h 50]
+          (let [i (.nextInt rnd 30) j (.nextInt rnd 30)]
+            (when (and (not= i j) (or (< i j) (zero? (.nextInt rnd 8))))
+              (tax/add-genl t (ps i) (ps j) h))))
+        (doseq [n [1 2 6 20]]
+          (let [ends   (into #{} (repeatedly n #(ps (.nextInt rnd 30))))
+                old    (fn [fs] (into #{} (filter #(some ends (tax/genls-global t %))) fs))
+                [a b]  (split-at 3 (shuffle ps))
+                missed (volatile! #{})]
+            (swap! hit + (count (old ps)))
+            (is (= (old ps) (under w ps ends)) (str "trial " trial ", " n " ends, every term"))
+            (is (= (old a) (under w a ends missed)) (str "trial " trial ", " n " ends, three terms"))
+            (is (= (old b) (under w b ends missed)) (str "trial " trial ", " n " ends, the rest"))))))
+    (is (pos? @hit) "some terms sit under an end")))
+
+(deftest the-candidates-a-binding-reaches-are-those-each-closure-reads
+  ;; random predicate graphs, some edges closing a cycle, exact and minimum lengths
+  ;; stated in two contexts and the universe, and tuples of two and three arguments:
+  ;; `reached` over its shared memos, against each candidate's whole closure
+  (let [rnd  (java.util.Random. 4904)
+        hit  (atom 0)
+        ctxs '[CxUniverse CxAcrA CxAcrB]]
+    (dotimes [trial 12]
+      (tu/with-neutral-kb [kb tu/isolated-fresh]
+        (let [ps    (vec (repeatedly 8 #(tu/fresh-term :predicate 'rel)))
+              terms (vec (repeatedly 3 #(tu/fresh-term :individual 'Thing)))
+              pick  (fn [v] (v (.nextInt rnd (count v))))
+              try!  (fn [s c] (try (v/assert kb s c) (catch clojure.lang.ExceptionInfo _)))]
+          (doseq [c (rest ctxs)] (try! (list 'genlCx c 'CxUniverse) 'CxUniverse))
+          (dotimes [_ 10]
+            (let [i (.nextInt rnd 8) j (.nextInt rnd 8)]
+              (when (and (not= i j) (or (< i j) (zero? (.nextInt rnd 6))))
+                (try! (list 'genl (ps i) (ps j)) 'CxUniverse))))
+          (dotimes [_ 4]
+            (try! (list (if (zero? (.nextInt rnd 4)) 'arityMin 'arity) (pick ps) (+ 2 (.nextInt rnd 2)))
+                  (pick ctxs)))
+          (dotimes [_ 12]
+            (try! (apply list (pick ps) (repeatedly (+ 2 (.nextInt rnd 2)) #(pick terms))) 'CxUniverse))
+          (let [tax    (reasoning/taxonomy kb)
+                w      (decide/write-view tax)
+                c      (decide/synced kb)
+                idx    (:index kb)
+                exact? @#'arity/exact-bound?
+                shape  @#'arity/shape-of]
+            (doseq [n [1 2 3]
+                    :let [below (set (take n (shuffle ctxs)))
+                          in?   #(seq (reads/as-stored-arity-bindings idx % below))
+                          want  (into #{} (filter (fn [h] (let [[q] (shape kb h)]
+                                                            (or (in? q)
+                                                                (some #(and (exact? kb %) (in? %))
+                                                                      (tax/genls-global tax q))))))
+                                      (:arity c))]]
+              (swap! hit + (count want))
+              (is (= want (set (arity/reached kb w c below))) (str "trial " trial ", " below)))))))
+    (is (pos? @hit) "some candidates are reached")))
+
+;; ---- a metatype membership binds a length ----------------------------------------
+;;
+;; `(kindRel likesRel)` and `(genl kindRel binary_predicate)`, each `:monotonic`, bind
+;; likesRel to two arguments, so a ternary likesRel fact is placed as an arity nogood.
+
+(defn- metatype-reading
+  "Assert the ops of `order` in CxUniverse, the edge and the membership at the strengths
+  `strengths` names, and answer whether the ternary tuple is believed there, read in the
+  KB and in a KB recovered from its dump records-only, before and after a write."
+  [kb order strengths]
+  (tu/with-terms [kindRel likesRel A B C D]
+    (let [ss {:edge   (list 'genl kindRel 'binary_predicate)
+              :member (list kindRel likesRel)
+              :tuple  (list likesRel A B C)}
+          hs (mapv #(v/assert kb (ss %) 'CxUniverse {:strength (get strengths % :default)}) order)
+          rs (tu/recovered-readings kb false [(ss :tuple) 'CxUniverse]
+                                    #(v/assert % (list likesRel A D) 'CxUniverse))]
+      (doseq [h (rseq hs)] (v/retract! kb h))
+      (mapv :loser rs))))
+
+(deftest a-monotonic-metatype-membership-binds-the-length-of-its-exact-class
+  (tu/with-neutral-kb [kb tu/fresh]
+    (let [mono {:edge :monotonic :member :monotonic}]
+      (is (= #{[false false false]}
+             (into #{} (map #(metatype-reading kb % mono)) (oi/permutations [:edge :member :tuple])))
+          "in all six orders, before and after recover")
+      (is (= [true true true] (metatype-reading kb [:edge :member :tuple] (assoc mono :edge :default)))
+          "a :default edge binds nothing")
+      (is (= [true true true] (metatype-reading kb [:edge :member :tuple] (assoc mono :member :default)))
+          "a :default membership binds nothing"))))
+
+(deftest a-reader-that-does-not-see-the-metatype-edge-reads-no-binding
+  (tu/with-neutral-kb [kb tu/fresh]
+    (tu/with-terms [kindRel likesRel A B C CxMa CxMb CxMc]
+      (let [m  {:strength :monotonic}
+            hs [(v/assert kb (list 'genlCx CxMa 'CxUniverse) 'CxUniverse)
+                (v/assert kb (list 'genlCx CxMb 'CxUniverse) 'CxUniverse)
+                (v/assert kb (list 'genlCx CxMc CxMa) 'CxUniverse)
+                (v/assert kb (list 'genlCx CxMc CxMb) 'CxUniverse)
+                (v/assert kb (list 'genl kindRel 'binary_predicate) CxMb m)
+                (v/assert kb (list kindRel likesRel) CxMa m)]
+            t  (v/assert kb (list likesRel A B C) CxMa)]
+        (is (= [true false] [(v/believed? kb t CxMa) (v/believed? kb t CxMc)])
+            "CxMa sees no edge; CxMc sees the membership and the edge")
+        (doseq [h (cons t (rseq hs))] (v/retract! kb h))))))
+
+(deftest a-re-assert-raising-a-membership-or-edge-to-monotonic-binds-the-length
+  (tu/with-neutral-kb [kb tu/fresh]
+    (doseq [raised [:edge :member]]
+      (tu/with-terms [kindRel likesRel A B C]
+        (let [ss {:edge (list 'genl kindRel 'binary_predicate) :member (list kindRel likesRel)}
+              m  {:strength :monotonic}
+              hs [(v/assert kb (ss :edge) 'CxUniverse (if (= raised :edge) {} m))
+                  (v/assert kb (ss :member) 'CxUniverse (if (= raised :member) {} m))]
+              t  (v/assert kb (list likesRel A B C) 'CxUniverse)
+              before (v/believed? kb t 'CxUniverse)]
+          (v/assert kb (ss raised) 'CxUniverse m)
+          (is (= [true false] [before (v/believed? kb t 'CxUniverse)]) (name raised))
+          (doseq [h (cons t (rseq hs))] (v/retract! kb h)))))))

@@ -145,6 +145,118 @@
     (v/assert kb (list 'length Review  '(QuantityFn 30 Minute)) C)
     (is (= #{(list longDay Standup Review)} (believed kb longDay)))))
 
+(defn- unit-rows
+  "`unit` as a temporary unit of Duration worth 60 seconds, so a test may retract its rows."
+  [unit]
+  [(list 'dimensionOf unit 'Duration) (list 'conversionFactor unit 'Second 60)])
+
+(tu/deftest-kb a-duration-rests-on-the-unit-rows-it-converted-through
+  ;; rows: Review's length, the answer slot, and which of the Mins rows is retracted
+  (doseq [[review-length answer retracted]
+          [[#(list 'QuantityFn 30 %) (constantly '?d) 0]
+           [#(list 'QuantityFn 30 %) (constantly '?d) 1]
+           [(constantly '(QuantityFn 1800 Second)) #(list 'QuantityFn 150 %) 1]]]
+    (tu/with-terms [Standup Review Mins longDay]
+      (run! #(v/assert kb % C) (unit-rows Mins))
+      (v/assert kb (list 'length Standup '(QuantityFn 2 Hour)) C)
+      (v/assert kb (list 'length Review (review-length Mins)) C)
+      (v/assert kb (fwd [(list 'totalDuration (list 'list Standup Review) (answer Mins))]
+                        (list longDay Standup Review))
+                C)
+      (is (seq (believed kb longDay)))
+      (let [row (nth (unit-rows Mins) retracted)]
+        (v/retract! kb (v/handle-of kb row C))
+        (is (empty? (believed kb longDay)) (pr-str (first row) (answer Mins)))))))
+
+(defn- metric-overlap!
+  "Bridge A and B to their endpoints and state the gaps that put B's start 105 minutes
+  into A's two hours, B lasting thirty minutes."
+  [kb [A As Ae] [B Bs Be]]
+  (doseq [s [(list 'startOf A As) (list 'endOf A Ae) (list 'startOf B Bs) (list 'endOf B Be)
+             (list 'temporalDistance As Ae '(QuantityFn 2 Hour))
+             (list 'temporalDistance Bs Be '(QuantityFn 30 Minute))
+             (list 'temporalDistance As Bs '(QuantityFn 105 Minute))]]
+    (v/assert kb s C)))
+
+(tu/deftest-kb an-overlap-rests-on-what-narrowed-it
+  (tu/with-terms [A B As Ae Bs Be D shared]
+    (doseq [[i m] [[A '(QuantityFn 2 Hour)] [B '(QuantityFn 30 Minute)] [D '(QuantityFn 1 Hour)]]]
+      (v/assert kb (list 'length i m) C))
+    (doseq [i [B D]]
+      (v/assert kb (fwd [(list 'overlapDuration A i '?d)] (list shared A i '?d)) C))
+    (v/assert kb (list 'before A D) C)
+    (metric-overlap! kb [A As Ae] [B Bs Be])
+    (is (contains? (believed kb shared) (list shared A D '(QuantityFn 0 Second))))
+    (is (contains? (believed kb shared) (list shared A B '(QuantityFn 900 Second))))
+    (testing "retracting the Allen relation"
+      (v/retract! kb (v/handle-of kb (list 'before A D) C))
+      (is (not (contains? (believed kb shared) (list shared A D '(QuantityFn 0 Second))))))
+    (testing "retracting a gap the window read"
+      (v/retract! kb (v/handle-of kb (list 'temporalDistance As Bs '(QuantityFn 105 Minute)) C))
+      (is (not (contains? (believed kb shared) (list shared A B '(QuantityFn 900 Second))))))))
+
+(tu/deftest-kb an-overlap-rule-may-arrive-before-what-narrows-it
+  ;; each row states, after the rule and the lengths, one source the answer reads last
+  (doseq [last-source [:allen :gaps :endpoints :unit-rows]]
+    (tu/with-terms [A B As Ae Bs Be Mins shared]
+      (let [unit     (if (= :unit-rows last-source) Mins 'Minute)
+            endpoint [(list 'startOf A As) (list 'endOf A Ae)
+                      (list 'startOf B Bs) (list 'endOf B Be)]
+            gaps     [(list 'temporalDistance As Ae '(QuantityFn 2 Hour))
+                      (list 'temporalDistance Bs Be '(QuantityFn 30 Minute))
+                      (list 'temporalDistance As Bs '(QuantityFn 105 Minute))]
+            [early late expected]
+            (case last-source
+              :allen     [[] [(list 'contains A B)] '(QuantityFn 1800 Second)]
+              :gaps      [endpoint gaps '(QuantityFn 900 Second)]
+              :endpoints [gaps endpoint '(QuantityFn 900 Second)]
+              :unit-rows [[] (unit-rows Mins) '(QuantityIntervalFn 0 1800 Second)])]
+        (v/assert kb (fwd [(list 'overlapDuration A B '?d)] (list shared A B '?d)) C)
+        (v/assert kb (list 'length A '(QuantityFn 2 Hour)) C)
+        (v/assert kb (list 'length B (list 'QuantityFn 30 unit)) C)
+        (run! #(v/assert kb % C) early)
+        (run! #(v/assert kb % C) late)
+        (is (= #{(list shared A B expected)} (believed kb shared)) (str last-source))))))
+
+(defn- believed-after
+  "Assert `sentences` in order, read the believed `pred` sentences, and retract what was
+  asserted, so the next reading starts from the same KB."
+  [kb sentences pred]
+  (let [hs (mapv #(v/assert kb % C) sentences)
+        b  (believed kb pred)]
+    (run! #(v/retract! kb %) (rseq hs))
+    b))
+
+(tu/deftest-kb a-narrowed-bound-is-believed-alone-in-every-order-and-after-a-retraction
+  ;; each row: the rule, the sources with the one that narrows the answer last, the
+  ;; conclusion over the narrowed answer, and the one over the answer without it
+  (doseq [row [:overlap :distance]]
+    (tu/with-terms [A B Dawn Mid Noon Dusk concl]
+      (let [[rule sources narrow tight wide]
+            (case row
+              :overlap  [(fwd [(list 'overlapDuration A B '?d)] (list concl A B '?d))
+                         [(list 'length A '(QuantityFn 2 Hour))
+                          (list 'length B '(QuantityFn 30 Minute))]
+                         (list 'before A B)
+                         (list concl A B '(QuantityFn 0 Second))
+                         (list concl A B '(QuantityIntervalFn 0 1800 Second))]
+              :distance [(fwd [(list 'temporalDistance Dawn Dusk '?d)] (list concl Dawn Dusk '?d))
+                         [(list 'temporalDistance Dawn Noon '(QuantityIntervalFn 5 7 Hour))
+                          (list 'temporalDistance Noon Dusk '(QuantityFn 6 Hour))
+                          (list 'temporalDistance Dawn Mid '(QuantityFn 3 Hour))]
+                         (list 'temporalDistance Mid Noon '(QuantityFn 3 Hour))
+                         (list concl Dawn Dusk '(QuantityFn 43200 Second))
+                         (list concl Dawn Dusk '(QuantityIntervalFn 39600 46800 Second))])
+            all (conj sources narrow)]
+        (testing (str row)
+          (is (= #{tight} (believed-after kb (cons rule all) concl)) "the rule first")
+          (is (= #{tight} (believed-after kb (conj all rule) concl)) "the rule last")
+          (is (= #{wide} (believed-after kb (conj sources rule) concl)) "a fresh load without it")
+          (let [hs (mapv #(v/assert kb % C) (conj all rule))]
+            (v/retract! kb (v/handle-of kb narrow C))
+            (is (= #{wide} (believed kb concl)) "retracting what narrowed it")
+            (run! #(when (v/sentex kb %) (v/retract! kb %)) (rseq hs))))))))
+
 ;; ---- is the whale heavier than a ton --------------------------------------
 
 (defn- load-mass-table

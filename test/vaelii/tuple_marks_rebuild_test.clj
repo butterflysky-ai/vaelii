@@ -9,7 +9,11 @@
   supertypes.  The replay holds the taxonomy still, so it keeps each functor's marks
   (`tuple/*functor-marks*`): on a large KB's recover the walk per tuple rebuilt the same
   few thousand closures millions of times.  The determinants and chains it finds must be
-  the ones a rebuild reading the marks per tuple finds."
+  the ones a rebuild reading the marks per tuple finds.
+
+  The placement reads the `genl` lower ends under a mark without a closure per end
+  (`tuple/under-marks`), and finds the ends `props-over` and `functional-in-arg-over`
+  find per end."
   (:require [clojure.test :refer [deftest is]]
             [vaelii.core :as v]
             [vaelii.impl.decide :as decide]
@@ -131,3 +135,42 @@
               (is (= want (tax/props-over-among tax kind p memo))
                   (str "trial " trial " " kind " " p)))))))
     (is (pos? @seen) "the hierarchies carry marks over some predicates")))
+
+(deftest the-ends-under-a-mark-are-those-props-over-reads-per-end
+  ;; random hierarchies of predicates and of types, some edges closing a cycle, a mark of
+  ;; each kind or a `functionalInArg` declaration on a few predicates at varied depths, and
+  ;; one top marked over a chain of twelve: every `genl` lower end, asked together and three
+  ;; at a time in shuffled orders (the two sides of `under-marks`), against the reads per end
+  (let [rnd   (java.util.Random. 4901)
+        kinds [:irreflexive :anti-symmetric :asymmetric :functional :anti-transitive]
+        marks '[irreflexive anti_symmetric asymmetric functional anti_transitive]
+        seen  (atom 0)]
+    (dotimes [trial 12]
+      (tu/with-neutral-kb [kb tu/isolated-fresh]
+        (let [ps    (vec (repeatedly 10 #(tu/fresh-term :predicate 'rel)))
+              ts    (vec (repeatedly 10 #(tu/fresh-term :type 'kind)))
+              chain (vec (repeatedly 12 #(tu/fresh-term :predicate 'link)))
+              try!  (fn [s] (try (v/assert kb s 'CxUniverse) (catch clojure.lang.ExceptionInfo _)))]
+          (doseq [xs [ps ts]]
+            (dotimes [_ 14]
+              (let [i (.nextInt rnd 10) j (.nextInt rnd 10)]
+                (when (and (not= i j) (or (< i j) (zero? (.nextInt rnd 5))))
+                  (try! (list 'genl (xs i) (xs j)))))))
+          (doseq [[a b] (partition 2 1 chain)] (try! (list 'genl a b)))
+          (try! (list 'genl (ps (.nextInt rnd 10)) (chain 0)))
+          (try! (list (marks (.nextInt rnd 5)) (peek chain)))
+          (dotimes [_ 2]
+            (try! (list (marks (.nextInt rnd 5)) (ps (.nextInt rnd 10)))))
+          (when (zero? (.nextInt rnd 2))
+            (try! (list 'functionalInArg (ps (.nextInt rnd 10)) (inc (.nextInt rnd 2)))))
+          (let [tax  (reasoning/taxonomy kb)
+                ends (into [] (comp (map :sentence) (map second) (filter symbol?) (distinct))
+                           (v/sentexes-with-functor kb 'genl))
+                want (into #{} (filter (fn [q] (or (some #(seq (tax/props-over tax % q)) kinds)
+                                                   (seq (tax/functional-in-arg-over tax q)))))
+                           ends)]
+            (swap! seen + (count want))
+            (is (= want (tuple/under-marks tax (shuffle ends))) (str "trial " trial))
+            (is (= want (into #{} (mapcat #(tuple/under-marks tax %)) (partition-all 3 (shuffle ends))))
+                (str "trial " trial ", three ends at a time"))))))
+    (is (pos? @seen) "the hierarchies hold ends under a mark")))

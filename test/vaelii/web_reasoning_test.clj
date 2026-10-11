@@ -134,7 +134,7 @@
         cookie (cookie-of open)
         ;; the sandbox is named by the session token, not by the page: nothing is
         ;; created until a write, so the first GET has no context to name
-        sbx    (sandbox/context-for (second (str/split cookie #"=" 2)))]
+        sbx    (sandbox/context-of {:headers {"cookie" cookie}})]
     (try
       (let [r (*app* {:request-method :post :uri "/reasoning"
                       :params {"id" "grandparent"}

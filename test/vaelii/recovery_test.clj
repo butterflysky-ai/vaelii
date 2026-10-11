@@ -202,6 +202,56 @@
       (testing "and the drop is reported, not silent"
         (is (re-find #"not well-formed edges" out))))))
 
+(defn- store-as-older-writer!
+  "Store `sentence` the way a writer that admitted it did: the sentex, its premise mark,
+  its index postings, and the supporter `post!` installs (nil for a declaration the
+  taxonomy holds no entry for).  Returns the handle."
+  [kb sentence post!]
+  (let [rec (:records kb)
+        s   (sx/sentex sentence 'CxUniverse)
+        h   (p/put-sentex rec s)]
+    (p/mark-premise rec h :default)
+    (p/index-sentex (:index kb) (assoc s :id h) h)
+    (when post! (post! (reasoning/taxonomy kb) h))
+    h))
+
+(tu/deftest-kb a-stored-value-edge-recovers-stored-and-inert
+  ;; `recover` reads the supporter families, not the checked sentences
+  (doseq [value ["Bob" nil #inst "2020-01-01"]]
+    (let [t  (tu/tmp-type)
+          h  (store-as-older-writer! kb (list 'genl value t)
+                                     #(tax/add-genl %1 value t %2 'CxUniverse))
+          kb2 (restart)]
+      (v/recover kb2)
+      (testing "the value is no node of the closure"
+        (is (not (contains? (get-in @(reasoning/taxonomy kb2) [:genl :nodes]) value)))
+        (is (not (v/genl? kb2 value t 'CxUniverse))))
+      (testing "the sentex stays stored, and check names what is wrong with it"
+        (is (v/in? kb2 h))
+        (is (= [:not-well-formed]
+               (mapv :type (v/check kb2 (list 'genl value t) 'CxUniverse))))))))
+
+(tu/deftest-kb a-stored-value-disjoint-recovers-inert
+  (let [t   (tu/tmp-type)
+        h   (store-as-older-writer! kb (list 'disjoint "Bob" t)
+                                    #(tax/add-disjoint %1 "Bob" t %2 'CxUniverse))
+        kb2 (restart)]
+    (v/recover kb2)
+    (is (v/in? kb2 h))
+    (is (not (v/disjoint? kb2 "Bob" t)))))
+
+(tu/deftest-kb a-stored-value-argument-type-recovers-inert
+  ;; the argument checks read the declaration through one reader, which skips it
+  (tu/with-terms [dog Fido walks]
+    (v/assert kb (list 'genl dog 'thing) 'CxUniverse)
+    (v/assert kb (list dog Fido) 'CxUniverse)
+    (v/assert kb (list 'unary_predicate walks) 'CxUniverse)
+    (let [h   (store-as-older-writer! kb (list 'arg walks 1 "Bob") nil)
+          kb2 (restart)]
+      (v/recover kb2)
+      (is (v/in? kb2 h))
+      (is (= [] (v/check kb2 (list walks Fido) 'CxUniverse))))))
+
 (tu/deftest-kb recover-rebuilds-disjoint-metatype-membership
   ;; A metatype's members are cached in memory, not stored: the only durable trace is
   ;; the `(M T)` sentexes themselves.  So recovery has to re-read them *after* the
@@ -618,7 +668,7 @@
           reads-of   (fn [k] (let [idx (:index k)]
                                [(reads/as-stored-rule-keys idx)
                                 (count (reads/as-stored-rules-in idx :rule #{CxAviary}))
-                                (set (reads/as-stored-rules-in idx :solve nil))]))
+                                (set (reads/as-stored-rules-in-global idx :solve))]))
           live       (reads-of kb)]
       (testing "the live reads hold what arrived, a negated antecedent as [:not pred]"
         (let [[keys n solve] live]

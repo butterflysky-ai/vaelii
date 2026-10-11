@@ -5,7 +5,7 @@
   measuring stick for the index-layout experiment, phase 1.
 
   The definitional checks read a term's memberships through the argument roots — the
-  candidate index's unary-roster read, and `arbitrable-violations`' `matches-visible` —
+  candidate index's unary-roster read, and a `matches-visible` read with the term bound —
   which narrow on the **argument roots**, a count trie over `[pred pos term ctx]`: the node
   `[:argument-root :children [pred pos term]]` lists the contexts stating such a fact, and
   the leaf `[:argument-root :handles [pred pos term ctx]]` holds the handles stated in one.
@@ -161,8 +161,8 @@
          acc)))))
 
 (defn- micro-probe-match
-  "The full clash-arm call `arbitrable-violations` makes — `res/matches-visible` on a
-  bound-argument-1 literal — with the literal cache OFF so each probe hits the index.
+  "`res/matches-visible` on a bound-argument-1 literal, with the literal cache OFF so each
+  probe hits the index.
   Returns [total-matches nanoseconds]."
   [kb ctx subjects]
   (binding [lc/*enabled* false]
@@ -359,8 +359,8 @@
   "A KB shaped like the definitional clashes' diet: a deep genl tree with disjointness
   declared between subtrees, individuals each holding `memberships` non-clashing types
   from their own ancestor chain (so every individual is a membership candidate), and `clashes`
-  individuals holding both sides of one declared-disjoint pair (so `arbitrable-violations`
-  reads the argument roots and `matches-hierarchical` records returned-vs-matched)."
+  individuals holding both sides of one declared-disjoint pair (so the disjointness check
+  at the write entry point reads the argument roots and `matches-hierarchical` records returned-vs-matched)."
   [kb {:keys [types branching individuals memberships predicates disjoints clashes]}]
   (let [ctx 'CxBench]
     (v/assert kb (list 'genlCx ctx 'CxCore) 'CxCore {:chain? false})

@@ -259,7 +259,7 @@
   (tu/with-terms [whole_t p_t q_t CxA]
     (let [hg (v/assert kb (list 'genl p_t whole_t) CxA)
           hc (v/assert kb (list 'covering whole_t p_t q_t) CxA)
-          sup #(reads/as-stored-supporters (:index kb) [:genl % whole_t])]
+          sup #(reads/as-stored-supporters-global (:index kb) [:genl % whole_t])]
       (is (= {hg CxA hc CxA} (sup p_t)))
       (is (= {hc CxA} (sup q_t)))
       (is (contains? (reads/as-stored-installed-keys (:index kb) hc) [:genl q_t whole_t]))
@@ -477,28 +477,6 @@
         (v/assert kb (list 'not (list blk poodle)) CxE {:strength :monotonic})
         (is (= [[true true true] [false false false] [true true true]] (read)))))))
 
-(tu/deftest-kb a-defeat-retires-only-the-scoped-closures-that-cross-its-edge
-  ;; A standing defeat of (genl s_t t_t) keeps the `genl` filter on.  A defeat of
-  ;; (genl x_t y_t) in CxP retires the closure of x_t's spec w_t read at CxR below CxP,
-  ;; which crosses the edge, and keeps the closure of a_t read there and the closure of
-  ;; w_t read at CxQ beside CxP, as the same set objects.
-  (tu/with-terms [s_t t_t x_t y_t w_t a_t b_t CxP CxQ CxR]
-    (let [M {:strength :monotonic}]
-      (doseq [[c up] [[CxP 'CxUniverse] [CxQ 'CxUniverse] [CxR CxP]]]
-        (v/assert kb (list 'genlCx c up) 'CxUniverse M))
-      (v/assert kb (list 'genl s_t t_t) 'CxUniverse)
-      (v/assert kb (list 'not (list 'genl s_t t_t)) 'CxUniverse M)
-      (doseq [[sub super] [[x_t y_t] [w_t x_t] [a_t b_t]]]
-        (v/assert kb (list 'genl sub super) 'CxUniverse))
-      (let [before [(v/genls kb w_t CxR) (v/genls kb a_t CxR) (v/genls kb w_t CxQ)]]
-        (is (contains? (first before) y_t))
-        (v/assert kb (list 'not (list 'genl x_t y_t)) CxP M)
-        (let [after [(v/genls kb w_t CxR) (v/genls kb a_t CxR) (v/genls kb w_t CxQ)]]
-          (is (not (contains? (first after) y_t)) "the crossing closure below CxP is retired")
-          (is (contains? (nth after 2) y_t) "CxQ does not see the defeat")
-          (is (= [false true true] (mapv identical? before after))
-              "the closures the defeat cannot move are kept"))))))
-
 (defn- memo-against-fresh
   "Each step `[tag memo fresh]` at which `(read tx)` over the live taxonomy differs from
   the same read over a detached copy, whose memo is empty, under either reading."
@@ -586,3 +564,54 @@
           (testing (vec order)
             (is (= [] (into [] (mapcat second) steps)))
             (is (= [true false] (mapv #(nth % 2) (take-last 2 steps))))))))))
+
+(tu/deftest-kb a-member-s-denial-leaves-a-default-type-edge-believed
+  ;; A stated type `genl` edge loses only in a nogood it is a member of (docs/nmtms.md),
+  ;; and a denial of one member's supertype membership is not one: the edge and the other
+  ;; members' supertype memberships stay.  A per-member default is a rule (below).
+  (tu/with-terms [organism mortal Bob Jelly]
+    (v/assert kb (list 'genl organism mortal) 'CxUniverse)
+    (doseq [x [Bob Jelly]] (v/assert kb (list organism x) 'CxUniverse))
+    (v/assert kb (list 'not (list mortal Jelly)) 'CxUniverse {:strength :monotonic})
+    (is (v/genl? kb organism mortal 'CxUniverse))
+    (is (v/isa? kb Bob mortal 'CxUniverse))))
+
+(defn- default-back-rule
+  "`(organism ?x) ⇒ (mortal ?x)` as a forward default rule."
+  [organism mortal]
+  (list 'set/defaultRule
+        (list 'set/forwardRule (list 'implies (list 'and (list organism '?x)) (list mortal '?x)))))
+
+(tu/deftest-kb a-default-rule-back-along-a-genl-edge-holds-for-each-member-but-the-denied-one
+  ;; `(genl mortal organism)` and a default rule back from organism to mortal state two
+  ;; types that coincide by default.  Each firing is defeasible on its own, so a denial of
+  ;; one member's conclusion defeats that firing alone and the member keeps its type.
+  (doseq [order (take-nth 4 (orders [:edge :rule :members :deny]))]
+    (tu/with-terms [organism mortal Bob Jelly]
+      (let [parts {:edge    #(v/assert kb (list 'genl mortal organism) 'CxUniverse
+                                       {:strength :monotonic})
+                   :rule    #(v/assert kb (default-back-rule organism mortal) 'CxUniverse)
+                   :members #(doseq [x [Bob Jelly]] (v/assert kb (list organism x) 'CxUniverse))
+                   :deny    #(v/assert kb (list 'not (list mortal Jelly)) 'CxUniverse
+                                       {:strength :monotonic})}]
+        (doseq [p order] ((get parts p)))
+        (testing (vec order)
+          (is (= [true false true]
+                 (mapv #(v/ask? kb % 'CxUniverse)
+                       [(list mortal Bob) (list mortal Jelly) (list organism Jelly)])))
+          (is (empty? (v/conflicts kb)))
+          (is (empty? (v/contradictions kb))))))))
+
+(tu/deftest-kb a-context-excepting-the-default-rule-reads-the-two-types-apart
+  ;; Two types coextensive by default in one context and not in another: the rule holds
+  ;; where its context is seen, and an `except` of it in a context below hides the firing
+  ;; there.  A context that does not see the rule's context never reads the firing.
+  (tu/with-terms [organism mortal Bob CxBiology CxTotoro CxOther]
+    (doseq [[sub super] [[CxBiology 'CxUniverse] [CxTotoro CxBiology] [CxOther 'CxUniverse]]]
+      (v/assert kb (list 'genlCx sub super) 'CxUniverse))
+    (v/assert kb (list 'genl mortal organism) 'CxUniverse {:strength :monotonic})
+    (let [rh (v/assert kb (default-back-rule organism mortal) CxBiology)]
+      (v/assert kb (list 'except (list 'sentexHandle rh)) CxTotoro)
+      (v/assert kb (list organism Bob) 'CxUniverse)
+      (is (= [true false false]
+             (mapv #(v/ask? kb (list mortal Bob) %) [CxBiology CxTotoro CxOther]))))))

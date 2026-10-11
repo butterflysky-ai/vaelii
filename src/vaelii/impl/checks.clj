@@ -90,18 +90,12 @@
   materialized on, checked like any symbol — so a compound seen here is one that is never
   minted, and its function's declaration is the only thing the KB can know about it.
 
-  A boolean is tested before a symbol only because `false` and `nil` are the two values
-  a `cond` arm can be written to fall through by accident; the order is otherwise free."
+  A literal value's kind is `provers/literal-value-kind`'s, the table `EvaluableProver`
+  answers a value-kind membership from, so the argument checks and the prover read one
+  classification.  A symbol is the one kind added here."
   [x]
-  (cond
-    (string? x)                              'string
-    (boolean? x)                             'boolean
-    (integer? x)                             'integer
-    (number? x)                              'number
-    (keyword? x)                             'keyword
-    (char? x)                                'character
-    (and (symbol? x) (not (sx/variable? x))) 'symbol
-    :else                                    nil))
+  (or (provers/literal-value-kind x)
+      (when (and (symbol? x) (not (sx/variable? x))) 'symbol)))
 
 (defn- value-kinds
   "The most specific built-in types known from a value.
@@ -144,6 +138,7 @@
     genlArg     (genlArg ?n ?type)
     quotedArg   (quotedArg ?n ?type)
     interArg (interArg ?n ?type ?m ?utype)
+    argArg   (argArg ?n ?m)
     args           (args ?type)
     argsGenl        (argsGenl ?type)
     argAndRest      (argAndRest ?start ?type)
@@ -195,7 +190,16 @@
         (if-some [ds (get @cache kind)]
           ds
           (let [[f & tail] (declaration-queries kind)
-                ds         (when (symbol? pred)
+                ds         (cond
+                             (not (symbol? pred)) nil
+                             ;; written of a function, a `resultArg` binds the
+                             ;; `termOfUnit` facts naming its applications
+                             ;; (`result-arg-rows`)
+                             (= 'resultArg kind)
+                             (when (and (= 'termOfUnit pred)
+                                        (pos? (reads/stored-count-with-functor (:index kb) 'resultArg)))
+                               (into [] (res/matches-visible kb '(resultArg ?f ?n) context)))
+                             :else
                              (into []
                                    (mapcat #(res/matches-visible kb (list* f % tail) context))
                                    (res/constraining-predicates kb kind pred context)))]
@@ -215,6 +219,53 @@
   once (`declaration-reader`)."
   [decls functor]
   (decls ::stored? functor))
+
+(defn- arg-at
+  "The argument sitting at one-based `position` of the argument vector `as`, or nil when
+  the position is not one the sentence has.  The bounds test the argument constraints all
+  need before they can say anything about a position a declaration names."
+  [as position]
+  (when (and (integer? position) (<= 1 position (count as)))
+    (nth as (dec position))))
+
+(defn- arg-arg-rows
+  "The `(argArg pred n m)` declarations `decls` reads, as `arg` rows over the argument
+  vector `as` of one sentence: `[handle {?n n ?type t ?m m} sentex]`, `t` being the
+  sentence's argument `m`.  The shape `(decls 'arg)` yields, so the conviction, the
+  entailment and the late sweep read an `argArg` exactly as the `arg` it amounts to for
+  that sentence, and its support is the `argArg` declaration.  A position the sentence
+  lacks, or a non-symbol there, names no type and yields no row.  Read like `arg`, with no
+  functor-count gate: `(decls 'argArg)` reads only the predicates the taxonomy marks as
+  declaring one (`res/constraining-predicates`), which costs no index read on a predicate
+  no `argArg` names."
+  [decls as]
+  (for [[h b sx] (decls 'argArg)
+        :let  [m (get b '?m)
+               t (arg-at as m)]
+        :when (and (symbol? t) (not (sx/variable? t)))]
+    [h {'?n (get b '?n) '?type t '?m m} sx]))
+
+(defn- result-arg-rows
+  "The `(resultArg F n)` declarations `decls` reads, as `arg` rows over the `termOfUnit`
+  fact `sentence`, `(termOfUnit K E)` with `E` an application of `F`: `[handle {?n 1
+  ?type t} sentex]`, `t` being `E`'s argument `n`, so the rows type the constant `K` as an
+  `arg` at position 1 types it.  A position `E` lacks, or a non-symbol there, names no
+  type and yields no row."
+  [decls sentence]
+  (let [e (nth sentence 2 nil)]
+    (when (and (= 'termOfUnit (nm/functor sentence)) (sequential? e) (symbol? (first e)))
+      (let [as (vec (rest e))]
+        (for [[h b sx] (decls 'resultArg)
+              :when (= (first e) (get b '?f))
+              :let  [t (arg-at as (get b '?n))]
+              :when (and (symbol? t) (not (sx/variable? t)))]
+          [h {'?n 1 '?type t} sx])))))
+
+(defn- arg-rows
+  "Every `arg` row binding one sentence with argument vector `as`: the `arg`
+  declarations, then the `argArg` ones read over `as` (`arg-arg-rows`)."
+  [decls as]
+  (into (vec (decls 'arg)) (arg-arg-rows decls as)))
 
 (defn- declared-of
   "The predicate a declaration match is *about* — its first argument, which is `pred`
@@ -243,14 +294,6 @@
   (str (if (= via pred) "is declared with " "takes ")
        n " argument" (when (not= 1 n) "s")
        (when-not (= via pred) (str " through " via))))
-
-(defn- arg-at
-  "The argument sitting at one-based `position` of the argument vector `as`, or nil when
-  the position is not one the sentence has.  The bounds test the argument constraints all
-  need before they can say anything about a position a declaration names."
-  [as position]
-  (when (and (integer? position) (<= 1 position (count as)))
-    (nth as (dec position))))
 
 (defn- in-content-order
   "Declaration matches sorted by the stored declaration's own sentence — the order
@@ -447,13 +490,16 @@
 
   Behind `nat/any-result-declarations?` — two O(1) functor counts, reached only for a
   compound sitting at a position some declaration constrains, so a KB that has written no
-  result declaration pays nothing for this and one that has pays two integer reads."
+  result declaration pays nothing for this and one that has pays two integer reads.
+
+  The `quoting_function` mark is read unscoped: whether an argument is a mention is a
+  fact about the sentence (`tax/mention-marks`)."
   [kb declared pred x t context]
   (when (and (symbol? t) (application-term? x)
              (not (contains? nat/nat-quoting-predicates pred))
              (nat/any-result-declarations? kb))
     (let [tax (reasoning/taxonomy kb)
-          rs  (vec (declared kb (first x) context))]
+          rs  (vec (declared kb x context))]
       (when (and (not (tax/quoting-function? tax pred))
                  (not-any? #(tax/genl? tax % t context) rs))
         (nm/min-by-content-key identity (filterv #(tax/genl? tax % 'thing context) rs))))))
@@ -491,7 +537,10 @@
   argument, one the taxonomy separates from `t` is the clash, and any other admits it,
   since the entailment would mint `t` there.  The consequences of minting `(t K)` past that
   one membership are not read.  A quoting predicate's or quoting function's argument is a
-  mention, which `convicting-result-type` leaves alone for the same reason, so nil."
+  mention, which `convicting-result-type` leaves alone for the same reason, so nil.
+
+  The `quoting_function` mark is read unscoped: whether an argument is a mention is a
+  fact about the sentence (`tax/mention-marks`)."
   [kb tax pred x t context]
   (when (and *entry-mints?*
              *assertive-arg-types?*
@@ -499,7 +548,7 @@
              (not (tax/quoting-function? tax pred))
              (nat/reifiable-ground-nat? kb x)
              (mintable-type? tax t))
-    (let [rs (vec (nat/result-types kb (first x)))]
+    (let [rs (vec (nat/result-types kb x))]
       (if (some #(tax/genl? tax % t context) rs)
         ::admitted
         (let [dj? (tax/disjointness-test tax t context)]
@@ -551,7 +600,7 @@
         tax  (reasoning/taxonomy kb)]
     (when (symbol? pred)
       (first
-       (for [m     (in-content-order (decls 'arg))
+       (for [m     (in-content-order (arg-rows decls as))
              :let  [b     (nth m 1)
                     n     (get b '?n)
                     t     (get b '?type)
@@ -577,7 +626,9 @@
             ;; for every term that could already be convicted here
             :message (str "arg constraint: " (pr-str arg) " must be a " t
                           (when r (str " — " (first arg) " results in a " r))
-                          " (arg " n " of " pred (via-clause (declared-of m) pred) ")")}))))))
+                          " (arg " n " of " pred
+                          (when-let [tp (get b '?m)] (str ", the type its arg " tp " names"))
+                          (via-clause (declared-of m) pred) ")")}))))))
 
 (defn- inter-args-problem
   "First `(interArg pred n T m U)` violation for a sentence, or nil.
@@ -1014,15 +1065,9 @@
   [decls]
   (into #{} (map #(get (nth % 1) '?n)) (decls 'quotedArg)))
 
-(def ^:private formula-functors
-  "The frames whose arguments are formulas rather than terms — a `(not (P …))` reaches the
-  checks whole when the negation is genuine (`checked-sentence`), and its argument is a
-  sentence about `P`, not an application of it."
-  '#{not and or implies exceptWhen thereExists forAll ist unknown})
-
 (defn- formula-head?
   "Does the compound `x`, written in an argument position, have a head the KB knows as a
-  predicate — is it an `atomic_formula`, the other half of `relation_application`
+  predicate — is it a `predication`, the other half of `non_atomic_expression`
   (CxCore), rather than a function applied to terms?  A formula written as an argument is
   a sentence about its predicate's tuples, which that predicate's declarations do not
   type from here.  A head the KB has not classified is read as a function: its
@@ -1061,12 +1106,15 @@
 
   One declaration reader per application, built on reaching it, so a sentence with no
   compound argument reads nothing: `application-term?` over its arguments is the whole
-  cost."
+  cost.
+
+  The `quoting_function` mark is read unscoped: whether an argument is a mention is a
+  fact about the sentence (`tax/mention-marks`)."
   [kb sentence context types decls]
   (let [pred (nm/functor sentence)
         as   (nm/args sentence)]
     (when (and (symbol? pred)
-               (not (contains? formula-functors pred))
+               (not (contains? provers/formula-heads pred))
                (some application-term? as)
                (not (contains? nat/nat-quoting-predicates pred))
                (not (tax/quoting-function? (reasoning/taxonomy kb) pred)))
@@ -1074,7 +1122,7 @@
         (first
          (for [[n x] (map-indexed (fn [i a] [(inc i) a]) as)
                :when (and (application-term? x)
-                          (not (contains? formula-functors (first x)))
+                          (not (contains? provers/formula-heads (first x)))
                           (not (contains? mentioned n)))
                :let  [ds (declaration-reader kb (first x) context (decls ::counts nil))
                       p  (or (args-problem kb x context types ds)
@@ -1140,7 +1188,8 @@
   `first` over the roster is exact wherever CxCore is loaded: `(disjoint unary binary)`
   and its two peers separate the relation-wide three and the six kind specializations
   inherit that separation through their `genl` edges, so a relation reaches one number
-  however many of the nine spellings its closure holds."
+  however many of the nine spellings its closure holds.  The believed reading, through
+  any believed edge, not the arity nogood's (docs/taxonomy.md, \"Arity\")."
   [types pred]
   (let [cs (types pred)]
     (first (for [[t n] tax/exact-arity-classes
@@ -1158,7 +1207,8 @@
 
 (defn- own-arity
   "The arity `pred` **itself** is declared with, visible from `context`, or nil when the
-  KB has never said.  Both spellings, the table first because it is a map read."
+  KB has never said.  Both spellings, the table first because it is a map read, in the
+  believed reading (docs/taxonomy.md, \"Arity\")."
   [kb pred context types]
   (or (tabled-arity kb pred context)
       (membered-arity types pred)))
@@ -1287,11 +1337,11 @@
   than with a sentence it constrains — two ways one can contradict what the KB already
   says about the predicate it is about:
 
-  * a position the predicate does not have (`arg-position-problem`).  `interArg` names
-    two, and each is checked.
+  * a position the predicate does not have (`arg-position-problem`).  `interArg` and
+    `argArg` name two, and each is checked.
   * a constraint disagreeing with the predicate's own `relation_kind` — `genlArg` on
     an `instance_relation_predicate`, or `arg` on a `type_relation_predicate`.
-    `interArg` reads its types as memberships, so it takes `arg`'s side of that.
+    `interArg` and `argArg` read their types as memberships, so they take `arg`'s side.
 
   **Both constraints on one position is not a problem**, and this is the case worth
   naming because the opposite reads plausible: one asks the argument to be an instance
@@ -1328,6 +1378,15 @@
       (and (= 'interArg f) (= 5 (nm/arity sentence)) (symbol? pred))
       (some-> (or (arg-position-problem kb f pred n context types)
                   (arg-position-problem kb f pred m context types)
+                  (when (seq (res/matches-visible kb (list 'type_relation_predicate pred) context))
+                    {:type :arg-constraint-kind :predicate pred
+                     :message (str pred " is declared type_relation_predicate, so its"
+                                   " arguments are constrained with genlArg, not " f)}))
+              (assoc :sentence sentence))
+
+      (and (= 'argArg f) (= 3 (nm/arity sentence)) (symbol? pred))
+      (some-> (or (arg-position-problem kb f pred n context types)
+                  (arg-position-problem kb f pred (nth sentence 3) context types)
                   (when (seq (res/matches-visible kb (list 'type_relation_predicate pred) context))
                     {:type :arg-constraint-kind :predicate pred
                      :message (str pred " is declared type_relation_predicate, so its"
@@ -1398,6 +1457,19 @@
   [v]
   (boolean (and v (not (arbitrable? v)))))
 
+(def ^:dynamic *refuse-clashes?*
+  "Does the write entry point refuse an arbitrable clash as well?  False by default, where
+  `refuses-assert?` decides.  `vaelii.core/try-assert` binds it true, and
+  `constraint-checks` then refuses every violation the sentence or one of its
+  argument-type mints forms (docs/api.md, \"Refusing a clash\")."
+  false)
+
+(defn- entry-refuses?
+  "Does violation `v` refuse its sentence at the write entry point under
+  `*refuse-clashes?*`?"
+  [v]
+  (if *refuse-clashes?* (some? v) (refuses-assert? v)))
+
 (defn- membership-handles-led
   "`membership-handles`' small side: lead from `x`'s own argument-1 postings (a handful)
   and test each up via `genl?` (t'' ⊑ t ⟺ t'' ∈ specs(t), see `kb/memberships`),
@@ -1441,17 +1513,16 @@
                   (kept (sequence (comp (distinct) (keep cand) said)
                                   (reads/as-stored-at-path (:index kb)
                                                            (sx/path (sx/sentex target '?c))))))
-        cands  (delay (into [] (keep cand) (reads/as-stored-with-arg (:index kb) 1 x)))
+        cands  (delay (into [] (keep cand) (reads/as-stored-with-arg-global (:index kb) 1 x)))
         exact  (if (seq by-path) by-path (kept (sequence said @cands)))]
     (handle-namings
      (if (seq exact)
        exact
        (kept (keep (fn [s]
                      (let [t'' (nm/functor (:sentence s))]
-                       ;; a walk memoized per pass, not the closure: every type `x`
-                       ;; holds is tested, and a closure read builds the supertype
-                       ;; closure of each; a plain walk repeats per instance sharing t''
-                       (when (or (= t'' t) (tax/genl?-per-pass tax t'' t context))
+                       ;; a walk, not the closure: every type `x` holds is tested, and a
+                       ;; closure read builds the supertype closure of each
+                       (when (or (= t'' t) (tax/genl? tax t'' t context))
                          [(:id s) nil s])))
                    @cands)))
      target)))
@@ -1586,10 +1657,19 @@
                   ;; every part *but this one*: on the refusal path the sentence under
                   ;; assertion is not stored yet and holds by assumption, and on the
                   ;; settle path it is stored and would answer here anyway.
+                  ;; A part the membership `(t x)` puts `x` in (`t` or a supertype of
+                  ;; it) is denied only by a stored negation.  A closed extent's
+                  ;; negation as failure is withdrawn when a member arrives, and the
+                  ;; membership under assertion is that member, so reading the denial
+                  ;; before it is stored would make the arrival order decide.
                   :when (every? (fn [p]
                                   (or (= p part)
-                                      (provers/conjunction-derivable?
-                                       kb [(list 'not (list p x))] {} context)))
+                                      (if (and (nil? part)
+                                               (or (= p (nm/functor lit))
+                                                   (tax/genl? tax (nm/functor lit) p context)))
+                                        (seq (negation-handles kb p x context))
+                                        (provers/conjunction-derivable?
+                                         kb [(list 'not (list p x))] {} context))))
                                 parts)]
               {:type :cover :sentence sentence :types (vec (cons whole parts))
                ;; The membership and the other negations, and **not** the declaration
@@ -1780,7 +1860,7 @@
   claim stated at another tuple reaches `converse` by preservation, and carries the
   reading's handles as `::via` and as `:class` the weakest defeat class of the claim and
   those handles, the reading `discovery/preserving-nogoods` weighs.  With no reading, `c`
-  carries no `::via`, so `arbitrable-violations` keeps the pair."
+  carries no `::via`, and the violation names the claim's own handle alone."
   [kb converse c context]
   (if-let [via (when (not= (:tuple c) (vec (nm/args converse)))
                  (some-> (inherit/claim-reading kb converse c context) vec))]
@@ -1971,8 +2051,8 @@
   [kb a b]
   (let [idx  (:index kb)
         wide Long/MAX_VALUE
-        out  (if (symbol? a) (reads/stored-count-with-arg idx 1 a) wide)
-        in   (if (symbol? b) (reads/stored-count-with-arg idx 2 b) wide)]
+        out  (if (symbol? a) (reads/stored-count-with-arg-global idx 1 a) wide)
+        in   (if (symbol? b) (reads/stored-count-with-arg-global idx 2 b) wide)]
     (<= out in)))
 
 (defn- chain-triples
@@ -2170,7 +2250,10 @@
   so a `(not (not (dog Muffet)))` is still arg/disjoint/functional-checked and a genuine
   negation is not.  A literal whose functor is `symmetric` or declares a commuting group
   is read in the argument order `res/kb-sentex` stores it in, so each argument meets the
-  declarations at the position it is stored at, whichever spelling was written."
+  declarations at the position it is stored at, whichever spelling was written.
+
+  The marks are read unscoped: the fold decides the stored key, which every reader
+  shares."
   [kb sentence]
   (let [body (or (sx/positive-body sentence) sentence)
         f    (when (sequential? body) (first body))
@@ -2314,6 +2397,21 @@
          :because (entailment-support kb pred d context)
          :position n :kind kind}))))
 
+(defn- result-arg-entailments
+  "The memberships the `(resultArg F n)` declarations visible from `context` draw over the
+  `termOfUnit` fact `sentence` (`result-arg-rows`): `(t K)` for the constant `K`, resting
+  on the declaration and the `genlCx` edges `context` sees it through."
+  [kb sentence context decls]
+  (let [k   (second sentence)
+        tax (reasoning/taxonomy kb)]
+    (when (checkable-term? k)
+      (for [[h b] (result-arg-rows decls sentence)
+            :let  [t (get b '?type)]
+            :when (mintable-type? tax t)]
+        {:assert  (list t k)
+         :because (into [h] (visibility-support kb h context))
+         :position 1 :kind 'resultArg}))))
+
 (defn- inter-arg-entailments
   "The entailments `interArg` draws over `sentence`'s arguments in `context`.
 
@@ -2419,7 +2517,10 @@
   The entailments a fact meets its declarations with read their positions off this on
   every path, so the assert and derivation paths, which reach them before the sentex
   exists, draw the justifications a later declaration or a reload draws.  An unmarked
-  predicate pays two taxonomy reads and no canonicalization."
+  predicate pays two taxonomy reads and no canonicalization.
+
+  The marks are read unscoped: the fold decides the stored key, which every reader
+  shares."
   [kb sentence context]
   (let [tax (reasoning/taxonomy kb)
         f   (nm/functor sentence)]
@@ -2432,10 +2533,12 @@
   "What `sentence`'s visible argument declarations entail about its arguments in
   `context` — a vec of `{:assert <sentence> :because [decl-handle edge-handle …]
   :position n :kind <the declaring functor>}`, empty when they entail nothing.  Every
-  entailing kind is read: `arg`, `genlArg`, `interArg`, the covering forms and the
-  homogeneity forms, from a declaration written in `context` or inherited by it.
+  entailing kind is read: `arg`, `argArg`, `genlArg`, `interArg`, the covering forms,
+  the homogeneity forms and, over a `termOfUnit` fact, `resultArg`, from a declaration
+  written in `context` or inherited by it.
 
-  `(arg parentOf 1 animal)` over `(parentOf Fred Mary)` entails `(animal Fred)`;
+  `(arg parentOf 1 animal)` over `(parentOf Fred Mary)` entails `(animal Fred)`, and
+  `(argArg holdsOf 1 2)` over `(holdsOf Rex dog)` entails `(dog Rex)`;
   `(genlArg partType 1 tangible)` over `(partType wheel_kind axle_kind)` entails
   `(genl wheel_kind tangible)`; `(interArg eats 1 carnivore 2 meat)` over
   `(eats Rex Chunk)` entails `(meat Chunk)` — but only once `Rex` is known to be a
@@ -2465,6 +2568,15 @@
        (vec (concat (arg-entailments kb sentence context decls 'arg
                                      checkable-term?
                                      (fn [arg t] (list t arg)))
+                    ;; `argArg` is `arg` with the type read off this sentence, so its
+                    ;; rows go through `arg`'s arm under their own kind
+                    (arg-entailments kb sentence context
+                                     (let [as (vec (nm/args sentence))]
+                                       (fn ([k] (if (= k 'argArg) (vec (arg-arg-rows decls as)) []))
+                                         ([op functor] (decls op functor))))
+                                     'argArg checkable-term?
+                                     (fn [arg t] (list t arg)))
+                    (result-arg-entailments kb sentence context decls)
                     (arg-entailments kb sentence context decls 'genlArg
                                      #(and (checkable-term? %) (not (nm/individual? %)))
                                      (fn [arg t] (list 'genl arg t)))
@@ -2472,18 +2584,59 @@
                     (covering-entailments kb sentence context decls)
                     (homogeneity-entailments kb sentence context types decls)))))))
 
+(defn unmintable-named-types
+  "The types the `argArg` declarations visible from `context` name over `sentence`, and the
+  `resultArg` ones over a `termOfUnit` fact, that `mintable?` refuses (`mintable-type?` by
+  default), where the argument they type is one an entailment can be about: the mints a
+  fact owes once those types are in the hierarchy (`special/note-unmintable-fact!`).
+  Empty, with no index read, when no `argArg` is declared of `sentence`'s predicate or a
+  super-predicate of it and `sentence` is no `termOfUnit` fact: the taxonomy marks the
+  subject of each `argArg` (`tax/arg-declaration-props`), and this runs on every new fact.
+
+  The gate reads the marks unscoped, a superset; `declaration-reader` then reads the
+  declarations from `context`."
+  ([kb sentence context]
+   (unmintable-named-types kb sentence context
+                           (partial mintable-type? (reasoning/taxonomy kb))))
+  ([kb sentence context mintable?]
+   (let [pred (nm/functor sentence)
+         aa?  (and (symbol? pred)
+                   (seq (tax/props-over (reasoning/taxonomy kb)
+                                        (tax/arg-declaration-props 'argArg) pred)))
+         ra?  (= 'termOfUnit pred)]
+     (when (and *assertive-arg-types?* (or aa? ra?))
+       (let [as    (vec (nm/args sentence))
+             decls (declaration-reader kb pred context)]
+         (into []
+               (comp (keep (fn [[_ b _]]
+                             (let [a (arg-at as (get b '?n))
+                                   t (get b '?type)]
+                               (when (and a (checkable-term? a) (not (mintable? t))) t))))
+                     (distinct))
+               (concat (when aa? (arg-arg-rows decls as))
+                       (when ra? (result-arg-rows decls sentence)))))))))
+
 (defn declaration-entailments
   "`constraint-entailments` narrowed to the declaration stored at `dh`: the entries whose
   `:because` leads with `dh`, drawn from that declaration's match alone.  Every arm draws
   one entry per match, so the other declarations on the predicate are not read, and their
-  types are not asked `mintable-type?` once per fact of a sweep over `dh`'s extent."
-  [kb sentence context dh]
-  (let [kind  (nm/functor (:sentence (p/get-sentex (:records kb) dh)))
-        decls (declaration-reader kb (nm/functor sentence) context)]
-    (constraint-entailments kb sentence context (kb/membership-reader kb context)
-                            (fn
-                              ([k] (if (= k kind) (filterv #(= dh (nth % 0)) (decls k)) []))
-                              ([op functor] (decls op functor))))))
+  types are not asked `mintable-type?` once per fact of a sweep over `dh`'s extent.
+
+  With `src`, the handle of the fact stored in a context `context` sees, each `:because`
+  also names the `genlCx` edges `context` sees the fact through (`visibility-support`):
+  the entailments placed below the fact's own context (`special/pair-placements`)."
+  ([kb sentence context dh] (declaration-entailments kb sentence context dh nil))
+  ([kb sentence context dh src]
+   (let [kind  (nm/functor (:sentence (p/get-sentex (:records kb) dh)))
+         decls (declaration-reader kb (nm/functor sentence) context)
+         ents  (constraint-entailments kb sentence context (kb/membership-reader kb context)
+                                       (fn
+                                         ([k] (if (= k kind) (filterv #(= dh (nth % 0)) (decls k)) []))
+                                         ([op functor] (decls op functor))))
+         seen  (when (and src (seq ents)) (visibility-support kb src context))]
+     (if (seq seen)
+       (mapv (fn [e] (update e :because #(into % (remove (set %)) seen))) ents)
+       ents))))
 
 (def ^:dynamic *prune-subsumed-mints?*
   "Does a minted type give way to a more specific one the KB believes?  With this on,
@@ -2617,6 +2770,28 @@
                  (into mints fresh)))
         {:mints mints :readers readers}))))
 
+(defn- write-clash
+  "The first disjointness clash between two memberships of one write — `sentence` and
+  the `mints` its cascade draws — as a violation naming the other member in
+  `:clashes-with`, or nil.  Neither member is stored when the entry point asks, so no
+  stored-content reader finds the pair; `try-assert` asks this (`*refuse-clashes?*`)."
+  [kb sentence context mints]
+  (let [tax (reasoning/taxonomy kb)
+        ms  (filterv #(and (= 1 (nm/arity %)) (symbol? (nm/functor %))
+                           (not= 'not (nm/functor %)))
+                     (cons sentence mints))]
+    (first
+     (for [a ms
+           :let [disjoint? (tax/separation-test tax (nm/functor a) context)]
+           :when disjoint?
+           b ms
+           :when (and (not= a b) (= (nm/args a) (nm/args b)) (disjoint? (nm/functor b)))]
+       {:type :disjoint :sentence b :types [(nm/functor b) (nm/functor a)]
+        :entailed-from sentence
+        :clashes-with [{:sentence a :context context}]
+        :message (str "arg constraint: " (nm/print-key sentence) " entails "
+                      (nm/print-key b) ", disjoint from " (nm/print-key a))}))))
+
 (defn- entailment-check
   "The entailment reading's half of the entry point check:
   `{:entailments [{:assert …} …] :refusal v}` — what `sentence`'s argument declarations
@@ -2664,20 +2839,44 @@
         (let [{:keys [mints readers]} (entailment-cascade kb sentence context types decls seed)]
           {:entailments seed
            :refusal
-           (first
-            (keep (fn [m]
-                    (when-let [p (constraint-problem kb m context types
-                                                     (get readers (nm/functor m))
-                                                     refuses-assert?)]
-                      (assoc p :entailed-from sentence
-                             :message (str "arg constraint: " (nm/print-key sentence)
-                                           " entails " (nm/print-key m)
-                                           ", which cannot be admitted — " (:message p)))))
-                  mints))})))))
+           (or (first
+                (keep (fn [m]
+                        (when-let [p (constraint-problem kb m context types
+                                                         (get readers (nm/functor m))
+                                                         entry-refuses?)]
+                          (assoc p :entailed-from sentence
+                                 :message (str "arg constraint: " (nm/print-key sentence)
+                                               " entails " (nm/print-key m)
+                                               ", which cannot be admitted — " (:message p)))))
+                      mints))
+               (when *refuse-clashes?* (write-clash kb sentence context mints)))})))))
+
+(defn- refusal
+  "The ex-info `constraint-checks` throws for violation `v`: `v` under its own `:type`,
+  or, for a clash that only `*refuse-clashes?*` refuses, `:definitional-clash` with the
+  clash kind in `:violation`, each other member in `:clashes-with`, as `{:handle
+  :sentence :context}` when it is stored and without `:handle` when it is part of the
+  write (`write-clash`), and the kind's own keys in `:detail`."
+  [kb v]
+  (if (or (arbitrable? v) (contains? v :clashes-with))
+    (ex-info (str "definitional clash: " (:message v))
+             {:type          :definitional-clash
+              :violation     (:type v)
+              :sentence      (:sentence v)
+              :entailed-from (:entailed-from v)
+              :clashes-with  (into (vec (:clashes-with v))
+                                   (map (fn [h]
+                                          (let [s (p/get-sentex (:records kb) h)]
+                                            {:handle h :sentence (sx/sentence-of s)
+                                             :context (:context s)})))
+                                   (opposing-handles v))
+              :detail        (dissoc v :message :sentence :entailed-from :clashes-with
+                                     :opposing-handle :opposing-handles :type)})
+    (ex-info (:message v) (dissoc v :message))))
 
 (defn constraint-checks
   "Throw the first definitional violation that `refuses-assert?`, as typed ex-info — the
-  assert path.
+  assert path.  Under `*refuse-clashes?*`, the first violation of any kind (`refusal`).
 
   A violation naming the other believed members of its nogood does not refuse: the
   sentence is stored and `settle` decides the nogood, whatever the members' classes.  An
@@ -2699,12 +2898,12 @@
   (let [chk   (checked-sentence kb sentence)
         types (kb/membership-reader kb context)
         decls (declaration-reader kb (nm/functor chk) context)]
-    (if-let [p (constraint-problem kb chk context types decls refuses-assert?)]
-      (throw (ex-info (:message p) (dissoc p :message)))
-      (let [{:keys [entailments refusal]} (entailment-check kb chk context types decls)]
-        (if refusal
-          (throw (ex-info (:message refusal) (dissoc refusal :message)))
-          entailments)))))
+    (if-let [p (constraint-problem kb chk context types decls entry-refuses?)]
+      (throw (refusal kb p))
+      (let [ec (entailment-check kb chk context types decls)]
+        (if-let [p (:refusal ec)]
+          (throw (refusal kb p))
+          (:entailments ec))))))
 
 (defn check-application-inputs
   "Throw the first violation of a function's argument declarations inside `sentence` in
@@ -2817,8 +3016,8 @@
   with its predicate's `relation_kind`, and an arity arriving is not what makes that true,
   so asking it here would report a second finding under the first one's trigger.
 
-  Both of `interArg`'s positions are asked, as at the entry point, and the first that
-  convicts is the answer.
+  Both of `interArg`'s and `argArg`'s positions are asked, as at the entry point, and the
+  first that convicts is the answer.
 
   Through `checked-sentence`, like the entry point: a doubly negated
   declaration is a declaration and is read as one, and a genuinely negative sentence keeps
@@ -2838,37 +3037,22 @@
                      (arg-position-problem kb f pred m context types))
                  (assoc :sentence chk))
 
+         (and (= 'argArg f) (= 3 (nm/arity chk)))
+         (some-> (or (arg-position-problem kb f pred n context types)
+                     (arg-position-problem kb f pred (nth chk 3) context types))
+                 (assoc :sentence chk))
+
          (and (contains? arg-constraint-kinds f) (= 3 (nm/arity chk)))
          (some-> (arg-position-problem kb f pred n context types)
                  (assoc :sentence chk)))))))
 
-(defn arbitrable-violations
-  "**Every** disjointness and cover clash `sentence` forms against believed content
-  visible from `context` — the nogood half of the membership checks, read by `settle`'s
-  discovery.  Empty when the sentence forms none.  The tuple marks' nogoods are found
-  from a candidate index instead (`vaelii.impl.decide`).
-
-  Asked of a sentence that is itself **stored and believed**, which is what the
-  discovery walks: the clashes it reports are with the *other* members of each nogood,
-  since a term's own type is not disjoint from itself.
-
-  Plural: a term holding three mutually disjoint types forms three pairs, and stopping at
-  the first would report a set of pairs that depended on the order the argument root
-  handed the memberships back, which is arrival order.  `context` is the asker; a caller
-  asking a stored sentex's question from a vantage passes the vantage."
-  [kb sentence context]
-  (let [chk   (checked-sentence kb sentence)
-        types (kb/membership-reader kb context)]
-    (->> (concat (disjoint-problems kb chk context types)
-                 (cover-refutations kb chk context))
-         (filter arbitrable?))))
-
 (defn check-sentex-ground
   "`check-ground` over `s`, the sentex already built from `sentence` in `context`: throw
-  `:not-ground` when `s` is not a rule and still holds a pattern variable, unless
-  `sentence` is a schematic equation or a `defn*` definition."
+  `:not-ground` when `s` is not a rule and has a free variable, unless `sentence` is a
+  schematic equation or a `defn*` definition.  A variable inside a `(Quote …)` or bound
+  by a quantifier is not free (`sx/closed?`)."
   [s sentence context]
-  (when (and (nil? (:antecedent s)) (not (sx/ground? s))
+  (when (and (nil? (:antecedent s)) (not (sx/closed? s))
              (not (rewrite/schematic-equation? sentence))
              ;; a `defn*` collection definition carries the member variable `?x` in
              ;; its condition argument, the way a schematic equation carries its schema
@@ -2960,15 +3144,25 @@
   [kb sentence]
   (and (sx/negation? sentence) (forced-monotonic? kb (second sentence))))
 
+(defn off-roster-antecedents
+  "The predicates of the stored rule `rule-sentex`'s antecedents that are not
+  `forced-monotonic?` literals, `unknown` antecedents aside, distinct and in antecedent
+  order: the predicates a `(forced_monotonic_predicate P)` declaration puts on the roster
+  for the rule's firings to conclude a roster literal."
+  [kb rule-sentex]
+  (into [] (comp (remove sx/unknown?) (remove #(forced-monotonic? kb %)) (map nm/functor)
+                 (distinct))
+        (:antecedent rule-sentex)))
+
 (defn roster-rule?
   "Is the stored rule `rule-sentex` one whose firings conclude a roster literal as an
-  ordinary belief: not `set/defaultRule`, no `unknown` antecedent, and every antecedent a
-  `forced-monotonic?` literal.  Its `exceptWhen` exceptions are meta-sentexes, which
+  ordinary belief: not `set/defaultRule`, no `unknown` antecedent, and no
+  `off-roster-antecedents`.  Its `exceptWhen` exceptions are meta-sentexes, which
   `forced-conclusion-violation` reads at the firing."
   [kb rule-sentex]
   (let [antes (:antecedent rule-sentex)]
-    (boolean (and (seq antes) (not (:defeasible rule-sentex))
-                  (every? #(and (not (sx/unknown? %)) (forced-monotonic? kb %)) antes)))))
+    (boolean (and (seq antes) (not (:defeasible rule-sentex)) (not-any? sx/unknown? antes)
+                  (empty? (off-roster-antecedents kb rule-sentex))))))
 
 (defn forced-conclusion-violation
   "The `:forced-conclusion` violation of a firing of the rule stored at `rule-handle` that
@@ -2976,20 +3170,26 @@
   concluding a denial of a `forced-monotonic?` literal is convicted, and so is one
   concluding a roster literal unless its rule is a `roster-rule?` with no believed
   `exceptWhen`.  A convicted firing is stored, held void (the `:void` forced set) and
-  reported (docs/nmtms.md, \"The forced-monotonic roster\")."
+  reported, naming the rule's `off-roster-antecedents` (docs/nmtms.md, \"The
+  forced-monotonic roster\")."
   [kb rule-handle conseq]
   (let [neg? (sx/negation? conseq)
         body (if neg? (second conseq) conseq)]
-    (when (and (forced-monotonic? kb body)
-               (or neg?
-                   (let [rsx (p/get-sentex (:records kb) rule-handle)]
-                     (or (nil? rsx) (not (roster-rule? kb rsx))
-                         (seq (provers/rule-exception-entries kb rule-handle))))))
-      {:violation :forced-conclusion
-       :detail    {:message (str (pr-str conseq) " is not concluded: " (nm/functor body)
-                                 " is on the forced-monotonic roster, and a rule concludes a"
-                                 " roster literal only from roster antecedents, with no"
-                                 " unknown, exceptWhen or set/defaultRule")}})))
+    (when (forced-monotonic? kb body)
+      (let [rsx (p/get-sentex (:records kb) rule-handle)]
+        (when (or neg? (nil? rsx) (not (roster-rule? kb rsx))
+                  (seq (provers/rule-exception-entries kb rule-handle)))
+          (let [off (if rsx (off-roster-antecedents kb rsx) [])]
+            {:violation :forced-conclusion
+             :detail    {:off-roster off
+                         :message    (str (pr-str conseq) " is not concluded: " (nm/functor body)
+                                          " is on the forced-monotonic roster, and a rule"
+                                          " concludes a roster literal only from roster"
+                                          " antecedents, with no unknown, exceptWhen or"
+                                          " set/defaultRule"
+                                          (when (seq off)
+                                            (str "; the antecedents off the roster are "
+                                                 (str/join ", " off))))}}))))))
 
 (defn forced-premise?
   "Does a premise mark on the stored sentex `sx` confer `:monotonic` in the labeller (the
@@ -3244,8 +3444,8 @@
 ;; The rule-set half of well-formedness: a rule whose `exceptWhen` exception closes
 ;; a cycle through negation is refused, the way a `genl` cycle is.  The graph itself
 ;; and the search live in `vaelii.impl.wff`; what lives here is reaching the stored
-;; rules, which is the rule index's job — `rules-by-consequent` answers "what could
-;; conclude P?" whatever a rule's direction, so no scan is needed.
+;; rules, which is the rule index's job — `reads/as-stored-rules-by-consequent-in`
+;; answers "what could conclude P?" whatever a rule's direction, so no scan is needed.
 ;;
 ;; **Two things can close a cycle**, because both kinds of edge fan out over the genl
 ;; **spec** closure: a *rule* arriving, and a *taxonomy edge* arriving underneath
@@ -3334,7 +3534,7 @@
   (let [index (:index kb)]
     (cond-> (set (reads/watched-rules index))
       (reads/stored-rule-key? index 'different)
-      (into (reads/as-stored-rules-by-antecedent index 'different)))))
+      (into (reads/as-stored-rules-by-antecedent-global index 'different)))))
 
 (defn- exception-predicates
   "The predicates the exceptWhen exceptions of stored rule `handle` mention — the
@@ -3407,7 +3607,10 @@
   The returned fn memoizes the node per rule handle and the readers per predicate, for as
   long as the caller holds it.  Every caller builds one per check and drops it when the
   check returns, and a check runs before anything is written, so the store cannot change
-  under the memo (docs/exceptions.md, \"The search\")."
+  under the memo (docs/exceptions.md, \"The search\").
+
+  The `closed_extent` mark is read unscoped: the stratification graph is a property of
+  every rule the KB stores (`wff/negation-walk`)."
   ([kb] (stratification-readers kb nil))
   ([kb pending]
    (let [index   (:index kb)
@@ -3426,7 +3629,7 @@
                             :content (filter keep? (keep node (disj (set handles) (:id pending)))))
                      (and pending (keep? pending)) (conj pending)))
          by-pred (java.util.HashMap.)
-         every   (delay (ordered (concat (reads/as-stored-rules-in index :rule nil)
+         every   (delay (ordered (concat (reads/as-stored-rules-in-global index :rule)
                                          (reads/watched-rules index))
                                  some?))]
      (fn
@@ -3437,13 +3640,13 @@
           (let [ante-keys (if (= sx/not-functor g)
                             (cons g (filter vector? (reads/as-stored-rule-keys index)))
                             [g])
-                found     (ordered (concat (mapcat #(reads/as-stored-rules-by-antecedent index %)
+                found     (ordered (concat (mapcat #(reads/as-stored-rules-by-antecedent-global index %)
                                                    ante-keys)
                                            (reads/watched-rules-on index g)
                                            (when (contains? different-negatives g)
-                                             (reads/as-stored-rules-by-antecedent index 'different))
+                                             (reads/as-stored-rules-by-antecedent-global index 'different))
                                            (when (and (symbol? g) (tax/has-prop? tx :closed-extent g))
-                                             (reads/as-stored-rules-by-antecedent index [:not g])))
+                                             (reads/as-stored-rules-by-antecedent-global index [:not g])))
                                    #(reads? % g))]
             (.put by-pred g found)
             found)))))))
@@ -3587,9 +3790,10 @@
 ;;     these verdicts could still move.  With
 ;;     `symbol` on the `quotedArg` side there is no tension to begin with: a symbol is
 ;;     what every term the `arg` side types is written as.
-;;   - `quotedArg` × a type-level position.  A string value serves here, `(genl "Bob"
-;;     thing)` being admitted — `genls-problem` still exempts a value outright, which
-;;     is its own question (a value is never a subtype of anything).
+;;   - `quotedArg` × a type-level position.  Bind a compound again: `wff` refuses a
+;;     value in a `genl` slot, and `genls-problem` reads an application nothing types
+;;     open-world.  `genls-problem` also exempts a value outright, which is its own
+;;     question (a value is never a subtype of anything).
 ;;   - `interArg`.  Its trigger is a *demand*, not a fact.  `(arg P i T)` does not make
 ;;     argument `i` a `T` — an unclassified term satisfies it vacuously — so no rule's
 ;;     own bindings entail the trigger, and a conditional constraint that never provably
@@ -3767,7 +3971,7 @@
    (into []
          (comp (keep (fn [h] (when-let [s (p/get-sentex (:records kb) h)] [h s])))
                (filter (fn [[_ s]] (rules/generator-sentex? s))))
-         (reads/as-stored-rules-by-consequent (:index kb) sx/rule-functor))))
+         (reads/as-stored-rules-by-consequent-global (:index kb) sx/rule-functor))))
 
 (defn- stamped-predicate
   "The predicate a generator eventually concludes — the **innermost** rule's, through
@@ -4056,7 +4260,7 @@
   (when (and (= 'closed_extent_predicate (nm/functor sentence)) (= 2 (count sentence)))
     (let [pred (second sentence)]
       (when-let [[node cycle]
-                 (->> (reads/as-stored-rules-by-antecedent (:index kb) [:not pred])
+                 (->> (reads/as-stored-rules-by-antecedent-global (:index kb) [:not pred])
                       (keep (fn [rh]
                               (when-let [rsx (p/get-sentex (:records kb) rh)]
                                 (when (and (rules/rule? rsx)
@@ -4163,6 +4367,7 @@
 
 (caches/register-derived
  {:id :K8 :label "Storable classes" :kind :cache :keyed-by :value :reads [] :retired-by {}
+  :holds-content? false
   :computed :read :imaged? false :var #'storable-class-cache
   :value (fn [_] storable-class-cache)
   :note "class to whether a value of it can be stored; content-keyed, bounded by the classes seen"})

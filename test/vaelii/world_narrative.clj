@@ -84,8 +84,8 @@
   the fox gets it.  Types first (so the arg checks bind), then the facts."
   '[(agent FoxF) (agent CrowF)
     (goal HasCheese)
-    (action Flatter1)
-    (event CrowSings) (event CheeseFalls) (event FoxGetsCheese)
+    (action Flatter1) (causal_event Flatter1)    ; a cause is causal (arg causes 1 causal)
+    (causal_event CrowSings) (causal_event CheeseFalls) (event FoxGetsCheese)
     (wants FoxF HasCheese)
     (does FoxF Flatter1)
     (causes Flatter1 CrowSings)          ; the causal chain, link by link

@@ -451,7 +451,7 @@
   non-symbol `term`."
   [kb term]
   (when (symbol? term)
-    (into [] (believed-xf kb) (reads/as-stored-with-arg (:index kb) 1 term))))
+    (into [] (believed-xf kb) (reads/as-stored-with-arg-global (:index kb) 1 term))))
 
 (defn believed-memberships
   "The believed positive unary memberships of `x`, as `[type context handle]` triples,
@@ -477,7 +477,10 @@
   common descendant contexts of the first disjointness witness that shares one with `c1`
   and `c2`, kept where the scoped `disjoint?` holds, or nil; it enumerates witnesses only
   after the scoped `disjoint?` at some common descendant of `c1` and `c2` says one exists
-  (docs/contexts.md)."
+  (docs/contexts.md).
+
+  `:disjoint?` reads the declarations unscoped, a superset that `:visible-from`
+  narrows to the contexts where the scoped `disjoint?` holds."
   [tax]
   (let [dj  (volatile! {})
         vis (volatile! {})

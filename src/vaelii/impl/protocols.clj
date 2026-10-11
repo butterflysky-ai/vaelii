@@ -191,14 +191,25 @@
      store can manage.  Returns nil."))
 
 (def var-consequent-key
-  "The `index-rule` consequent slot's catch-all for a rule whose consequent functor is a
-  **variable** — a rule with concrete antecedents concluding `(?p …)`, which
+  "The `rules/index-rule` consequent slot's catch-all for a rule whose consequent functor
+  is a **variable** — a rule with concrete antecedents concluding `(?p …)`, which
   `rules/check-indexable-functors` allows (the antecedent binds `?p`, so a forward firing
   is ground, and the range check guarantees it).  Filed under this one bucket rather than
   the canonical `?var0` no goal can spell, and unioned into every concrete-goal answer by
   `resolution/concluding-rule-handles`.  Written via `rules/consequent-index-pred`; a
   keyword can never collide with a predicate, which is always a symbol."
   :var-pred)
+
+(def every-context
+  "The `ctxs` a family read passes to read every context.  A `family-*` method given nil
+  for `ctxs` throws, so a read past a reader's ancestor set is spelled where a lint can see
+  it (docs/storage.md, \"The family methods\")."
+  ::every-context)
+
+(def any-context
+  "The last token of a `family-apply!` retire's leaf path when the writer does not know the
+  context: the retire takes the handle out of whichever context's leaf holds it."
+  ::any-context)
 
 (defprotocol IndexStore
   "The index store — the count-aware trie, the secondary root indexes, the
@@ -227,45 +238,12 @@
   (leaf-at   [store path]          "Handles stored exactly at `path`'s leaf — an exact read, never a wildcard match.")
   (count-at  [store prefix]        "Sentex count under a path prefix.")
   (children  [store prefix]        "Child tokens registered under an interior prefix.")
-  ;; How *many* children, without building them.  This is the trie's own distinct-value
-  ;; count at a position — what the query planner's cost model divides by
-  ;; (`vaelii.impl.plan`) — and it is asked once per literal per plan, so it must not
-  ;; scale with the KB.  `(count (children …))` does: both implementations materialize
-  ;; the child set to answer `children`, which turns planning a fixed conjunction into
-  ;; work proportional to how many distinct values sit at that position.  Every *storage*
-  ;; backend answers the cardinality without building the members — a set's count, or a
-  ;; node's edge-array span — so the count is its own read rather than a projection of
-  ;; them.  The **fork decorator is the exception, and knowingly**: a key the fork has
-  ;; written under is no longer inherited, so its count is `(count merged-members)` and
-  ;; the base's set is materialized after all (docs/overlay.md).  A fork trades this op
-  ;; for the protocol, on the nodes it writes.
-  (count-children [store prefix]   "How many child tokens sit under an interior prefix.")
   ;; secondary roots — the trie is ordered [pred args… ctx], so it can only narrow
   ;; left-to-right.  These give extent *and* cardinality from the other directions —
-  ;; by context, by functor, and by argument position — without a walk of the trie.
-  ;; Cardinality is one stored count on a base store and the merge above on a fork.
-  (sentexes-in-context   [store context]  "Handles of sentexes asserted in `context`.")
-  (count-in-context      [store context]  "How many sentexes are in `context`.")
+  ;; by functor and by argument position — without a walk of the trie.  Cardinality is
+  ;; one stored count on a base store and the merge above on a fork.
   (sentexes-with-functor [store pred]     "Handles of fact sentexes whose functor is `pred` (any arity, either polarity).")
   (count-with-functor    [store pred]     "How many fact sentexes have functor `pred`.")
-  (sentexes-with-arg     [store pos term] "Handles of fact sentexes with `term` at 1-based argument `pos`.")
-  (count-with-arg        [store pos term] "How many fact sentexes have `term` at `pos`.")
-  ;; ...and the **unary** slice of that read, which is a separate op because the argument
-  ;; root cannot narrow to it: `(T x)` and `(P x y)` share the `[1 x]` node and the trie
-  ;; level below it, so telling them apart meant fetching the record behind every fact at
-  ;; the node and reading its arity.  `kb/types-of` — the retrieval every definitional
-  ;; check bottoms out on — wants exactly the unary ones, so a term at argument 1 of n
-  ;; binary facts cost n record fetches on every assert about it, to find the handful of
-  ;; types it holds.
-  ;;
-  ;; A **superset** is a legal answer, and `(sentexes-with-arg store 1 term)` is the
-  ;; simplest one: the caller filters by arity and by the argument on the records it was
-  ;; going to read anyway, so over-answering costs a posting read and under-answering
-  ;; would lose a membership.  It is an op here rather than an optional protocol beside
-  ;; this one because every index can answer it and no caller branches on whether it
-  ;; does — a capability nothing tests for is not a capability, it is this protocol with
-  ;; a second name.
-  (unary-sentexes-with-arg [store term] "Handles of arity-1 fact sentexes whose lone argument is `term` — a superset is legal; the caller filters it exact.")
   ;; multi-column narrowing: one intersection of every named argument root, so a query
   ;; that knows several terms narrows on all of them at once instead of one column with
   ;; the rest deferred to a post-fetch filter.  `pred` may be nil (a variable-functor
@@ -276,48 +254,13 @@
   ;; context.
   (sentexes-with-args    [store pred pos-terms] [store pred pos-terms contexts]
     "Handles with functor `pred` AND each `[pos term]`, stated in one of `contexts` when it is a set.")
-  ;; rule index: rules are sentexes indexed additionally by their predicates.  Both
-  ;; predicate sets are *complete* — every rule, whatever its direction — so "what
-  ;; could conclude P?" is answerable for a forward-only rule.  A rule whose consequent
-  ;; functor is a variable files its consequent under `var-consequent-key` (above), not
-  ;; under a canonical `?var0`, so "what could conclude P?" for a *concrete* P is the P
-  ;; bucket unioned with that catch-all — see `resolution/concluding-rule-handles`.
-  ;; Direction and defeasibility are NOT mirrored here: they live on the sentex record
-  ;; (the `set/*Rule` wrapper canonicalizes into it), and chaining reads them from there.
-  ;; Both indexes end in the rule's `context`, so a read given `contexts` (a set, or nil
-  ;; for every context) returns only the rules stated in one of them.
-  (index-rule   [store handle ante-preds conseq-pred context] "Register a rule handle, stated in `context`, by its predicates.")
-  (unindex-rule! [store handle ante-preds conseq-pred context] "Deregister a rule handle stated in `context`.")
-  (rules-by-antecedent [store pred] "Handles of rules with an antecedent on pred.")
-  (rules-by-consequent [store pred] [store pred contexts] "Handles of rules concluding pred, stated in one of `contexts` when it is a set.")
-  ;; exception (re-check) index: a rule carrying an `exceptWhen` is posted under every
-  ;; predicate its exception query mentions, and into a roster of all such rules.  It is
-  ;; at *rule* granularity, never per firing — a rule handle is already an antecedent of
-  ;; every justification it licenses, so each conclusion it produced is reachable through
-  ;; the existing consequence links.  It stores **no truth value**: it answers "which
-  ;; rules might need re-checking", never "does the exception hold", so unlike a cached
-  ;; closure it has nothing that can drift from belief.  The predicates are passed in
-  ;; rather than read off the sentex, so the index does not depend on how a rule spells
-  ;; its exception.
-  (index-exception    [store handle preds] "Register a rule handle under each predicate its exception mentions.")
-  (unindex-exception!  [store handle preds] "Deregister a rule handle from its exception predicates.")
-  (rules-with-exception-on [store pred] "Handles of rules whose exception mentions pred.")
-  (exception-rules         [store]      "Handles of every rule carrying an exception.")
-  (exception-rule?         [store handle] "Is `handle` in the exception/watched-rule roster? (O(1) membership — the firing-path gate.)")
   ;; term (inverted) index: every sentex is findable by any term it contains.  The keys
   ;; are `sentex/index-terms` — every *symbol*, at every depth, plus each ground compound
   ;; between `sentex/*min-indexed-depth*` and `sentex/max-indexed-compound`.  So this is
   ;; exact for a symbol and, for a compound outside those bounds, holds only the sentexes
   ;; that nest it deep enough; `kb/find-sentexes` is the exact read for a compound, which
   ;; it gets from the atoms' postings plus a verify against the record.
-  (sentexes-with-term  [store term]  "Handles of sentexes the term index keys by `term`.")
   (sentexes-with-terms [store terms] "Handles of sentexes keyed by all `terms` — one intersection.")
-  ;; the term roster: the *names* the term index is keyed by, held as one set beside the
-  ;; postings so the vocabulary can be listed and counted without walking the records.
-  ;; A name enters when the first sentex mentions it and leaves with the last, derived
-  ;; from the postings themselves, so the roster cannot drift from what is indexed.
-  (terms      [store] "Every symbol term the index is keyed by — the KB's vocabulary, unordered.")
-  (term-count [store] "How many distinct symbol terms the index is keyed by (the roster's own count, no walk).")
   ;; the portable projection.  Every index — the flat-map one, the dense one, the
   ;; columnar one with a native int-token trie — answers this protocol, so the
   ;; `[structured-key value]` entry shape is what they have in *common* rather than what
@@ -329,6 +272,25 @@
   ;; `index-load` is bare, not `!`: it installs derived state into an *empty* index and
   ;; destroys no knowledge.  Loading over a populated one merges rather than replaces,
   ;; so the caller owes the emptiness.
+  ;; the family methods: every family `vaelii.impl.kv/index-families` names, read and
+  ;; written by its tag `f` and a token `path` from the family's root.  In a trie or count
+  ;; trie a node is the path above the context and a leaf the node plus the context; in a
+  ;; flat set the path is the key's tail.  `ctxs` is a set, or `every-context`; nil throws.
+  ;; docs/storage.md, "The family methods", gives each method per shape.
+  (family-count [store f path ctxs]
+    "The node's count with `every-context`, else the summed leaf sizes over its children in `ctxs`.")
+  (family-children [store f path ctxs]
+    "The child tokens under `path`: a set with `every-context`, else a vector of those in `ctxs`.")
+  (family-child-count [store f path] "How many child tokens sit under `path`, with no set built.")
+  (family-leaf [store f path] "The set stored at exactly `path`.")
+  (family-member? [store f path x] "Is `x` in the set at exactly `path`?  No set built.")
+  (family-handles [store f node ctxs]
+    "The union of the leaves under `node` over its children in `ctxs`; one context answers its leaf as stored.")
+  (family-apply! [store ops]
+    "Apply `[:post f leaf-path h]` / `[:retire f leaf-path h]` as one batch equal to the
+     ops applied one at a time in order; reply per op the node's count after it, or nil
+     when it changed nothing.  A count-trie retire's leaf path may end in `any-context`;
+     a flat set's throws `:bad-args`.")
   (index-entries [store]         "Every index entry as a lazy `[key value]` seq — the portable projection.")
   (index-load    [store entries] "Install `[key value]` entries into an empty index, in this store's own representation.")
   (clear-index!        [store]       "Remove every index entry (wipe the store — `reindex` rebuilds)."))

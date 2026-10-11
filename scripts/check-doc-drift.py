@@ -92,20 +92,27 @@ and those files describe the project around it.
       indistinguishable from a sibling that is fine.  The unreleased section only:
       the convention is newer than the released sections, and rewriting those to
       satisfy it is archaeology.
-  E16 A raw `IndexStore` read (`p/sentexes-with-functor`, `p/rules-by-consequent`,
+  E16 A raw `IndexStore` read (`p/sentexes-with-functor`, `p/sentexes-with-args`,
       `p/count-at`, …) anywhere under src/ but the implementers.  The index answers
       what is STORED, and a stored sentex is not a believed one — so every read
       carries a question, and read straight off the protocol nothing says which
       answer the caller wanted: a forgotten belief filter and a deliberate as-stored
       read look identical.  `vaelii.impl.reads` asks it in the name of the read, and
       the roster (`E16_OK_FILES`) is the one place an exception is written down.
-      `RecordStore` is outside the check by design — a record IS the storage.
-  E17 A `tax/…-global` taxonomy read from a `(file, top-level def)` pair not in
-      `E17_ROSTER`.  A read sees what its context sees, and on a KB where no edge is
-      context-restricted the global closure and the scoped one are the same object —
-      so a caller that meant to scope and did not is right on every KB but the one it
-      is wrong on.  The roster records THAT a caller has a reason; the reason itself
-      lives in that definition's own docstring.
+      `RecordStore` is outside the check by design — a record IS the storage.  The
+      `family-*` reads and the trie's `count-at` / `leaf-at` are narrower still:
+      only `reads`, `kv` and `columnar` call them.  A `reads/…-global` entry point
+      (one that passes `p/every-context`) is called only from a `(file, top-level
+      def)` pair on `E16_GLOBAL_ROSTER`, and a `reads` def passing the sentinel is
+      named `…-global`.
+  E17 A `tax/…-global` taxonomy read, or a flat-cache read (`has-prop?`, `inverse-of`,
+      `disjoint?`, …) called with no context, from a `(file, top-level def)` pair not in
+      `E17_ROSTER`; and a roster entry whose definition makes no such read.  A read
+      sees what its context sees, and on a KB where no edge is context-restricted the
+      global closure and the scoped one are the same object — so a caller that meant to
+      scope and did not is right on every KB but the one it is wrong on.  The roster
+      records THAT a caller has a reason; the reason itself lives in that definition's
+      own docstring.
   E18 A `.clj` under src/ that docs/namespaces.md neither glosses in its file map nor
       names in its "Not glossed above" block — or a name in either list that is no
       longer a file, or a count in that section's first sentence that disagrees with
@@ -1182,14 +1189,11 @@ if os.path.exists(changelog):
 # does one behind a `resolve`. Closing that would mean banning the value form, which
 # is the form the planner's injected cost model is built from. The rule catches the
 # read somebody writes without thinking, not the one somebody hides.
-E16_READS = ("lookup", "leaf-at", "count-at", "children", "count-children",
-             "sentexes-in-context", "count-in-context",
-             "sentexes-with-functor", "count-with-functor",
-             "sentexes-with-arg", "count-with-arg", "sentexes-with-args",
-             "rules-by-antecedent", "rules-by-consequent",
-             "rules-with-exception-on", "exception-rules", "exception-rule?",
-             "sentexes-with-term", "sentexes-with-terms",
-             "terms", "term-count", "index-entries")
+E16_READS = ("lookup", "leaf-at", "count-at", "children",
+             "sentexes-with-functor", "count-with-functor", "sentexes-with-args",
+             "sentexes-with-terms", "index-entries",
+             "family-count", "family-children", "family-child-count", "family-leaf",
+             "family-member?", "family-handles")
 E16_OK_FILES = {
     # the entry points themselves
     "src/vaelii/impl/reads.clj",
@@ -1228,7 +1232,149 @@ for path in clj_files():
              f"`reads/believed-…`. If this file implements the protocol rather than "
              f"reading through it, add it to E16_OK_FILES with the reason")
 
-# ── E17: a global taxonomy read is rostered, never reached for ─────────────
+# The family reads serve every family, so the `reads` entry point is where the family
+# is named and tallied (T1); the trie's `count-at` and `leaf-at` go the same way. Only
+# the entry points and the two implementers call them.
+E16_FAMILY_READS = ("family-count", "family-children", "family-child-count", "family-leaf",
+                    "family-member?", "family-handles", "count-at", "leaf-at")
+E16_FAMILY_FILES = {
+    "src/vaelii/impl/reads.clj",
+    "src/vaelii/impl/protocols.clj",
+    "src/vaelii/impl/kv.clj",
+    "src/vaelii/impl/columnar.clj",
+    # the image writer reads the root count of the store it images, below any reader
+    "src/vaelii/impl/disk/index_snapshot.clj",
+}
+E16_FAMILY_CALL = re.compile(r"\bp/(" + "|".join(re.escape(r) for r in E16_FAMILY_READS) + r")(?![\w?-])")
+
+# A read over every context reads past the reader's ancestor set, which context scoping
+# forbids unless the read is deliberately global. It passes `p/every-context` — never
+# nil, which a family read refuses — through a `reads/…-global` entry point, and this
+# roster lists who calls one, as E17's does for `tax/…-global`. The reason lives in the
+# caller's docstring or beside the row.
+E16_GLOBAL_ROSTER = {
+    # The taxonomy is keyed by edge, not by reader: an entry's supporters in every
+    # context decide whether it is installed, and the scoped closures filter by context.
+    ("src/vaelii/impl/taxonomy.clj", "supporters-of"),
+    ("src/vaelii/impl/taxonomy.clj", "unmark-disjoint-metatype!"),
+    ("src/vaelii/impl/taxonomy.clj", "stored-disjoint-metatype?"),
+    # The unscoped census of every stored supporter functor, for the unscoped closure.
+    ("src/vaelii/impl/taxonomy.clj", "all-keys"),
+    # The supporter visibility gate and its readers: the targets every stored except and
+    # defeat names, each filtered by the reader's view afterwards.
+    ("src/vaelii/impl/except.clj", "named-entries"),
+    ("src/vaelii/impl/except.clj", "genlCx-excepts"),
+    ("src/vaelii/impl/resolution.clj", "defeated-index"),
+    ("src/vaelii/impl/settle.clj", "belief-before"),
+    # A rule read with no reader context: `concluding-rule-handles`' unscoped arities, a
+    # stratification check over every rule, and two whole-KB reports.
+    ("src/vaelii/impl/resolution.clj", "concluding-rule-handles"),
+    ("src/vaelii/impl/checks.clj", "stratification-readers"),
+    ("src/vaelii/impl/chain.clj", "rule-firing-report"),
+    ("src/vaelii/impl/integrity.clj", "rule-macro-findings"),
+    # The planner's lead choice under a variable context, which has no ancestor set yet:
+    # the argument's census over every context bounds what the lead can cost.
+    ("src/vaelii/impl/resolution.clj", "arg-lead"),
+    # The mint withdrawal: a mint is a fact about a stored justification, filed in every
+    # context, and each candidate's belief and placement are read per record.
+    ("src/vaelii/impl/special.clj", "withdrawal-candidates"),
+    ("src/vaelii/impl/special.clj", "edge-route-candidates"),
+    ("src/vaelii/impl/special.clj", "subsumed-mint-blocks"),
+    ("src/vaelii/impl/special.clj", "withheld-releases"),
+    ("src/vaelii/impl/special.clj", "departed-context-edge-mints"),
+    # A body's both polarities in every context, a superset the negation placement scopes.
+    ("src/vaelii/impl/decide/negation.clj", "polarity-handles"),
+    # The arity family's rows read every binding and keep a reader's by its ancestor set.
+    ("src/vaelii/impl/decide/arity.clj", "exact-handles"),
+    ("src/vaelii/impl/decide/arity.clj", "pair-sets"),
+    ("src/vaelii/impl/decide/arity.clj", "note-arity!"),
+    ("src/vaelii/impl/decide/arity.clj", "routes"),
+    ("src/vaelii/impl/decide/arity.clj", "shape-handles"),
+    ("src/vaelii/impl/decide/arity.clj", "types-entry"),
+    ("src/vaelii/impl/decide/arity.clj", "meta-visible"),
+    ("src/vaelii/impl/decide/arity.clj", "meta-routes"),
+    # The self tuples under an `irreflexive` mark when no reader set is given.
+    ("src/vaelii/impl/decide/tuple.clj", "self-tuples-under"),
+    # The vocabulary: the term roster keys no context, and the public reads and the
+    # quality report list every name the KB stores.
+    ("src/vaelii/core.clj", "terms"),
+    ("src/vaelii/core.clj", "term-count"),
+    ("src/vaelii/core.clj", "find-terms"),
+    ("src/vaelii/impl/quality.clj", "vocabulary-pass"),
+    # A rule read keyed by predicate over the rules stated in any context: a forward firing
+    # or a re-join places each firing from its antecedents' contexts, a definitional check
+    # or a report reads every stored rule, and `direct-concluders` is the stored graph.
+    ("src/vaelii/impl/chain.clj", "fire-rules-for"),
+    ("src/vaelii/impl/chain.clj", "permuting-rejoin-rules"),
+    ("src/vaelii/impl/special.clj", "computed-reading-rules"),
+    ("src/vaelii/impl/chain.clj", "transitive-rejoin-rules"),
+    ("src/vaelii/impl/chain.clj", "closure-rejoin-rules"),
+    ("src/vaelii/impl/special.clj", "recheck-on-separation"),
+    ("src/vaelii/impl/inherit.clj", "rejoin-rules"),
+    ("src/vaelii/impl/special.clj", "recheck-on-qualitative"),
+    ("src/vaelii/impl/special.clj", "index-closed-extent-rules"),
+    ("src/vaelii/impl/special.clj", "transitive-partner-functors"),
+    ("src/vaelii/impl/special.clj", "closure-reader-rules"),
+    ("src/vaelii/impl/checks.clj", "negative-edge-rules"),
+    ("src/vaelii/impl/checks.clj", "stored-generators"),
+    ("src/vaelii/impl/checks.clj", "check-closed-extent-stratified"),
+    ("src/vaelii/impl/integrity.clj", "converse-rule"),
+    ("src/vaelii/impl/integrity.clj", "known-exception?"),
+    ("src/vaelii/impl/rules.clj", "direct-concluders"),
+    # A predicate-agnostic argument read: the slot roster keys no context, the public reads
+    # answer over every context, a planner's or a lead's count bounds a cost its scoped
+    # read then pays, and a candidate set is filtered per record by the reader's view.
+    ("src/vaelii/core.clj", "sentexes-with-arg"),
+    ("src/vaelii/core.clj", "count-with-arg"),
+    ("src/vaelii/impl/plan.clj", "est-matches"),
+    ("src/vaelii/impl/plan.clj", "summary"),
+    ("src/vaelii/impl/plan.clj", "memo-opts"),
+    ("src/vaelii/impl/resolution.clj", "lead-agnostic?"),
+    ("src/vaelii/impl/resolution.clj", "lead-candidates"),
+    ("src/vaelii/impl/checks.clj", "lead-from-source?"),
+    ("src/vaelii/impl/inherit.clj", "extent-size"),
+    ("src/vaelii/impl/inherit.clj", "claim-reach-separated"),
+    ("src/vaelii/impl/checks.clj", "membership-handles-led"),
+    ("src/vaelii/impl/special.clj", "roster-members-in"),
+    ("src/vaelii/impl/special.clj", "transitive-left-ends"),
+    ("src/vaelii/impl/abduce.clj", "edge-handles"),
+    ("src/vaelii/impl/clashes.clj", "believed-at-arg1"),
+    ("src/vaelii/impl/kb.clj", "type-memberships"),
+    ("src/vaelii/impl/decide/membership.clj", "term-entries"),
+}
+E16_GLOBAL_CALL = re.compile(r"\breads/([\w?!*-]+-global)(?![\w?-])")
+E16_EVERY = re.compile(r"\bp/every-context\b")
+E16_DEF = re.compile(r"\(def[\w-]*\s+(?:\^[^\s]+\s+)*([^\s\)]+)")
+
+for path in clj_files():
+    rel = prel(path, ROOT)
+    enclosing = "?"
+    for i, line in enumerate(open(path, errors="replace"), 1):
+        if line.startswith("(def"):
+            m = E16_DEF.match(line)
+            enclosing = m.group(1) if m else "?"
+        code = E16_BACKTICKED.sub("", line.split(";", 1)[0])
+        m = E16_FAMILY_CALL.search(code)
+        if m and rel not in E16_FAMILY_FILES:
+            flag("E16", path, f"p/{m.group(1)}",
+                 f"{rel}:{i} `p/{m.group(1)}` — a family read outside vaelii.impl.reads. "
+                 f"The family methods serve every family, so the `reads` entry point names the "
+                 f"family and tallies it: call `reads/…` instead")
+        m = E16_GLOBAL_CALL.search(code)
+        if m and rel != "src/vaelii/impl/reads.clj" and (rel, enclosing) not in E16_GLOBAL_ROSTER:
+            flag("E16", path, f"reads/{m.group(1)}",
+                 f"{rel}:{i} `{enclosing}` calls `reads/{m.group(1)}` — a read over every "
+                 f"context outside the roster. A read sees what its context sees (README.md, "
+                 f"context scoping): pass the reader's ancestor set to the scoped entry point, or "
+                 f"add `{enclosing}` to E16_GLOBAL_ROSTER and say in its docstring why it reads "
+                 f"every context")
+        if (rel == "src/vaelii/impl/reads.clj" and E16_EVERY.search(code)
+                and not enclosing.endswith("-global")):
+            flag("E16", path, "p/every-context",
+                 f"{rel}:{i} `{enclosing}` passes `p/every-context` — an entry point reading "
+                 f"every context is named `…-global`, so E16_GLOBAL_ROSTER sees its callers")
+
+# ── E17: an unscoped taxonomy read is rostered, never reached for ──────────
 # Context scoping is the third invariant: a read sees what its context sees, up the
 # genlCx ancestor set. `vaelii.impl.taxonomy` answers each closure both ways — `genls` walks
 # the edges visible from a context, `genls-global` walks every active edge whoever
@@ -1237,19 +1383,42 @@ for path in clj_files():
 # broad: the caller that meant to scope and did not is right on every KB until the
 # one it is wrong on.
 #
-# So a global read is a decision, and this is where the decisions are listed. Each
+# The flat-cache reads (`has-prop?`, `inverse-of`, `disjoint?`, …) answer the same two
+# ways through their arity: with a concrete context they read the declarations that
+# context believes, and with none (or nil, or a `?var`) they read every declaration the
+# cache holds, one a defeat or an except hides from every reader included.  E17 holds a
+# context-free call to one of them to the same roster.
+#
+# So an unscoped read is a decision, and this is where the decisions are listed. Each
 # roster entry is a `(file, top-level def)` pair, and the reason lives in that
 # definition's own docstring — the roster records THAT there is one, the docstring
-# says what it is. A caller that cannot state a reason wants the scoped arity.
+# says what it is. A caller that cannot state a reason wants the scoped arity.  A roster
+# entry whose definition makes no unscoped read is itself an E17 finding.
 #
 # `vaelii.impl.taxonomy` itself is not on the roster and needs no entry: it calls its
 # own readers unqualified, and this rule is about reaching one through the alias.
-E17_GLOBAL = ("genls-global", "specs-global", "genl?-global", "genl?-global-held",
-              "context-up-global",
-              "context-down-global",
-              "genlCx?-global", "genls-global-within", "specs-global-within",
-              "genls-global-among", "genls-global-union", "specs-global-while",
-              "genls-global-while", "direct-genls-global", "direct-specs-global")
+# A `tax/` read is global by its name: every one spelled with `-global`.
+E17_GLOBAL = re.compile(r"\btax/([\w?*!<>=+-]*-global(?:-[\w?*!<>=+-]+)?)(?![\w?*!<>=+-])")
+# The flat-cache reads and the argument index their context takes, counting from the
+# first argument.  An `:optional` context makes the call unscoped when the call stops
+# before it; a required one when the form there is nil or a `?var`.
+E17_FLAT = {
+    "tax/has-prop?": (3, "optional"), "tax/inverse-of": (2, "optional"),
+    "tax/inverses-of": (2, "optional"), "tax/inverses-under": (2, "optional"),
+    "tax/disjoint?": (3, "optional"), "tax/props-over": (3, "optional"),
+    "tax/functional-in-arg-over": (2, "optional"), "tax/declared-arity": (2, "optional"),
+    "kb/disjoint?": (3, "optional"),
+    "tax/separation-test": (2, "required"), "tax/disjointness-test": (2, "required"),
+    "tax/separating-partners": (2, "required"), "tax/separation-frame": (2, "required"),
+    "tax/covers-over": (2, "required"), "tax/covers-naming-visible": (2, "required"),
+    "tax/separating-pairs": (1, "required"),
+    # The reads with no scoped arity: the census of a mark and its wrappers.  Every call
+    # is unscoped, except as the argument of `seq`, `empty?` or `not-empty`, a test of
+    # whether the KB declares the mark anywhere, which gates work a later read decides.
+    "tax/props": (None, "census"), "tax/quoting-function?": (None, "census"),
+    "tax/mention-marks": (None, "census"), "tax/commuting-groups": (None, "census"),
+}
+E17_GATES = ("seq", "empty?", "not-empty")
 E17_ROSTER = {
     # The public API offers both readings, and its shorter arity IS the global one —
     # `vaelii.core/genls` documents the pair (docs/taxonomy.md).
@@ -1258,6 +1427,8 @@ E17_ROSTER = {
     ("src/vaelii/core.clj", "genl?"),
     ("src/vaelii/core.clj", "direct-genls"),
     ("src/vaelii/core.clj", "direct-specs"),
+    ("src/vaelii/core.clj", "min-genls"),
+    ("src/vaelii/core.clj", "max-specs"),
     # Assert-time refusals. A refusal is a claim about the KB and not about a vantage:
     # a cycle refused when asked from one context and allowed from another is not a
     # refusal, it is a coin toss.  `disjoint-problems` is the deliberate exception and
@@ -1289,6 +1460,9 @@ E17_ROSTER = {
     ("src/vaelii/impl/chain.clj", "transitive-source-preds"),
     ("src/vaelii/impl/chain.clj", "walks-its-own-conclusion?"),
     ("src/vaelii/impl/chain.clj", "solve-closure"),
+    ("src/vaelii/impl/chain.clj", "solve-separation"),
+    ("src/vaelii/impl/chain.clj", "separated-from"),
+    ("src/vaelii/impl/special.clj", "separation-moved-types"),
     ("src/vaelii/impl/inherit.clj", "moved-in"),
     ("src/vaelii/impl/inherit.clj", "witness?"),
     ("src/vaelii/impl/inherit.clj", "licensing-functors"),
@@ -1307,7 +1481,6 @@ E17_ROSTER = {
     ("src/vaelii/impl/special.clj", "recheck-arg-inferred"),
     ("src/vaelii/impl/special.clj", "recheck-on-predicate"),
     ("src/vaelii/impl/special.clj", "composed-exception-rules"),
-    ("src/vaelii/impl/special.clj", "rules-watching"),
     ("src/vaelii/impl/special.clj", "recheck-genl-edge"),
     ("src/vaelii/impl/special.clj", "recheck-negated-exceptions"),
     ("src/vaelii/impl/special.clj", "subtree-sentexes"),
@@ -1322,6 +1495,7 @@ E17_ROSTER = {
     # in; each fact is then asked its own context's declarations.
     ("src/vaelii/impl/special.clj", "declared-functors"),
     ("src/vaelii/impl/special.clj", "trigger-entailments"),
+    ("src/vaelii/impl/special.clj", "descent-surplus-placements"),
     ("src/vaelii/impl/special.clj", "negative-subsumption-seeds"),
     ("src/vaelii/impl/inherit.clj", "moved-goal-test"),
     ("src/vaelii/impl/qcn_kb.clj", "governing-contexts"),
@@ -1334,33 +1508,30 @@ E17_ROSTER = {
     # Settle's candidate discovery. An over-approximated candidate merely checks and
     # yields nothing, and the arbitration that follows is context-scoped anyway.
     ("src/vaelii/impl/recheck.clj", "reachable-predicates"),
-    ("src/vaelii/impl/clashes.clj", "exposed-clashes-for-term"),
-    ("src/vaelii/impl/clashes.clj", "clash-grounds"),
     # A nogood family keeps its candidate rows, a superset over every reader, where no
     # reader exists: at the store and removal choke points, at a replay's end and in a
     # sync.  It reads the unscoped closures there through the one view this builds, and
     # its reader half is handed none.
     ("src/vaelii/impl/decide.clj", "write-view"),
+    # The arity length entries are a superset over every reader, kept where no reader
+    # exists, as the candidate rows they serve are (`decide/write-view`).
+    ("src/vaelii/impl/decide/arity.clj", "evict-below!"),
+    ("src/vaelii/impl/decide/arity.clj", "lengths-of"),
+    ("src/vaelii/impl/decide/arity.clj", "meta-paths"),
+    ("src/vaelii/impl/decide/arity.clj", "note-reading-moved!"),
     # Reader-side reads: a reader's binding above a functor reads the unscoped closure cut
-    # to the bound predicates and scopes each member it keeps; a membership nogood's
-    # vantages are the maximal contexts over the unscoped ancestor sets the readers decide
-    # over.
+    # to the bound predicates and scopes each member it keeps.
     ("src/vaelii/impl/decide/arity.clj", "bound-above"),
-    ("src/vaelii/impl/decide/membership.clj", "membership-vantages"),
     ("src/vaelii/impl/discovery.clj", "preserving-moves"),
-    # A memo's re-ask test names every entry a moved separation can reach from some
-    # reader, so it reads the union of what every context reads.
-    ("src/vaelii/impl/discovery.clj", "separated?"),
     # The visibility filter cannot be scoped by the filter it derives — asking
     # `context-up` here would make except evaluation recursive on itself.
     ("src/vaelii/impl/except.clj", "visible-exception-index"),
     ("src/vaelii/impl/except.clj", "except-hidden-fn"),
     ("src/vaelii/impl/except.clj", "excepts-seen"),
     ("src/vaelii/impl/except.clj", "reader-state"),
-    # A `genlCx` edge's re-check trigger queues a guarded rule whose firing is placed in a
-    # context a context under the edge's lower end sees; a trigger reads a superset over
-    # every reader, as `special/recheck-on-fact` reads the unscoped genls.
-    ("src/vaelii/impl/special.clj", "recheck-genlCx-edge"),
+    # The settle's `genlCx` moves: the placement reach is a superset over every reader,
+    # read where no reader exists, as the candidate rows are (`decide/write-view`).
+    ("src/vaelii/impl/special.clj", "drain-moves!"),
     # A report on the whole taxonomy, which has no vantage to read from.
     ("src/vaelii/impl/quality.clj", "taxonomy-coverage"),
     # The clash reading's candidate fan. A rule pair is decided from a common descendant
@@ -1368,10 +1539,199 @@ E17_ROSTER = {
     # either would drop a pair the context that can see both would find, and the pair
     # itself is decided scoped.
     ("src/vaelii/impl/quality.clj", "clash-partners"),
+    # The context adjacency read where no reader exists: the settle's `genlCx` moves
+    # (an active edge an except reaches, every reader's moves read from it), and the gate
+    # in front of a fact's declarations below it, each candidate then asked from its
+    # placement.
+    ("src/vaelii/impl/special.clj", "excepted-edges"),
+    ("src/vaelii/impl/special.clj", "declarations-below"),
+    #
+    # Context-free flat-cache reads.  The public API's short arity is the KB-wide
+    # reading, as `genls`' is.
+    ("src/vaelii/core.clj", "disjoint?"),
+    ("src/vaelii/core.clj", "has-prop?"),
+    ("src/vaelii/core.clj", "inverse-of"),
+    ("src/vaelii/impl/kb.clj", "disjoint?"),
+    # A KB-wide property: the read decides a stored key, a storage context or what the
+    # store holds, which every reader shares.  The argument-order fold and the reified
+    # spelling are stored once, and the read walk hides the spelling a reader's belief
+    # rules out (docs/canonicalization.md); the storage context of a decontextualized
+    # mark, a teardown, a merge's retargeting, the roster a stored sentex is classed by,
+    # the stratification graph over every stored rule.
+    ("src/vaelii/core.clj", "rehome-forced-extent!"),
+    ("src/vaelii/core.clj", "target-following-meta?"),
+    ("src/vaelii/impl/assert_entry.clj", "storage-context"),
+    ("src/vaelii/impl/assert_entry.clj", "assert-one"),
+    ("src/vaelii/impl/checks.clj", "checked-sentence"),
+    ("src/vaelii/impl/checks.clj", "stored-spelling"),
+    ("src/vaelii/impl/checks.clj", "stratification-readers"),
+    ("src/vaelii/impl/decide.clj", "on-roster?"),
+    ("src/vaelii/impl/integrate.clj", "permuting?"),
+    ("src/vaelii/impl/integrate.clj", "recanonicalizing-subject"),
+    ("src/vaelii/impl/kb.clj", "permuting-literal?"),
+    ("src/vaelii/impl/nat.clj", "reifiable-function?"),
+    ("src/vaelii/impl/quasiquote.clj", "ensure-quasiquote-functions"),
+    ("src/vaelii/impl/resolution.clj", "kb-sentex"),
+    ("src/vaelii/impl/resolution.clj", "raw-match-with"),
+    ("src/vaelii/impl/special.clj", "meta-target"),
+    ("src/vaelii/impl/special.clj", "deduce-lifts"),
+    # A candidate superset a later step narrows: a gate in front of a scoped read, a
+    # trigger or seed whose re-join reads the rule's own context, a nogood candidate row
+    # kept where no reader exists and placed after (`decide/write-view`), and a claim
+    # or reifiable function a per-reader test admits.
+    ("src/vaelii/impl/chain.clj", "reified-fns"),
+    ("src/vaelii/impl/nat.clj", "queue-split-uses!"),
+    ("src/vaelii/impl/checks.clj", "unmintable-named-types"),
+    ("src/vaelii/impl/clashes.clj", "exposure-probes"),
+    ("src/vaelii/impl/decide/membership.clj", "term-nogoods"),
+    ("src/vaelii/impl/decide/membership.clj", "cover-routes"),
+    ("src/vaelii/impl/decide/membership.clj", "separation-tests"),
+    ("src/vaelii/impl/decide/related.clj", "contradicted-somewhere?"),
+    ("src/vaelii/impl/decide/tuple.clj", "roster-marks"),
+    ("src/vaelii/impl/decide/tuple.clj", "det-marks"),
+    ("src/vaelii/impl/decide/tuple.clj", "note-converse!"),
+    ("src/vaelii/impl/decide/tuple.clj", "converse-functors"),
+    ("src/vaelii/impl/decide/tuple.clj", "convicting"),
+    ("src/vaelii/impl/decide/tuple.clj", "under-marks"),
+    ("src/vaelii/impl/decide/tuple.clj", "self-tuples-under"),
+    ("src/vaelii/impl/inherit.clj", "denial-readings"),
+    ("src/vaelii/impl/inherit.clj", "separated-types"),
+    ("src/vaelii/impl/inherit.clj", "separation-moved"),
+    ("src/vaelii/impl/inherit.clj", "separation-test"),
+    ("src/vaelii/impl/inherit.clj", "stated-claims"),
+    ("src/vaelii/impl/recheck.clj", "cross-argument-predicate?"),
+    ("src/vaelii/impl/rules.clj", "closed-extent-antecedents"),
+    ("src/vaelii/impl/special.clj", "licensing-functors"),
+    ("src/vaelii/impl/special.clj", "transitive-seeds"),
+    ("src/vaelii/impl/special.clj", "transitive-rule-seeds"),
+    ("src/vaelii/impl/special.clj", "functional-mark-relevant?"),
+    ("src/vaelii/impl/special.clj", "anti-symmetric-mark-relevant?"),
+    ("src/vaelii/impl/special.clj", "offered-mark-over?"),
+    #
+    # Census reads (`tax/props`, `commuting-groups`, `quoting-function?`, `mention-marks`)
+    # outside an emptiness test.  The public census is the KB-wide reading.
+    ("src/vaelii/core.clj", "props"),
+    # A KB-wide property: the stored spelling, the roster, the rebuild of every stored
+    # declaration, and whether an argument is a mention, which is a fact about the
+    # sentence (`tax/mention-marks`).
+    ("src/vaelii/impl/decide.clj", "roster"),
+    ("src/vaelii/impl/kb.clj", "canon-stamp"),
+    ("src/vaelii/impl/resolution.clj", "spelling-opts"),
+    ("src/vaelii/impl/resolution.clj", "matches-hierarchical-over"),
+    ("src/vaelii/impl/special.clj", "permuting-marks"),
+    ("src/vaelii/impl/special.clj", "rebuild-pending!"),
+    ("src/vaelii/impl/checks.clj", "nested-input-problem"),
+    ("src/vaelii/impl/checks.clj", "convicting-result-type"),
+    ("src/vaelii/impl/checks.clj", "minted-application-clash"),
+    ("src/vaelii/impl/nat.clj", "reify-or-mint-nat"),
+    ("src/vaelii/impl/nat.clj", "reify-nat-for-read"),
+    ("src/vaelii/impl/quasiquote.clj", "reduce-term"),
+    ("src/vaelii/impl/quasiquote.clj", "any-quasiquote?"),
+    ("src/vaelii/impl/resolution.clj", "representative-term"),
+    ("src/vaelii/impl/resolution.clj", "displaced-terms-in"),
+    ("src/vaelii/impl/resolution.clj", "retired-for?"),
+    # A candidate superset a later step narrows: a trigger whose firing names the mark it
+    # was read through, which the read walk hides per reader; a walk the prover gates
+    # again at its context; nogood candidate rows; a per-reader filter.
+    ("src/vaelii/impl/chain.clj", "mirrored-antecedent?"),
+    ("src/vaelii/impl/chain.clj", "permuting-antecedent?"),
+    ("src/vaelii/impl/chain.clj", "symmetric-mirror"),
+    ("src/vaelii/impl/chain.clj", "commuting-components-of"),
+    ("src/vaelii/impl/chain.clj", "transitive-antecedent?"),
+    ("src/vaelii/impl/decide/tuple.clj", "self-tuples"),
+    ("src/vaelii/impl/decide/tuple.clj", "self-tuples-in"),
+    ("src/vaelii/impl/decide/tuple.clj", "converse-family"),
+    ("src/vaelii/impl/decide/tuple.clj", "marks-family"),
+    ("src/vaelii/impl/inherit.clj", "permuted-read-supports"),
+    ("src/vaelii/impl/integrate.clj", "mark-witness"),
+    ("src/vaelii/impl/nat.clj", "withheld-at"),
+    ("src/vaelii/impl/resolution.clj", "reified-reading"),
+    ("src/vaelii/impl/resolution.clj", "constraining-predicates"),
+    ("src/vaelii/impl/special.clj", "declaring-predicates"),
+    ("src/vaelii/impl/special.clj", "marked-roots"),
+    # The `quoting_function` mark: whether an argument is a mention is a fact about the
+    # sentence, read unscoped as `checks` reads it (`tax/mention-marks`).
+    ("src/vaelii/impl/provers.clj", "quoted-form"),
+    ("src/vaelii/impl/provers.clj", "expression-kind-goal?"),
+    # The re-join reads every context, so an edge's upper end is read through every edge.
+    ("src/vaelii/impl/provers.clj", "support-answers-reading"),
 }
-E17_CALL = re.compile(r"\btax/(" + "|".join(re.escape(n) for n in E17_GLOBAL) + r")(?![\w?-])")
 E17_DEF = re.compile(r"\(def[\w-]*\s+(?:\^[^\s]+\s+)*([^\s\)]+)")
+E17_TOKEN = re.compile(r'"(?:[^"\\]|\\.)*"|;[^\n]*|\\.[^\s,()\[\]{}]*|#_|#?[(\[{]|[)\]}]|[^\s,()\[\]{}";]+')
 
+
+def e17_flat_calls(text):
+    """`(line, top-level def, read)` for each context-free call of an `E17_FLAT` read in
+    the Clojure source `text`.  A `#_` form is skipped, and a quote is read through."""
+    stack, top, out, line, pos, skip = [], "?", [], 1, 0, 0
+    for m in E17_TOKEN.finditer(text):
+        tok = m.group(0)
+        line += text.count("\n", pos, m.start())
+        pos = m.start()
+        if tok.startswith(";") or tok in ("'", "`", "~", "~@", "@", "#'", "^"):
+            continue
+        if tok == "#_":
+            skip += 1
+            continue
+        if tok[-1] in "([{" and not tok.startswith('"'):
+            if not stack:
+                top = "?"
+            stack.append([tok[-1], line, skip > 0 or (bool(stack) and stack[-1][2])])
+            skip = max(skip - 1, 0)
+            continue
+        if tok in ")]}":
+            form = stack.pop() if stack else None
+            if form is None:
+                continue
+            kind, ln, dropped, *items = form
+            if kind == "(" and items and not dropped and items[0] in E17_FLAT:
+                at, mode = E17_FLAT[items[0]]
+                args = items[1:]
+                if mode == "census":
+                    parent = stack[-1][3] if stack and len(stack[-1]) > 3 else None
+                    free = parent not in E17_GATES
+                else:
+                    ctx = args[at] if len(args) > at else None
+                    free = ctx == "nil" or (isinstance(ctx, str) and ctx.startswith("?"))
+                    if mode == "optional" and len(args) == at:
+                        free = True
+                if free:
+                    out.append((ln, top, items[0]))
+            if stack:
+                stack[-1].append(None)
+            continue
+        if skip:
+            skip -= 1
+            continue
+        tok = tok.lstrip("'")
+        if not stack:
+            continue
+        if (len(stack) == 1 and top == "?" and stack[0][0] == "(" and len(stack[0]) > 3
+                and str(stack[0][3]).startswith("def") and not tok.startswith(("^", '"'))):
+            top = tok
+        stack[-1].append(tok)
+    return out
+
+
+# The check's own fixture: a reader of the flat caches that drops its context is found
+# whether the arity is short, the context is nil or a `?var`, or the context is
+# required, and a census read outside an emptiness test is found; one that passes a
+# context, a census under `seq`, a `#_` form and a docstring are not.
+E17_FIXTURE = '''(ns f)
+(defn a [t p] (tax/has-prop? t :transitive p))
+(defn b [t p c] (tax/has-prop? t :transitive p c) "(tax/inverse-of t p)")
+(defn c [t p] (tax/inverse-of t p nil) #_(tax/disjoint? t p p))
+(defn d [t p] (tax/covers-over t p '?ctx) (tax/separation-test t p c))
+(defn e [k a] (kb/disjoint? k a a))
+(defn f [t p] (seq (tax/props t :symmetric)) (contains? (tax/props t :symmetric) p))'''
+if [(t, r) for _, t, r in e17_flat_calls(E17_FIXTURE)] != [
+        ("a", "tax/has-prop?"), ("c", "tax/inverse-of"), ("d", "tax/covers-over"),
+        ("e", "kb/disjoint?"), ("f", "tax/props")]:
+    flag("E17", pjoin(ROOT, "scripts", "check-doc-drift.py"), "e17-fixture",
+         "E17's own fixture no longer reads as it should: `e17_flat_calls` misses or "
+         "invents a context-free flat-cache call")
+
+E17_SEEN = set()
 for path in clj_files():
     rel = prel(path, ROOT)
     enclosing = "?"
@@ -1379,8 +1739,11 @@ for path in clj_files():
         if line.startswith("(def"):
             m = E17_DEF.match(line)
             enclosing = m.group(1) if m else "?"
-        m = E17_CALL.search(E16_BACKTICKED.sub("", line))
-        if not m or (rel, enclosing) in E17_ROSTER:
+        m = E17_GLOBAL.search(E16_BACKTICKED.sub("", line))
+        if not m:
+            continue
+        if (rel, enclosing) in E17_ROSTER:
+            E17_SEEN.add((rel, enclosing))
             continue
         flag("E17", path, f"tax/{m.group(1)}",
              f"{rel}:{i} `{enclosing}` calls `tax/{m.group(1)}` — an unscoped taxonomy "
@@ -1388,8 +1751,25 @@ for path in clj_files():
              f"context scoping), and on a KB where no edge is context-restricted the "
              f"global and the scoped answer are the same object — so a caller that "
              f"meant to scope and did not is right until it is not. Pass the context "
-             f"(`tax/{m.group(1)[:-len('-global')]}`), or add `{enclosing}` to "
+             f"(`tax/{m.group(1).replace('-global', '')}`), or add `{enclosing}` to "
              f"E17_ROSTER and say in its docstring why it must not be scoped")
+    if rel == "src/vaelii/impl/taxonomy.clj":
+        continue
+    for i, enclosing, read in e17_flat_calls(open(path, errors="replace").read()):
+        if (rel, enclosing) in E17_ROSTER:
+            E17_SEEN.add((rel, enclosing))
+            continue
+        flag("E17", path, read,
+             f"{rel}:{i} `{enclosing}` calls `{read}` with no context — the flat-cache "
+             f"read of every declaration the cache holds, one a defeat or an except "
+             f"hides from every reader included. Pass the reader's context, or add "
+             f"`{enclosing}` to E17_ROSTER and say in its docstring why it reads the "
+             f"KB-wide answer")
+
+for rel, enclosing in sorted(E17_ROSTER - E17_SEEN):
+    flag("E17", pjoin(ROOT, rel), f"{rel}:{enclosing}",
+         f"E17_ROSTER names `{enclosing}` in {rel}, which makes no unscoped taxonomy "
+         f"read: drop the entry, so the roster lists only the callers with a reason")
 
 # ── E18: the namespace map accounts for every file under src/ ──────────────
 # docs/namespaces.md is the file map, and it makes a countable claim: the glossed

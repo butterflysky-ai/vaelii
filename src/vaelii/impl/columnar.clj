@@ -92,6 +92,24 @@
 
 ;; ---- the composed IndexStore --------------------------------------------
 
+(defn- trie-seen
+  "The children of the native trie's `prefix` in `ctxs` (every child when nil), iterating
+  the smaller side as `KvIndexStore`'s family reads do."
+  [trie prefix ctxs]
+  (cond
+    (nil? ctxs) (t-children trie prefix)
+    (<= (long (t-child-count trie prefix)) (count ctxs))
+    (filterv #(contains? ctxs %) (t-children trie prefix))
+    :else (filterv #(pos? (long (t-count-at trie (conj prefix %)))) ctxs)))
+
+(defn- trie-handles
+  [trie prefix ctxs]
+  (let [cs (trie-seen trie prefix ctxs)]
+    (case (count cs)
+      0 #{}
+      1 (t-leaves-at trie (conj prefix (first cs)))
+      (reduce (fn [acc c] (into acc (t-leaves-at trie (conj prefix c)))) #{} cs))))
+
 (defn- trie-reads
   "`kv/trie-reads` over the native trie, which the opposed family's writes read."
   [trie]
@@ -143,7 +161,6 @@
   ;; walk below is native and counts no node probes (docs/profile.md).
   (count-at [_ prefix]  (prof/record-read :trie-counts) (t-count-at trie prefix))
   (children [_ prefix]  (prof/record-read :trie-counts) (t-children trie prefix))
-  (count-children [_ prefix] (prof/record-read :trie-counts) (t-child-count trie prefix))
   (lookup   [_ pattern] (prof/record-read :trie-lookup) (t-lookup   trie pattern))
   (lookup   [_ pattern ctxs] (prof/record-read :trie-lookup) (t-lookup trie pattern ctxs))
   ;; the exact leaf — the trie's own `t-leaves-at`, which walks the path's nodes and
@@ -151,31 +168,39 @@
   (leaf-at  [_ path]    (prof/record-read :trie-lookup) (t-leaves-at trie path))
 
   ;; the non-trie families — flat key→handle-set maps — read/write the shared backend
-  (sentexes-in-context   [_ c]        (p/sentexes-in-context   embedded c))
-  (count-in-context      [_ c]        (p/count-in-context      embedded c))
   (sentexes-with-functor [_ pred]     (p/sentexes-with-functor embedded pred))
   (count-with-functor    [_ pred]     (p/count-with-functor    embedded pred))
-  (sentexes-with-arg     [_ pos term] (p/sentexes-with-arg     embedded pos term))
-  ;; the unary roster lives with the other root families, in the embedded store
-  (unary-sentexes-with-arg [_ term]   (p/unary-sentexes-with-arg embedded term))
 
-  (count-with-arg        [_ pos term] (p/count-with-arg        embedded pos term))
   (sentexes-with-args    [_ pred pts] (p/sentexes-with-args    embedded pred pts))
   (sentexes-with-args    [_ pred pts cs] (p/sentexes-with-args embedded pred pts cs))
-  (index-rule            [_ h a c x]  (p/index-rule            embedded h a c x))
-  (unindex-rule!         [_ h a c x]  (p/unindex-rule!         embedded h a c x))
-  (rules-by-antecedent   [_ pred]     (p/rules-by-antecedent   embedded pred))
-  (rules-by-consequent   [_ pred]     (p/rules-by-consequent   embedded pred))
-  (rules-by-consequent   [_ pred cs]  (p/rules-by-consequent   embedded pred cs))
-  (index-exception       [_ h preds]  (p/index-exception       embedded h preds))
-  (unindex-exception!    [_ h preds]  (p/unindex-exception!    embedded h preds))
-  (rules-with-exception-on [_ pred]   (p/rules-with-exception-on embedded pred))
-  (exception-rules       [_]          (p/exception-rules       embedded))
-  (exception-rule?       [_ h]        (p/exception-rule?       embedded h))
-  (sentexes-with-term    [_ term]     (p/sentexes-with-term    embedded term))
   (sentexes-with-terms   [_ terms]    (p/sentexes-with-terms   embedded terms))
-  (terms                 [_]          (p/terms                 embedded))
-  (term-count            [_]          (p/term-count            embedded))
+
+  ;; The family methods: `:trie` native, every other family the embedded store's.
+  (family-count [_ f path ctxs]
+    (if (= :trie f)
+      (let [cs (kv/family-ctxs 'family-count ctxs) path (vec path)]
+        (if cs
+          (transduce (map #(count (t-leaves-at trie (conj path %)))) + 0 (trie-seen trie path cs))
+          (t-count-at trie path)))
+      (p/family-count embedded f path ctxs)))
+  (family-children [_ f path ctxs]
+    (if (= :trie f)
+      (if-let [cs (kv/family-ctxs 'family-children ctxs)]
+        (trie-seen trie (vec path) cs)
+        (set (t-children trie (vec path))))
+      (p/family-children embedded f path ctxs)))
+  (family-child-count [_ f path]
+    (if (= :trie f) (t-child-count trie path) (p/family-child-count embedded f path)))
+  (family-leaf [_ f path]
+    (if (= :trie f) (t-leaves-at trie path) (p/family-leaf embedded f path)))
+  (family-member? [_ f path x]
+    (if (= :trie f) (contains? (t-leaves-at trie path) x) (p/family-member? embedded f path x)))
+  (family-handles [_ f node ctxs]
+    (if (= :trie f)
+      (trie-handles trie (vec node) (kv/family-ctxs 'family-handles ctxs))
+      (p/family-handles embedded f node ctxs)))
+  ;; the trie is written by `index-sentex` alone, which the embedded store refuses by tag
+  (family-apply! [_ ops] (p/family-apply! embedded ops))
 
   ;; Two structures, one entry stream: the native trie projected into the flat key shape,
   ;; then the roots backend's own entries.  The load consumes the stream **once** —
@@ -256,6 +281,7 @@
 
 (caches/register-derived
  {:id :R13 :label "Mapped index roots" :kind :index :keyed-by :value :reads [:index]
+  :holds-content? false
   :retired-by {:stored :K :removed :K :respelled :K}
   :computed :write :imaged? false
   :value (fn [kb] (let [store (:index kb)]

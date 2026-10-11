@@ -3,7 +3,7 @@
 (ns vaelii.separable-frame-test
   "An unscoped separation frame reads its type's supertypes cut to the separable ones.
 
-  `separation-frame*` asks of `a`'s supertypes only which are declared disjoint from
+  `separation-frame` asks of `a`'s supertypes only which are declared disjoint from
   something, members of a disjoint metatype, sibling-disjoint parents or partition parts,
   save the sibling arm's chain under a marked parent.  Unscoped it reads the closure cut
   to those (`tax/separable-genls`), built from the parents' cuts, where it read the whole
@@ -89,24 +89,6 @@
     (with-redefs [tax/separable-genls-at (fn [tax a context] (genls-at tax a context))]
       (f))))
 
-(defn- in-pass
-  "Run `f` inside a read-only pass: the caches a reader's re-read binds."
-  [f]
-  (binding [tax/*closure-pass-cache*       (atom {})
-            tax/*visible-neighbours-cache* (atom {})
-            tax/*separation-frame-cache*   (atom {})]
-    (f)))
-
-(defn- filtered!
-  "Give `child` a `genl` scope that filters: it excepts an edge between two fresh types,
-  so its reads go through the scoped walk rather than the unscoped one."
-  [kb child]
-  (let [[u w] (repeatedly 2 #(tu/fresh-term :type 'aside_t))
-        h     (v/assert kb (list 'genl u w) 'CxUniverse)]
-    (v/assert kb (list 'except (list 'sentexHandle h)) child)
-    (is (some? (#'tax/relation-scope (reasoning/taxonomy kb) :genl child))
-        "the child's genl scope filters")))
-
 (defn- cycle!
   "Make `x` and `y` subtypes of each other, the `x` → `y` edge stated in `cx` and the
   `y` → `x` one in `cy`.  `wff` refuses the edge closing a cycle, so it is formed the way
@@ -159,85 +141,14 @@
                                         [[cx a b] (tax/disjoint? tax a b cx)])))
                 whole (whole-scoped-frames ask)]
             (swap! seen + (count (filter val whole)))
-            (is (= whole (ask)) (str "trial " trial ", off a pass"))
-            (is (= whole (in-pass ask)) (str "trial " trial ", in a pass"))
-            (testing "and asked again in the same pass, off the cuts it holds"
-              (in-pass (fn [] (ask) (is (= whole (ask)) (str "trial " trial)))))))))
+            (is (= whole (ask)) (str "trial " trial))))))
     (is (pos? @seen) "the forests separate some pairs")
     (is (pos? @cyclic) "and hold `genl` components")))
 
-(deftest a-scoped-frame-in-a-pass-reads-a-component-every-reader-sees-as-one-unit
-  ;; the chain below again, under a cycle of two types every context sees: the build
-  ;; reads the component as one unit rather than handing back
-  (tu/with-neutral-kb [kb tu/isolated-fresh]
-    (let [types (vec (repeatedly 30 #(tu/fresh-term :type 'kind_t)))
-          [p q] (repeatedly 2 #(tu/fresh-term :type 'loop_t))
-          [x y] (repeatedly 2 #(tu/fresh-term :type 'apart_t))
-          child (tu/fresh-term :context 'CxChild)]
-      (v/assert kb (list 'genlCx child 'CxUniverse) 'CxUniverse)
-      (cycle! kb p q 'CxUniverse 'CxUniverse)
-      (v/assert kb (list 'genl (types 0) p) 'CxUniverse)
-      (doseq [i (range 1 (count types))]
-        (v/assert kb (list 'genl (types i) (types (quot (dec i) 2)))
-                  (if (even? i) child 'CxUniverse)))
-      (v/assert kb (list 'disjoint x y) 'CxUniverse)
-      (filtered! kb child)
-      (is (seq (:scc (:genl @(reasoning/taxonomy kb)))) "the two types are one component")
-      (let [tax   (reasoning/taxonomy kb)
-            reads (atom 0)
-            real  tax/genls]
-        (with-redefs [tax/genls (fn [t a c] (when (some #{a} types) (swap! reads inc)) (real t a c))]
-          (in-pass #(is (not-any? (fn [t] (tax/disjoint? tax t x child)) types)
-                        "no type there is separated")))
-        (is (zero? @reads) "and no scoped closure is read to find that")))))
-
-(deftest a-scoped-frame-in-a-pass-reads-no-closure-of-a-type-under-no-separation
-  ;; `specs`/`genls` of the chain's types are never read: every cut is built from its
-  ;; parents' and is empty
-  (tu/with-neutral-kb [kb tu/isolated-fresh]
-    (let [types (vec (repeatedly 30 #(tu/fresh-term :type 'kind_t)))
-          [x y] (repeatedly 2 #(tu/fresh-term :type 'apart_t))
-          child (tu/fresh-term :context 'CxChild)]
-      (v/assert kb (list 'genlCx child 'CxUniverse) 'CxUniverse)
-      (doseq [i (range 1 (count types))]
-        (v/assert kb (list 'genl (types i) (types (quot (dec i) 2)))
-                  (if (even? i) child 'CxUniverse)))
-      (v/assert kb (list 'disjoint x y) 'CxUniverse)
-      (filtered! kb child)
-      (let [tax   (reasoning/taxonomy kb)
-            reads (atom 0)
-            real  tax/genls]
-        (with-redefs [tax/genls (fn [t a c] (when (some #{a} types) (swap! reads inc)) (real t a c))]
-          (in-pass #(is (not-any? (fn [t] (tax/disjoint? tax t (types 0) child)) types)
-                        "no type there is separated")))
-        (is (zero? @reads) "and no scoped closure is read to find that")))))
-
-(deftest a-component-the-scope-breaks-reads-the-scoped-closure
-  ;; `p`, `q` and `r` are one component, and the child excepts `q` → `r`: it still sees
-  ;; the `p` ↔ `q` cycle, but not the whole component, so a build through it hands back
-  ;; and the frame reads the scoped closure.  `a` sits under `p`, and `q` is declared
-  ;; disjoint from `z`.
-  (tu/with-neutral-kb [kb tu/isolated-fresh]
-    (let [[p q r a z] (map #(tu/fresh-term :type %) '[p_t q_t r_t a_t z_t])
-          child       (tu/fresh-term :context 'CxChild)]
-      (v/assert kb (list 'genlCx child 'CxUniverse) 'CxUniverse)
-      (cycle! kb p q 'CxUniverse 'CxUniverse)
-      (let [[qr] (cycle! kb q r 'CxUniverse 'CxUniverse)]
-        (v/assert kb (list 'except (list 'sentexHandle qr)) child))
-      (v/assert kb (list 'genl a p) 'CxUniverse)
-      (v/assert kb (list 'disjoint q z) 'CxUniverse)
-      (is (= 3 (count (:scc (:genl @(reasoning/taxonomy kb))))) "the three types are one component")
-      (let [tax   (reasoning/taxonomy kb)
-            ask   (fn [] (into {} (for [cx ['CxUniverse child], [x y] [[a z] [z a] [p z] [r z]]]
-                                    [[cx x y] (tax/disjoint? tax x y cx)])))
-            whole (whole-scoped-frames ask)]
-        (is (get whole [child a z]) "`a` is separated from `z` at the child, through `q`")
-        (is (= whole (in-pass ask)) "and read so in a pass")))))
-
 (deftest a-frame-from-an-ancestor-set-answers-what-the-whole-closure-answers
-  ;; the scoped forests again, each question asked from a reader's ancestor set, off a
-  ;; pass: the cuts are held in the closure cache, so an edge that moves between two
-  ;; reads must retire them
+  ;; the scoped forests again, each question asked from a reader's ancestor set: the cuts
+  ;; are held in the closure cache, so an edge that moves between two reads must retire
+  ;; them
   (let [rnd  (java.util.Random. 2178)
         seen (atom 0)]
     (dotimes [trial 8]

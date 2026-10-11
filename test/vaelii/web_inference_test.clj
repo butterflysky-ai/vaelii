@@ -25,6 +25,10 @@
         (v/assert kb (list 'edgeOf a b) 'CxSmoke))
       (v/assert-rule kb '[(edgeOf ?x ?y)] '(anc ?x ?y) 'CxSmoke {:direction :backward})
       (v/assert-rule kb '[(edgeOf ?x ?y) (anc ?y ?z)] '(anc ?x ?z) 'CxSmoke {:direction :backward})
+      ;; a transitive relation, for the marker an open goal over it carries
+      (v/assert kb '(transitive aheadOf) 'CxSmoke)
+      (v/assert kb '(aheadOf A B) 'CxSmoke)
+      (v/assert kb '(aheadOf B C) 'CxSmoke)
       (binding [tu/*kb* kb, *app* (web/app kb)] (f))
       (tu/clear-kb! kb))))
 
@@ -53,6 +57,11 @@
         (is (re-find #"answer" b)))
       (testing "the run reports whether the tree is whole or a prefix"
         (is (re-find #"frontier emptied" b))))))  ; this small search completes
+
+(deftest an-open-transitive-goal-is-marked-incomplete-on-the-page
+  (is (re-find #"Incomplete:" (:body (GET "/inference" "q=(aheadOf%20%3Fx%20%3Fy)&ctx=CxSmoke&d=1"))))
+  (is (not (re-find #"Incomplete:" (:body (GET "/inference" "q=(aheadOf%20A%20%3Fy)&ctx=CxSmoke&d=1"))))
+      "one bound end enumerates the closure"))
 
 (deftest the-tacticians-agree-and-the-page-says-so-from-a-comparison
   (let [b (:body (GET "/inference" goal-qs))]

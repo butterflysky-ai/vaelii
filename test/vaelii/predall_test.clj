@@ -212,6 +212,18 @@
     (is (empty? (into [] (v/ask kb (list rel '?x '?y) 'CxUniverse)))
         "none of the four declarations concludes a single fact of the subject predicate")))
 
+(tu/deftest-kb a-placeholder-fact-types-its-subject-and-its-placeholder
+  ;; `predAllExistsPlaceholder`'s subject is a member of the second argument and its
+  ;; placeholder of the third (`argArg`), so a stated fact types both
+  (tu/with-terms [rel person dog Alice Rex]
+    (v/assert kb (list 'binary_predicate rel) 'CxUniverse)
+    (v/assert kb (list 'genl person 'thing) 'CxUniverse)
+    (v/assert kb (list 'genl dog 'thing) 'CxUniverse)
+    (tu/with-entailing
+      (v/assert kb (list 'predAllExistsPlaceholder rel person dog Alice Rex) 'CxUniverse)
+      (is (v/isa? kb Alice person 'CxUniverse) "the subject is a member of the second argument")
+      (is (v/isa? kb Rex dog 'CxUniverse) "and the placeholder of the third"))))
+
 (tu/deftest-kb a-placeholder-is-sanctioned-vocabulary-the-author-asserts
   ;; the per-cell full-arg functor is the author's term for the unnamed filler: usable in
   ;; hand-asserted sentences, structural (unreifiable), and distinct per cell — the
@@ -224,7 +236,7 @@
     (v/assert kb (list 'predAllExists rel person dog) 'CxUniverse)
     (v/assert kb (list 'predExistsAll rel dog person) 'CxUniverse)
     (v/assert kb (list person Alice) 'CxUniverse)
-    (let [p1 (list 'PredAllExistsFn rel person dog)
+    (let [p1 (list 'PredAllExistsFn rel person dog Alice)
           p2 (list 'PredExistsAllFn rel dog person)]
       (v/assert kb (list dog p1) 'CxUniverse)
       (v/assert kb (list dog p2) 'CxUniverse)
@@ -734,7 +746,7 @@
     (v/assert kb (list 'arg owns 2 dog) 'CxUniverse)
     (v/assert kb (list 'predAllSpecified owns person) 'CxUniverse)
     (v/assert kb (list person Alice) 'CxUniverse)
-    (let [p (list 'PredAllExistsFn owns person dog)]
+    (let [p (list 'PredAllExistsFn owns person dog Alice)]
       (v/assert kb (list dog p) 'CxUniverse)
       (v/assert kb (list owns Alice p) 'CxUniverse))
     (is (= {:status :audited :violations #{}}

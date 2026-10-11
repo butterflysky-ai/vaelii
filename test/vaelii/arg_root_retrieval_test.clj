@@ -27,7 +27,10 @@
   the equality below means something."
   (:require [clojure.test :refer [deftest is testing use-fixtures]]
             [vaelii.core :as v]
+            [vaelii.impl.protocols :as p]
+            [vaelii.impl.reads :as reads]
             [vaelii.impl.resolution :as res]
+            [vaelii.impl.sentex :as sx]
             [vaelii.test-util :as tu]
             [vaelii.world :as world]))
 
@@ -114,6 +117,38 @@
                 (let [[off on :as both] (both-ways #(res/matches-visible kb pat ctx))]
                   (is (= off on) (str "matches-visible diverged on " (pr-str pat) " @ " ctx))
                   both))))))
+
+;; The `:access-path` rows of `kv/index-families` whose other path is the term index: a
+;; family read per probe against the term-index postings of the probe's term, each filtered
+;; by the record, so the two sides answer one question from two families.
+(deftest the-families-agree-with-the-term-index
+  (tu/with-kb [kb]
+    (let [idx    (:index kb)
+          recs   (:records kb)
+          facts  (fn [t] (keep #(let [r (p/get-sentex recs %)] (when (sx/body r) [% (sx/body r)]))
+                               (reads/as-stored-with-term idx t)))
+          sample (tu/fact-sample kb 40)
+          terms  (fn [b] (filter symbol? (rest b)))
+          unary  (fn [t hs] (into #{} (keep #(let [b (sx/body (p/get-sentex recs %))]
+                                               (when (= [t] (rest b)) %)))
+                                  hs))
+          rows   {:predicate-extent
+                  (for [b sample :let [f (first b)]]
+                    [f (reads/as-stored-with-functor idx f)
+                     (into #{} (keep (fn [[h b']] (when (= f (first b')) h))) (facts f))])
+                  :argument-slot
+                  (for [b sample, [i t] (map-indexed vector (rest b)) :when (symbol? t)]
+                    [[(inc i) t] (reads/as-stored-predicates-at-arg idx (inc i) t)
+                     (into #{} (keep (fn [[_ b']] (when (= t (nth b' (inc i) nil)) (first b'))))
+                           (facts t))])
+                  :unary-slot
+                  (for [b sample, t (terms b)]
+                    [t (unary t (reads/as-stored-unary-with-arg-global idx t))
+                     (unary t (map first (facts t)))])}]
+      (doseq [[family results] rows]
+        (doseq [[probe got want] results]
+          (is (= want got) (str family " at " (pr-str probe))))
+        (probed (str family) (map (fn [[_ got want]] [got want]) results))))))
 
 (deftest leading-variable-binary-patterns
   ;; the case the arg root exists for: a bound *second* argument with a variable first

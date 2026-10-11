@@ -17,7 +17,7 @@
   of the generator."
   (:require [clojure.test :refer [deftest is testing use-fixtures]]
             [vaelii.core :as v]
-            [vaelii.impl.protocols :as p]
+            [vaelii.impl.reads :as reads]
             [vaelii.impl.rules :as vr]
             [vaelii.test-util :as tu]))
 
@@ -253,11 +253,26 @@
              (refusal kb (list 'exceptWhen (list blocked '?p)
                                (list 'implies (list marker '?p)
                                      (list 'implies (list '?p '?x) (list dst '?x)))))))
-      (v/assert kb (list blocked src) 'CxUniverse)
+      (v/assert kb (list blocked src) 'CxUniverse {:strength :monotonic})
       (v/assert kb (list marker src) 'CxUniverse)
       (is (empty? (stamped kb 'CxUniverse))
           "the blocked fill stamped nothing")
       (v/assert kb (list src Fido) 'CxUniverse)
+      (is (empty? (v/sentexes-matching kb (list dst Fido) 'CxUniverse))))))
+
+(tu/deftest-kb a-default-blocker-of-a-generator-stores-the-stamped-rule-hidden
+  ;; design ruling 25: the stamped rule is stored with a guard defeat resting on the
+  ;; blocker, so neither it nor what it concludes is believed
+  (tu/with-terms [marker src dst blocked Fido]
+    (v/assert kb (list 'exceptWhen (list blocked '?p)
+                       (list 'implies (list marker '?p) (list 'implies (list '?p '?x) (list dst '?x))))
+              'CxUniverse)
+    (v/assert kb (list blocked src) 'CxUniverse)
+    (v/assert kb (list marker src) 'CxUniverse)
+    (v/assert kb (list src Fido) 'CxUniverse)
+    (let [[r] (stamped kb 'CxUniverse)]
+      (is (some? r))
+      (is (not (v/believed? kb (:id r) 'CxUniverse)))
       (is (empty? (v/sentexes-matching kb (list dst Fido) 'CxUniverse))))))
 
 (tu/deftest-kb a-stamped-existential-head-skolemizes-when-the-stamped-rule-fires
@@ -541,7 +556,8 @@
 
 (tu/deftest-kb a-stamped-conjunctive-consequent-is-polycanonicalized
   ;; the same split an asserted rule gets: one rule per conjunct, each keyed by its own
-  ;; consequent predicate, or `rules-by-consequent` could not answer for either
+  ;; consequent predicate, or `reads/as-stored-rules-by-consequent-in` could not answer
+  ;; for either
   (tu/with-terms [marker src dstA dstB]
     (v/assert kb (list 'implies (list marker '?p)
                        (list 'implies (list '?p '?x)
@@ -564,9 +580,9 @@
     (v/assert kb (list marker src) 'CxUniverse)
     (let [h (:id (first (stamped kb 'CxUniverse)))]
       (testing "posted under the stamped antecedent, not under a variable"
-        (is (contains? (set (p/rules-by-antecedent (:index kb) src)) h)))
+        (is (contains? (set (reads/as-stored-rules-by-antecedent-global (:index kb) src)) h)))
       (testing "and under the stamped consequent"
-        (is (contains? (set (p/rules-by-consequent (:index kb) dst)) h))))
+        (is (contains? (set (reads/as-stored-rules-by-consequent-global (:index kb) dst)) h))))
     (testing "so a backward goal reaches it too"
       (v/assert kb (list src Fido) 'CxUniverse)
       (is (v/provable? kb (list dst Fido) 'CxUniverse)))))

@@ -35,12 +35,61 @@ Two protocols keep the reasoning code independent of any backend:
   whole-db wipe `reindex` rebuilds from) and `index-entries` / `index-load`, the
   `[structured-key value]` projection all four index backends share — what a dump
   writes, and why an index written by one loads into another.
-  `unary-sentexes-with-arg` is the one op here a new implementation can answer in a line:
-  a **superset** is legal, and `(sentexes-with-arg store 1 term)` is one, so an index that
-  cannot narrow to arity-1 facts returns the whole argument-1 posting and the caller
-  filters it exact. An index that *can* narrow should, because this is the read a
-  membership question makes on every assert — see [indexing.md](indexing.md), "the unary
-  roster".
+
+### The family methods
+
+Seven `IndexStore` methods read and write every family `kv/index-families` names
+([indexing.md](indexing.md), "The index-family registry"), by its tag `f` and a token
+`path` from the family's root, so a store that implements the protocol answers every
+family. One read reaches past the methods: a taxonomy probe forks the `KvBackend` the
+families live in (`mount/fork-families`, below), found by `kv-backend-of` or under the
+store's `:roots`. A probe runs at a `genl` assert while a stored rule carries a negative
+edge (`checks/edge-negation-cycle`), and over an out-of-tree store keeping no `KvBackend`
+that assert throws `:unforkable-index`. In a trie or count trie a **node** is the path
+above the context and a **leaf** is the node plus the context; in a flat set the path is
+the key's tail (`[:argument-slot pos term]` is `f` `:argument-slot`, path `[pos term]`).
+
+| method | trie, count trie | flat set |
+|---|---|---|
+| `(family-count idx f path ctxs)` | `every-context`: the node's count; a set: the summed leaf sizes over its children in `ctxs` | the set's size; a set of contexts: the summed sizes of `(conj path c)` |
+| `(family-children idx f path ctxs)` | the node's children, kept to `ctxs` on the smaller side; a set with `every-context`, else a vector | the members, kept to `ctxs`; a set with `every-context`, else a vector |
+| `(family-child-count idx f path)` | how many children, no set built | the set's size |
+| `(family-leaf idx f path)` | the leaf at exactly `path` | the set |
+| `(family-member? idx f path x)` | membership in that leaf, no set built | membership |
+| `(family-handles idx f node ctxs)` | the union of the leaves under `node` over its children in `ctxs`; one context answers its leaf as stored | the union of `(conj node c)` over a set of contexts |
+| `(family-apply! idx ops)` | see below | see below |
+
+`ctxs` is a set or `p/every-context`, and nil throws `:bad-args`, so a read past a
+reader's ancestor set names the sentinel at its call site.
+
+`family-apply!` takes `[:post f leaf-path h]` and `[:retire f leaf-path h]` and lands them
+as one `kv-batch`. A count-trie post adds `h` to the leaf, the context to the node's
+children and one to its count, and enters the root roster (the family's `:root`) when
+the node was empty; a retire undoes each of them where it empties. A flat-set op adds or
+removes the member, and the root roster follows the set's first and last member. A
+count-trie retire's leaf path may end in `p/any-context`, which retires `h` from whichever
+context's leaf holds it; a flat set keeps no roster of its contexts, so its retire throws
+`:bad-args` on one. The reply per op is the node's count (a set's size) after it, or nil when it
+changed nothing. **The batch equals its ops applied one call at a time, in order**: each op
+is decided against the store as the ops before it left it, so two posts of one handle are
+one post and a retire after a post cancels it
+(`index_test/a-family-batch-equals-its-ops-applied-one-at-a-time`). The trie is written
+by `index-sentex` alone, and `family-apply!` refuses it.
+
+A read or write that is one family method under another name is no method of its own.
+`vaelii.impl.reads` answers the context root, the term index and its roster, the rule
+indexes and the re-check index over `family-leaf`, `family-count`, `family-member?` and
+`family-handles`. It composes the predicate-agnostic argument reads from the slot roster
+(`:argument-slot`, or `:unary-slot` for the unary slice) and one `:argument-root` node per
+predicate in it, and `rules/index-rule`, `rules/unindex-rule!`, `rules/index-exception`
+and `rules/unindex-exception!` write the rule and re-check families through
+`family-apply!`.
+
+`KvIndexStore` answers the seven over the registry, dispatching on the tag with a `case`
+the registry generates. `ColumnarIndexStore` answers `:trie` from its native trie and
+hands every other tag to its embedded `KvIndexStore`. The methods tally nothing: the
+`vaelii.impl.reads` entry point that calls one tallies the logical read it serves
+([profile.md](profile.md)).
 
 **The three record fetches are counted.** `get-sentex`, `get-justification` and
 `get-provenance` each tally against their kind through `vaelii.impl.profile`'s
@@ -102,8 +151,12 @@ index over records it shares.
 
 **The space is a whole number 0 or more, or a keyword, a symbol or a vector**, and
 `open-kb` refuses any other value (`:unknown-option`, `:mismatch :bad-value`). A keyword,
-a symbol or a vector names a private space no number can name: `fork` takes `[::fork n]`,
-and a test takes a `gensym`.
+a symbol or a vector names a private space no number can name, and a test takes a
+`gensym`. An ephemeral `fork` and a `kb-diff` side read from a path open on an **engine
+space** (`mem/engine-space`), which no entry point hands to a caller, so `close!` of that
+KB drops the space from every RAM registry. Every other RAM space stays in the registry
+for the life of the JVM, because a second KB over the same space is how a store is
+reopened; `clear!` empties it.
 The refused values are the ones that name a store the caller did not spell. A string keys a
 RAM store of its own but derives the directory of the number or symbol it prints as
 (`"3"` and `3` are both `space-3`); a present `nil` is what `(:space cfg)` answers for a
@@ -309,6 +362,15 @@ Neither op changes what the per-handle version does. A handle with no sentex is 
 marked — over Postgres the batch statement `RETURNING`s the ids it actually touched, since
 an update count over a batch cannot say *which* rows matched and a strength cache filled
 past that would answer for a handle `premise-ids` does not name.
+
+The `:disk` store's `mark-premise-batch` decides each handle from its idx slot, and reads
+the slots in handle order, so the reads walk the idx and the log forward. A slot whose
+strength rank equals the wanted strength's is a mark already on disk, and the handle is
+rostered without its record being paged. An import's sink writes each record carrying its
+strength, so its marks page no record. A slot whose rank is unrecorded or different sends
+the handle to its record, which is read without the hot-cache put and re-stored when its
+`:strength` differs. `lein perf`'s `bulk-premise-mark-record-size` holds the cost per
+handle flat in the size of the record.
 
 Measured through `import!` — not through a store directly — on `{:belief? false}`, a dump
 of monotonic ground facts:
@@ -641,7 +703,8 @@ The index image is one half of a `:disk-snapshot` cold open; `recover` is the ot
 `:disk-snapshot` KB on the dense network writes its whole reasoning state to `<dir>/reasoning/`,
 and the next open installs it in place of the recover (`vaelii.impl.reasoning-image`):
 
-- `network.bin` — the dense network: every node, justification column, label,
+- `network.bin` — the dense network: every node, justification column (the subsumptions
+  column among them), label,
   defeat-class, block, forced set and supersession (`dense-jtms/write-image`), keys in sorted
   order so two images of one network are equal bytes;
 - `state.nippy` — the taxonomy's relations and caches, less the slots the live KB owns
@@ -664,7 +727,10 @@ removed is declined.
 KB's provers and solver are the defaults — a registered prover or evaluatable runs code the
 source identity does not cover — and both sections read in full into a scratch network
 before anything moves into the KB's own. Any mismatch, a registered prover, or a torn
-section leaves the KB to the full recover, which then writes a fresh image. A declined image
+section leaves the KB to the full recover, which then writes a fresh image. The install
+thaws `state.nippy` and the network's object frames under `io.thaw/sharing`: each symbol is
+the symbol pool's and each handle one `Long` per value in a section, so the installed KB
+holds one object where the KB that wrote the image held one. A declined image
 costs the recover and never an answer, because the recover it falls back to is the path an
 open without an image runs. `lein cli upgrade --dir <path>` (and `scripts/upgrade-kb.sh`)
 performs that open and a close for a store, so the recover a changed engine owes is paid
@@ -688,7 +754,10 @@ the code before it, and the identity has been wrong in that direction before.
 
 **An image is written** after a full recover, and when the directory closes if the records
 moved since the image on disk was written. The records fingerprint is read before and after
-the sections are written, and an image whose records moved during the write is abandoned. A
+the sections are written, and an image whose records moved during the write is abandoned.
+The sections are written to temp files beside the image on disk and renamed over it only
+once both are complete, so a write that throws or runs out of heap, at a close or a seal,
+leaves the image the directory held installable. A
 KB opened over an empty store registers the close-time write at open, since it builds its
 belief assert by assert and never recovers. A KB whose network holds fewer nodes than it has
 stored sentexes — a loader filled it and skipped the recover, or it holds `assert-inert`
@@ -871,7 +940,7 @@ The term reaching a
 key is canonical — `vaelii.impl.kv` canonicalizes at both boundaries, because a lazy seq
 and the `PersistentList` it is `=` to freeze to different nippy bytes.
 
-`kv-member?` is there for a *cost* rather than an answer. `exception-rule?` — the gate
+`kv-member?` is there for a *cost* rather than an answer. `reads/watched-rule?` — the gate
 the firing path takes once per candidate rule per new datum — asks whether one handle is
 in the roster, and a backend that packs a posting (`vaelii.impl.dense-kv`,
 `vaelii.impl.dense-roots`) has to answer by probing it, not by materializing the roster
@@ -885,11 +954,12 @@ contract-tested by `kv_backend_test` (every adapter satisfies one spec). The one
 `IndexStore` that is *not* a `KvBackend` is `ColumnarIndexStore`
 (`vaelii.impl.columnar`), which implements the trie natively over CSR arrays and
 delegates the flat families — roots, term index — to an embedded `KvIndexStore` on the
-same keys, so the two answer alike. An `IndexStore` that is neither a `KvIndexStore`
-nor embeds one as `:embedded` holds none of the families `vaelii.impl.kv` reads past the
-protocol (the argument-root census, the rule extent, the opposed bodies, the taxonomy's
-supporters, the mints, the shape roster): each of those reads answers nil, so such a store
-installs no taxonomy edge and files no mint, and no check refuses it. The **record store** stays per-backend
+same keys, so the two answer alike. Every family read and write goes through the family
+methods above, so any `IndexStore` holds the taxonomy's supporters and the mints
+(`index_test/an-index-store-reached-through-the-protocol-answers-the-families`, a
+`reify` that delegates each method). The one structural reach below the protocol is a
+taxonomy probe's fork (`mount/fork-families`, [overlay.md](overlay.md)), which refuses a
+store keeping no `KvBackend` with `:unforkable-index`. The **record store** stays per-backend
 (`MemoryRecordStore` / `DiskRecordStore`) — a handle→blob map is simple enough that
 sharing it buys nothing.
 
@@ -1103,7 +1173,10 @@ frames plus fixed-width 24-byte `.idx` slots keyed by integer id.
   id, still decode, and so do the rule tags that spell the wrappers as the three fields
   `direction` / `assumption` / `constraint`, read through `sentex/fielded-rule-slots`),
   a justification frame a bare vector (one
-  shape needs no tag), and provenance — an open application map — passes through as it
+  shape needs no tag) `[id informant antecedents consequence bindings strength]` with the
+  justification's subsumptions as a seventh element when it has some (a seven-element
+  frame an earlier build wrote ends in an always-empty `:out` set, which decodes as
+  none), and provenance — an open application map — passes through as it
   comes.  Each decoder dispatches on the thawed frame's shape, so **frames written before
   the codec still read** and no store needs rewriting.  Decoding interns the symbols it
   rebuilds, so a paged record shares one vocabulary object per name with the in-memory
@@ -1666,16 +1739,23 @@ What bounds the pool is **not** the vocabulary. A KB that only names things hold
 entry per distinct name, but three writers mint a fresh symbol per *fact* — NAT
 reification (`nat/constant-for`), head-existential skolemization
 (`skolem/skolemize-conclusion`) and abduction's scratch contexts — and the pool is
-static, process-wide and shared by every KB, so nothing hands an entry back. A disk
-store's index snapshot also interns every token of its dictionary at open, which on a
-large store is millions of names. So the pool is capped at
-`sentex/*symbol-pool-limit*` (1M, several times the shipped ontology plus the whole of
-OpenCyc, ~188k constants) and held in two generations. A lookup reads the current
-generation, then the previous one, and a name found in the previous one moves into the
-current one. When the current generation reaches half the limit it becomes the previous
-one, and the old previous generation is dropped. A name read at least once per generation
-keeps one shared object; a name unread for two rotations leaves the pool. A rotation can
-change no answer, since identity was never what anything read.
+static, process-wide and shared by every KB, so nothing hands an entry back. So the pool
+is capped at `sentex/*symbol-pool-limit*` and held in two generations. A lookup reads the
+current generation, then the previous one, and a name found in the previous one moves into
+the current one. When the current generation reaches half the limit it becomes the
+previous one, and the old previous generation is dropped. A name read at least once per
+generation keeps one shared object; a name unread for two rotations leaves the pool. A
+rotation can change no answer, since identity was never what anything read.
+
+The limit starts at 1M, several times the shipped ontology plus the whole of OpenCyc
+(~188k constants). A disk store's token dictionaries (the record store's `tokens.log` and
+the index snapshot's) intern every token they hold at open, which on a large store is
+millions of names. Each dictionary therefore first raises the limit to twice its entry
+count (`sentex/size-symbol-pool`). One
+generation then holds the whole dictionary, so the open rotates at most once and drops no
+name it interned. A name minted per fact afterwards rotates the generations at the raised
+limit. The limit never falls, so a second, smaller store leaves it where it is. A
+store with no durable dictionary, such as the in-memory stores, keeps the 1M default.
 
 ## Persistence & recovery
 

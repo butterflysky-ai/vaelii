@@ -91,7 +91,7 @@
         (v/assert kb (list 'genl kind 'thing) 'CxUniverse)
         (v/assert kb (list 'arg rel 1 kind) 'CxUniverse)
         (v/assert kb (list rel 'McFred 'McMary) (first subs))
-        (is (pos? (reads/stored-mint-count (:index kb))) "the fact mints a membership")
+        (is (pos? (reads/stored-mint-count-global (:index kb))) "the fact mints a membership")
         (let [sx    (first (filter #(= top (second (:sentence %))) (context-edges kb)))
               asks  (atom 0)
               real  tax/sees?
@@ -107,7 +107,7 @@
   "The handles the mint family files, read by term."
   [kb]
   (let [idx (:index kb)]
-    (into #{} (mapcat #(reads/as-stored-mints-about idx %)) (reads/as-stored-mint-terms idx))))
+    (into #{} (mapcat #(reads/as-stored-mints-about-global idx %)) (reads/as-stored-mint-terms idx))))
 
 (defn- concluded
   "The handles a stored justification `special/mint-informant?` accepts concludes, of a

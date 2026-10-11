@@ -88,7 +88,9 @@
   last-program "[[conn]]",
   levels "[[conn]]",
   lookup "[[conn level goal] [conn level goal context]]",
+  max-specs "[[conn t] [conn t context]]",
   metatype-members "[[conn m]]",
+  min-genls "[[conn t] [conn t context]]",
   poll "[[conn token cursor] [conn token cursor opts]]",
   possible-relations "[[conn calculus context a b]]",
   premise? "[[conn handle]]",
@@ -133,7 +135,9 @@
   term-count "[[conn]]",
   term-expression "[[conn term]]",
   terms "[[conn]]",
-  types "[[conn]]",
+  try-assert
+  "[[conn sentence] [conn sentence context] [conn sentence context opts]]",
+  types "[[conn] [conn context]]",
   types-of "[[conn x] [conn x context]]",
   unwatch "[[conn token]]",
   violations "[[conn]]",
@@ -268,7 +272,9 @@
   load-text! "[[kb source]]",
   log-level "[[]]",
   lookup "[[kb level goal] [kb level goal context]]",
+  max-specs "[[kb t] [kb t context]]",
   metatype-members "[[kb m]]",
+  min-genls "[[kb t] [kb t context]]",
   negative? "[[sentex]]",
   open-kb "[[] [opts]]",
   possible-relations "[[kb calculus context a b]]",
@@ -341,7 +347,9 @@
   term-expression "[[kb term]]",
   term-role "[[term]]",
   terms "[[kb]]",
-  types "[[kb]]",
+  try-assert
+  "[[kb sentence] [kb sentence context] [kb sentence context opts]]",
+  types "[[kb] [kb context]]",
   types-of "[[kb x] [kb x context]]",
   unwatch "[[kb token]]",
   violations "[[kb]]",
@@ -428,7 +436,9 @@
    :last-program
    :levels
    :lookup
+   :max-specs
    :metatype-members
+   :min-genls
    :poll
    :possible-relations
    :premise?
@@ -470,6 +480,7 @@
    :term-count
    :term-expression
    :terms
+   :try-assert
    :types
    :types-of
    :unwatch
@@ -549,7 +560,9 @@
    :last-program
    :levels
    :lookup
+   :max-specs
    :metatype-members
+   :min-genls
    :possible-relations
    :premise?
    :preview
@@ -590,6 +603,7 @@
    :term-count
    :term-expression
    :terms
+   :try-assert
    :types
    :types-of
    :violations

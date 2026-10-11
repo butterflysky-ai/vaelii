@@ -135,7 +135,7 @@
     (v/assert kb (list 'pp Aa) 'CxWell)
     (testing "derived while the NAF query is absent"
       (is (v/ask? kb (list 'rr Aa) 'CxWell)))
-    (let [h (v/assert kb (list 'qq Aa) 'CxWell)]
+    (let [h (v/assert kb (list 'qq Aa) 'CxWell {:strength :monotonic})]
       (testing "a later fact that satisfies the query blocks and sweeps the conclusion"
         (is (not (v/ask? kb (list 'rr Aa) 'CxWell)))
         (is (nil? (v/handle-of kb (list 'rr Aa) 'CxWell))
@@ -316,10 +316,10 @@
                        (list ss '?x))
               'CxWell {:direction :forward})
     (v/assert kb (list pp Aa) 'CxWell)
-    (v/assert kb (list qq Aa) 'CxWell)
+    (v/assert kb (list qq Aa) 'CxWell {:strength :monotonic})
     (is (v/ask? kb (list ss Aa) 'CxWell)
         "one conjunct holding leaves the query underivable")
-    (let [h (v/assert kb (list rr Aa) 'CxWell)]      ; the *second* conjunct, last
+    (let [h (v/assert kb (list rr Aa) 'CxWell {:strength :monotonic})]      ; the *second* conjunct, last
       (testing "completing the conjunction blocks and sweeps the conclusion"
         (is (not (v/ask? kb (list ss Aa) 'CxWell)))
         (is (nil? (v/handle-of kb (list ss Aa) 'CxWell))))
@@ -527,10 +527,10 @@
                        (list unworried '?x))
               'CxWell {:direction :forward})
     (v/assert kb (list person Tom) 'CxWell)
-    (v/assert kb (list childOf Tom Kid) 'CxWell)
+    (v/assert kb (list childOf Tom Kid) 'CxWell {:strength :monotonic})
     (testing "no sick child, so the rule fires"
       (is (v/ask? kb (list unworried Tom) 'CxWell)))
-    (let [h (v/assert kb (list sick Kid) 'CxWell)]
+    (let [h (v/assert kb (list sick Kid) 'CxWell {:strength :monotonic})]
       (testing "the *second* conjunct's predicate is watched too, so the firing is swept"
         (is (not (v/ask? kb (list unworried Tom) 'CxWell)))
         (is (nil? (v/handle-of kb (list unworried Tom) 'CxWell))))
@@ -753,7 +753,7 @@
     (v/assert kb (list asleep Kid2) 'CxWell)
     (testing "two children, both asleep"
       (is (v/ask? kb (list all_kids_asleep Bob) 'CxWell)))
-    (let [h (v/assert kb (list childOf Bob Kid3) 'CxWell)]
+    (let [h (v/assert kb (list childOf Bob Kid3) 'CxWell {:strength :monotonic})]
       (testing "a third child nobody says is asleep is the counterexample"
         (is (not (v/ask? kb (list all_kids_asleep Bob) 'CxWell)))
         (is (nil? (v/handle-of kb (list all_kids_asleep Bob) 'CxWell))
@@ -818,9 +818,9 @@
 
 (tu/deftest-kb forall-is-not-assertible
   (tu/with-terms [childOf asleep Bob Kid]
-    (testing "the written spelling carries a variable, so the ground check refuses it first"
+    (testing "the written spelling binds its variable, so it is closed and reaches the query-operator arm"
       (is (thrown-with-msg?
-           clojure.lang.ExceptionInfo #"not ground"
+           clojure.lang.ExceptionInfo #"query operator"
            (v/assert kb (list 'forall '?y (list 'implies (list childOf Bob '?y)
                                                 (list asleep '?y)))
                      'CxWell))))
@@ -1239,6 +1239,36 @@
       (is (= [true false 0 1] (guard-reading kb kind [:pp :qq :g :g2 :uu])))
       (is (= [true true 0 1] (guard-reading kb kind [:pp :qq :g :premise]))
           "a premise is a justification no guard defeat covers"))))
+
+(tu/deftest-kb a-firing-over-a-subset-of-anothers-antecedents-leaves-the-others-guard-defeat
+  ;; (bb Fido) reaches cc and dd through bb ⊂ cc ⊂ dd, so the rule fires over
+  ;; {(bb Fido) e1 e3}, and with (cc Fido) also over {(bb Fido) (cc Fido) e1 e3}: equal
+  ;; bindings, one antecedent set inside the other.  Each firing's guard defeat rests on
+  ;; its own antecedents, and the smaller firing arriving second keeps the larger's.
+  (is (= #{false}
+         (into #{}
+               (map (fn [tail]
+                      (tu/with-terms [bb cc dd rr blk Fido CxA]
+                        (let [as (fn [s & [o]] (v/assert kb s CxA o))
+                              hs (mapv (fn [op]
+                                         (case op
+                                           :e1   (as (list 'genl bb cc) {:strength :monotonic})
+                                           :e3   (as (list 'genl cc dd) {:strength :monotonic})
+                                           :blk  (as (list blk Fido))
+                                           :fb   (as (list bb Fido))
+                                           :fc   (as (list cc Fido))
+                                           :rule (as (list 'implies
+                                                           (list 'and (list bb '?x) (list cc '?x)
+                                                                 (list dd '?x)
+                                                                 (list 'unknown (list blk '?x)))
+                                                           (list rr '?x))
+                                                     {:direction :forward})))
+                                       (into [:e1 :e3 :blk] tail))
+                              f  (v/handle-of kb (list rr Fido) CxA)
+                              r  (v/believed? kb f CxA)]
+                          (doseq [h (rseq hs)] (when (v/sentex kb h) (v/retract! kb h)))
+                          r))))
+               (oi/permutations [:rule :fb :fc])))))
 
 (tu/deftest-kb retracting-the-blocker-takes-the-guard-defeat-out
   (doseq [kind [:except :unknown]]

@@ -7,6 +7,7 @@
   (:require [clojure.test :refer [deftest is testing]]
             [vaelii.core :as v]
             [vaelii.impl.protocols :as p]
+            [vaelii.impl.reads :as reads]
             [vaelii.impl.reindex :as reindex]
             [vaelii.test-util :as tu]))
 
@@ -53,7 +54,7 @@
       (v/assert kb (list holds loves Tom Ann) 'CxUniverse)
       (let [var0?  (fn [t] (re-find #"var0" (str t)))
             snap   (fn [] {:backward? (v/provable? kb (list loves Tom Ann) 'CxUniverse)
-                           :roster-clean? (not-any? var0? (p/terms (:index kb)))})
+                           :roster-clean? (not-any? var0? (reads/stored-terms-global (:index kb)))})
             before (snap)]
         (testing "the backward goal reaches the var-consequent rule, and ?var0 never rostered"
           (is (:backward? before))

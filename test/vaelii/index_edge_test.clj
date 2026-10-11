@@ -21,6 +21,7 @@
   (:require [clojure.test :refer [deftest is testing use-fixtures]]
             [vaelii.core :as v]
             [vaelii.impl.protocols :as p]
+            [vaelii.impl.reads :as reads]
             [vaelii.impl.sentex :as sx]
             [vaelii.test-util :as tu]))
 
@@ -273,7 +274,7 @@
               "the fact's body no longer keys itself")
           (is (contains? (v/indexable-terms (v/sentex kb nest)) c)
               "while the same compound nested inside a literal keeps its key")
-          (is (= #{nest} (p/sentexes-with-term (:index kb) c))
+          (is (= #{nest} (reads/as-stored-with-term (:index kb) c))
               "so the raw index read holds the nesting alone"))
         (testing "and the public read is exact anyway, at every floor"
           (doseq [floor [0 1 2]]

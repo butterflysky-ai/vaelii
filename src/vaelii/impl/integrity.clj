@@ -783,7 +783,7 @@
                 (when (shape-bindings shape (mapv #(freeze % m) (:antecedent rsx))
                                       (freeze (:consequent rsx) m))
                   {:rule h :sentence (sx/authored-sentence rsx) :context (:context rsx)})))))
-        (sort (reads/as-stored-rules-by-consequent (:index kb) p))))
+        (sort (reads/as-stored-rules-by-consequent-global (:index kb) p))))
 
 (defn- macro-holds?
   "The conditions beside the shape under which the macro `m` bound by `b` says exactly
@@ -869,7 +869,7 @@
                       (res/matches-visible kb (list 'not (list* g vars)) '?ctx)))
               (sort-by nm/print-key preds))
         (some #(contrary-rule? kb preds ctx %)
-              (sort (reads/as-stored-rules-by-consequent (:index kb) sx/not-functor))))))
+              (sort (reads/as-stored-rules-by-consequent-global (:index kb) sx/not-functor))))))
 
 (def ^:private declined-marker
   "The predicate a reviewer states of a suggested declaration to record that the rule
@@ -925,7 +925,7 @@
   [kb context remaining]
   (let [idx  (:index kb)
         recs (:records kb)
-        rows (->> (into (sorted-set) (reads/as-stored-rules-in idx :rule nil))
+        rows (->> (into (sorted-set) (reads/as-stored-rules-in-global idx :rule))
                   (keep (fn [h]
                           (budget/spend!)
                           (when-let [rsx (p/get-sentex recs h)]

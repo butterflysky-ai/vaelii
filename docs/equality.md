@@ -569,11 +569,9 @@ them. A calendar month→year edge therefore reached the taxonomy and the except
 re-checks and stopped: two fillers of one functional slot, made jointly visible for the
 first time by that edge, stayed unmerged and unreported, and whether the KB merged them
 came down to whether the year's fact was written before January existed (vaelii#56).
-`special/reconcile-context-edge` is the one entry point all three now call, and the producer
-calls it on the **transition into belief** — after the justification, because the three
-sweeps read the belief-filtered `genlCx` closure and a line earlier the edge supports
-nothing; and only on the transition, because the producer is idempotent and re-runs over
-every context of a declared function, where each edge owes exactly one sweep in its life.
+The settle's drain runs the sweeps for every `genlCx` move, whichever path stored the edge
+([contexts.md](contexts.md#one-context-move)), and the producer settles once it has built
+an edge.
 
 **Past that cap, and only past it, order independence is a residual rather than a
 guarantee.** The ancestor set is enumerated in handle order — assertion order — and the budget

@@ -24,9 +24,9 @@
 ;; 1.  `:related-dj` keeps the `disjoint`s whose arguments are related over the unscoped
 ;; `genl` closure, read again for the declarations naming a type at or below the lower end
 ;; of an edge moved since the generation `::genl-seen` (`tax/moves-since`).
-;; `:cover-pairs` keeps each `#{cover disjoint}` whose `disjoint` separates the whole from
-;; a part, read off the index when either side arrives (`pairs-of`), with each member's
-;; pairs under `::cover-of`.
+;; A cover pair, each `#{cover disjoint}` whose `disjoint` separates the whole from a part,
+;; is read off the index for the side in hand (`pairs-of`, `pairs-holding`), and its
+;; members are queued when either side arrives or leaves.
 ;;
 ;; An `(orthogonal a b)` says the two types are not disjoint and neither is a `genl` of the
 ;; other.  It exempts nothing, so what contradicts it is a `genl` edge between the two, one
@@ -142,47 +142,36 @@
               (disjoints kb [whole]))
         #{}))))
 
+(defn- pairs-possible?
+  "Does the store hold a `disjoint` and a cover, which a cover pair needs?  Count reads."
+  [kb]
+  (let [idx (:index kb)]
+    (and (pos? (reads/stored-count-with-functor idx 'disjoint))
+         (boolean (some #(pos? (reads/stored-count-with-functor idx %)) cover-functors)))))
+
 (defn- every-pair
   "Every cover pair the store holds: each stored cover's (`pairs-of`)."
   [kb]
-  (let [recs (:records kb)]
-    (into #{} (comp (mapcat #(reads/as-stored-with-functor (:index kb) %))
-                    (keep #(p/get-sentex recs %))
-                    (mapcat #(pairs-of kb %)))
-          cover-functors)))
+  (if (pairs-possible? kb)
+    (let [recs (:records kb)]
+      (into #{} (comp (mapcat #(reads/as-stored-with-functor (:index kb) %))
+                      (keep #(p/get-sentex recs %))
+                      (mapcat #(pairs-of kb %)))
+            cover-functors))
+    #{}))
+
+(defn- pairs-holding
+  "The cover pairs the stored fact `h` is a side of (`pairs-of`)."
+  [kb h]
+  (if (pairs-possible? kb)
+    (or (some->> (p/get-sentex (:records kb) h) (pairs-of kb)) #{})
+    #{}))
 
 (defn- noted
   "`c` with the handles `hs` journaled (`journal/note`) and queued under `::moved` for the
   settle to place their nogoods again (`take-moved!`)."
   [c hs]
   (-> (journal/note c hs) (update ::moved (fnil into #{}) hs)))
-
-(defn- add-cover-pairs
-  "`c` with the cover pairs `prs` under `:cover-pairs` and each member's under
-  `::cover-of`."
-  [c prs]
-  (reduce (fn [c pr]
-            (if (contains? (:cover-pairs c) pr)
-              c
-              (as-> c c
-                (update c :cover-pairs (fnil conj #{}) pr)
-                (reduce #(update-in %1 [::cover-of %2] (fnil conj #{}) pr) c pr)
-                (noted c pr))))
-          c prs))
-
-(defn- drop-cover-pairs
-  "`c` with every cover pair holding `h` removed."
-  [c h]
-  (reduce (fn [c pr]
-            (as-> c c
-              (update c :cover-pairs disj pr)
-              (reduce (fn [c x] (let [left (disj (get-in c [::cover-of x]) pr)]
-                                  (if (seq left)
-                                    (assoc-in c [::cover-of x] left)
-                                    (update c ::cover-of dissoc x))))
-                      c pr)
-              (noted c pr)))
-          c (get-in c [::cover-of h])))
 
 (defn- contradicted-somewhere?
   "Can some reader read the `orthogonal` over `[a b]` contradicted?  One type twice, a
@@ -197,16 +186,18 @@
 (defn- orthogonals-under
   "`{h [a b]}` of the stored `orthogonal`s with an argument at or below one of the types
   `ends` over the unscoped `genl` closure: those a separation over `ends` can contradict
-  or exempt.  Reads the stored ones whole, or those naming a specialization of `ends`,
-  whichever is fewer."
+  or exempt.  Reads the stored ones whole, each argument by one walk up to the first of
+  `ends` over one memo (`tax/genls-global-meets?`), or those naming a specialization of
+  `ends`, whichever is fewer."
   [kb w ends]
   (when (seq ends)
     (let [idx  (:index kb)
           ends (set ends)
           n    (transduce (map #(reads/stored-count-with-functor idx %)) + (orthogonal-functors w))]
       (if (< n (* 4 (count ends)))
-        (into {} (filter (fn [[_ ab]] (some #(some ends ((:genls-global w) %)) ab)))
-              (orthogonals kb w nil))
+        (let [missed (volatile! #{})]
+          (into {} (filter (fn [[_ ab]] (some #((:genls-global-meets? w) % ends missed) ab)))
+                (orthogonals kb w nil)))
         (orthogonals kb w (into #{} (mapcat (:specs-global w)) ends))))))
 
 (defn- reread-orthogonals
@@ -239,8 +230,8 @@
   "Keep the related-types rows in step with the fact `sx` arriving (`stored?`) or leaving.
   A `disjoint` enters `:related-dj` when `::genl-seen` holds a generation it is read under
   (`sync-related` reads every one otherwise) and its arguments are related, and leaves it
-  with its record; a `disjoint` or a cover arriving pairs with the stored other side it
-  names (`pairs-of`), and one leaving takes its pairs with it.  A fact stating an
+  with its record; a `disjoint` or a cover arriving or leaving queues the members of the
+  cover pairs it is a side of, read off the stored other side it names (`pairs-of`).  A fact stating an
   `orthogonal` enters `:related-orth` likewise when it is contradicted somewhere, and a
   `siblingDisjointException` either way queues the contradicted `orthogonal`s with an
   argument at or below one of its own: its exemption moves where they are placed.  A
@@ -259,23 +250,21 @@
 
       (disjoint-args sx)
       (let [ab  (disjoint-args sx)
-            prs (when stored? (pairs-of kb sx))]
+            prs (into #{} cat (pairs-of kb sx))]
         (swap! cands (fn [c]
-                       (cond
-                         (not stored?)
-                         (-> c (update :related-dj #(some-> % (disj h))) (noted [h])
-                             (drop-cover-pairs h))
+                       (cond-> (cond
+                                 (not stored?)
+                                 (-> c (update :related-dj #(some-> % (disj h))) (noted [h]))
 
-                         (and (::genl-seen c) (related? w ab))
-                         (-> c (update :related-dj (fnil conj #{}) h) (noted [h])
-                             (add-cover-pairs prs))
+                                 (and (::genl-seen c) (related? w ab))
+                                 (-> c (update :related-dj (fnil conj #{}) h) (noted [h]))
 
-                         :else (add-cover-pairs c prs)))))
+                                 :else c)
+                         (seq prs) (noted prs)))))
 
       (cover-args sx)
-      (let [prs (when stored? (pairs-of kb sx))]
-        (when (or (seq prs) (contains? (::cover-of @cands) h))
-          (swap! cands #(if stored? (add-cover-pairs % prs) (drop-cover-pairs % h)))))
+      (let [prs (into #{} cat (pairs-of kb sx))]
+        (when (seq prs) (swap! cands noted prs)))
 
       :else
       (let [ab (orthogonal-args w sx)]
@@ -383,13 +372,20 @@
   (let [[old _] (swap-vals! (reasoning/nogood-candidates kb) dissoc ::moved)]
     (::moved old #{})))
 
+(defn held?
+  "Can the related-types family hold a nogood: a `disjoint` of `:related-dj` or an
+  `orthogonal` of `:related-orth` in the candidate index `c`, or a `disjoint` and a cover
+  stored (`pairs-possible?`)?"
+  [kb c]
+  (boolean (or (seq (:related-dj c)) (seq (:related-orth c)) (pairs-possible? kb))))
+
 (defn nogoods-holding
-  "The related-types nogoods the candidate index `c` keeps with the declaration `h` among
-  their members, each `{:members #{h} :kind k}`: a `disjoint` of `:related-dj`, kind
-  `:disjoint`; each cover pair holding `h`, kind `:cover`; and an `orthogonal` of
-  `:related-orth`, kind `:orthogonal`."
-  [c h]
-  (cond-> (mapv (fn [pr] {:members pr :kind :cover}) (get-in c [::cover-of h]))
+  "The related-types nogoods with the declaration `h` among their members, each
+  `{:members #{h} :kind k}`: a `disjoint` of `:related-dj` in the candidate index `c`,
+  kind `:disjoint`; each cover pair holding `h`, read off the index (`pairs-holding`),
+  kind `:cover`; and an `orthogonal` of `:related-orth`, kind `:orthogonal`."
+  [kb c h]
+  (cond-> (mapv (fn [pr] {:members pr :kind :cover}) (pairs-holding kb h))
     (contains? (:related-dj c) h)   (conj {:members #{h} :kind :disjoint})
     (contains? (:related-orth c) h) (conj {:members #{h} :kind :orthogonal})))
 
@@ -437,28 +433,28 @@
               (not (tax/disjoint? tax a b up)) (not (tax/disjoint? tax b a up))))))))
 
 (def family
-  "The related-types family's entry in `decide/registry`.  It keeps no stored declaration:
-  recover reads the cover pairs off the cover extents (`every-pair`) and leaves
-  `::genl-seen` unread, so the first read reads every declaration (`sync-related`).  Each
-  nogood of it is placed as a conclusion (`chain/place-related!`)."
+  "The related-types family's entry in `decide/registry`.  It keeps no stored declaration
+  and no cover pair: a cover pair is read off the index (`pairs-holding`, `every-pair`),
+  and recover leaves `::genl-seen` unread, so the first read reads every declaration
+  (`sync-related`).  Each nogood of it is placed as a conclusion
+  (`chain/place-related!`)."
   {:note!     (fn [kb w sx stored?] (note-declaration! kb w sx stored?))
-   :recovered (fn [kb _] (swap! (reasoning/nogood-candidates kb) add-cover-pairs (every-pair kb)))
    :synced?   related-synced?
    :sync      sync-related
-   :handles   (fn [c] (concat (:related-dj c) (apply concat (:cover-pairs c)) (:related-orth c)))
-   :holds?    (fn [c h] (or (contains? (:related-dj c) h) (contains? (::cover-of c) h)
-                            (contains? (:related-orth c) h)))})
+   :handles   (fn [kb c] (concat (:related-dj c) (apply concat (every-pair kb)) (:related-orth c)))
+   :holds?    (fn [kb c h] (or (contains? (:related-dj c) h) (contains? (:related-orth c) h)
+                               (boolean (seq (pairs-holding kb h)))))})
 
 ;; ---- derived state (docs/caches.md, "The derived-state register") ----------------
 
 (caches/register-derived
  {:id :N6 :label "Related declaration candidates" :kind :cache :keyed-by :handle
+  :holds-content? false
   :reads [:index :records :T1 :J5]
   :retired-by {:stored :K :removed :K :respelled :K :edge :K :declared :K :edge-belief :K
                :settle-pass :K :recover :R :image-install :R}
   :computed :read :imaged? :state
   :at [[:nogood-candidates :related-dj] [:nogood-candidates :related-orth]
-       [:nogood-candidates ::genl-seen] [:nogood-candidates :cover-pairs]
-       [:nogood-candidates ::cover-of] [:nogood-candidates ::moved]]
-  :bound "one handle per stored `disjoint` and per stored fact stating an `orthogonal`, and one pair per stored cover and `disjoint` separating its whole from a part"
-  :note "the `disjoint`s over related types, the contradicted `orthogonal`s and the cover pairs, read off the argument trie and the extents; synced at a read by the relation moves (J5), and an orthogonal read again by the separation declarations a settle relabels"})
+       [:nogood-candidates ::genl-seen] [:nogood-candidates ::moved]]
+  :bound "one handle per stored `disjoint` and per stored fact stating an `orthogonal`"
+  :note "the `disjoint`s over related types and the contradicted `orthogonal`s, read off the argument trie and the extents; synced at a read by the relation moves (J5), and an orthogonal read again by the separation declarations a settle relabels"})

@@ -79,6 +79,21 @@
       (swap! cache assoc-bounded limit k v)
       v)))
 
+(def ^:dynamic *open-mark*
+  "nil outside a second-route search.  Inside one (`exc/route-answer`), a fn of a thunk
+  answering `[value settled?]`: the thunk's value, and false when its computation read a
+  route question still open, which makes the value provisional."
+  nil)
+
+(defn held-if-settled
+  "`(compute)`, handed to `put!` (which answers the value it holds) unless its computation
+  read a route question still open (`*open-mark*`): a provisional value is answered and
+  not held, so no entry depends on which question a read asked first."
+  [compute put!]
+  (if-let [mark *open-mark*]
+    (let [[v settled?] (mark compute)] (if settled? (put! v) v))
+    (put! (compute))))
+
 ;; ---- the tunable bound: an operator scale, a guard pressure, overrides --
 ;;
 ;; Every count-bounded cache reads its limit through `limit-of`, so the operator's profile
@@ -569,6 +584,16 @@
                   n))
               0 ks))))
 
+(defn lru-evict!
+  "Drop the entries of `lru` at the keys `ks`, and answer how many went."
+  [{:keys [^java.util.LinkedHashMap map ^longs weight weigh]} ks]
+  (locking map
+    (reduce (fn [n k]
+              (if-some [v (.remove map k)]
+                (do (aset weight 0 (- (aget weight 0) (long (weigh v)))) (inc n))
+                n))
+            0 ks)))
+
 (defn lru-clear!
   "Empty `lru`, and answer how many entries went."
   [{:keys [^java.util.LinkedHashMap map ^longs weight]}]
@@ -880,11 +905,13 @@
 
 (defn- check-descriptor
   "`d`, or a throw naming the first slot outside its closed set."
-  [{:keys [id label kind keyed-by reads retired-by computed imaged? at value] :as d}]
+  [{:keys [id label kind holds-content? keyed-by reads retired-by computed imaged? at value]
+    :as d}]
   (cond
     (not (keyword? id))                     (refuse-descriptor id "no keyword :id")
     (not (string? label))                   (refuse-descriptor id "no :label")
     (not (kinds kind))                      (refuse-descriptor id (str "kind " kind))
+    (not (boolean? holds-content?))         (refuse-descriptor id "no boolean :holds-content?")
     (not (keyed-by-values keyed-by))        (refuse-descriptor id (str "keyed-by " keyed-by))
     (not (computed-values computed))        (refuse-descriptor id (str "computed " computed))
     (not (contains? imaged-values imaged?)) (refuse-descriptor id (str "imaged? " imaged?))
@@ -903,6 +930,9 @@
 
     :id :label     the row's id and name
     :kind          one of `kinds`
+    :holds-content? true when an entry holds a sentence the KB holds or would hold that
+                   no store holds; `lein lint`'s `derived` check fails such a row unless
+                   its allowlist names it (docs/nmtms.md, \"3. Separated state\")
     :keyed-by      what an entry is keyed by
     :reads         the ids of the rows and `stores` it is computed from
     :retired-by    `{event code}`: each event in `events` that retires entries, and how

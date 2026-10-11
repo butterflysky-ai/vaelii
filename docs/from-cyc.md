@@ -97,22 +97,30 @@ with its own handle rather than an absence:
 (v/assert-rule kb ['(dislikes ?x ?y)] '(not (likes ?x ?y))    'CxSomeContext)
 ```
 
-`(inverse P Q)` is the inverse that actually chains. vaelii declares an inert
+`(inverse P Q)` is the inverse that `ask?`, `query` and a transitive walk read; a forward
+rule's antecedent does not join it ([inference.md](inference.md#where-the-machinery-stops)).
+vaelii declares an inert
 `genlInverse` too, and the declaration carries no inference path, so a working
 one-directional inverse is a forward rule. `(inverse P Q)` is stronger than that
 forward rule in three ways: it is stored under an unordered key so one declaration installs
 both directions, a predicate may declare **several** partners and all are live, and a
 partner declared on a sub-predicate answers the super-predicate's goal.
 
-## Well-formedness: lenient by default, assertive on request
+## Well-formedness: assertive by default
 
 Cyc's three modes, and what each maps to:
 
 | mode | in Cyc | here |
 |---|---|---|
 | strict | constraints must be provable | no equivalent |
-| lenient | constraints must not be disjoint | **the default** — a demonstrated conflict is refused, an argument with no place in the hierarchy is excused |
-| assertive | that, plus eagerly concluding tighter `isa`s | `checks/*assertive-arg-types?*`, on by default (additive on top of lenient; `VAELII_ASSERTIVE_ARG_TYPES=0` opts out) |
+| lenient | constraints must not be disjoint | what `VAELII_ASSERTIVE_ARG_TYPES=0` leaves: a demonstrated conflict is refused, and an argument with no place in the hierarchy is excused |
+| assertive | that, plus eagerly concluding tighter `isa`s | **the default** (`checks/*assertive-arg-types?*`): the argument is concluded a member of the declared type, and a concluded type disjoint from one it holds is a placed clash, not a refusal |
+
+The assertive reading holds for a declaration stated in the asserting context and for one
+the context inherits from an ancestor. A concluded membership is stored at each maximal
+context that sees both the fact and the declaration, so a declaration stated below the
+fact's context concludes the membership in the declaration's context.
+[argtypes.md](argtypes.md#where-a-mint-is-placed) states the rule.
 
 One naming collision to hold: `vaelii.impl.wff` is narrower than Cyc's "WFF". It is the
 **structural** check on the special predicates — `genl` and `genlCx` acyclicity, the
@@ -126,7 +134,7 @@ The content constraints above are a separate stage. `check` runs both.
 | `LogicalTruthMt` | — | no analogue; the logical truths are the engine's, not a context's |
 | `CoreCycLMt` | `CxCore` | the spindle head: the vocabulary code interprets |
 | `UniversalVocabularyMt` / `BaseKB` | `CxUniverse` | the mid anchor, and where a decontextualized claim lands |
-| `CurrentWorldDataCollectorMt` | `CxWell` | the collector — sees the whole shipped ontology |
+| `CurrentWorldDataCollectorMt` | `CxWell` | the collector — sees every shipped context but the opt-in theories, the `kb/middle/` files that state no `genlCx` edge from CxWell ([contexts.md](contexts.md)) |
 | `InferencePSC` | `CxInference` | a **reading**, not a place: what one reader's ancestor set sees whole |
 | `EverythingPSC` | `CxEverything` | likewise, and blind to belief — a syntactic read of the store |
 

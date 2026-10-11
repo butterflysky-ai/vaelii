@@ -55,7 +55,7 @@
 (defn- postings
   "The stored memberships of `x` saying `(t x)` and the ones stating another type."
   [kb t x]
-  (let [ss (keep #(p/get-sentex (:records kb) %) (reads/as-stored-with-arg (:index kb) 1 x))]
+  (let [ss (keep #(p/get-sentex (:records kb) %) (reads/as-stored-with-arg-global (:index kb) 1 x))]
     (group-by #(= (list t x) (:sentence %)) ss)))
 
 (deftest the-lookup-names-what-the-matches-visible-reference-names
@@ -99,8 +99,8 @@
           (v/assert kb (list (chain 0) x) cx)))
       (let [h     (v/assert kb (list t x) cx)
             walks (atom 0)
-            real  tax/genl?-per-pass]
-        (with-redefs [tax/genl?-per-pass (fn [& args] (swap! walks inc) (apply real args))]
+            real  tax/genl?]
+        (with-redefs [tax/genl? (fn [& args] (swap! walks inc) (apply real args))]
           (is (= [h] (vec (membership-handles kb t x cx))) "the exact membership is named"))
         (is (zero? @walks) (str @walks " genl? walks beside a surviving exact membership"))))))
 
@@ -116,7 +116,7 @@
         (v/assert kb (list pred x (tu/fresh-term :individual 'Other)) cx))
       (let [h     (v/assert kb (list t x) cx)
             reads (atom 0)
-            real  reads/as-stored-with-arg]
-        (with-redefs [reads/as-stored-with-arg (fn [& args] (swap! reads inc) (apply real args))]
+            real  reads/as-stored-with-arg-global]
+        (with-redefs [reads/as-stored-with-arg-global (fn [& args] (swap! reads inc) (apply real args))]
           (is (= [h] (vec (membership-handles kb t x cx))) "the exact membership is named"))
         (is (zero? @reads) (str @reads " reads of the term's postings"))))))

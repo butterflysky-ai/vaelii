@@ -691,9 +691,9 @@
 
 (deftest lifting-the-denial-returns-every-reader-to-reaching
   ;;   The lattice above, with the denial retracted.  The scoped closures are memoized
-  ;;   under a key carrying the supporter-visibility generation, so a lift that empties
-  ;;   the scoped-defeat roster has to move that generation or a reader keeps the closure
-  ;;   the defeat is gone from.
+  ;;   under a key carrying the change clock and the reading, so the retraction that
+  ;;   empties the scoped-defeat roster retires every closure memoized while the defeat
+  ;;   stood.
   (tu/with-neutral-kb [kb tu/fresh]
     (tu/with-terms [CxA CxB chi_t dog_t cat_t largerThan Rex]
       (types! kb chi_t dog_t cat_t)

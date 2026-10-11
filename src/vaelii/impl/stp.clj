@@ -457,8 +457,9 @@
 
 (defn- build-problem
   "The stated constraints as `{:dimension :unit :net :support}`, nil when none, or
-  `{:mixed dims}` when they span more than one dimension.  `:support` is
-  `{[p q] → #{handle}}`, both directions of each stated pair."
+  `{:mixed dims :handles #{handle}}` when they span more than one dimension.  `:support`
+  is `{[p q] → #{handle}}`, both directions of each stated pair; `:handles` is every
+  stated constraint's support."
   [kb context]
   (let [stated (stated-constraints kb context)
         dims   (set (map first stated))]
@@ -473,22 +474,27 @@
                                              (update-in [:support [q p]] (fnil into #{}) sup)))
                                        {:net {} :support {}} stated)]
                            {:dimension dim :unit unit :net net :support support})
-      :else              {:mixed dims})))
+      :else              {:mixed dims :handles (into #{} (mapcat peek) stated)})))
+
+(defn- problem-or-refusal
+  "`build-problem`'s answer for `context`, the refusal `{:mixed dims :handles}` included,
+  and the refusal reported once per KB and context.  Resident on the KB's `:qcn` atom,
+  stamped with the change clock and keyed on the tolerance the magnitudes are snapped to."
+  [kb context]
+  (let [prob (observe/cached (reasoning/qcn kb) [::problem context provers/*quantity-tolerance*]
+                             (fn [_stale] (build-problem kb context)))]
+    (when-let [dims (:mixed prob)]
+      (when (observe/newly-seen? (reasoning/qcn kb) [::reported-mixed context] dims)
+        (report-mixed-dimensions! kb context dims)))
+    prob))
 
 (defn problem
   "Every `temporalDistance` believed and visible from `context`, as
   `{:dimension :unit :net :support}`.  nil when nothing is stated, and nil — reported once
-  per KB and context — when the constraints span more than one dimension.  Resident on the
-  KB's `:qcn` atom, stamped with the change clock and keyed on the tolerance the
-  magnitudes are snapped to."
+  per KB and context — when the constraints span more than one dimension."
   [kb context]
-  (let [prob (observe/cached (reasoning/qcn kb) [::problem context provers/*quantity-tolerance*]
-                             (fn [_stale] (build-problem kb context)))]
-    (if-let [dims (:mixed prob)]
-      (do (when (observe/newly-seen? (reasoning/qcn kb) [::reported-mixed context] dims)
-            (report-mixed-dimensions! kb context dims))
-          nil)
-      prob)))
+  (let [prob (problem-or-refusal kb context)]
+    (when-not (:mixed prob) prob)))
 
 ;; ---- the closure, memoized on the network value --------------------------
 
@@ -669,20 +675,23 @@
   (into (into stp-predicates endpoint-predicates) provers/unit-table-predicates))
 
 (defn unsatisfiable-narrowing
-  "The narrowing an unsatisfiable source answers over `intervals`: the pair of the two
-  first under `nm/print-key` emptied both ways, `support` behind it.  An empty pair is
-  unsatisfiable as given, so the interval network it is folded into is unsatisfiable and
-  answers nothing.  nil for fewer than two intervals.
+  "The narrowing an unsatisfiable or refused source answers over `intervals`: the pair of
+  the two first under `nm/print-key` emptied both ways, `support` behind it.  An empty
+  pair is unsatisfiable as given, so the interval network it is folded into is
+  unsatisfiable and answers nothing.  nil for fewer than two intervals.
 
   `:unsatisfiable-sources` carries `source`, the description of the clash in the source
-  network, with the emptied pair as its `:stand-in`: the pair stands in for the source's
-  clash and is not one any interval fact contradicts (`qcn-kb/unsatisfiable-sources`).
+  network or of its refusal, with the emptied pair as its `:stand-in`: the pair stands in
+  for the source's clash or refusal and is not one any interval fact contradicts
+  (`qcn-kb/unsatisfiable-sources`).
 
   An unsatisfiable source admits no endpoint ordering, so reading it pair by pair would
-  empty every pair; one emptied pair gives the same verdict.  Answering nil instead would
-  widen the interval network when a fact arrives, and an entailment drawn through the
-  narrowing would stop holding while the firing that rested on it stayed believed
-  (docs/qcn.md, \"A network can have a second reader\")."
+  empty every pair; one emptied pair gives the same verdict.  A refused source (a metric
+  problem spanning more than one dimension) is read the same way (docs/stp.md,
+  \"Constraints are measures\").  Answering nil instead would widen the interval network
+  when a fact arrives, and an entailment drawn through the narrowing would stop holding
+  while the firing that rested on it stayed believed (docs/qcn.md, \"A network can have
+  a second reader\")."
   [intervals support source]
   (let [[i j] (nm/by-print-key (set intervals))]
     (when j
@@ -713,15 +722,26 @@
   `endpoint-gaps`.  Only narrowed pairs are recorded.  nil with no constraints or fewer
   than two intervals with both endpoints.  An inconsistent network answers
   `unsatisfiable-narrowing`, supported by every constraint read, its source described by
-  `inconsistency-source`."
+  `inconsistency-source`.  A problem refused for spanning more than one dimension answers
+  it too, its `:metric` source naming the `:dimensions` (docs/stp.md, \"Constraints are
+  measures\")."
   [kb context]
-  (when-let [{:keys [net support] :as prob} (problem kb context)]
+  (when-let [{:keys [net support mixed handles] :as prob} (problem-or-refusal kb context)]
     (let [ends (intervals-with-endpoints kb context)]
       (when (>= (count ends) 2)
-        (let [closed (closure kb context prob (mapcat (comp first val) ends))]
-          (if (= :inconsistent closed)
+        (let [closed (when-not mixed (closure kb context prob (mapcat (comp first val) ends)))]
+          (cond
+            mixed
+            (unsatisfiable-narrowing (keys ends) handles
+                                     {:source     :metric
+                                      :dimensions (nm/by-print-key (map first mixed))
+                                      :support    handles})
+
+            (= :inconsistent closed)
             (unsatisfiable-narrowing (keys ends) (into #{} (mapcat val) support)
                                      (inconsistency-source prob))
+
+            :else
             (reduce
              (fn [acc [[i [ei hi]] [j [ej hj]]]]
                (let [rels (relations-from-endpoints closed ei ej)]
@@ -851,6 +871,7 @@
 
 (caches/register-derived
  {:id :K5 :label "Metric closures and reconstructions" :cache :metric-closures :kind :cache
+  :holds-content? false
   :keyed-by :value :reads [] :retired-by {:caches-cleared :W} :computed :read
   :imaged? false :var [#'closure-cache #'via-cache]
   :value (fn [_] [@closure-cache @via-cache])

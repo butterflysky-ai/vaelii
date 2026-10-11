@@ -48,7 +48,8 @@
 
   **A finished job's report outlives the job**, for an hour — long enough to read what it
   did, since the page that would have shown it is usually the page you navigated away
-  from.  Nothing *unsettled* is ever dropped, at any age: forgetting a job is releasing
+  from.  The registry holds the newest `max-settled-jobs` settled reports at most, so a
+  caller submitting no-op jobs holds a bounded number of them.  Nothing *unsettled* is ever dropped, at any age: forgetting a job is releasing
   its writer claim, and a thread that is still running is still writing.  So a wedged job
   keeps its place and keeps counting towards the running badge, which is the truth about
   the process — better than a store two writers took turns on."
@@ -65,6 +66,12 @@
   "How long a settled job's report stays in the registry.  There is deliberately no
   companion bound for an *unsettled* one — `sweep` says why."
   (* 60 60 1000))
+
+(def ^:private max-settled-jobs
+  "How many settled reports the registry holds, newest by submission first; `sweep`
+  drops the rest whatever their age.  Unsettled jobs are outside the count: one writing
+  job runs at a time and one export, so their number is bounded already."
+  100)
 
 (defonce ^:private state (atom {:jobs {} :order [] :next-id 0}))
 
@@ -106,8 +113,9 @@
                :elapsed-ms (- (or (:finished j) (now)) (:started j))))))
 
 (defn- sweep
-  "Drop the reports nobody can still be reading.  Runs on `submit`, which is the only
-  moment the registry grows.
+  "Drop the settled reports older than `finished-ttl-ms`, and those past the newest
+  `max-settled-jobs`.  Runs on `submit` and on every listing read (`jobs`), so an idle
+  registry shrinks too.
 
   **Only a settled job is ever dropped**, and no age changes that.  Forgetting a job is
   releasing its writer claim — `writer` and `writes-kb?` are both reads of this map — so
@@ -117,10 +125,15 @@
   towards the running badge: a thread that will never return is a true thing to say about
   this process, and saying it is better than a store two writers took turns on."
   [s]
-  (let [cutoff (- (now) finished-ttl-ms)
-        live?  (fn [j] (or (not (settled? j))
-                           (> (or (:finished j) (:started j)) cutoff)))
-        kept   (into {} (filter (comp live? val)) (:jobs s))]
+  (let [cutoff  (- (now) finished-ttl-ms)
+        js      (:jobs s)
+        recent  (into #{}
+                      (comp (filter #(let [j (js %)]
+                                       (and j (settled? j)
+                                            (> (or (:finished j) (:started j)) cutoff))))
+                            (take max-settled-jobs))
+                      (rseq (vec (:order s))))
+        kept    (into {} (filter (fn [[id j]] (or (not (settled? j)) (recent id)))) js)]
     (assoc s :jobs kept :order (vec (filter kept (:order s))))))
 
 (defn- update-job!
@@ -139,9 +152,10 @@
   (view (get-in @state [:jobs id])))
 
 (defn jobs
-  "Every job the registry still holds, newest first — the order `/jobs` lists them in."
+  "Every job the registry still holds, newest first — the order `/jobs` lists them in.
+  Sweeps the registry first."
   []
-  (let [{js :jobs :keys [order]} @state]
+  (let [{js :jobs :keys [order]} (swap! state sweep)]
     (into [] (comp (map js) (keep view)) (reverse order))))
 
 (defn running

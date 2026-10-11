@@ -80,7 +80,7 @@
 (defn- per-call
   "Nanoseconds one call of `f` costs.  The warmup is **fixed** rather than proportional
   to `n`: sizing it by the sample count gives the longer reading a head start, which is
-  the mistake `perf`'s `measure` records having made."
+  the mistake `perf`'s `warm!` records having made."
   ^double [f ^long n]
   (dotimes [_ 2000] (f))
   (let [[_ ns] (timed (dotimes [_ n] (f)))]

@@ -662,6 +662,50 @@
           (is (v/ask? kb (list 'before A B) C))
           (is (seq (v/sentexes-matching kb (list finishedFirst A) '?ctx))))))))
 
+(tu/deftest-kb a-refused-metric-network-withdraws-the-allen-firings-it-licensed
+  (load-time-units kb)
+  (v/assert kb '(dimensionOf Metre Length) C)
+  ;; each order states the Metre gap before or after the measures the rule fires on, and
+  ;; reads the same three things: the firing with the Metre gap stored, the source the
+  ;; interval network names, and the firing with the Metre gap retracted
+  (let [run (fn [metre-first?]
+              (tu/with-terms [A B As Ae Bs Be P Q finishedFirst]
+                (with-allen kb
+                  (let [metre! #(v/assert kb (list 'temporalDistance P Q '(QuantityFn 5 Metre)) C)
+                        h      (when metre-first? (metre!))]
+                    (v/assert kb (list 'arg finishedFirst 1 'thing) 'CxCore {:strength :monotonic})
+                    (v/assert-rule kb [(list 'before '?x '?y)] (list finishedFirst '?x) C
+                                   {:direction :forward})
+                    (two-hours-apart! kb A B As Ae Bs Be)
+                    (let [fired-before (seq (v/sentexes-matching kb (list finishedFirst A) '?ctx))
+                          h            (or h (metre!))
+                          net          (v/qualitative-network kb :allen C)
+                          during       {:fired?  (boolean (seq (v/sentexes-matching
+                                                                kb (list finishedFirst A) '?ctx)))
+                                        :before? (v/ask? kb (list 'before A B) C)
+                                        :consistent? (:consistent? net)
+                                        :sources (mapv #(dissoc % :support)
+                                                       (:unsatisfiable-sources net))}]
+                      (v/retract! kb h)
+                      {:fired-before (boolean fired-before)
+                       :during       during
+                       :after        {:fired?  (boolean (seq (v/sentexes-matching
+                                                              kb (list finishedFirst A) '?ctx)))
+                                      :before? (v/ask? kb (list 'before A B) C)}})))))
+        late  (run false)
+        early (run true)]
+    (testing "the rule fires on a relation only the metric layer entails"
+      (is (:fired-before late)))
+    (testing "a Metre gap refuses the metric network, so the interval network reading it is
+              unsatisfiable, names the refusal as its source, and withdraws the firing"
+      (is (= {:fired? false :before? false :consistent? false
+              :sources [{:source :metric :dimensions '[Duration Length]}]}
+             (:during late))))
+    (testing "retracting the Metre gap revives the firing"
+      (is (= {:fired? true :before? true} (:after late))))
+    (testing "the Metre gap stated first gives the same belief at every step"
+      (is (= (dissoc late :fired-before) (dissoc early :fired-before))))))
+
 (tu/deftest-kb the-narrowing-declares-what-moves-it-and-what-names-a-reader
   (testing "every predicate the closure reads is a trigger, the unit table included"
     (is (= '#{temporalDistance startOf endOf dimensionOf conversionFactor}

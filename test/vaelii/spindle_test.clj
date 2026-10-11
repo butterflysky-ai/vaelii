@@ -74,7 +74,7 @@
             (is (= #{['CxCore '(unary_predicate spindle_stale_kind)]}
                    (set (map (juxt :context :form) remove)))))))
       (testing "the sync applies it"
-        (is (= {:added 2 :removed 1 :refused []} (spindle/sync-spindle! kb)))
+        (is (= {:added 2 :removed 1 :refused []} (spindle/sync-spindle! kb @shipped)))
         (is (= {:add [] :remove []} (spindle/plan kb @shipped)))
         (is (= :monotonic (:strength (v/sentex kb (v/handle-of kb wsentence 'CxOrganism)))))
         (is (nil? (v/handle-of kb '(unary_predicate spindle_stale_kind) 'CxCore))))
@@ -98,7 +98,7 @@
                (update (spindle/plan kb @shipped) :remove
                        #(mapv (juxt :context :form) %)))))
       (testing "the sync leaves it held at :default"
-        (is (= {:added 1 :removed 1 :refused []} (spindle/sync-spindle! kb)))
+        (is (= {:added 1 :removed 1 :refused []} (spindle/sync-spindle! kb @shipped)))
         (is (= :default (:strength (v/sentex kb (v/handle-of kb sentence 'CxAbstract)))))
         (is (= {:add [] :remove []} (spindle/plan kb @shipped))))
       (finally (tu/clear-kb! kb)))))
@@ -117,7 +117,7 @@
       ;; shipped edge, and the edge lands once the batch has retracted the author's
       (v/assert kb clash 'CxOrganism)
       (with-redefs [v/edit! (fn [& args] (swap! edits inc) (apply edit! args))]
-        (is (= {:added 1 :removed 1 :refused []} (spindle/sync-spindle! kb))))
+        (is (= {:added 1 :removed 1 :refused []} (spindle/sync-spindle! kb @shipped))))
       (testing "the batch refused the edge, and ran again without it"
         (is (= 2 @edits)))
       (is (some? (v/handle-of kb lost 'CxOrganism)))
@@ -135,7 +135,7 @@
         (testing "the wrapper is one entry naming both records"
           (is (= form (:form entry)))
           (is (= 2 (count (:handles entry))))))
-      (is (= {:added 0 :removed 1 :refused []} (spindle/sync-spindle! kb)))
+      (is (= {:added 0 :removed 1 :refused []} (spindle/sync-spindle! kb @shipped)))
       (is (nil? (v/handle-of kb rule 'CxBiology)))
       (is (= {:add [] :remove []} (spindle/plan kb @shipped)))
       (finally (tu/clear-kb! kb)))))

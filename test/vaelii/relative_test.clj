@@ -1,33 +1,15 @@
 ;; SPDX-License-Identifier: SSPL-1.0
 ;; Copyright © 2026 Vaelii LLC and the Vaelii contributors.
 (ns vaelii.relative-test
-  "Relative direction (`vaelii.impl.relative`): the nine base relations of a frame of
-  reference and the four derived ones, answered by entailment over the path-consistent
-  constraint network of everything asserted in a context.
-
-  Two halves.  The first tests the **algebra alone** — no KB, no context, no belief.  The
-  composition table is *computed* from two independent axis projections rather than
-  transcribed, so it is derived here a second time from the coordinate inequalities that
-  define the nine relations, by laying out three things every way three things can be laid
-  out on a grid; the two statements share nothing and can only agree by both being right.
-  The second half tests the prover over a KB, where what is really being checked is that a
-  relation nobody stored comes out — and that it comes out **in one frame only**, since
-  the frame of reference here is the context."
-  (:require [clojure.set :as set]
-            [clojure.test :refer [deftest is testing use-fixtures]]
+  "Relative direction (`vaelii.impl.relative`): the computed composition table against
+  the coordinate definitions, entailment over a KB, and the context as the frame of
+  reference.  The claims all four spatial calculi share are tables in `space_test`."
+  (:require [clojure.test :refer [deftest is testing use-fixtures]]
             [vaelii.core :as v]
-            [vaelii.impl.projection :as proj]
-            [vaelii.impl.provers :as provers]
-            [vaelii.impl.qcn :as qcn]
             [vaelii.impl.qcn-kb :as qkb]
             [vaelii.impl.relative :as rel]
             [vaelii.test-util :as tu]))
 
-;; A fresh KB per test: the CxCore grammar, the CxSpace vocabulary that states
-;; relative directions in it, and the prover registered.  The vocabulary is an upper
-;; context (it is *about* space, so it is nobody else's business); the prover is opt-in, so
-;; registering it is what turns stored relative-direction facts into a network.  The
-;; algebra tests below need none of it.
 (use-fixtures :each (tu/neutral-fresh
                      #(doto (tu/fresh)
                         (tu/load-core-with! '[[CxSpace "upper"]])
@@ -35,14 +17,10 @@
 
 (def ^:private C 'CxUniverse)
 
-;; ---- the algebra, derived from coordinates ------------------------------
-
 (def ^:private by-coordinates
-  "Each base relation as the inequalities over two places that *define* it, a place in a
-  frame being `[lr fb]` — the left-right coordinate growing rightwards, the front-back one
-  growing frontwards.  This is the independent second statement of the algebra: everything
-  below is derived from here and compared against what `relative/compose` computes from
-  the projections, so the two can only agree by both being right."
+  "Each base relation as the inequalities over two places `[lr fb]` that define it, the
+  coordinates growing rightwards and frontwards: a statement of the algebra that shares
+  nothing with `relative/relation->axes`."
   {:left         (fn [alr afb blr bfb] (and (< alr blr) (= afb bfb)))
    :right        (fn [alr afb blr bfb] (and (> alr blr) (= afb bfb)))
    :front        (fn [alr afb blr bfb] (and (= alr blr) (> afb bfb)))
@@ -54,10 +32,8 @@
    :eq           (fn [alr afb blr bfb] (and (= alr blr) (= afb bfb)))})
 
 (def ^:private places
-  "Every place on a 3×3 grid.  Three values per axis is enough to realize *any* layout of
-  three things: a layout is a weak ordering of three coordinates on each axis
-  independently, so it needs at most three distinct values per axis, and the two axes are
-  free of each other."
+  "Every place on a 3×3 grid.  A layout of three things is a weak ordering of three
+  coordinates on each axis independently, so three values per axis realize every one."
   (vec (for [lr (range 3) fb (range 3)] [lr fb])))
 
 (defn- holding [[alr afb] [blr bfb]]
@@ -76,37 +52,8 @@
             {}
             (for [a places b places c places] [a b c]))))
 
-(deftest the-nine-relations-are-exactly-the-nine-axis-pairs
-  (testing "each relation projects onto one [left-right front-back] pair"
-    (is (= 9 (count rel/relation->axes)))
-    (is (= rel/all-relations (set (keys rel/relation->axes))))
-    (is (= rel/all-relations (set (keys by-coordinates)))
-        "the projections and the coordinate definitions name the same relations"))
-  (testing "and the projection is a bijection onto the whole 3×3 product"
-    (is (= (set (for [l [:lt :eq :gt] f [:lt :eq :gt]] [l f]))
-           (set (vals rel/relation->axes))))
-    ;; totality is a claim about composition, so composition answers it — see the same
-    ;; testing block in `orientation_test` for why `(some? (algebra …))` cannot fail
-    (let [{:keys [compose universe]} (proj/algebra rel/relation->axes)]
-      (is (= rel/all-relations universe))
-      (doseq [a universe, b universe]
-        (let [r (compose #{a} #{b})]
-          (is (seq r) (str "composing " a " with " b " names something"))
-          (is (every? universe r)
-              (str "and only relations — " a " ∘ " b " = " (pr-str r)))))))
-  (testing "and a projection that is not one is refused where it is built, not composed"
-    (testing "a missing pair, which covers eight"
-      (is (thrown-with-msg?
-           clojure.lang.ExceptionInfo #"all nine \[x y\] pairs"
-           (proj/algebra (dissoc rel/relation->axes :front)))))
-    (testing "and a repeated one, which still covers all nine"
-      (is (thrown-with-msg?
-           clojure.lang.ExceptionInfo #"all nine \[x y\] pairs"
-           (proj/algebra (assoc rel/relation->axes :nowhere [:gt :gt])))))))
-
 (deftest the-nine-relations-are-jointly-exhaustive-and-pairwise-disjoint
-  (testing "exactly one holds of any two places — that is what makes a network of them a
-            constraint network at all"
+  (testing "exactly one holds of any two places"
     (doseq [a places b places]
       (is (= 1 (count (holding a b)))
           (str a " and " b " stand in " (holding a b)))))
@@ -115,10 +62,7 @@
            (set (for [a places b places] (relation-of a b)))))))
 
 (deftest the-composition-table-matches-the-coordinate-definitions
-  ;; The guard on the computation.  A wrong projection or a wrong point-algebra entry is
-  ;; not a crash and not an empty answer — it is a wrong entailment, reported with full
-  ;; confidence, about a pair nobody asserted anything for.  Nothing downstream could
-  ;; catch it, so it is caught here.
+  ;; a wrong projection or point-algebra entry composes to a wrong entailment, not a crash
   (let [derived @derived-composition]
     (testing "every pair of relations composes to something, and to the same something"
       (doseq [r1 rel/all-relations r2 rel/all-relations]
@@ -137,9 +81,6 @@
                   [r1 r2]))))))
 
 (deftest composition-is-computed-from-the-two-axis-projections
-  (testing "a relation composed with itself keeps both axes"
-    (is (= #{:left} (rel/compose #{:left} #{:left})) "left of left is left")
-    (is (= #{:front-left} (rel/compose #{:front-left} #{:front-left}))))
   (testing "two perpendicular relations combine into the corner between them"
     (is (= #{:front-left} (rel/compose #{:left} #{:front})) "left then in front is front-left")
     (is (= #{:front-left} (rel/compose #{:front} #{:left})) "and so is in front then left")
@@ -150,58 +91,13 @@
     (is (= rel/all-relations (rel/compose #{:front-left} #{:behind-right}))
         "opposite corners disagree on both axes at once, so nothing at all is left")))
 
-(deftest coincidence-is-the-identity-element
-  (doseq [r rel/all-relations]
-    (is (= #{r} (rel/compose #{:eq} #{r})))
-    (is (= #{r} (rel/compose #{r} #{:eq})))))
-
-(deftest composition-of-sets-is-the-union-over-their-members
-  (is (= (set/union (rel/compose #{:left} #{:front-left})
-                    (rel/compose #{:front} #{:front-left}))
-         (rel/compose #{:left :front} #{:front-left}))
-      "a disjunction on either side admits every combination"))
-
-(deftest composition-is-total-and-never-empty
-  (doseq [a rel/all-relations b rel/all-relations]
-    (let [c (rel/compose #{a} #{b})]
-      (is (seq c) (str a " ∘ " b " must leave something possible"))
-      (is (set/subset? c rel/all-relations)
-          (str a " ∘ " b " must stay inside the universe")))))
-
 (deftest the-converse-flips-both-axes
   (is (= #{:right} (rel/converse-set #{:left})))
   (is (= #{:behind-right} (rel/converse-set #{:front-left})))
   (is (= #{:eq} (rel/converse-set #{:eq})) "coincidence is its own converse")
-  (testing "it is an involution"
-    (is (= rel/all-relations (rel/converse-set (rel/converse-set rel/all-relations))))
-    (doseq [r rel/all-relations]
-      (is (= #{r} (rel/converse-set (rel/converse-set #{r}))))))
-  (testing "and it reverses composition, as a relation algebra requires"
-    (doseq [a rel/all-relations b rel/all-relations]
-      (is (= (rel/converse-set (rel/compose #{a} #{b}))
-             (rel/compose (rel/converse-set #{b}) (rel/converse-set #{a})))
-          (str "converse(" a " ∘ " b ")"))))
-  (testing "and it agrees with reading the coordinates backwards"
+  (testing "it agrees with reading the coordinates backwards"
     (doseq [a places b places]
       (is (= #{(relation-of b a)} (rel/converse-set #{(relation-of a b)}))))))
-
-(deftest the-algebra-drives-the-engine-with-no-kb-in-sight
-  (let [net '{[A B] #{:left} [B A] #{:right}
-              [B D] #{:left} [D B] #{:right}}
-        pc  (qcn/path-consistent net '#{A B D} rel/relative-algebra)]
-    (testing "path consistency composes the chain into the pair nobody recorded"
-      (is (= #{:left} (qcn/constraint pc rel/relative-algebra 'A 'D)))
-      (is (= #{:right} (qcn/constraint pc rel/relative-algebra 'D 'A))))
-    (testing "and the diagonal is the algebra's identity"
-      (is (= #{:eq} (qcn/constraint pc rel/relative-algebra 'A 'A)))))
-  (testing "a chain contradicting itself empties a constraint"
-    (is (= :inconsistent
-           (qcn/path-consistent '{[A B] #{:left}  [B A] #{:right}
-                                  [B D] #{:left}  [D B] #{:right}
-                                  [A D] #{:right} [D A] #{:left}}
-                                '#{A B D} rel/relative-algebra)))))
-
-;; ---- entailment over a KB -----------------------------------------------
 
 (tu/deftest-kb composition-derives-an-unasserted-relation
   (tu/with-terms [Mouse Lion Rock]
@@ -270,29 +166,6 @@
       (is (not (v/ask? kb (list 'frontwardOf A B) C))
           "directly left is level on the front-back axis, so no forward component"))))
 
-(tu/deftest-kb a-derived-assertion-constrains-without-pinning
-  (tu/with-terms [A B]
-    (v/assert kb (list 'leftwardOf A B) C)
-    (is (= #{:left :front-left :behind-left} (qkb/possible rel/relative kb C A B)))
-    (testing "the predicate asserted is entailed, and its converse"
-      (is (v/ask? kb (list 'leftwardOf A B) C))
-      (is (v/ask? kb (list 'rightwardOf B A) C)))
-    (testing "but none of the three base relations it leaves open is"
-      (is (not (v/ask? kb (list 'leftOf A B) C)))
-      (is (not (v/ask? kb (list 'frontLeftOf A B) C)))
-      (is (not (v/ask? kb (list 'behindLeftOf A B) C))))))
-
-(tu/deftest-kb two-facts-about-one-pair-intersect
-  (tu/with-terms [A B]
-    ;; one fact per axis: each leaves the other axis open, and together they pin the
-    ;; relation to the corner between them
-    (v/assert kb (list 'leftwardOf A B) C)                ; #{:left :front-left :behind-left}
-    (v/assert kb (list 'frontwardOf A B) C)               ; #{:front :front-left :front-right}
-    (is (= #{:front-left} (qkb/possible rel/relative kb C A B))
-        "the constraint is the intersection, whichever order they were read in")
-    (is (v/ask? kb (list 'frontLeftOf A B) C))
-    (is (not (v/ask? kb (list 'leftOf A B) C)))))
-
 (tu/deftest-kb coincidence-carries-a-relation-across
   (tu/with-terms [A B D]
     (v/assert kb (list 'sameRelativePositionAs A B) C)
@@ -301,13 +174,7 @@
       (is (= #{:left} (qkb/possible rel/relative kb C A D)))
       (is (v/ask? kb (list 'leftOf A D) C)))))
 
-;; ---- the frame of reference is the context ------------------------------
-
 (tu/deftest-kb a-frame-of-reference-is-a-context-and-does-not-leak
-  ;; The test the whole design decision rests on.  Relative direction is ternary in the
-  ;; literature and the network is binary; the viewpoint is the context.  So the same
-  ;; two individuals stand in opposite relations in two sibling contexts, each context's
-  ;; network answers its own way, and neither is contaminated by the other.
   (tu/with-terms [Mouse Lion CxFromTheLion CxFromTheMouse]
     (v/assert kb (list 'genlCx CxFromTheLion C) C)
     (v/assert kb (list 'genlCx CxFromTheMouse C) C)
@@ -330,8 +197,6 @@
       (is (not (v/ask? kb (list 'rightOf Mouse Lion) C))))))
 
 (tu/deftest-kb a-context-seeing-two-frames-at-once-is-incoherent
-  ;; The other side of the same decision, stated rather than hidden: merging two frames
-  ;; without translating between them is an error, and a context that sees both makes it.
   (tu/with-terms [Mouse Lion CxFromTheLion CxFromTheMouse CxBothWays]
     (v/assert kb (list 'genlCx CxBothWays CxFromTheLion) C)
     (v/assert kb (list 'genlCx CxBothWays CxFromTheMouse) C)
@@ -342,53 +207,6 @@
     (testing "while the two frames it sees are each still coherent on their own"
       (is (not (qkb/inconsistent? rel/relative kb CxFromTheLion)))
       (is (not (qkb/inconsistent? rel/relative kb CxFromTheMouse))))))
-
-(tu/deftest-kb the-network-follows-belief-and-visibility
-  (tu/with-terms [A B D CxInner CxOuter]
-    (v/assert kb (list 'genlCx CxInner CxOuter) C)
-    (v/assert kb (list 'leftOf A B) CxOuter)
-    (v/assert kb (list 'leftOf B D) CxInner)
-    (testing "the inner context sees both facts, so it composes the chain"
-      (is (v/ask? kb (list 'leftOf A D) CxInner)))
-    (testing "the outer context sees only its own, so it composes nothing"
-      (is (not (v/ask? kb (list 'leftOf A D) CxOuter)))
-      (is (v/ask? kb (list 'leftOf A B) CxOuter)))
-    (testing "retracting a link breaks the chain — the network is read, not cached"
-      (v/retract! kb (v/handle-of kb (list 'leftOf B D) CxInner))
-      (is (not (v/ask? kb (list 'leftOf A D) CxInner))))))
-
-;; ---- inconsistency -------------------------------------------------------
-
-(tu/deftest-kb a-contradictory-network-answers-nothing
-  (tu/with-terms [A B D]
-    (v/assert kb (list 'leftOf A B) C)
-    (v/assert kb (list 'rightOf A B) C)
-    (testing "left and right are disjoint base relations, so their pair empties"
-      (is (= #{} (qkb/possible rel/relative kb C A B)))
-      (is (= :inconsistent (qkb/definite rel/relative kb C A B))))
-    (testing "and an inconsistent theory is not mined for conclusions — anywhere"
-      (is (not (v/ask? kb (list 'leftOf A B) C)))
-      (is (not (v/ask? kb (list 'rightOf A B) C)))
-      (is (not (v/ask? kb (list 'leftwardOf A B) C)))
-      (is (empty? (v/ask kb (list 'leftwardOf A '?y) C)))
-      (is (not (v/ask? kb (list 'sameRelativePositionAs D D) C))
-          "not even the diagonal, which holds of anything in a coherent network"))
-    (testing "retracting one of the two gives the other its answers back"
-      (v/retract! kb (v/handle-of kb (list 'rightOf A B) C))
-      (is (v/ask? kb (list 'leftOf A B) C))
-      (is (not (v/ask? kb (list 'rightOf A B) C))))))
-
-(tu/deftest-kb an-inconsistency-derived-through-a-chain-is-caught
-  (tu/with-terms [A B D]
-    ;; A left of B, B left of D — so A is left of D, and cannot also be right of it
-    (v/assert kb (list 'leftOf A B) C)
-    (v/assert kb (list 'leftOf B D) C)
-    (v/assert kb (list 'rightOf A D) C)
-    (is (= :inconsistent (qkb/definite rel/relative kb C A D)))
-    (is (not (v/ask? kb (list 'leftOf A B) C))
-        "the whole network is unsatisfiable, so no pair of it is answered")))
-
-;; ---- open enumeration ----------------------------------------------------
 
 (tu/deftest-kb an-open-argument-enumerates-the-entailed-things
   (tu/with-terms [A B D]
@@ -404,42 +222,3 @@
       (let [pairs (set (map (juxt #(get % '?x) #(get % '?y))
                             (v/ask kb (list 'leftwardOf '?x '?y) C)))]
         (is (= #{[A B] [A D] [B D]} pairs))))))
-
-(tu/deftest-kb one-variable-twice-is-the-diagonal
-  (tu/with-terms [A B]
-    (v/assert kb (list 'leftOf A B) C)
-    (testing "(sameRelativePositionAs ?x ?x) holds of everything — its denotation is the
-              identity"
-      (is (= #{A B} (set (map #(get % '?x)
-                              (v/ask kb (list 'sameRelativePositionAs '?x '?x) C))))))
-    (testing "and the irreflexive relations hold of none"
-      (is (empty? (v/ask kb (list 'leftOf '?x '?x) C)))
-      (is (empty? (v/ask kb (list 'leftwardOf '?x '?x) C))))))
-
-;; ---- registration --------------------------------------------------------
-
-(tu/deftest-kb the-prover-ships-opt-in
-  (testing "nothing about a frame of reference is in the default registry, so a KB pays
-            for the network only once it asks for it"
-    (is (not-any? #(qkb/prover-for? :relative %) provers/default-provers)
-        "the calculi share one prover record, so opt-in is asked by which calculus a
-         registered prover speaks for, not by its class")))
-
-(tu/deftest-kb without-the-prover-the-facts-are-inert
-  ;; the same KB, queried through the *default* registry — the extension point is the prover list, so
-  ;; this isolates what registering it adds without building a second KB on the shared
-  ;; scratch space (which would clear this one out from under the fixture)
-  (tu/with-terms [A B D]
-    (v/assert kb (list 'leftOf A B) C)
-    (v/assert kb (list 'leftOf B D) C)
-    (testing "an asserted relation is retrievable as an ordinary fact"
-      (is (seq (provers/solve-goal-with kb provers/default-provers
-                                        (list 'leftOf A B) C))))
-    (testing "but nothing in the default registry composes two of them"
-      (is (empty? (provers/solve-goal-with kb provers/default-provers
-                                           (list 'leftOf A D) C)))
-      (is (empty? (provers/solve-goal-with kb provers/default-provers
-                                           (list 'leftwardOf A D) C))))
-    (testing "the registered prover on the very same facts does"
-      (is (v/ask? kb (list 'leftOf A D) C))
-      (is (v/ask? kb (list 'leftwardOf A D) C)))))

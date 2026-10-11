@@ -381,6 +381,7 @@
 
 (caches/register-derived
  {:id :R9 :label "Rete alpha memories" :cache :rete-alpha :kind :cache :keyed-by :functor
+  :holds-content? false
   :reads [:records]
   :retired-by {:stored :K :removed :K :respelled :K :closed :W :caches-cleared :W :recover :R}
   :computed :write :imaged? false :var #'registry

@@ -51,6 +51,7 @@
             [vaelii.impl.kb :as kb]
             [vaelii.impl.levels :as lvl]
             [vaelii.impl.logging :as logging]
+            [vaelii.impl.memory :as mem]
             [vaelii.impl.modal :as modal]
             [vaelii.impl.naming :as nm]
             [vaelii.impl.nat :as nat]
@@ -58,7 +59,6 @@
             [vaelii.impl.observe :as observe]
             [vaelii.impl.oplog :as oplog]
             [vaelii.impl.opts :as opts]
-            [vaelii.impl.overlay.mount :as mount]
             [vaelii.impl.plan :as plan]
             [vaelii.impl.predall :as predall]
             [vaelii.impl.protocols :as p]
@@ -197,9 +197,9 @@
   so several forks may share one base and evolve independently.
 
   `opts` names the fork's *own* storage, as an ordinary opts map (`:backend :memory` by
-  default — an ephemeral hypothesis on a space nothing else uses; `{:backend :disk-log
-  :dir …}` gives a durable one, which can be remounted over the same base later and
-  serves the merged view it was left in).  `:tms` selects the fork's truth-maintenance
+  default — an ephemeral hypothesis on a space nothing else uses, which `close!` drops;
+  `{:backend :disk-log :dir …}` gives a durable one, which can be remounted over the same
+  base later and serves the merged view it was left in).  `:tms` selects the fork's truth-maintenance
   representation and, unlike the entry-point policies below, does **not** inherit: an
   unnamed `:tms` takes the engine default (`:dense`), not the base's rep.  That is safe
   because the two are belief-identical (`jtms_dense_oracle_test`), so a fork holds the same
@@ -227,10 +227,11 @@
          ;; plain open-kb in the same JVM would see both — so any opts naming neither
          ;; a :space nor a :dir take the fresh fork space, exactly as no opts do;
          ;; naming one explicitly stays the remount spelling
+         fresh  {:backend :memory :space (mem/engine-space :fork)}
          own    (cond
-                  (not (seq own))              (mount/fresh-overlay-opts)
+                  (not (seq own))              fresh
                   (or (:space own) (:dir own)) own
-                  :else                        (merge (mount/fresh-overlay-opts) own))
+                  :else                        (merge fresh own))
          spec   {:records  :overlay
                  :index    :overlay
                  :base-stores {:records (:records kb) :index (:index kb)}
@@ -319,13 +320,13 @@
   Terms are what is **stored**: a defeated or unsupported sentex keeps its names here,
   exactly as it keeps its extent in the secondary roots."
   [kb]
-  (vec (sort (reads/stored-terms (:index kb)))))
+  (vec (sort (reads/stored-terms-global (:index kb)))))
 
 (defn term-count
   "How many distinct terms the KB's vocabulary holds — one set-size read, O(1), nothing
   fetched.  The cardinality of `terms`, and like it a count of what is stored."
   [kb]
-  (reads/stored-term-count (:index kb)))
+  (reads/stored-term-count-global (:index kb)))
 
 (defn sentex-count
   "How many sentexes the KB holds, in total — the count the count-aware trie keeps at its
@@ -517,7 +518,7 @@
    (when-some [n (:limit opts)]
      (check-limit! n "find-terms :limit"))
    (let [match? (term-matcher q opts)
-         hits   (filter #(match? (str %)) (reads/stored-terms (:index kb)))]
+         hits   (filter #(match? (str %)) (reads/stored-terms-global (:index kb)))]
      (if-let [n (:limit opts)]
        (smallest-n n hits)
        (vec (sort hits))))))
@@ -649,7 +650,7 @@
   ([kb pos term] (sentexes-with-arg kb pos term nil))
   ([kb pos term opts]
    (check-extent-opts! opts "sentexes-with-arg")
-   (believed-filter kb opts (records-of kb (reads/as-stored-with-arg (:index kb) pos term)))))
+   (believed-filter kb opts (records-of kb (reads/as-stored-with-arg-global (:index kb) pos term)))))
 
 (defn count-with-arg
   "How many fact sentexes hold `term` at argument position `pos`, as **stored** — cheap,
@@ -657,7 +658,7 @@
 
   Counts stored-not-believed sentexes too.  The believed count is
   `(count (sentexes-with-arg kb pos term {:believed? true}))` and is O(n)."
-  [kb pos term] (reads/stored-count-with-arg (:index kb) pos term))
+  [kb pos term] (reads/stored-count-with-arg-global (:index kb) pos term))
 
 (defn types-of
   "The types asserted of individual `x` — functors of unary sentexes (T x), found
@@ -669,7 +670,10 @@
 (defn disjoint?
   "Are types `a` and `b` provably disjoint (via disjoint declarations, closed
   under genl)?  With a `context`, only declarations and genl edges visible from
-  it count — the vantage every definitional check now judges from."
+  it count — the vantage every definitional check now judges from.
+
+  The 3-arity reads every declaration and edge the taxonomy holds, including one a
+  `defeat` or an `except` hides from every reader: the KB-wide reading."
   ([kb a b] (kb/disjoint? kb a b))
   ([kb a b context] (kb/disjoint? kb a b context)))
 
@@ -777,7 +781,10 @@
 (defn genls
   "The supertypes of type `t`, reflexively — `t` itself plus everything reachable
   from it by `genl`.  A set; `#{t}` when `t` is not a node in the type hierarchy.
-  With a `context`, only edges visible from it are walked (docs/taxonomy.md)."
+  With a `context`, only edges visible from it are walked (docs/taxonomy.md).
+
+  The 2-arity reads every edge the taxonomy holds, including one a `defeat` or an
+  `except` hides from every reader: the KB-wide reading."
   ([kb t] (tax/genls-global (reasoning/taxonomy kb) t))
   ([kb t context] (tax/genls (reasoning/taxonomy kb) t context)))
 
@@ -785,7 +792,9 @@
   "The subtypes of type `t`, reflexively — `t` itself plus everything that reaches
   it by `genl`.  A set; `#{t}` when `t` is not a node in the type hierarchy.  This
   is the fan-out that lets an antecedent `(animal ?x)` match a stored `(dog Muffet)`.
-  With a `context`, only edges visible from it are walked."
+  With a `context`, only edges visible from it are walked.
+
+  The short arity reads the KB-wide edge set, as `genls`' does."
   ([kb t] (tax/specs-global (reasoning/taxonomy kb) t))
   ([kb t context] (tax/specs (reasoning/taxonomy kb) t context)))
 
@@ -795,27 +804,60 @@
   whatever installed it: a stated `(genl t super)`, or a `covering`, `separating` or
   `partition` roster naming `t` as a part of `super`.  O(degree).  A set; `#{}` when
   `t` is not a node in the type hierarchy.  With a `context`, only edges visible from it
-  count."
+  count.
+
+  The short arity reads the KB-wide edge set, as `genls`' does."
   ([kb t] (tax/direct-genls-global (reasoning/taxonomy kb) t))
   ([kb t context] (tax/direct-genls (reasoning/taxonomy kb) t context)))
 
 (defn direct-specs
   "The types that are a subtype of `t` by **one** `genl` edge in the closure — its
-  direct children.  `direct-genls`, the other direction."
+  direct children.  `direct-genls`, the other direction.
+
+  The short arity reads the KB-wide edge set, as `genls`' does."
   ([kb t] (tax/direct-specs-global (reasoning/taxonomy kb) t))
   ([kb t context] (tax/direct-specs (reasoning/taxonomy kb) t context)))
+
+(defn min-genls
+  "The **minimal** supertypes of type `t`: its direct parents (`direct-genls`) with no
+  other direct parent of `t` strictly below them.  Every other strict supertype of `t` is
+  a supertype of one of these, so the set is `t`'s position in the subsumption order read
+  from below.  The read is over every believed edge, whatever installed it: a stated
+  `(genl dog animal)` beside `dog ⊂ mammal ⊂ animal` leaves `animal` out, and a parent
+  only an `intersection` or a cover roster gives is a member.  Two parents that subsume
+  each other are both members.  Not reflexive.  One memoized closure read per direct
+  parent.  A set; `#{}` when `t` is not a node in the type hierarchy.  With a `context`,
+  only edges visible from it count.
+
+  The short arity reads the KB-wide edge set, as `genls`' does."
+  ([kb t] (tax/min-genls-global (reasoning/taxonomy kb) t))
+  ([kb t context] (tax/min-genls (reasoning/taxonomy kb) t context)))
+
+(defn max-specs
+  "The **maximal** subtypes of type `t`: its direct children (`direct-specs`) with no
+  other direct child of `t` strictly above them.  `min-genls`, the other direction.  One
+  memoized closure read per direct child, so the cost follows `t`'s own fan-out.
+
+  The short arity reads the KB-wide edge set, as `genls`' does."
+  ([kb t] (tax/max-specs-global (reasoning/taxonomy kb) t))
+  ([kb t context] (tax/max-specs (reasoning/taxonomy kb) t context)))
 
 (defn genl?
   "Is `sub` a (reflexive-transitive) subtype of `super`?  Types, not individuals —
   for an individual's type membership use `isa?`.  With a `context`, only edges
-  visible from it count."
+  visible from it count.
+
+  The short arity reads the KB-wide edge set, as `genls`' does."
   ([kb sub super] (tax/genl?-global (reasoning/taxonomy kb) sub super))
   ([kb sub super context] (tax/genl? (reasoning/taxonomy kb) sub super context)))
 
 (defn types
   "Every type currently in the genl hierarchy — the nodes of the closure, i.e. every
-  type named by some believed `genl` edge."
-  [kb] (tax/types (reasoning/taxonomy kb)))
+  type named by some believed `genl` edge. With a `context`, only a node touched by an
+  edge visible from it counts — the same visibility `genl?` and `disjoint?` read with a
+  `context`."
+  ([kb] (tax/types (reasoning/taxonomy kb)))
+  ([kb context] (tax/types (reasoning/taxonomy kb) context)))
 
 (defn- scoped-read?
   "Does `context` name a place to scope a read by?  A variable and the three query
@@ -858,7 +900,7 @@
   `:asymmetric`, `:reflexive`, `:functional`, `:irreflexive`, `:anti-symmetric`,
   `:anti-transitive`), the grants (`:decontextualized`, `:forced-decontextualized`,
   `:forced-monotonic`, `:abducible`, `:closed-extent`, `:modal`, `:target-following`),
-  the function kinds (`:reifiable`, `:unreifiable`, `:quoting`, `:context-denoting`) and
+  the function kinds (`:reifiable`, `:unreifiable`, `:quoting`) and
   the `:declares-*` kinds naming a predicate as the subject of an argument constraint.
   Declared by the corresponding sentex, e.g. `(symmetric siblingOf)`.  A kind off that
   roster answers false for every term rather than being refused.
@@ -876,7 +918,9 @@
   context answers whether it believes a statement, which a `defeat` or an `except` it
   sees takes away, and the two roster kinds
   (`:forced-monotonic`, `:forced-between-predicates`), which answer the engine's baseline
-  as well as the declarations, from any context alike (docs/nmtms.md)."
+  as well as the declarations, from any context alike (docs/nmtms.md).
+
+  The 3-arity reads the KB-wide declarations, as `disjoint?`'s does."
   ([kb kind pred]
    (if (decide/roster-kinds kind)
      (decide/on-roster? (reasoning/taxonomy kb) kind pred)
@@ -887,7 +931,11 @@
      (tax/has-prop? (reasoning/taxonomy kb) kind pred context))))
 
 (defn props
-  "The set of predicates carrying metadata property `kind` (see `has-prop?`)."
+  "The set of predicates carrying metadata property `kind` (see `has-prop?`).
+
+  The KB-wide reading: every predicate a declaration the taxonomy holds marks,
+  including one a `defeat` or an `except` hides from every reader; `has-prop?` with a
+  context reads one reader's."
   [kb kind]
   (if (decide/roster-kinds kind)
     (decide/roster (reasoning/taxonomy kb) kind)
@@ -896,7 +944,9 @@
 (defn inverse-of
   "The predicate declared inverse to `pred` by an `(inverse P Q)` sentex, or nil.
   The relation is stored both ways, so `(inverse-of kb Q)` answers `P`.  With a
-  `context`, the declaration must be visible from it."
+  `context`, the declaration must be visible from it.
+
+  The 2-arity reads the KB-wide declarations, as `disjoint?`'s does."
   ([kb pred] (tax/inverse-of (reasoning/taxonomy kb) pred))
   ([kb pred context] (tax/inverse-of (reasoning/taxonomy kb) pred context)))
 
@@ -1385,18 +1435,15 @@
 
 (defn- context-shape-problem
   "The `:shape` problem a context slot of the wrong shape is refused with, or nil.  A
-  context is a bare symbol — or a **context-function application** `(CxTimeFn …)` that
-  actually reifies to its `cx/` constant before anything downstream reads it
-  (docs/context-nat.md).
+  context is a bare symbol — or a **ground application** `(CxTimeFn …)`, which reifies to
+  its `cx/` constant before anything downstream reads it (docs/context-nat.md).
 
-  The compound is admitted only when reification *would yield a symbol*: its head is a
-  **declared** `context_denoting_function` and the application is ground
-  (`nat/context-denoting-ground-nat?`).  This is a shape invariant — a stored sentex's
-  context is always a symbol — so it must not depend on the naming policy: an undeclared
-  `(CxBogusFn …)` or a non-ground `(CxTimeFn CxMonad ?x)` never reifies, would store a raw
-  list as the context, and is refused here whatever `:naming` is set to (a lexical
-  `Cx*Fn`-only check passed it to the naming check, which `:naming :off` then waves
-  through).
+  The compound is admitted when reification yields a symbol: it is ground and headed by a
+  symbol (`nat/context-application?`).  The test reads the form alone and no declaration,
+  so the stored set does not depend on the order a declaration and a fact arrive in.  This
+  is a shape invariant — a stored sentex's context is always a symbol — so it does not
+  depend on the naming policy: a non-ground `(CxTimeFn CxMonad ?x)` never reifies, would
+  store a raw list as the context, and is refused here whatever `:naming` is set to.
 
   A **query context** (`CxEverything` / `CxInference` / `CxNothing`) is refused here too,
   and for the same kind of reason: it is a symbol, so every shape check below passes it,
@@ -1404,7 +1451,7 @@
   rather than a place — after which the read entry points, which resolve the symbol before the
   engine ever sees it, could never match what was written.  Refused whatever `:naming`
   says, the distinction being an invariant and not a spelling policy (`nm/query-contexts`)."
-  [kb context]
+  [context]
   (cond
     (nm/query-context? context)
     {:type :shape :context context
@@ -1412,11 +1459,10 @@
                    "nothing is asserted into one.  Assert into the context you mean, and "
                    "pass " context " to a read instead.")}
 
-    (not (or (symbol? context)
-             (nat/context-denoting-ground-nat? kb context)))
+    (not (or (symbol? context) (nat/context-application? context)))
     {:type :shape :context context
-     :message (str "the context must be a bare symbol or a ground application of a declared "
-                   "context-denoting function (CxTimeFn …), got " (pr-str context))}))
+     :message (str "the context must be a bare symbol or a ground application headed by a "
+                   "symbol (CxTimeFn …), got " (pr-str context))}))
 
 (defn- sentence-shape-problem
   "The `:shape` problem a would-be assertion is refused with before it is even a sentence,
@@ -1655,7 +1701,9 @@
   Premises only: a derived `(P …)` placed outside CxUniverse is placed by the rule that
   concluded it, and is re-placed when that derivation is re-run.  The extent is
   snapshotted before the first move, since each move writes to the posting being read.
-  `assert-fn` is `assert`, handed in because this runs inside it."
+  `assert-fn` is `assert`, handed in because this runs inside it.
+
+  The mark is read unscoped: the storage context does not vary by reader."
   [kb sentence assert-fn]
   (let [s    (rules/inner-rule sentence)
         pred (when (and (seq? s) (= 'forced_decontextualized_predicate (first s))) (second s))]
@@ -2042,7 +2090,7 @@
    ;; and one that is not sequential throws bare, with no `:type` to discriminate on.
    ;; The vector arm is the same failure at one remove — it stores, and then the read
    ;; entry points read the spelling as a conjunction.
-   (check-shape! (context-shape-problem kb context))
+   (check-shape! (context-shape-problem context))
    (check-assert-opts! opts)
    (check-sentence-shape! sentence)
    ;; Reify ground reifiable NATs to their opaque constants *before* anything else —
@@ -2054,10 +2102,10 @@
     kb
     [:assert sentence context (:strength opts)]
     (fn []
-      (let [;; A context-denoting NAT `(CxTimeFn …)` in the context slot reifies to its `cx/`
+      (let [;; A ground application `(CxTimeFn …)` in the context slot reifies to its `cx/`
             ;; constant here — the context-slot twin of the sentence reify below, since the
             ;; context argument is not on the sentence walk (docs/context-nat.md).  A no-op
-            ;; unless the KB declares a context_denoting_function and this is a ground one.
+            ;; for a symbol.
             context  (nat/maybe-reify-context kb context)
             sentence (apply-direction-opt sentence opts)
             ;; The answer-set surface forms — an `(asp/atMost k ?v pattern)` / `(asp/atLeast …)`
@@ -2171,6 +2219,25 @@
                (nat-maint/reconcile-assert kb sentence opts)))
             h)))))))
 
+(defn try-assert
+  "`assert`, refusing a sentence that would open a definitional clash with believed
+  content visible from `context`: a `:disjoint`, `:functional`, `:asymmetric`,
+  `:anti-transitive` or `:cover` clash formed by the sentence, by a membership its
+  argument declarations mint, or, for a `(forced_decontextualized_predicate P)`
+  declaration, by a `(P …)` premise it moves into CxUniverse (`rehome-forced-extent!`).
+  The refusal is `:definitional-clash`, carrying the clash
+  kind in `:violation`, the members it clashes with in `:clashes-with`, and
+  `:entailed-from` when a mint clashes, and the call stores nothing.  Every other
+  refusal, argument and return value is `assert`'s.
+
+  Whether a write is refused depends on what is already stored, so this is the one write
+  entry point whose result depends on arrival order (docs/api.md, \"Refusing a clash\")."
+  ([kb sentence] (try-assert kb sentence 'CxUniverse nil))
+  ([kb sentence context] (try-assert kb sentence context nil))
+  ([kb sentence context opts]
+   (binding [checks/*refuse-clashes?* true]
+     (assert kb sentence context opts))))
+
 (defn assert-rule
   "Assert a rule (a sentex whose sentence is an implication) in `context`.
   `opts` may carry `:direction` (:forward | :backward | :inert | :both, default
@@ -2241,8 +2308,8 @@
   only for the sentence: an entry whose `:strength` is misspelt is admissible knowledge
   asserted at the wrong class, which is exactly what a batch critic exists to catch
   before it lands."
-  [kb sentence context opts]
-  (or (some-> (context-shape-problem kb context) vector)
+  [sentence context opts]
+  (or (some-> (context-shape-problem context) vector)
       (some-> (problem (fn [] (check-assert-opts! opts))) vector)
       (some-> (sentence-shape-problem sentence) vector)
       ;; A malformed answer-set surface (`asp/atMost` / `asp/atLeast` / `asp/minimize`, or a
@@ -2360,8 +2427,9 @@
   Absent under `*write-unrecovered?*`, where `assert` lands the write.
 
   Plus three that are about the *request* rather than the knowledge: `:shape` (the
-  context is not a symbol, the sentence is not an s-expression, or it is a vector —
-  which is how a read entry point spells a conjunction), `:unknown-option`
+  context is neither a symbol nor a ground application, the sentence is not an
+  s-expression, or it is a vector — which is how a read entry point spells a
+  conjunction), `:unknown-option`
   (`opts` is not a map, an `opts` key `assert` does not read, a `:strength` that is
   not an assertable class, or a `:direction` that is unknown, on a non-rule, or
   contradicting the wrapper the sentence already carries — see `assert-opt-keys`) and
@@ -2386,7 +2454,9 @@
   constant for a ground reifiable NAT, which is a write: an application that already has
   a term is checked as that term, and one that has none is read as the constant `assert`
   would mint, holding its function's `result` types (`checks/*entry-mints?*`) — what a
-  rule would conclude of the new constant is not read.  It does not evaluate an
+  rule would conclude of the new constant is not read.  A ground application in the
+  context slot is checked as the `cx/` context `assert` stores in, minted or not
+  (`nat/context-for-check`).  It does not evaluate an
   imperative.  And it does not chain, so a refusal raised while the assertion's rules
   fire, a `:pattern-too-costly` from an `exceptWhen` query, is `assert`'s alone; `assert`
   then takes back what the call wrote (`undoing-refusal`).  Everything else is the same
@@ -2398,7 +2468,7 @@
    ;; ahead of the shape guards, so that `*bulk-load?*` cannot be the way into a state
    ;; whose dedup walk is already gone.
    (or (unrecovered-problems kb "assert")
-       (shape-problems kb sentence context opts)
+       (shape-problems sentence context opts)
        (some-> (direction-opt-problem sentence opts) vector)
        ;; ...and the other wrapper `assert` peels before it splits: a strength stated on
        ;; an `exceptWhen` query, for the exception's own defeat class
@@ -2409,7 +2479,9 @@
        ;; exactly as `assert` does before it splits or stores anything.  None can throw:
        ;; `shape-problems` above answered for a malformed cardinality bound, and
        ;; `direction-opt-problem` and `exception-strength-problem` for the other two.
-       (let [sentence (apply-direction-opt sentence opts)
+       (let [;; the context slot as `assert` stores it: its `cx/` constant, unminted
+             context  (nat/context-for-check kb context)
+             sentence (apply-direction-opt sentence opts)
              sentence (rules/normalize-solve-surface sentence)
              sentence (first (sx/peel-exception-strength sentence))]
          (cond
@@ -2770,7 +2842,8 @@
                                              :facts-per-sec (if (pos? ms)
                                                               (/ (double done) (/ ms 1000.0))
                                                               0.0)))))
-         hs          (binding [*bulk-load?* true]
+         hs          (binding [*bulk-load?* true
+                               special/*seed-moves?* false]
                        (with-deferred-settle kb
                          ;; the counting arm only when somebody is listening: a load with
                          ;; no callback pays nothing for the option it did not pass
@@ -3113,18 +3186,24 @@
   The read side takes **more** than the write side — a variable stands for the reader to be
   found, and the three query contexts name a way of reading — and all of those are symbols,
   so one `symbol?` covers them and the fast path pays a type test.  What is left is the
-  compound, admitted only when it reifies: a ground application of a declared
-  `context_denoting_function`, exactly as `context-shape-problem` admits one for a write.
+  compound, admitted only when it reifies: a ground application whose head CxUniverse
+  believes a `(result F context)` of (`nat/readable-context-application?`).  A write admits
+  every ground application, and stores it in a `cx/` context no read names until the
+  declaration is believed.
 
   Unrefused it answered **empty**.  `(CxTimeFn ?t)` is not ground so it names no context,
-  `(CxBogusFn Q)` is not declared so it names none either, and a read at something that
-  names no context finds nothing — silently, and looking exactly like a true negative."
+  `(CxBogusFn Q)` is declared to denote none, and a read at something that names no
+  context finds nothing — silently, and looking exactly like a true negative."
   [kb context]
-  (when-not (or (symbol? context) (nat/context-denoting-ground-nat? kb context))
+  (when-not (or (symbol? context) (nat/readable-context-application? kb context))
     {:type :shape :context context
-     :message (str "the context to read in must be a symbol — a context, a variable, or a "
-                   "query context — or a ground application of a declared context-denoting "
-                   "function (CxTimeFn …), got " (pr-str context))}))
+     :message (if (nat/context-application? context)
+                (str "the context " (pr-str context) " is read only while " nat/universal-context " believes "
+                     (pr-str (list 'result (first context) nat/context-type))
+                     ", and it does not")
+                (str "the context to read in must be a symbol — a context, a variable, or a "
+                     "query context — or a ground application headed by a symbol "
+                     "(CxTimeFn …), got " (pr-str context)))}))
 
 (defn- read-in-context
   "Run `run-at` — a read as a function of the context to run it in — resolving a **query
@@ -3231,16 +3310,16 @@
   "The `:shape` problem `handle-of` refuses a context with, or nil — read after the `ist`
   resolution, so a ground context-function application has been reified to its constant
   (or to the `no-match` symbol) and a query context has been refused already.  What is
-  left to refuse is a non-symbol — nil, a number, a non-ground or undeclared `(CxFn …)` —
-  and a variable, which on a read means \"in some context\" and so names no one stored
-  sentex."
+  left to refuse is a non-symbol — nil, a number, a non-ground `(CxFn …)` or one no
+  believed `(result CxFn context)` declares — and a variable, which on a read means \"in
+  some context\" and so names no one stored sentex."
   [context]
   (cond
     (not (symbol? context))
     {:type :shape :context context
      :message (str "handle-of looks a sentence up in one context, and the context must be a"
-                   " symbol naming it, or a ground application of a declared context-denoting"
-                   " function (CxTimeFn …), got " (pr-str context))}
+                   " symbol naming it, or a ground application of a function some reader"
+                   " believes a (result F context) of, got " (pr-str context))}
 
     (sx/variable? context)
     {:type :shape :context context
@@ -3367,7 +3446,7 @@
   ;; context throws `:naming` where `assert` and `check` say `:shape`.
   ;; this entry point persists and indexes too, so it owes every one of them — including the
   ;; durable-log constraint `check-sentence-shape!` closes with
-  (check-shape! (context-shape-problem kb context))
+  (check-shape! (context-shape-problem context))
   (check-sentence-shape! sentence)
   (if (and (sequential? sentence) (= sx/ist-functor (first sentence)))
     ;; `(ist Ctx S)` is not stored, at this entry point as at `assert`: it names the context
@@ -3376,7 +3455,18 @@
     (if-let [[ctx s] (entry/ist-parts sentence)]
       (assert-inert kb s ctx)
       (check-shape! (entry/ist-shape-problem sentence)))
-    (do
+    (let [;; a ground application in the context slot keys on the `cx/` constant `assert`
+          ;; minted for it (dedup, never mint), refused as an unminted NAT below is
+          context (if (nat/context-application? context)
+                    (or (nat/existing-context kb context)
+                        (throw (ex-info (str "a context application with no stored constant"
+                                             " cannot be stored inert: " (pr-str context)
+                                             " names a context this KB has not minted, and"
+                                             " assert-inert never mints — assert a fact in it"
+                                             " first (which mints)")
+                                        {:type :unminted-nat :sentence sentence
+                                         :context context})))
+                    context)]
       (nm/check! (:naming kb) sentence context)
       ;; a stored sentence is closed (`checks/check-ground`, the same refusal `assert`
       ;; makes): an inert literal holding a variable is a record every belief-blind read
@@ -4088,21 +4178,26 @@
   [kb goal context d opts]
   (if (and d (pos? (long d)))
     (let [goals (goal-conjunction (quasiquote/prepare-goal-for-read kb goal context))
-          {:keys [answers truncated? time-to-first-answer-ms total-time-ms stats]}
+          {:keys [answers truncated? time-to-first-answer-ms total-time-ms stats unenumerated]}
           (inference/search-report kb goals context (query-node-opts kb context d opts))]
       {:answers                 answers
        :count                   (count answers)
-       :status                  (if truncated? :truncated :complete)
+       :status                  (cond truncated?          :truncated
+                                      (seq unenumerated) :incomplete
+                                      :else              :complete)
        :truncated?              truncated?
+       :unenumerated            unenumerated
        :depth                   d
        :time-to-first-answer-ms time-to-first-answer-ms
        :total-time-ms           total-time-ms
        :stats                   stats})
-    (let [[answers first-ns total-ns] (timed-realize (query-at kb goal context d opts nil))]
+    (let [[[answers first-ns total-ns] unenumerated]
+          (provers/with-unenumerated #(timed-realize (query-at kb goal context d opts nil)))]
       {:answers                 answers
        :count                   (count answers)
-       :status                  :complete
+       :status                  (if (seq unenumerated) :incomplete :complete)
        :truncated?              false
+       :unenumerated            unenumerated
        :depth                   d
        :time-to-first-answer-ms (when first-ns (/ (double first-ns) 1e6))
        :total-time-ms           (/ (double total-ns) 1e6)})))
@@ -4118,8 +4213,11 @@
 
       {:answers                 [{?x v} …]   `query`'s own answers, realized
        :count                   n
-       :status                  :complete | :truncated
+       :status                  :complete | :truncated | :incomplete
        :truncated?              bool         = (= status :truncated)
+       :unenumerated            [P …]        transitive predicates whose closure a goal
+                                             asked with both arguments open did not
+                                             enumerate
        :depth                   d | nil      the depth bound the read ran under
        :time-to-first-answer-ms t | nil      nil when there are no answers
        :total-time-ms           t
@@ -4127,13 +4225,21 @@
 
   **`:truncated?` is conservative.**  `true` means the depth bound stopped at least one
   rewrite the search would otherwise have taken — the answers *may* be incomplete; `false`
-  guarantees they are every answer this KB entails at that depth.  A branch cut at the
-  bound may still have been answered by a shallower one (a converging rule graph reaches a
-  subgoal at several depths), so `true` is not proof an answer was lost — it is the signal
+  with an empty `:unenumerated` guarantees they are every answer this KB entails at that
+  depth.  A branch cut at the bound may still have been answered by a shallower one (a
+  converging rule graph reaches a subgoal at several depths), so `true` is not proof an
+  answer was lost — it is the signal
   to try a deeper bound, and to stop when `:truncated?` clears and the answer set holds
   still.  A facts-only read (no depth, or `:max-depth 0`) is never truncated: expanding no
   rule is a complete answer to the question it asks (`query`'s docstring for why that is a
-  real answer and not a degenerate one).
+  real answer and not a degenerate one).  It can still be `:incomplete`.
+
+  **`:incomplete` is the other case where the answers may not be every answer.**  A goal `(P ?x ?y)` over a
+  `transitive` `P`, at the top or as a rule antecedent solved with both ends still open,
+  is answered by `P`'s extent and not its closure (docs/taxonomy.md), so the answers may
+  lack a derived pair.  `:unenumerated` names each such `P`, and `:status` is
+  `:incomplete` when it is non-empty and the bound cut nothing.  Binding one end per
+  source enumerates the closure.
 
   `:stats` is the node engine's `tree-stats` — `:expanded` / `:nodes` / `:frontier` /
   `:dropped` / `:solutions` / `:max-depth` (the deepest rewrite taken) — present only where
@@ -4183,7 +4289,9 @@
   and every `:handle` is nil; with it the context stands until `abduce-discard!`.
   A vector goal is a conjunction, as for `prove`.  Refuses an unknown or ill-typed option
   (`:unknown-option`), a vector member that is not a sentence (`:shape`) and a variable
-  context (`:not-ground`).  See docs/abduction.md."
+  context (`:not-ground`).  A `:keep?` call is refused (`:too-many-kept`) while the KB
+  already holds `vaelii.impl.abduce/max-kept` kept contexts; the refusal names them under
+  `:contexts`.  See docs/abduction.md."
   ([kb goal] (abduce kb goal 'CxUniverse nil))
   ([kb goal context] (abduce kb goal context nil))
   ([kb goal context opts]
@@ -4208,13 +4316,24 @@
   [kb result]
   (abduce/discard! kb (if (map? result) (:context result) result) abduce-ops))
 
+(defn- instance-reads
+  "The two reads `subsumption-reading`'s shared-instance check makes: `:members`, the
+  terms a facts-only `(t ?x)` query answers for type `t`, and `:isa?`, whether term `x`
+  is an instance of type `t` at `context`.  Memoized per type and per `[x t]` for one
+  audit, which writes nothing between its pairs."
+  [kb context]
+  {:members (memoize (fn [t] (into [] (map #(get % '?x))
+                                   (query kb (list t '?x) context {:max-depth 0}))))
+   :isa?    (memoize (fn [x t] (isa? kb x t context)))})
+
 (defn- subsumption-reading
   "`{:statuses ss :witness w :via t}` for types `a` and `b`: `ss` is the set
   `subsumption-statuses` returns, and `w` names what put `:orthogonal` in it — `:declared`,
   `:shared-instance`, `:shared-spec` (a shared subtype with a known `(nonempty t)`) or
   `:unwitnessed-spec` (a shared subtype not known nonempty) — with `t` the instance or the
-  subtype it found (nil for `:declared`).  `w` and `t` are nil when `ss` holds no `:orthogonal`."
-  [kb a b context]
+  subtype it found (nil for `:declared`).  `w` and `t` are nil when `ss` holds no `:orthogonal`.
+  `rd` holds the shared-instance check's two reads (`instance-reads`)."
+  [kb a b context rd]
   (let [a<b (genl? kb a b)
         b<a (genl? kb b a)
         sep (disjoint? kb a b context)
@@ -4230,8 +4349,7 @@
         instance  (when (and open? (not declared?))
                     (nm/min-by-content-key
                      identity
-                     (keep #(let [x (get % '?x)] (when (isa? kb x b context) x))
-                           (query kb (list a '?x) context {:max-depth 0}))))
+                     (filter #((:isa? rd) % b) ((:members rd) a))))
         ;; A shared subtype counts only when it is not provably empty: a type below two
         ;; separated types, which `disjoint?` reports separated from itself, or
         ;; a type for which a facts-only read answers `(empty c)`.  `wff` refuses a stated
@@ -4296,7 +4414,7 @@
   `wff` refuses at assertion, so it appears only from a belief-state cycle or an equality
   merge, never from a plainly-asserted hierarchy."
   ([kb a b] (subsumption-statuses kb a b 'CxUniverse))
-  ([kb a b context] (:statuses (subsumption-reading kb a b context))))
+  ([kb a b context] (:statuses (subsumption-reading kb a b context (instance-reads kb context)))))
 
 (defn subsumption-status
   "The subsumption relationship of type `a` to type `b`, one of:
@@ -4321,13 +4439,18 @@
        :inconsistent))))
 
 (defn disjointness-audit
-  "The `subsumption-status` of every unordered pair of distinct types in the genl
-  hierarchy: its nodes less each `relation?` at `context`. Returns
-  `{:types n :pairs n :by-status {status count …} :pairs-data [{:a t :b t :status s :statuses ss} …]}`. `genl?` and `disjoint?` read cached closures, and the
-  shared-instance query runs only for a pair the taxonomy and disjoint declarations
-  leave open — pinned facts-only (`{:max-depth 0}`), so the N² sweep expands no rule.
-  `context` is the vantage `disjoint?` and the `:orthogonal` witnesses are read from
-  (default `CxUniverse`). Each entry carries both
+  "The `subsumption-status` of every unordered pair of distinct types **visible from
+  `context`**: the genl nodes `context` sees, less each `relation?` at `context`.
+  Returns
+  `{:types n :pairs n :by-status {status count …} :pairs-data [{:a t :b t :status s :statuses ss} …]}`. `genl?` reads the global closure and `disjoint?` reads the closure
+  visible from `context`, and the shared-instance query runs only for a pair the
+  taxonomy and disjoint declarations leave open — pinned facts-only (`{:max-depth 0}`),
+  so the N² sweep expands no rule.
+  `context` is the vantage the swept type set, `disjoint?` and the `:orthogonal`
+  witnesses are all read from (default `CxWell`, the starter spindle's collector — every
+  context below it, and no opt-in theory). A type a context sees only through an
+  opt-in theory `context` does not see is outside both the sweep and the coverage it
+  reports, by construction: visibility is one reading, not two. Each entry carries both
   the resolved `:status` keyword and the raw `:statuses` set from `subsumption-statuses`,
   so contradictions are visible without re-querying. The `:unknown` pairs are the
   candidates for a missing `disjoint` or `orthogonal` assertion; a declared `orthogonal`
@@ -4336,7 +4459,7 @@
   or `:unwitnessed-spec` — and, for the last three, `:via`, the instance or the subtype
   found. A shared subtype with a known `(nonempty t)` is a `:shared-spec`, and a shared
   subtype not known nonempty is an `:unwitnessed-spec`."
-  ([kb] (disjointness-audit kb 'CxUniverse))
+  ([kb] (disjointness-audit kb 'CxWell))
   ([kb context]
    ;; `by-print-key`, never bare `sort`: a type node need not be a symbol.  A NAT — a
    ;; function term standing for a collection an imported ontology has no atomic name for —
@@ -4346,15 +4469,16 @@
    ;; A relation is a genl node when `genl` specializes it by another — (genl performedBy
    ;; doneBy), (genl partition covering) — but it has no instances to share or keep
    ;; apart, so every pair it entered could only read :unknown.
-   (let [ts   (into [] (remove #(relation? kb % context)) (nm/by-print-key (types kb)))
+   (let [ts   (into [] (remove #(relation? kb % context)) (nm/by-print-key (types kb context)))
          n    (count ts)
+         rd   (instance-reads kb context)
          data (persistent!
                (reduce
                 (fn [acc i]
                   (reduce
                    (fn [a j]
                      (let [{ss :statuses w :witness t :via}
-                           (subsumption-reading kb (nth ts i) (nth ts j) context)]
+                           (subsumption-reading kb (nth ts i) (nth ts j) context rd)]
                        (conj! a (cond-> {:a        (nth ts i)
                                          :b        (nth ts j)
                                          :statuses ss
@@ -4435,9 +4559,11 @@
   this entry point overwrites or never reads; a key off the roster is refused (`:unknown-option`),
   as at `query`.
 
-  Returns `{:goals :context :strategy :status :bounded? :answers :nodes :stats}`;
-  `:status` is `:complete`, `:bounded` or `:timeout`, and each answer carries the `:node`
-  it came off.  Reads-only, like every query in this engine."
+  Returns `{:goals :context :strategy :status :bounded? :answers :nodes :stats
+  :unenumerated}`; `:status` is `:complete`, `:bounded` or `:timeout`, and each answer
+  carries the `:node` it came off.  `:unenumerated` is `query-status`'s: the transitive
+  predicates whose closure a goal asked with both arguments open did not enumerate.
+  Reads-only, like every query in this engine."
   ([kb goal] (search-tree kb goal '?ctx nil))
   ([kb goal context] (search-tree kb goal context nil))
   ([kb goal context opts]
@@ -4695,7 +4821,9 @@
     {:source :metric :pairs [[P Q] …] :cycle [P Q R] :support [handle …]}
 
   `:pairs` are that network's pairs unsatisfiable as written, `:cycle` the instants on a
-  negative cycle (`:metric` only), `:support` the facts behind them.  The interval pair
+  negative cycle (`:metric` only), `:support` the facts behind them.  A metric problem
+  refused for spanning more than one dimension names its `:dimensions` in place of
+  `:pairs` and `:cycle`.  The interval pair
   emptied to make the interval network unsatisfiable is not in `:unsatisfiable`
   (docs/qcn.md, \"A network can have a second reader\").
 
@@ -5315,7 +5443,7 @@
   | entry | means | detail |
   |---|---|---|
   | `:non-confluent` | two schematic equations disagree about a shared term; the normal form stays deterministic, so nothing is dropped | `:with` `:message` |
-  | `:forced-conclusion` | a firing concluding a literal on the forced-monotonic roster, or its denial, from a rule that is not all roster antecedents with no `unknown`, `exceptWhen` or `set/defaultRule`: the firing is stored and held void, so it supports nothing (docs/nmtms.md) | `:message` |
+  | `:forced-conclusion` | a firing concluding a literal on the forced-monotonic roster, or its denial, from a rule that is not all roster antecedents with no `unknown`, `exceptWhen` or `set/defaultRule`: the firing is stored and held void, so it supports nothing, and `:off-roster` names the rule's antecedent predicates off the roster (docs/nmtms.md) | `:off-roster` `:message` |
   | `:aggregate` | an aggregate prover cannot reduce an extent — values that are not numbers of one dimension, or bounds only partially ordered.  Filed once per distinct error, since a count is recomputed rather than cached | `:message` `:values` |
   | `:qualitative-inconsistency` | the qualitative network visible from a context is unsatisfiable, so no goal of that calculus is answered there | `:calculus` `:message` `:nodes` `:pairs` `:sources` |
   | `:metric-temporal-mixed-dimensions` | the `temporalDistance` facts visible from a context span more than one dimension, so it gets no metric network at all | `:message` `:dimensions` `:units` |
@@ -5562,12 +5690,15 @@
 (defn- target-following-meta?
   "Is `sx` a **target-following meta-sentex** — a sentex whose predicate is declared
   `target_following_predicate`?  Such a sentex names another sentex by handle and must not
-  outlive it, so a teardown that removes the named target removes it too."
+  outlive it, so a teardown that removes the named target removes it too.
+
+  The mark is read unscoped: a teardown removes stored sentexes, which every reader
+  shares."
   [kb sx]
   (let [s (:sentence sx)]
     (and (sequential? s)
          (symbol? (first s))
-         (has-prop? kb :target-following (first s)))))
+         (tax/has-prop? (reasoning/taxonomy kb) :target-following (first s)))))
 
 (defn- following-metas-naming
   "The handles of still-stored target-following meta-sentexes that name handle `h` — the
@@ -5611,12 +5742,12 @@
   (`integrate/*removed-sink*`): the dependency sweep's removals, the settle's, and the
   cascades' own.
 
-  Gated on the two things that read one — a reifiable function (the orphan sweep) and a
-  `target_following_predicate` (the meta cascade).  With neither declared both sweeps are
-  no-ops, and recording a cascade for nothing to read is pure retention, so the gate
-  answers nil and the choke point collects nothing."
+  Gated on the things that read one — a reified constant (`nat/any-reified-constants?`,
+  the orphan sweep), a `target_following_predicate` (the meta cascade) and a placed read.
+  With none of them the sweeps are no-ops, and recording a cascade for nothing to read is
+  pure retention, so the gate answers nil and the choke point collects nothing."
   [kb]
-  (integrate/removal-sink (or (nat/any-reifiable-functions? kb)
+  (integrate/removal-sink (or (nat/any-reified-constants? kb)
                               (seq (props kb :target-following))
                               (exc/placed-reads? kb))))
 
@@ -5634,13 +5765,18 @@
     declaration was OUT would stay absent with nothing to revive.  Rebuilt against the
     settled belief (docs/context-nat.md), and gated internally on the KB declaring one.
 
+  The last two run only beside a `sink`: `teardown-sink` answers nil only when
+  `nat/any-reified-constants?` is false, which gates both, so a KB with no reified
+  constant reads that gate once per teardown and not three times.
+
   One fn because `retract!` and `edit!` must not drift: a batch that swept a meta the
   single retraction did not — or the reverse — would leave the same knowledge in two
   states depending on how it was taken out."
   [kb sink]
   (retract-following-metas! kb sink)
-  (nat-maint/collect-orphans! kb sink retract!)
-  (nat-maint/reconcile-revivals! kb))
+  (when sink
+    (nat-maint/collect-orphans! kb sink retract!)
+    (nat-maint/reconcile-revivals! kb)))
 
 (defn- rolled-back
   "The refusal an atomic batch rethrows once the KB is back the way it was found:
@@ -6153,7 +6289,8 @@
   '{arg       (?n ?type)
     genlArg   (?n ?type)
     quotedArg (?n ?type)
-    interArg  (?n ?type ?m ?utype)})
+    interArg  (?n ?type ?m ?utype)
+    argArg    (?n ?m)})
 
 (defn- declarations-on
   "One predicate's argument declarations visible from `context`, each as
@@ -6660,12 +6797,24 @@
       (jtms/forced? (reasoning/tms kb) :out handle)
       (assoc base :believed? false :reason :inert)
       :else
-      (assoc base :believed? false :reason :unsupported
-             :premise? (premise? kb handle)
-             :support (vec (for [j (supporting-justifications kb handle)]
-                             {:justification (:id j)
-                              :informant (:informant j)
-                              :missing   (vec (remove #(in? kb %) (jtms/rests-on j)))}))))))
+      (let [void?   #(jtms/forced? (reasoning/tms kb) :void (:id %))
+            js      (supporting-justifications kb handle)
+            support (vec (for [j (remove void? js)]
+                           {:justification (:id j)
+                            :informant (:informant j)
+                            :missing   (vec (remove #(in? kb %) (jtms/rests-on j)))}))]
+        (if-let [void (seq (filter void? js))]
+          ;; a firing the roster convicts (the `:void` forced set): the rule, and the
+          ;; antecedent predicates a declaration puts on the roster
+          (assoc base :believed? false :reason :forced-conclusion :support support
+                 :convicted (mapv (fn [j]
+                                    (let [r (sentex kb (:informant j))]
+                                      {:justification (:id j) :informant (:informant j)
+                                       :rule          (readable-sentence r)
+                                       :off-roster    (checks/off-roster-antecedents kb r)}))
+                                  void))
+          (assoc base :believed? false :reason :unsupported
+                 :premise? (premise? kb handle) :support support))))))
 
 (defn- excepted-argument
   "The argument for `sentence` in `context` that some excepted rule built and then
@@ -6891,6 +7040,7 @@
   | `:defeated` | the target of a placed `defeat` in force at its own context, whose handles `:defeats` names and whose nogoods convict through the declarations `:grounds` names, as a clash report's do | `:contradicted-by` `:defeats` `:grounds` |
   | `:withdrawn` | IN in the network, and not believed at its own context because every justification rests on a handle a placed `defeat` in force there hides; each `:withdrawn-by` entry names that handle, its context, the `:defeat` and the defeat's context under `:vantage` (docs/nmtms.md) | `:withdrawn-by` |
   | `:inert` | a denial of a literal on the forced-monotonic roster, stored and held OUT (docs/nmtms.md) | — |
+  | `:forced-conclusion` | not a premise, and a supporting justification is a firing held void for concluding a roster literal from antecedents off the roster (docs/nmtms.md). Each `:convicted` entry names the `:rule` and the antecedent predicates `:off-roster` that a `forced_monotonic_predicate` declaration puts on the roster; `:support` lists the other justifications as `:unsupported` does | `:convicted` `:support` |
   | `:unsupported` | not a premise, and every supporting justification has an antecedent that is OUT | `:support` with `:missing` |
   | `:excepted` | *(sentence arity only)* a rule applied and its `exceptWhen` query held, so it concluded nothing | `:rule` `:exception` `:via` |
   | `:closed-extent` | *(sentence arity only)* nothing stored or derived says so, **and** `(closed_extent_predicate P)` is visible here — so the KB is not silent about it, it says the extent is complete and this is not in it | — |
@@ -7705,8 +7855,8 @@
   and shared by every fork taken over it, so it is nobody's fork to close; release it by
   closing the KB it was opened as.
 
-  A no-op on a KB with no directory (every in-memory backend, and an ephemeral fork), so
-  it is safe to call unconditionally in a `finally`.  The KB must not be used
+  On a KB with no directory (every in-memory backend, and an ephemeral fork) it releases
+  only RAM, so it is safe to call unconditionally in a `finally`.  The KB must not be used
   afterwards; open it again to read the same directory.
 
   A durable records backend that is not the disk store — the `:sqlite` adapter, which
@@ -7718,7 +7868,9 @@
   **What holding a KB open costs, and what this releases.**  A durable KB holds the
   directory's exclusive lock and its file handles until this runs; an in-memory KB holds
   its records in a process-global space registry keyed by its `:space`, shared with any
-  other KB over that space and released by `clear!`, not here.  A **disk-backed KB with a
+  other KB over that space and released by `clear!`, not here.  The exception is a space
+  the engine allocated for the KB and handed to no caller — an ephemeral `fork`'s own half,
+  a `kb-diff` side read from a path — which this drops.  A **disk-backed KB with a
   derived index** (`:disk-dense`, `:disk-columnar`, `:disk-memory`) also holds that index
   in a RAM registry keyed by the directory; this drops it, so a process opening durable KBs
   in a loop does not keep one derived index per directory it has finished with (the index
@@ -7742,6 +7894,7 @@
   ;; index a disk-backed KB built (nil unless the index was derived and the records durable).
   (rete/forget-kb! kb)
   (kb/release-index-space! (:index-space kb))
+  (kb/release-engine-space! (:engine-space kb))
   (when-let [dir (:dir kb)]
     (disk/close-dir! dir))
   ;; after the directory's close, whose image writer seals a KB that records an operation
@@ -7968,15 +8121,15 @@
 ;; is the same key `assert` dedups on, so two KBs told the same thing in any order compare
 ;; equal (docs/canonicalization.md, docs/defenses.md).
 
-(defonce ^:private diff-side-seq (atom 0))
-
 (defn- diff-side
   "One side of a `kb-diff` as a KB.  A **string** is a path to a text KB — a directory of
-  `Cx….txt` files or one such file — read into a fresh in-RAM KB on a space nothing else
-  names, so two paths never land in one store; anything else is already a KB."
-  [x]
+  `Cx….txt` files or one such file — read into a fresh in-RAM KB on an engine space
+  (`mem/engine-space`), so two paths never land in one store, and conj'd onto the
+  volatile `opened` for `kb-diff` to close; anything else is already a KB."
+  [opened x]
   (if (string? x)
-    (let [k (open-kb {:backend :memory :space [::diff (swap! diff-side-seq inc)]})]
+    (let [k (open-kb {:backend :memory :space (mem/engine-space :diff)})]
+      (vswap! opened conj k)
       (load-text! k x)
       k)
     x))
@@ -8030,6 +8183,34 @@
      [[] (vec (mapcat val (apply dissoc ga shared))) (vec (mapcat val (apply dissoc gb shared)))]
      shared)))
 
+(defn- diff-sides
+  "`kb-diff` over two open KBs."
+  [ka kbb]
+  (let [a-first? (<= (sentex-count ka) (sentex-count kbb))
+        [small large] (if a-first? [ka kbb] [kbb ka])
+        idx  (persistent!
+              (reduce (fn [m r] (assoc! m (diff-key r) r)) (transient {}) (diff-rows small)))
+        step (fn [[matched belief left] r]
+               (if-let [s (idx (diff-key r))]
+                 [(conj! matched (diff-key r))
+                  (if (= (:believed? s) (:believed? r))
+                    belief
+                    (conj belief (-> (dissoc r :believed?)
+                                     (assoc :believed-in-a (:believed? (if a-first? s r))
+                                            :believed-in-b (:believed? (if a-first? r s))))))
+                  left]
+                 [matched belief (conj left r)]))
+        [matched belief large-left] (reduce step [(transient #{}) [] []] (diff-rows large))
+        matched     (persistent! matched)
+        small-left  (into [] (remove #(matched (diff-key %))) (vals idx))
+        [a-left b-left] (if a-first? [small-left large-left] [large-left small-left])
+        [moved a-gone b-new] (paired-moves a-left b-left)
+        by-content  #(nm/sort-by-content-key (juxt :sentence :context) %)]
+    {:added          (by-content b-new)
+     :removed        (by-content a-gone)
+     :moved          (nm/sort-by-content-key (juxt :sentence :from :to) moved)
+     :belief-changed (by-content belief)}))
+
 (defn kb-diff
   "What two KBs disagree about, as content: `{:added :removed :moved :belief-changed}`.
 
@@ -8068,34 +8249,16 @@
   first, `provenance` for the second, and the third is deliberately not a question.
 
   O(|a| + |b|): the **smaller** side is indexed by content key and the larger is walked as a
-  lazy seq, one record fetched per step.  The four lists are realized, being ordered."
+  lazy seq, one record fetched per step.  The four lists are realized, being ordered.
+
+  A KB read from a string side is closed before this returns, which drops its space; a KB
+  the caller passed stays open."
   [a b]
-  (let [ka   (diff-side a)
-        kbb  (diff-side b)
-        a-first? (<= (sentex-count ka) (sentex-count kbb))
-        [small large] (if a-first? [ka kbb] [kbb ka])
-        idx  (persistent!
-              (reduce (fn [m r] (assoc! m (diff-key r) r)) (transient {}) (diff-rows small)))
-        step (fn [[matched belief left] r]
-               (if-let [s (idx (diff-key r))]
-                 [(conj! matched (diff-key r))
-                  (if (= (:believed? s) (:believed? r))
-                    belief
-                    (conj belief (-> (dissoc r :believed?)
-                                     (assoc :believed-in-a (:believed? (if a-first? s r))
-                                            :believed-in-b (:believed? (if a-first? r s))))))
-                  left]
-                 [matched belief (conj left r)]))
-        [matched belief large-left] (reduce step [(transient #{}) [] []] (diff-rows large))
-        matched     (persistent! matched)
-        small-left  (into [] (remove #(matched (diff-key %))) (vals idx))
-        [a-left b-left] (if a-first? [small-left large-left] [large-left small-left])
-        [moved a-gone b-new] (paired-moves a-left b-left)
-        by-content  #(nm/sort-by-content-key (juxt :sentence :context) %)]
-    {:added          (by-content b-new)
-     :removed        (by-content a-gone)
-     :moved          (nm/sort-by-content-key (juxt :sentence :from :to) moved)
-     :belief-changed (by-content belief)}))
+  (let [opened (volatile! [])]
+    (try
+      (diff-sides (diff-side opened a) (diff-side opened b))
+      (finally (run! close! @opened)))))
+
 ;; ---- four-valued epistemic status --------------------------------------
 ;; `argue` reads both a sentence and its explicit negation and reports where belief
 ;; stands between them, with a small argumentation stub for the both-provable case.  It
@@ -8288,6 +8451,7 @@
   `vaelii.impl.oplog`'s: `:replay` is recorded, `:seal` and `:config` mark the log
   unusable."
   {#'assert                   [:assert :replay]
+   #'try-assert               [:try-assert :replay]
    #'assert-rule              [:assert-rule :replay]
    #'assert-many              [:assert-many :replay]
    #'bulk-assert-facts!       [:bulk-assert-facts :replay]
@@ -8372,7 +8536,8 @@
     :explain-levels :export! :export-text! :exposed-clashes :find-sentexes
     :find-sentexes-all :find-terms :functional-at-instant-violations :genl? :genls
     :handle-of :handles :has-prop? :in? :inverse-of :isa? :ist :justification
-    :kb-integrity :kb-quality :last-program :lookup :metatype-members :separating-covers
+    :kb-integrity :kb-quality :last-program :lookup :max-specs :metatype-members
+    :min-genls :separating-covers
     :possible-relations
     :premise? :props :provable? :prove :prove-within :provenance
     :qualitative-network :qualitative-scenario :qualitative-scenarios :query

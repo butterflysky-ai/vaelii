@@ -186,6 +186,26 @@
       (is (= #{:unknown-option}
              (into #{} (map :type) (v/check kb (list dog Muffet) CxThe :nope)))))))
 
+(deftest a-ground-application-in-the-context-slot-is-checked-as-the-context-assert-stores-in
+  ;; `assert` reifies the slot to its `cx/` constant whatever is declared about the head
+  ;; (docs/context-nat.md), and `check` reads its checks at that constant without minting it
+  (tu/with-neutral-kb [kb tu/fresh]
+    (tu/with-terms [dog Muffet SeasonFn Winter]
+      (let [slot   (list SeasonFn Winter)
+            fact   (list dog Muffet)
+            before (v/sentex-count kb)]
+        (testing "a slot no constant names yet"
+          (is (= [] (v/check kb fact slot)))
+          (is (= [] (v/check kb (list 'ist slot fact) 'CxUniverse)))
+          (is (= before (v/sentex-count kb)) "and check minted nothing"))
+        (testing "a problem in the sentence is the type assert throws"
+          (is (= #{:naming} (types-of-check kb (list 'BadPred Muffet) slot)))
+          (is (= :naming (assert-type kb (list 'BadPred Muffet) slot))))
+        (let [h (v/assert kb fact slot)]
+          (testing "a slot assert has minted"
+            (is (= [] (v/check kb fact slot))))
+          (v/retract! kb h))))))
+
 (deftest a-vector-sentence-is-refused-because-the-read-entry-points-read-it-as-a-join
   ;; The one spelling both entry points accepted and read differently.  A vector is
   ;; `sequential?`, so the write entry point took it and canon flattened it to the list it

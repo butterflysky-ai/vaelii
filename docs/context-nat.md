@@ -1,7 +1,8 @@
 # Reified-NAT contexts and structural genlCx
 
-- **Covers:** how a `Cx*Fn` function application reifies to a **context** — a `cx/`
-  constant a sentex can be stored in and a `genlCx` node — how a declared argument
+- **Covers:** how a ground application in a sentex's context slot reifies to a
+  **context** — a `cx/` constant a sentex can be stored in and a `genlCx` node — when a read
+  names that context through the application, how a declared argument
   ordering makes one such context a computed **spec** of another with nobody asserting the
   edge, and when the orphan sweep collects one.
 - **Not here:** object-denoting NATs, which reify to a `nat/` constant that is a *term* and
@@ -19,22 +20,48 @@ context hierarchy can then be **computed**: `(CxTimeFn CxMonad (DatetimeFn "2000
 year is visible from the month, and **nobody asserts that `genlCx` edge**. This is the
 shape Cyc gives a context keyed by a term (its `MtTimeWithGranularityDimFn` and kin).
 
-Two records earlier established the opposite for *object* NATs: a `nat/` constant is a
-term, refused as a context by the naming and `genlCx` well-formedness gates
-([nat.md](nat.md)). Context NATs are the deliberate exception, carried by a distinct
-namespace so the refusal stays exact.
+An object NAT is the other case: a `nat/` constant is a term, refused as a context by the
+naming and `genlCx` well-formedness checks ([nat.md](nat.md)). A context NAT carries a
+distinct namespace so that refusal stays exact.
 
 ## The representation: reify the outer function, keep the argument structural
 
-A `Cx*Fn` is declared `(context_denoting_function CxTimeFn)`. A ground application reifies —
-like any NAT, *before* the index sees it — but to an opaque **`cx/`**-namespaced constant
-rather than a `nat/` one:
+**Position picks the namespace.** A ground application in a sentex's **context slot**
+reifies — like any NAT, *before* the index sees it — to an opaque **`cx/`**-namespaced
+constant, whatever is declared about its head:
 
 ```clojure
 (assert kb '(holiday NewYear) '(CxTimeFn CxMonad (DatetimeFn "2000")))
-;; stored: the sentex's context slot is a bare symbol  cx/g42
-;; map:    (termOfUnit cx/g42 (CxTimeFn CxMonad (DatetimeFn "2000")))
+;; stored: the sentex's context slot is a bare symbol  cx/a…
+;; map:    (termOfUnit cx/a… (CxTimeFn CxMonad (DatetimeFn "2000")))
 ```
+
+The write reads no declaration (`nat/context-application?`), so the stored set is a
+function of the offered set: a fact stored before, after or without any declaration about
+`CxTimeFn` lands in the same `cx/` context. A non-ground slot `(CxTimeFn CxMonad ?x)` is
+refused for `:shape`, since the sentence alone shows it names no context, and so is a
+query context.
+
+**A read names the context through the application only while CxUniverse believes
+`(result CxTimeFn context)`** (`nat/context-function-believed?`): the declaration that
+`CxTimeFn`'s applications are contexts. `context` is the CxCore type, and `result` is the
+ordinary result declaration ([argtypes.md](argtypes.md)), so one declaration says what the
+function denotes in both positions. Otherwise the read refuses the slot for `:shape`, and
+the message names the missing `(result CxTimeFn context)`. A fact stored while CxUniverse
+does not believe the declaration is inert: the fact sits in its `cx/` context, a read
+naming that constant answers it, and a read naming the application refuses until
+CxUniverse believes the declaration.
+
+The check reads the declaration in CxUniverse, the context every reader reads the slot's
+`termOfUnit` map in ([nat.md](nat.md#what-reification-does-not-cover)). A declaration
+stated in CxUniverse or in a context CxUniverse sees, such as CxCore, admits the slot. A
+declaration stated in an unwired context or in a spec of CxUniverse admits no read, and
+an `except` or a denial at CxUniverse hides the declaration (`res/supporter-visible?`). An
+`except` in a sub-context leaves the declaration believed at CxUniverse, and the slot
+reads. The check does not read the context the slot names: a `cx/` context no `genlCx`
+edge names sees nothing but itself
+([contexts.md](contexts.md#a-context-outside-the-spindle)), so a check read there would
+refuse every read of an unwired context NAT.
 
 Only the **outer** function reifies. Its arguments are left alone by the mint, so an
 `unreifiable_function` argument — `(DatetimeFn "2000")` — stays **structural inside the
@@ -53,26 +80,55 @@ they see it.
 
 Role-reading is **spelling-only** and never consults belief ([naming.md](naming.md)), so a
 reified context cannot be marked a context by a `(context K)` fact a `context?` would have
-to look up. It is marked by its **namespace**: `naming/context?` is true for a `cx/` symbol
+to look up, and the mint writes none: a `(result F context)` is not materialized on a `cx/`
+constant. It is marked by its **namespace**: `naming/context?` is true for a `cx/` symbol
 as it is for a `Cx…` name, and false for a `nat/` object constant. `term-role` follows, and
-so — because they call `context?` — do the two gates that refuse an object NAT:
+so — because they call `context?` — do the two checks that refuse an object NAT:
 
 - `wff/genlCx-problems` admits a `cx/` constant as a `genlCx` argument;
 - `naming/problems*` admits it as a sentex's context slot.
 
 `nat/reified-nat-symbol?` recognizes both namespaces (everything that asks "is this an
 opaque reified constant" — display, the `K → E` lookup — wants both); `reified-context-symbol?`
-and `reified-object-symbol?` are the discriminants where the kind matters (the mint's
-namespace choice, and the orphan sweep below).
+and `reified-object-symbol?` are the discriminants where the kind matters (the orphan
+sweep below).
+
+### One constant per expression per namespace
+
+The `termOfUnit` map is 1:1 **within** a namespace. One expression written in a context
+slot and in argument position maps twice: to a `cx/` constant `K′` from the slot, and to a
+`nat/` constant `K` from the argument when its head is a `reifiable_function`
+([nat.md](nat.md)). Every read from expression to constant takes the namespace it wants
+(`nat/in-namespace?`, which splits the map by `naming/context?`): `dedup-constant`,
+`rewrite-target`, the collision grouping behind `merge-colliding-nats!`, and the
+applications a late `result` or correspondence declaration reaches. So the two constants
+are no collision, and neither read resolves to the other's constant. A function that is no
+`reifiable_function` leaves its argument-position application structural, as an
+`unreifiable_function` does. A `rewriteOf` target resolves a context slot only when it is a
+context by spelling, and a correspondence value never does: the value of a corresponding
+predicate names an object.
+
+**An argument-position application of a function declared `(result F context)` is a
+context by content.** Its `nat/` constant `K` is minted with the result types every object
+constant gets, so `(context K)` is stored and believed, and nothing refuses or contradicts
+it: no stored disjointness separates `context` from what a `nat/` constant is, and a clash
+read off the spelling is not placed. The constant is a term in a sentence, so the naming
+check refuses it in a context slot and `wff/genlCx-problems` refuses it as a `genlCx`
+argument. Nothing equates `K` with `K′`.
 
 ### Write and read are symmetric
 
 The context slot is *not* on the sentence-reify walk — it is a separate argument to
 `assert` — so `maybe-reify-context` reifies it explicitly: on the write path (`assert`,
-minting) and on every read entry point (`ist-goal`, dedup-only, never minting). A query scoped to
-`(CxTimeFn …)` therefore resolves to the same `cx/` constant the write minted and meets the
-facts stored there; a never-seen NAT context resolves to the `no-match` sentinel and the
-read is scoped to nothing, answering empty rather than minting a context to ask about.
+minting) and on every read entry point (`ist-goal`, dedup-only, never minting, behind the
+declaration check above). A query scoped to `(CxTimeFn …)` therefore resolves to the same
+`cx/` constant the write minted and meets the facts stored there; a never-seen NAT context
+resolves to the `no-match` sentinel and the read is scoped to nothing, answering empty
+rather than minting a context to ask about. `assert-inert`, which never mints, resolves the
+slot the same way and refuses one with no stored constant (`:unminted-nat`). `check`
+reads the slot as the `cx/` constant `assert` stores in, the stored one or the one the
+expression's content names, and mints none (`nat/context-for-check`), so `check` reports
+what `assert` refuses for a compound slot as for a symbol.
 
 ## The structural genlCx producer
 
@@ -81,7 +137,7 @@ at argument `pos` are ordered by the sub-relation `R` on that argument — the o
 argument is `R`-**below** the other's is the spec, and `genlCx` the more general.
 
 ```clojure
-(assert kb '(context_denoting_function CxTimeFn) 'CxUniverse)
+(assert kb '(result CxTimeFn context) 'CxUniverse)
 (assert kb '(unreifiable_function DatetimeFn) 'CxUniverse)
 (assert kb '(contextArgSubrelation CxTimeFn 2 subintervalOf) 'CxUniverse)  ; arg 2 = the datetime
 ```
@@ -107,15 +163,11 @@ which pairs a `functional` / `functionalInArg` / `anti_symmetric` mark can recon
 reconcilers were written out at the assert entry point and at the rule-conclusion entry point and at no
 third one, so a calendar edge posted the re-check triggers and ran no merge at all —
 whether two fillers of one functional slot merged came down to whether the year's fact was
-written before January existed (vaelii#56). The producer calls
-`special/reconcile-context-edge`, the one entry point all three paths share, on the
-**transition into belief**: after the justification, because the sweeps read the
-belief-filtered closure and a line earlier the edge supports nothing, and only on the
-transition, because this producer is idempotent and a declaration or a revival re-runs it
-over every pair of a function's contexts — an edge owes exactly one sweep in its life, and a
-second route to one already believed widens no ancestor set and owes none. What it merges is carried back out to
-`assert`, which gives it the same follow-through an asserted edge's merges get: the
-retired spellings reconciled, the twins chained, the violations reported, one settle.
+written before January existed (vaelii#56). The producer settles once it has built an
+edge, and the settle's drain runs the sweeps for it as for an asserted or a concluded edge
+([contexts.md](contexts.md#one-context-move)). The producer is idempotent, and a
+declaration or a revival re-runs it over every pair of a function's contexts; a second
+route to an edge already believed moves no label and is no move.
 
 **Every arrival order converges.** Three things can arrive last, and each has an arm. A
 declaration arriving after the contexts sweeps every pair of them (`reconcile-function`); a
@@ -126,10 +178,10 @@ comparator dimension never needs and a stored-fact one cannot do without. A fact
 a context that already exists creates no pair and sweeps nothing, so its cost does not grow
 with the context's siblings (`lein perf`'s `context-nat-existing-context`); a mint costs one
 oracle call per sibling. The maintenance hook sits beside the correspondence
-reconcile at the tail of `assert` and behind the same free in-memory reifiable gate — a
-`context_denoting_function` is a reify-kind, so any KB with a context NAT to order already
-passes it, and a KB that reifies nothing pays neither the hook nor the
-`any-context-subrelations?` index read.
+reconcile at the tail of `assert` and behind the same gate, `nat/any-reified-constants?`:
+the in-memory `reifiable_function` marks, then one O(1) `termOfUnit` functor count, since a
+context slot mints with no declaration. A KB that has minted nothing pays that count and
+neither the hook nor the `any-context-subrelations?` index read.
 
 ### The bounded R oracle — no proof inside the relabel loop
 
@@ -235,9 +287,9 @@ order.
 Each candidate costs one **`count-in-context`**, an O(1) secondary-root read on every
 backend ([indexing.md](indexing.md)), and — only when that is zero — one inverted-term-index
 read over the constant's own footprint. So a live context holding a million facts costs a
-count rather than a million record fetches, and a KB that declares no
-`context_denoting_function` mints no `cx/` constant and pays nothing: the sweep sits behind
-the free in-memory reifiable gate, which a context function turns on.
+count rather than a million record fetches. The sweep sits behind
+`nat/any-reified-constants?`, so a KB that has minted no constant pays one `termOfUnit`
+functor count per teardown and nothing else.
 
 Nothing here can reach a context that is not a `cx/` constant. The three **query contexts**
 ([contexts.md](contexts.md)) are `Cx…` names for a way of reading, refused at every write
@@ -267,8 +319,8 @@ which is the only spelling the map is keyed by.
 
 - **One dimension ships.** The calendar — `DatetimeFn` / `YearFn` / `MonthFn` / `DayFn`
   under `subintervalOf` — is the worked example; other dimensions are added by declaring a
-  `context_denoting_function`, a `contextArgSubrelation`, and either registering a comparator
-  or asserting the `R` facts.
+  `(result F context)`, a `contextArgSubrelation`, and either registering a comparator or
+  asserting the `R` facts.
 - **A calendar term's endpoints are somebody else's job.** `(YearFn 2000)` is a
   `temporal`, so it takes the interval relations and not `instantBefore`, which is a
   claim about moments. The moments it lies between are computed — half-open, so 2000 ends
@@ -281,26 +333,30 @@ which is the only spelling the map is keyed by.
 
 ## Where it lives
 
-- `vaelii.impl.nat` — `context-namespace`, the `cx/` mint path (`mint-nat!` picks the
+- `vaelii.impl.nat` — `context-namespace`, the `cx/` mint path (`mint-nat!` takes the
   namespace and skips result-types for a context), `maybe-reify-context`,
-  `context-denoting-ground-nat?` (what the context-slot shape check admits — a *declared,
-  ground* context function, so the check does not depend on the naming policy), the
-  `reified-context-symbol?` / `reified-object-symbol?` discriminants, and the orphan
-  question's context arm — `orphan?`'s extent gate, `computed-genlCx-edge?` (the
-  authorship test), and `orphans-named-by`'s reading of a removed sentex's context slot.
+  `context-application?` (what the context-slot shape check admits — a *ground*
+  application, so the check does not depend on the naming policy or on a declaration),
+  `context-function-believed?` and `readable-context-application?` (what a read admits),
+  `context-for-check` (the context `check` reads a slot as, minting nothing),
+  `in-namespace?` (the per-namespace split of the map), the `reified-context-symbol?` /
+  `reified-object-symbol?` discriminants, and the orphan question's context arm —
+  `orphan?`'s extent gate, `computed-genlCx-edge?` (the authorship test), and
+  `orphans-named-by`'s reading of a removed sentex's context slot.
 - `vaelii.impl.naming` — `context?` (the `cx/` namespace).
 - `vaelii.core` — the context-arg reify in `assert` and the read entry points (`ist-goal`),
-  and the context-slot shape gate (`context-shape-problem`).
+  and the context-slot shape checks (`context-shape-problem` on a write,
+  `read-context-shape-problem` on a read).
 - `vaelii.impl.nat-maintenance` — the producer's call site on the assert path
   (`reconcile-assert`), its revival re-run on `retract!` / `edit!`
   (`reconcile-revivals!`), the merges a computed or revived edge licenses, and
   `collect-orphans!`, which collects both kinds of constant at one gate.
-- `vaelii.impl.special` / `wff` — the `context_denoting_function` prop mark and the
-  `contextArgSubrelation` well-formedness check.
+- `vaelii.impl.wff` — the `contextArgSubrelation` well-formedness check.
 - `vaelii.impl.context-nat` — the producer, the comparator registry, and
   `functions-ordered-by`, the evidence-arrived-last arm of the stored-fact oracle.
 - `vaelii.impl.datetime` — the calendar containment comparator, over the ISO strings and
   the three calendar constructors alike, and beside it the half-open `bounds` the calendar
   clock reads a term's two moments out of ([time.md](time.md)).
-- `resources/kb/CxCore.txt` — the two declarations documented in the KB's own representation.
+- `resources/kb/CxCore.txt` — `contextArgSubrelation`, and `result`'s comment on
+  `(result F context)`, documented in the KB's own representation.
 - `resources/kb/upper/CxTime.txt` — `YearFn` / `MonthFn` / `DayFn`, each with its `result`.

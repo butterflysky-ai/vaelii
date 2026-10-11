@@ -122,7 +122,7 @@
      equivalence_relation variable_arity abducible_predicate closed_extent_predicate
      modal_predicate decontextualized_predicate forced_decontextualized_predicate
      instance_relation_predicate type_relation_predicate target_following_predicate
-     reifiable_function unreifiable_function quoting_function context_denoting_function
+     reifiable_function unreifiable_function quoting_function
      result genlResult transitiveInArgInverse transitiveInArg inverse relation_kind})
 
 (defn- touched-terms
@@ -157,8 +157,18 @@
   ;; extends belongs at or above that spindle's head — CxCore for the upper spindle, and
   ;; for the middle spindle CxUniverse or anything CxUniverse sees, which is the whole
   ;; upper spindle it collects.  Using another member's term is not caught here and is a
-  ;; separate question; *extending* one is what breaks a closure.
+  ;; separate question; *extending* one is what breaks a closure.  A file under `kb/middle/`
+  ;; that sees another (CxSocialExtension sees CxSocial) is not a member beside it, so a
+  ;; term the two touch passes when one context touching it is seen by every other.
   (let [pairs      (authored-sentences)
+        up         (reduce (fn [m [_ s]]
+                             (if (and (seq? s) (= 'genlCx (first s)))
+                               (update m (second s) (fnil conj #{}) (nth s 2))
+                               m))
+                           {} pairs)
+        sees       (fn sees [c]
+                     (into #{c} (mapcat sees) (up c)))
+        one-seen   (fn [cs] (some (fn [d] (every? #(contains? (sees %) d) cs)) cs))
         from       (fn [ctxs] (fn [[c _]] (contains? ctxs c)))
         members    (fn [dir] (set (seed/layer-contexts dir)))
         upper      (members "upper")
@@ -169,7 +179,8 @@
     (doseq [[spindle ctxs visible]
             [["upper" upper in-head] ["middle" middle (into in-head in-upper)]]]
       (let [shared (for [[t cs] (touched-terms (filter (from ctxs) pairs))
-                         :when  (and (< 1 (count cs)) (not (contains? visible t)))]
+                         :when  (and (< 1 (count cs)) (not (contains? visible t))
+                                     (not (one-seen cs)))]
                      [t (sort cs)])]
         (is (empty? (sort shared))
             (str "two members of the " spindle " spindle define or extend these, and no"
@@ -217,9 +228,20 @@
     (is (< 500 (count (p/sentex-ids (:records kb)))) "the load is the size it should be")
     (is (= [] (vec offenders)))))
 
+(tu/deftest-kb no-stored-justification-holds-its-own-conclusion-among-its-antecedents
+  ;; the cast's rules conclude memberships their own antecedents match through `genl`,
+  ;; `(mortal Eve)` among them (`chain/restates-an-antecedent?`)
+  (let [recs (:records kb)
+        own  (for [jid (p/justification-ids recs)
+                   :let [j (p/get-justification recs jid)]
+                   :when (some #{(:consequence j)} (:antecedents j))]
+               (:sentence (p/get-sentex recs (:consequence j))))]
+    (is (< 1000 (count (p/justification-ids recs))) "the load is the size it should be")
+    (is (= [] (vec own)))))
+
 (tu/deftest-kb starter-documents-its-vocabulary
   (testing "every ontology type carries exactly one comment"
-    (doseq [t '[thing intangible tangible temporal relation_type
+    (doseq [t '[thing intangible tangible temporal
                 substance made natural formation body_part food organism vehicle tool building
                 animal plant mammal bird fish reptile insect person human dog cat
                 lion mouse hare wolf tortoise ant grasshopper

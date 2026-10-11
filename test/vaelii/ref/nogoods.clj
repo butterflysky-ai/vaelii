@@ -18,8 +18,9 @@
   declarations and `genl` edges the conviction is read through. Members and `:ground` are
   disjoint for every definitional family (docs/nmtms.md, \"What qualifies as a nogood\":
   the separations and marks are read through and never members). The inherited family
-  puts its reasons in `:members` and leaves `:ground` empty (docs/inherit.md, \"A
-  contrary claim against a known-true one is a contradiction, and is reported\").
+  puts its reasons in `:members`, and its `:ground` holds only the separation a membership
+  denies through (docs/inherit.md, \"A contrary claim against a known-true one is a
+  contradiction, and is reported\").
 
   Each family collects its nogoods by member set, so one set of members convicted by two
   declarations is one nogood whose `:ground` holds both. The vector is sorted on a
@@ -383,7 +384,54 @@
                        (or (and (= a w) (some #{b} parts)) (and (= b w) (some #{a} parts))))]
         {:kind :covering :members #{cv d} :ground #{}})))))
 
+;; ---- supertype --------------------------------------------------------------
+
+(defn supertype
+  "The `:supertype` nogoods at the view's context. docs/nmtms.md, \"The membership
+  families\".
+
+  A believed membership `(s X)` is refuted by a believed denial `(not (q X))` with `q` in
+  `s`'s `genl` closure and distinct from `s`: `(dog Rex)`, `(genl dog animal)` and `(not
+  (animal Rex))` cannot all hold. Members: the membership and the denial. `:ground`: the
+  `genl` edges on the routes from `s` up to `q`. With `q` equal to `s` the pair is a
+  negation nogood, which belongs to no family here."
+  [view]
+  (let [edges   (genl-edges view)
+        denials (group-by #(second (denial-of %))
+                          (filter #(some-> (denial-of %) membership?) (:believed view)))]
+    (collect
+     (for [[s x :as m] (filter membership? (:believed view))
+           den (get denials x)
+           :let [q (first (denial-of den))]
+           :when (and (not= q s) (contains? (up view s) q))]
+       {:kind    :supertype
+        :members #{m den}
+        :ground  (route-edges view edges s q)}))))
+
 ;; ---- inherited (transitiveInArgInverse) -------------------------------------
+
+(defn- separated-inherited
+  "The arm of `inherited` whose denying side is a membership of a separated type."
+  [view]
+  (let [edges    (genl-edges view)
+        believed (:believed view)]
+    (for [[_ p k r :as d] (declarations view 'transitiveInArgInverse 3)
+          :when  (and (= 'genl r) (= 1 k))
+          [s sub :as m] (filter membership? believed)
+          :when  (not= s p)
+          [_ t1 t2 :as sep] (declarations view 'disjoint 2)
+          :let   [up-p (up view p) up-s (up view s)
+                  [tp ts] (cond (and (contains? up-p t1) (contains? up-s t2)) [t1 t2]
+                                (and (contains? up-p t2) (contains? up-s t1)) [t2 t1])]
+          :when  (and tp (not= t1 t2))
+          [_ sup :as claim] (filter membership? believed)
+          :when  (and (= p (first claim)) (not= sup sub)
+                      (= :monotonic ((:class view) claim)))
+          route  (simple-routes edges sub sup)]
+      {:kind    :inherited
+       :members (into #{m claim d} route)
+       :ground  (into #{sep} (concat (route-edges view edges p tp)
+                                     (route-edges view edges s ts)))})))
 
 (defn inherited
   "The `:inherited` nogoods at the view's context. docs/inherit.md, \"A contrary claim
@@ -405,6 +453,12 @@
   denied tuple itself pairs with the denial as a negation nogood, which belongs to no
   family here.
 
+  A believed membership `(S sub)` denies the reached `(P sub)` of a unary `P` when a
+  believed `(disjoint t1 t2)` separates the two types, `t1` in `P`'s closure and `t2` in
+  `S`'s. Members: the membership, the general claim, the declaration and the route edges.
+  `:ground`: the `disjoint` declaration and the edges from `P` and `S` up to the separated
+  types.
+
   Left out: `transitiveInArg`; a relation other than `genl` (a `(transitive R)`
   relation, `genlCx`); a claim reached by moving two positions at once, as two
   declarations on one predicate license; a general claim spelled at a sub-predicate of
@@ -422,22 +476,24 @@
   (let [edges    (genl-edges view)
         believed (:believed view)]
     (collect
-     (for [[_ p k r :as d] (declarations view 'transitiveInArgInverse 3)
-           :when (and (= 'genl r) (integer? k) (pos? k))
-           den    believed
-           :let   [lit (denial-of den)]
-           :when  (and lit (= p (first lit)) (< k (count lit)))
-           :let   [sub (nth lit k)]
-           claim  believed
-           :when  (and (tuple? claim)
-                       (= p (first claim))
-                       (= (count claim) (count lit))
-                       (not= sub (nth claim k))
-                       (every? #(= (nth claim %) (nth lit %))
-                               (remove #{k} (range 1 (count lit))))
-                       (= :monotonic ((:class view) claim)))
-           route  (simple-routes edges sub (nth claim k))]
-       {:kind :inherited :members (into #{den claim d} route) :ground #{}}))))
+     (concat
+      (for [[_ p k r :as d] (declarations view 'transitiveInArgInverse 3)
+            :when (and (= 'genl r) (integer? k) (pos? k))
+            den    believed
+            :let   [lit (denial-of den)]
+            :when  (and lit (= p (first lit)) (< k (count lit)))
+            :let   [sub (nth lit k)]
+            claim  believed
+            :when  (and (tuple? claim)
+                        (= p (first claim))
+                        (= (count claim) (count lit))
+                        (not= sub (nth claim k))
+                        (every? #(= (nth claim %) (nth lit %))
+                                (remove #{k} (range 1 (count lit))))
+                        (= :monotonic ((:class view) claim)))
+            route  (simple-routes edges sub (nth claim k))]
+        {:kind :inherited :members (into #{den claim d} route) :ground #{}})
+      (separated-inherited view)))))
 
 ;; ---- irreflexive and anti_symmetric ------------------------------------------
 
@@ -485,4 +541,4 @@
   order of their names. `vaelii.ref.believe` sorts the nogoods it decides on content, so
   this order changes no answer."
   [anti-symmetric anti-transitive asymmetric covering disjoint functional inherited
-   irreflexive])
+   irreflexive supertype])

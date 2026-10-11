@@ -191,6 +191,22 @@ skipped and the run flagged
 sentex only adds a justification (never re-enqueues), so cyclic non-productive
 recursion terminates.
 
+<a id="a-firing-that-restates-its-antecedent"></a>
+**A firing whose conclusion is one of the facts it matched places nothing**
+(`chain/restates-an-antecedent?`). A rule concluding a type its own antecedents read
+through `genl` draws such firings: `(implies (and (aspatial ?x) (atemporal ?x))
+(nowhere_never ?x))` matches a stored `(nowhere_never X)` at both positions. Every
+placement context sees the matched fact, and a justification holding its own conclusion
+among its antecedents never brings that conclusion IN and confers no class above the
+fact's. `derive-conclusion` drops the conclusion before placement, and `fire-rules-for`
+skips the join when the trigger binding alone fixes the conclusion to the arriving
+datum. The starter and the test-world, with `(intersection nowhere_never aspatial
+atemporal)` and `(intersection spatiotemporal spatial temporal)` asserted in CxCore, store
+5,306 justifications this way against 8,983, with the same sentexes and the same belief
+(`starter_test/no-stored-justification-holds-its-own-conclusion-among-its-antecedents`).
+The comparison is on the substituted sentence, so a symmetric conclusion spelled as the
+matched fact's mirror is not dropped.
+
 ## Incremental rule matching (`vaelii.impl.rete`)
 
 The reference chainer re-joins a candidate rule's non-trigger antecedents against the
@@ -548,6 +564,64 @@ about the rule.
 
 `closure_join_test` pins each arm, the placement, the re-derivation over a second path,
 and four arrival orders.
+
+## A `disjoint` antecedent reads the separations
+
+`DisjointnessProver` answers `(disjoint qa qb)` from every separation the taxonomy holds:
+a stated `disjoint` over a supertype of each side, a `partition` or `separating` roster, a
+`disjoint_metatype` and a `sibling_disjoint` parent. Only the first is a sentence, and
+the rosters and marks are never written out per pair ([taxonomy.md](taxonomy.md)). A
+forward join answers the literal the same way: `chain/solve-separation` unions the
+separations' answers with the matcher's stored `disjoint` sentences, so a rule reading
+`(disjoint ?a ?b)` fires on a pair two parts of a partition separate, and `ask` and
+forward chaining agree about the rule.
+
+- **The bounded arms answer.** With both ends bound the arm reads the routes between the
+  two (`tax/separation-routes`). With one end bound it reads the routes to every subtype
+  of a type a declaration separates the bound end from, the set `(disjoint qa ?y)`
+  answers as a query at a reader that sees every declaration. With both ends open it
+  contributes nothing, and the stored sentences answer alone. The literal waits for a
+  binder (`open-ends`). A literal whose variables the other antecedents all bind is
+  joined after every planned literal (`chain/planned-join`), so it tests two bound ends
+  and never enumerates the types separated from one of them.
+- **CxCore's emptiness rule reads `(disjoint ?type ?type)`.** A type below two separated
+  types is disjoint from itself, so the rule tests one type per `unary` binding, where a
+  pair of `genl` literals would test every pair of its supertypes.
+- **A firing rests on one route.** Each route yields its own firing. The declarations the
+  route reads (the `disjoint` sentence, the roster, the mark and the two memberships, or
+  the `sibling_disjoint` mark) are antecedents, one believed supporter per declaration.
+  The `genl` subsumptions the route climbs are closure links, placed and named as the
+  closure arm's are. Retracting the roster or an edge of the named path withdraws the
+  firing, and the re-join below re-derives it over a second path.
+- **An exception or a `genl` edge blocks at the conclusion's context.** The join reads
+  no `siblingDisjointException`, and a mark spares two types one of which is a `genl` of
+  the other. A firing whose conclusion's context reads the pair not separated, with no
+  stated `disjoint` there, is refused as `:separation` or blocked
+  (`chain/separation-exempted?`).
+- **A separation moving re-checks and re-joins the rule over the types it moved.** A
+  `partition`, `separating`, `disjoint_metatype`, `sibling_disjoint` or
+  `siblingDisjointException` sentence, a membership in a disjoint metatype, a stated
+  `disjoint` over a type with a proper subtype, or a `genl` edge (a cover's installed
+  edges included) whose upper end a separation reaches (`tax/separable?`), arriving or
+  leaving, moves the separations of the subtypes of the types it names
+  (`special/separation-moved-types`). A pair neither of whose types is among them reads
+  the separation it read before. The sentence queues every forward rule with a
+  `disjoint` antecedent under a `{::separation types}` marker
+  (`special/recheck-on-separation`). The next settle re-decides the firings and refusals
+  whose bindings name a moved type, and re-joins the rule once per moved type with a
+  `disjoint` antecedent's variable end bound to it (`chain/fire-rule-over-separation`).
+  A `disjoint` antecedent with a ground end among the moved types re-joins the rule in
+  full. So a `genl` edge retracted between two marked types separates them as an edge
+  never stated does, one arriving withdraws the firing, and the write costs the types it
+  moves rather than the rule's extent: `perf`'s `separation-rule-under-moving-edge`
+  measures one edge beside n unrelated `unary` types. Any other sentence costs taxonomy
+  reads and no index read, which `assert_cost_test` pins.
+- **A rule concluding `disjoint` takes the matcher alone**, for the closure arm's reason.
+
+`closure_join_test` pins the five separation spellings, the two bounded arms, the
+withdrawal by the roster and by an edge, the exception, a `genl` edge between two marked
+types arriving and leaving, and the arrival orders;
+`emptiness_test` pins CxCore's rule over a partition.
 
 ## Backward chaining
 
@@ -1142,8 +1216,8 @@ rewrite site: a live literal at depth 0 that is not a deferred literal and that 
 candidate rule's consequent unifies with (`depth-truncated?`). The flag is **conservative**
 — it says a branch was cut at the bound, not that an answer was certainly lost, because a
 converging rule graph reaches one subgoal at several depths and a branch cut at depth 0
-may have been answered by a shallower one. So `false` guarantees the answers are every
-answer the KB entails at that depth; `true` is the signal to raise the bound and stop when
+may have been answered by a shallower one. So `false`, with `:unenumerated` empty,
+guarantees the answers are every answer the KB entails at that depth; `true` is the signal to raise the bound and stop when
 the flag clears and the answer set holds still. A cyclic rule set always has one deeper
 level the bound refuses, so it is `:truncated?` at every depth — which is the report the
 bound owes for a search it, not the data, terminated.
@@ -1154,6 +1228,15 @@ under `:track-truncation?`, and `step!`'s candidate-rule probe runs only while i
 the run — `:time-to-first-answer-ms` off the first realized answer, `:total-time-ms` off
 the whole set. It reports one search over one concrete context's frontier, so a variable
 or query context is refused, and `:portfolio?` picking a race is dropped.
+
+An answer set can also lack an answer without a bound cutting the search. A literal `(P ?x ?y)` over a
+`transitive` `P`, solved with both arguments still open, is answered by `P`'s extent and
+not its closure ([taxonomy.md](taxonomy.md#predicate-metadata)), so a derived pair may be
+missing from the answers. `TransitivePredicateProver` adds `P` to `provers/*unenumerated*` when it
+declines that goal, and `search-report` and `search-tree` bind the collector around their
+search, as does `query-status`'s facts-only read, and return the set as `:unenumerated`. `query-status` reports `:status
+:incomplete` when the set is non-empty and the bound cut nothing, and the inference
+debugger page prints the predicates above its answers.
 
 ## The literal cache (`vaelii.impl.literal-cache`)
 
@@ -1535,7 +1618,7 @@ model divides by the trie's distinct-value count at a position, and it asks for 
 once per literal per plan; answering it with `(count (children …))` materializes the
 whole child set, which is O(how many distinct values sit there) — so a planner reading
 it that way costs 25× more against 32× the facts, on a conjunction that never changed.
-`p/count-children` answers the same number off a cardinality (`docs/indexing.md`). A
+`reads/stored-count-children` answers the same number off a cardinality (`docs/indexing.md`). A
 plan is computed per rule expansion, per node in the node engine and per `prove` call,
 so a planner that scales with the KB scales with it on every one of those.
 
@@ -1621,7 +1704,8 @@ does, except for the antecedents it answers by computation. A registered evaluat
 costed by `provers/evaluatable-est-override`, and a literal a `SupportingProver` answers
 by that prover's own estimate (`provers/support-est-override`). A prover that cannot
 enumerate an open argument completely reports `provers/deferred-est` for it, so the
-literal runs after its binders whatever order the rule's facts arrived in.
+literal runs after its binders whatever order the rule's facts arrived in, and with the
+ranking off as well (below).
 
 **Ordering is a cost decision, never a semantic one.** Two literals are pinned,
 exactly as `sentex/canonicalize-rule` pins them when canonicalizing a rule for
@@ -1667,9 +1751,12 @@ checks that every permutation of a conjunction returns the one answer set.
 two decisions and only one of them is cost: the **readiness discipline** — a deferred
 literal placed behind what binds its arguments, the recursive literal pinned last — runs
 whether or not the ranking does, because an order that violates it is not slower but
-illegal. `[(big_enough ?n) (hasScore ?x ?n)]` with the check ahead of its binder computes
-on nothing and answers empty; a recursive literal ahead of its generators is a rule that
-may not terminate. Neither is a cost, so neither is behind the switch.
+illegal. A literal the `:est-override` costs at `plan/unbounded` (`provers/deferred-est`:
+a registered evaluatable, or a prover that cannot enumerate an open argument) is computed
+from its bindings too, and unranked it waits until every variable it holds is bound.
+`[(big_enough ?n) (hasScore ?x ?n)]` with the check ahead of its binder computes on
+nothing and answers empty; a recursive literal ahead of its generators is a rule that may
+not terminate. Neither is a cost, so neither is behind the switch.
 
 **`VAELII_PLAN=0` puts the ranking's claim to the whole suite.** Ranking a conjunction
 is meant to be a cost decision that never changes the answer *set*, the claim
@@ -1684,16 +1771,10 @@ Put to the suite, the claim did not hold unqualified — which is the next secti
 
 ### Where the ranking is required
 
-The claim above is the ranking's own, and running the suite under it found three places
-where the ranking carries more than cost. Each is pinned back to the shipped reader
+The claim above is the ranking's own, and running the suite under it found one place
+where the ranking carries more than cost. The test is pinned back to the shipped reader
 (`tu/pinning`, `tu/with-pinned`) rather than standing aside, so every configuration runs
-the same assertions — and each is worth knowing on its own terms.
-
-**A registered evaluatable is placed by the ranking.** `partition-literals` defers the
-seventeen `sentex/deferred-predicates` **by name**, so a predicate registered with
-`add-evaluatable` is an ordinary generator to it; what actually puts one behind its
-binder is `est-bindings` reporting it unselective while its inputs are unbound. Unranked
-and written check-first, the join computes on nothing. (`evaluatable_test`, three tests.)
+the same assertions.
 
 **Where a theory stops can be an ordering fact.** The event calculus reaches
 `instantBefore` with one end open and the calendar prover declines it. Unranked, that
@@ -1708,13 +1789,15 @@ the plain reason: they measure the ranking, which the switch removes.
 narrower one: unranked answers identically everywhere the ranking is not the thing
 supplying an answer, and the exceptions are the pinned tests above rather than a silence.
 
-**A third case was found and fixed rather than pinned**, which is the outcome a sweep
-wants. Incremental forward chaining over a *growing* transitive extent is complete on its
-own account: the chainer re-drives the join when the closure grows (the section below), so
-order independence — the first of the four properties — does not rest on the ranking
-picking the lead that happens to re-drive it. The sweep surfaced that as a live defect in
-the shipped configuration rather than as a difference the switch makes, and neither of the
-two tests that pin the ranking needs a pin for it.
+**Two other cases are fixed rather than pinned**, which is the outcome a sweep wants. A
+literal computed from its bindings waits for its binders unranked, under the readiness
+discipline above (`evaluatable_test`, `quote_test`). Incremental forward chaining over a
+*growing* transitive extent is complete on its own account: the chainer re-drives the join
+when the closure grows (the section below), so order independence — the first of the five
+properties — does not rest on the ranking picking the lead that happens to re-drive it.
+The sweep surfaced that as a live defect in the shipped configuration rather than as a
+difference the switch makes, and neither of the two tests that pin the ranking needs a pin
+for it.
 
 ## Seeding a transitive closure (`special/transitive-seeds`)
 
@@ -1892,7 +1975,7 @@ out-of-tree prover registered through `add-prover` is welcome to implement it an
 same treatment; one that does not is taken at its word — its answer reads nothing stored,
 so no retraction can invalidate it.
 
-Three things follow, and they are the same three the qualitative and the inherited
+Four things follow. The first three are the ones the qualitative and the inherited
 antecedents already get ([qcn.md](qcn.md), [inherit.md](inherit.md)):
 
 - **The firing carries the handles**, so the ordinary relabel withdraws the conclusion
@@ -1906,10 +1989,20 @@ antecedents already get ([qcn.md](qcn.md), [inherit.md](inherit.md)):
 - **A change to a source re-joins the rule.** `conversionFactor` is not connected to
   `quantityGreaterThan` by any predicate walk, and the facts that would have triggered the
   rule have already arrived — so `chain/fire-rules-for` puts a datum on a
-  `support-sources` predicate in front of the rules carrying a `support-functors`
-  antecedent and re-joins them in full, exactly as it does for a `(symmetric P)`
-  declaration. That is what makes the firing independent of whether the table or the facts
-  came first.
+  `support-sources` predicate in front of the rules carrying an antecedent in the
+  `support-functors` of a prover that reads that predicate, and re-joins them in full,
+  exactly as it does for a `(symmetric P)` declaration. That is what makes the firing
+  independent of whether the table or the facts came first.
+- **A change to a source re-checks every firing of those rules.** A tightest bound narrows
+  when a source arrives and widens when one leaves, while every handle the firing names
+  stays believed. A datum on a `support-sources` predicate, arriving or leaving, therefore
+  queues the same rules for the next settle (`special/computed-reading-rules`). A rule
+  whose computed antecedents only provers not reading the datum's predicate answer is
+  neither re-joined nor re-checked: a `length` fact moves no `quantityGreaterThan` answer.
+  The settle solves each computed antecedent again under the firing's bindings, and
+  `chain/computed-withdrawn?` withdraws a firing whose answer the prover no longer gives
+  and no believed stored fact states. The settle then re-joins the rule, which derives the
+  wider answer a departed source had narrowed.
 
 **The transitive one carries no roster, and that is the one difference.**
 `support-functors` and `support-sources` are constants on a prover, and which predicates
@@ -2086,8 +2179,16 @@ Built-in provers (`default-provers`, held per-KB in an atom):
   ground chain `(lessThan 1 2 3)` is checked end to end — every adjacent pair must
   hold — not just as a binary comparison. Complete for a ground comparison, so a rule
   antecedent like `(lessThan ?bx ?by)` is discharged by computation once its variables
-  are bound (e.g. the `olderThan` rule over birth years). This is the extension point
-  for arithmetic / CLP / any calculated relation.
+  are bound (e.g. the `olderThan` rule over birth years). It also answers the
+  value-kind checks: `integer` for any ground argument, and `string`, `number`,
+  `boolean`, `keyword` and `character` for a literal argument, so `(string "foo")` and
+  `(not (number "foo"))` are both proved. A symbol or compound argument is left to the
+  other provers, since a constant or a function application can denote a number. This
+  is the extension point for arithmetic / CLP / any calculated relation.
+- **ExpressionKindProver** — `(k (Quote X))`, `k` an expression kind, answered from X's
+  spelling and cited to the `quoting_function` statements and the `genl` path it read
+  ([argtypes.md](argtypes.md#what-a-quoted-form-is)). Not complete (50): a stored
+  membership answers beside it.
 - **AggregateProver** — the five reductions over a query's solutions:
   `(agg/count ?n ?v Body)` binds `?n` to how many **distinct** `?v` satisfy
   `Body`, `Sum` / `Min` / `Max` / `Avg` to the arithmetic ones. `?v` is projected out,
@@ -2321,13 +2422,19 @@ reasoning. Raw introspection still sees everything.
 
 - **A justification has no OUT-list.** Its record is `[id informant antecedents
   consequence bindings strength]`, and `jtms/valid?` asks only that every antecedent and
-  the rule be IN and the justification not be blocked. Negation as failure reaches a rule antecedent by a different road — `chain/naf-blocks?`
+  the rule be IN and the justification not be blocked. Negation as failure reaches a rule antecedent by a different road — `chain/own-guard-block`
   evaluates an `unknown` antecedent at firing time in `derive-conclusion`, and the
   re-check index brings the rule back when a later fact would change the answer. So a
-  blocked firing is a justification that was never made, not one carrying an OUT
-  antecedent. See [naf.md](naf.md).
+  firing a `:monotonic` blocker blocks is a justification that was never made, and one a
+  `:default` blocker blocks is stored with a guard `defeat` resting on the blocker; neither
+  carries an OUT antecedent. See [naf.md](naf.md).
 - **A relabel is scoped to the affected region, and that region is the full forward
   closure.** Inside it the fixpoints are semi-naive worklists, so only nodes whose
   inputs move are retouched; the region itself is not narrowed below the closure.
 - **There is no beta network** over the alpha memories, so a repeated multi-way join is
   re-joined per firing (see "Incremental rule matching").
+- **A forward rule's antecedent does not join an `inverse` partner's facts.** With
+  `(inverse childOf parentOf)` and `(childOf C0 P0)` stored, `ask?` answers `(parentOf P0
+  C0)` through `provers/InverseProver`, and a forward rule with a `(parentOf ?p ?c)`
+  antecedent fires on no `childOf` fact. The forward join reads `inverse` only inside a
+  transitive walk (`chain/transitive-source-preds`).

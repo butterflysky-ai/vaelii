@@ -753,7 +753,7 @@
       (System/exit 2))
 
     ;; **One discarded load before any measured one**, and it is the same argument
-    ;; `perf.clj`'s `measure` makes about warming both sizes to the large one.  The
+    ;; `perf.clj`'s `warm!` makes about warming both sizes to the large one.  The
     ;; assert and index paths are cold when the first layout builds and hot when the
     ;; last one does, so an unwarmed run flatters whichever layout is listed last — on
     ;; the starter it read 1,432 ms for the first build and 440 ms for the fourth, over

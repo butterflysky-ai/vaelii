@@ -152,7 +152,7 @@
     (let [idx      (:index kb)
           body     (list near A)
           state    (fn [] {:bodies  (reads/as-stored-opposed-bodies idx)
-                           :members (reads/as-stored-opposed-members idx body)
+                           :members (reads/as-stored-opposed-members-global idx body)
                            :in      (mapv #(reads/as-stored-opposed-in idx #{%}) [CxP CxQ CxN])})
           longer   (v/assert kb (list near A B) CxP)
           n1       (v/assert kb (list 'not body) CxN)]

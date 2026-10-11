@@ -361,13 +361,15 @@
     (str/join
      "\n"
      (concat
-      ["| id | structure | owner | keyed by | reads | retired by | computed | kind | image | cache |"
-       "|---|---|---|---|---|---|---|---|---|---|"]
-      (for [{:keys [id label owner keyed-by reads retired-by computed kind imaged? cache]} rows]
+      ["| id | structure | owner | keyed by | reads | retired by | computed | kind | image | cache | content |"
+       "|---|---|---|---|---|---|---|---|---|---|---|"]
+      (for [{:keys [id label owner keyed-by reads retired-by computed kind imaged? cache
+                    holds-content?]} rows]
         (str "| " (name id) " | " (cell label) " | `" (str/replace owner "vaelii.impl." "")
              "` | " (name keyed-by) " | " (str/join " " (map name reads)) " | "
              (retired-cell kind retired-by) " | " (name computed) " | " (name kind) " | "
-             (if imaged? (name imaged?) "no") " | " (if cache (str "`" cache "`") "") " |"))
+             (if imaged? (name imaged?) "no") " | " (if cache (str "`" cache "`") "") " | "
+             (if holds-content? "yes" "") " |"))
       [""
        "| id | event | choke points | names | rows it retires |"
        "|---|---|---|---|---|"]
@@ -400,8 +402,8 @@
 ;; ---- the export the dependency graph is drawn from ------------------------
 
 (def ^:private export-row-keys
-  #{:id :label :owner :kind :keyed-by :reads :retired-by :computed :imaged? :cache :bound
-    :note :var})
+  #{:id :label :owner :kind :holds-content? :keyed-by :reads :retired-by :computed :imaged?
+    :cache :bound :note :var})
 
 (def ^:private export-event-keys #{:event :n :names})
 

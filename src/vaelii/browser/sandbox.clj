@@ -4,7 +4,9 @@
   "Somewhere safe to be wrong.
 
   A **sandbox** is a scratch context of one browser session's own, hung below
-  `CxWell` so it sees the whole shipped ontology and nothing shipped sees it.  A
+  `CxWell` so it sees what CxWell sees (every shipped context but the opt-in theories,
+  the `kb/middle/` files that state no `genlCx` edge from CxWell) and nothing shipped
+  sees it.  A
   reader can therefore use every type, every relation and every rule the KB ships, and
   cannot damage any of them: their content is visible only from inside, and one control
   takes all of it away again.
@@ -18,17 +20,18 @@
   (docs/contexts.md), and the sandbox is the only context below both.  So the derived
   content is inside the thing that gets discarded, without anything arranging for that.
 
-  Three facts about the lifecycle:
+  Four facts about the lifecycle:
 
   - **The context is created on the first write, not on the first page.**  A reader who
     only looks costs the KB nothing, and a KB full of empty sandboxes would be a KB with
     a `genlCx` edge per idle visitor.
-  - **A digest of the session id is in the context name**, so two readers of one
-    process never share one.  The id is minted into a cookie by `wrap-session` and
-    validated on the way back in — a name is being built from it, and a name built from
-    unvalidated client input is an injection.  The name carries a digest rather than the
-    id because every reader sees every context's name (`/find`, `CxWell`'s term page,
-    `/op :contexts`), and the id is what the cookie carries.
+  - **The server mints the session token and tags it.**  The cookie carries the token and
+    an HMAC of it under a key fixed at start, and a cookie whose tag does not check is
+    replaced with a fresh one, so a client cannot choose a sandbox.  The context name
+    carries a digest of the token rather than the token, because every reader sees every
+    context's name (`/find`, `CxWell`'s term page, `/op :contexts`).
+  - **A process keeps at most `max-sandboxes` per KB.**  Opening one more resets the
+    lowest-priority sandbox on the roster below (docs/web.md).
   - **Reset is a real teardown**, not a flag: every sentex in the extent goes through
     `edit`'s `:remove`, and the `genlCx` edge with them.  The edge is not in the
     extent — `genlCx` is a forced-decontextualized predicate, so it is stored in
@@ -40,38 +43,74 @@
   half-escaped is easier to reason about than one with an entry point in it."
   (:refer-clojure :exclude [reset!])
   (:require [clojure.string :as str]
-            [vaelii.browser.access :as v]))
+            [vaelii.browser.access :as v])
+  (:import (java.lang.ref WeakReference)
+           (java.nio.charset StandardCharsets)
+           (java.security MessageDigest SecureRandom)
+           (javax.crypto Mac)
+           (javax.crypto.spec SecretKeySpec)))
 
 (def cookie-name "vaelii-sandbox")
 
 (def ^:private token-pattern
-  "What a session token may be.  Hex, because that is what `mint-token` makes, and
-  because the token is interpolated into a **symbol** — an unvalidated cookie would let a
-  caller name any context it liked, including a shipped one, and write into it."
-  #"[0-9a-f]{8,32}")
+  "What a session token is: the 32 hex digits `mint-token` makes.  Checked again in
+  `context-for` because the token is digested into a **symbol**, and a name built from
+  unvalidated input is an injection."
+  #"[0-9a-f]{32}")
+
+(def ^:private cookie-pattern
+  "A cookie value: the token, a dot, and its 32-hex-digit tag."
+  #"([0-9a-f]{32})\.([0-9a-f]{32})")
+
+(defonce ^:private ^SecureRandom rng (SecureRandom.))
+
+(defn- hex
+  "The first `n` bytes of `bs` as lowercase hex."
+  [bs n]
+  (apply str (map #(format "%02x" %) (take n bs))))
 
 (defn mint-token
-  "A fresh session token: a whole random UUID with the dashes dropped, so hex that
-  needs no encoding to sit in either a cookie or a symbol.
-
-  The **whole** UUID rather than half of one.  A token names a sandbox that can be
-  read and written, so guessing another session's is guessing its contents; 48 bits
-  is thin the moment the browser is reachable by anyone but its operator, and the
-  extra 16 characters added no work."
+  "A fresh session token: 128 bits from `SecureRandom`, as 32 hex digits, which need no
+  encoding in a cookie or a symbol."
   []
-  (str/replace (str (java.util.UUID/randomUUID)) "-" ""))
+  (let [b (byte-array 16)]
+    (.nextBytes rng b)
+    (hex b 16)))
+
+(defonce ^:private signing-key
+  ;; `VAELII_SANDBOX_KEY`, so a tag checks across restarts and replicas; unset, 32 random
+  ;; bytes for this process's life, and every cookie is re-minted after a restart
+  (delay (if-let [k (some-> (System/getenv "VAELII_SANDBOX_KEY") str/trim not-empty)]
+           (.getBytes ^String k StandardCharsets/UTF_8)
+           (let [b (byte-array 32)] (.nextBytes rng b) b))))
+
+(defn- tag
+  "The first 128 bits of the HMAC-SHA256 of `token` under the signing key, as hex."
+  [^String token]
+  (let [mac (Mac/getInstance "HmacSHA256")]
+    (.init mac (SecretKeySpec. ^bytes @signing-key "HmacSHA256"))
+    (hex (.doFinal mac (.getBytes token StandardCharsets/UTF_8)) 16)))
+
+(defn- verified
+  "The token cookie value `v` carries, when its tag is the one the signing key gives it;
+  else nil.  The tags compare in constant time."
+  [v]
+  (when-let [[_ token t] (and v (re-matches cookie-pattern v))]
+    (when (MessageDigest/isEqual (.getBytes ^String t StandardCharsets/US_ASCII)
+                                 (.getBytes ^String (tag token) StandardCharsets/US_ASCII))
+      token)))
 
 (defn context-for
-  "The sandbox context named by `token`, or nil when the token is not one we minted.
+  "The sandbox context named by `token`, or nil when the token is not well-formed.
   `CxSandbox<digest>` satisfies the context naming invariant (`Cx` prefix,
   CapitalCamelCase), so it is an ordinary context in every other respect.  The digest
   is the first 128 bits of the token's SHA-256: the name is listed to every reader, so
-  it must not be a cookie value one of them can send."
+  it must not carry the token a cookie holds."
   [token]
   (when (and token (re-matches token-pattern (str token)))
-    (let [d (.digest (java.security.MessageDigest/getInstance "SHA-256")
-                     (.getBytes (str token) java.nio.charset.StandardCharsets/UTF_8))]
-      (symbol (apply str "CxSandbox" (map #(format "%02x" %) (take 16 d)))))))
+    (let [d (.digest (MessageDigest/getInstance "SHA-256")
+                     (.getBytes (str token) StandardCharsets/UTF_8))]
+      (symbol (str "CxSandbox" (hex d 16))))))
 
 (defn- cookies
   "The request's cookies as a map, parsed off the raw header.  Ring's cookie middleware
@@ -85,10 +124,10 @@
         (some-> (get-in req [:headers "cookie"]) (str/split #";"))))
 
 (defn token-of
-  "This request's session token — the one `wrap-session` put on it, else the cookie's,
-  else nil."
+  "This request's session token — the one `wrap-session` put on it, else the cookie's
+  when its tag checks, else nil."
   [req]
-  (or (::token req) (get (cookies req) cookie-name)))
+  (or (::token req) (verified (get (cookies req) cookie-name))))
 
 (defn context-of
   "The sandbox context this request belongs to, or nil when it carries no valid token."
@@ -97,12 +136,11 @@
 
 (defn- set-cookie
   "The `Set-Cookie` value for `token`.  A **session** cookie (no `Max-Age`): a sandbox is
-  scoped to the sitting, and one that outlived the browser would be a sandbox nobody
-  remembers making.  `HttpOnly` because no script needs it, and `SameSite=Lax` so another
-  site cannot drive a write with it — the same reasoning as the origin check on every
-  POST here."
-  [token]
-  (str cookie-name "=" token "; Path=/; HttpOnly; SameSite=Lax"))
+  scoped to the sitting.  `HttpOnly` because no script needs it, `SameSite=Lax` so another
+  site cannot drive a write with it, and `Secure` when the request came over HTTPS."
+  [token secure?]
+  (str cookie-name "=" token "." (tag token) "; Path=/; HttpOnly; SameSite=Lax"
+       (when secure? "; Secure")))
 
 (defn add-cookie
   "`resp` with one more `Set-Cookie`.  Ring takes a header value as a string or as a
@@ -121,21 +159,99 @@
                      (string? prior) [prior c]
                      :else           (conj (vec prior) c)))))
 
-(defn wrap-session
-  "Give every request a session token, minting one into a cookie the first time.
+;; ---- the roster ------------------------------------------------------------
+;; The sandboxes a KB holds, with each one's activity, so an admission past the cap
+;; knows which to reset.  The priority is GreedyDual's aged form: `L` (`:level`) plus
+;; `value`, restarted from the current `L` at each use; an eviction raises `L` to the
+;; evicted priority.  docs/web.md states the rule and why.
 
-  The token alone writes nothing — it names a sandbox that may not exist yet.  Only
-  `open` creates the context, and only a write calls it."
-  [handler]
-  (fn [req]
-    (let [known (get (cookies req) cookie-name)
-          valid (when (and known (re-matches token-pattern known)) known)
-          token (or valid (mint-token))
-          resp  (handler (assoc req ::token token))]
-      (cond-> resp
-        (nil? valid) (add-cookie (set-cookie token))))))
+(def max-sentexes
+  "How many sentexes one sandbox may store.  `/assert` refuses a form that would take its
+  sandbox past this, with `:over-ceiling`; the conclusions an admitted form derives may
+  pass it.  Only the lines addressed to the sandbox count: a line the form writes into
+  another context counts toward no ceiling."
+  2000)
 
-;; ---- the context itself --------------------------------------------------
+(defn max-sandboxes
+  "How many sandboxes a KB holds at most (`VAELII_SANDBOX_MAX`)."
+  []
+  (v/switch-value "VAELII_SANDBOX_MAX"))
+
+(defn- idle-horizon-ms
+  "How long a sandbox may go unused before it is reset ahead of every used one
+  (`VAELII_SANDBOX_IDLE_MINUTES`), in milliseconds."
+  []
+  (* 60000 (v/switch-value "VAELII_SANDBOX_IDLE_MINUTES")))
+
+(def ^:private empty-roster {:level 0.0 :seq 0 :entries {}})
+
+(defn- value
+  "What keeping a sandbox is worth: its active minutes past the first, times one plus the
+  log of its writes, over one plus the log of its stored sentexes.  A sandbox used inside
+  one minute is worth 0, however much it wrote."
+  [{:keys [minutes writes size]}]
+  (/ (* (dec minutes) (inc (Math/log (max 1 writes))))
+     (inc (Math/log (inc size)))))
+
+(defn- stamp
+  "`roster` with `ctx` used at `t`: its last use and use order set, one more active minute
+  when `t` falls in a minute it had none in, and its priority restarted from the level."
+  [roster ctx t]
+  (let [n (inc (:seq roster))
+        m (quot t 60000)]
+    (-> roster
+        (assoc :seq n)
+        (update-in [:entries ctx]
+                   (fn [e]
+                     (let [e (cond-> (assoc e :last t :seq n)
+                               (not= m (:minute e)) (-> (assoc :minute m) (update :minutes inc)))]
+                       (assoc e :h (+ (:level roster) (value e)))))))))
+
+(defn- enter
+  "`roster` with `ctx` opened at `t` holding `size` sentexes."
+  [roster ctx size t]
+  (stamp (assoc-in roster [:entries ctx] {:minutes 0 :minute -1 :writes 0 :size size}) ctx t))
+
+(defn- used
+  "`roster` with `ctx` used at `t`, when it is on the roster."
+  [roster ctx t]
+  (if (get-in roster [:entries ctx]) (stamp roster ctx t) roster))
+
+(defn- wrote
+  "`roster` with one more write by `ctx`'s session at `t`, after which it holds `size`."
+  [roster ctx size t]
+  (if (get-in roster [:entries ctx])
+    (stamp (update-in roster [:entries ctx] #(-> % (update :writes inc) (assoc :size size)))
+           ctx t)
+    roster))
+
+(defn- idle? [e t horizon] (> (- t (:last e)) horizon))
+
+(defn- victim
+  "The context an admission resets: of those idle past `horizon`, the longest idle; else
+  the lowest priority, and of equal priorities the one used least recently."
+  [roster t horizon]
+  (let [rank (fn [[_ e]] (if (idle? e t horizon) [0 (:last e) (:seq e)] [1 (:h e) (:seq e)]))]
+    (key (reduce (fn [best kv] (if (neg? (compare (rank kv) (rank best))) kv best))
+                 (:entries roster)))))
+
+(defn- evict
+  "`roster` without `ctx`.  The level rises to its priority unless it was idle past
+  `horizon`, since an idle sandbox's priority records activity that has stopped."
+  [roster ctx t horizon]
+  (let [e (get-in roster [:entries ctx])]
+    (cond-> (update roster :entries dissoc ctx)
+      (and e (not (idle? e t horizon))) (update :level max (:h e)))))
+
+(defn- room
+  "`[roster' evicted]`: `roster` with contexts evicted until fewer than `cap` remain, and
+  those contexts in eviction order."
+  [roster cap t horizon]
+  (loop [r roster out []]
+    (if (< (count (:entries r)) cap)
+      [r out]
+      (let [c (victim r t horizon)]
+        (recur (evict r c t horizon) (conj out c))))))
 
 (defn- edge [ctx] (list 'genlCx ctx 'CxWell))
 
@@ -145,23 +261,67 @@
   [target ctx]
   (boolean (and ctx (v/handle-of target (edge ctx) 'CxUniverse))))
 
-(defn open
-  "Make sure `ctx` exists, and answer it.  Idempotent — the edge is find-or-create, so a
-  second call on a live sandbox writes nothing.  Bare, not `!`: it only ever adds."
-  [target ctx]
-  (when ctx
-    (when-not (live? target ctx)
-      (v/edit! target {:add [[(edge ctx) 'CxUniverse {:strength :monotonic}]]}))
-    ctx))
+(defn- rebuilt
+  "The roster for the sandboxes `target` holds, each entered at `t` as a fresh sandbox of
+  its size: the activity signals live in this process and a restart loses them."
+  [target t]
+  (reduce (fn [r ctx] (enter r ctx (v/count-in-context target ctx) t))
+          empty-roster
+          (sort (filter #(and (str/starts-with? (name %) "CxSandbox") (live? target %))
+                        (v/contexts target)))))
 
-(defn extent
-  "Every sentex stored in the sandbox — what the reader put there and what the shipped
-  rules concluded from it, which are in the same place by construction."
+;; one `[WeakReference atom]` pair per KB, compared by identity: a KB's hash reads its
+;; stores, which change under it
+(defonce ^:private rosters (atom []))
+
+(defn- roster-of [target]
+  (some (fn [[^WeakReference r a]] (when (identical? target (.get r)) a)) @rosters))
+
+(defn- roster!
+  "`target`'s roster atom, built from the KB the first time it is asked for."
+  [target]
+  (or (roster-of target)
+      (locking rosters
+        (or (roster-of target)
+            (let [a (atom (rebuilt target (System/currentTimeMillis)))]
+              (swap! rosters (fn [rs] (conj (filterv (fn [[^WeakReference r]] (.get r)) rs)
+                                            [(WeakReference. target) a])))
+              a)))))
+
+(defn note-use!
+  "Record a request by the session whose sandbox is `ctx`."
   [target ctx]
-  (if (and ctx (live? target ctx)) (v/sentexes-in-context target ctx) []))
+  (when-let [a (and ctx (roster-of target))]
+    (swap! a used ctx (System/currentTimeMillis))))
+
+(defn note-write!
+  "Record a write request by the session whose sandbox is `ctx`, and its size after."
+  [target ctx]
+  (when-let [a (and ctx (roster-of target))]
+    (when (contains? (:entries @a) ctx)
+      (swap! a wrote ctx (v/count-in-context target ctx) (System/currentTimeMillis)))))
+
+(defn wrap-session
+  "Give every request a session token, minting one into a cookie when the request
+  carries none whose tag checks, and record the use against the KB `kb-of` answers.
+
+  The token alone writes nothing — it names a sandbox that may not exist yet.  Only
+  `open` creates the context, and only a write calls it."
+  [handler kb-of]
+  (force signing-key)
+  (fn [req]
+    (let [known (verified (get (cookies req) cookie-name))
+          token (or known (mint-token))
+          resp  (handler (assoc req ::token token))]
+      (when known (note-use! (kb-of) (context-for known)))
+      (cond-> resp
+        (nil? known) (add-cookie (set-cookie token (= :https (:scheme req))))))))
+
+;; ---- the context itself --------------------------------------------------
 
 (defn reset!
-  "Discard the whole sandbox: every sentex in it, then the edge that made it a context.
+  "Discard the whole sandbox: every sentex in it, then the edge that made it a context,
+  and its roster entry.
 
   One `edit`, so it is one settle, and the dependency-directed sweep does the rest — a
   conclusion derived into the sandbox goes with the premises it rested on, and its
@@ -171,6 +331,8 @@
   Answers `{:removed-sentexes n :removed-justifications n}`.  Irreversible, hence the
   `!` — that is the whole point of the control."
   [target ctx]
+  (when-let [a (and ctx (roster-of target))]
+    (swap! a update :entries dissoc ctx))
   (if-not (and ctx (live? target ctx))
     {:removed-sentexes 0 :removed-justifications 0}
     (let [handles (mapv :id (v/sentexes-in-context target ctx))
@@ -181,3 +343,34 @@
           gone2   (if e (:removed (v/edit! target {:remove [e]}))
                       {:removed-sentexes 0 :removed-justifications 0})]
       (merge-with + gone gone2))))
+
+(defn- make-room!
+  "Reset sandboxes until `target` holds fewer than `max-sandboxes`.  A roster entry whose
+  sandbox is gone by another path is dropped first."
+  [target]
+  (let [a   (roster! target)
+        cap (max-sandboxes)]
+    (when (>= (count (:entries @a)) cap)
+      (let [dead (remove #(live? target %) (keys (:entries @a)))
+            _    (swap! a update :entries #(apply dissoc % dead))
+            [r gone] (room @a cap (System/currentTimeMillis) (idle-horizon-ms))]
+        (clojure.core/reset! a r)
+        (doseq [c gone] (reset! target c))))))
+
+(defn open
+  "Make sure `ctx` exists, and answer it.  Idempotent — the edge is find-or-create, so a
+  second call on a live sandbox writes nothing.  Opening a sandbox past `max-sandboxes`
+  resets the lowest-priority one first.  Bare, not `!`: it removes only through `reset!`."
+  [target ctx]
+  (when ctx
+    (when-not (live? target ctx)
+      (make-room! target)
+      (v/edit! target {:add [[(edge ctx) 'CxUniverse {:strength :monotonic}]]})
+      (swap! (roster! target) enter ctx 0 (System/currentTimeMillis)))
+    ctx))
+
+(defn extent
+  "Every sentex stored in the sandbox — what the reader put there and what the shipped
+  rules concluded from it, which are in the same place by construction."
+  [target ctx]
+  (if (and ctx (live? target ctx)) (v/sentexes-in-context target ctx) []))

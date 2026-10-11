@@ -10,6 +10,7 @@
   (:require [clojure.test :refer [deftest is testing use-fixtures]]
             [vaelii.core :as v]
             [vaelii.impl.protocols :as p]
+            [vaelii.impl.reads :as reads]
             [vaelii.impl.reindex :as reindex]
             [vaelii.impl.rules :as rules]
             [vaelii.test-util :as tu]))
@@ -41,9 +42,9 @@
     (let [rh (v/assert-rule kb [(list bird '?x) (list 'not (list flies '?x))]
                             (list grounded '?x) CxNeg {:direction :forward})]
       (testing "the rule is posted under its body's predicate, not under the bare not"
-        (is (contains? (set (p/rules-by-antecedent (:index kb) [:not flies])) rh))
-        (is (not (contains? (set (p/rules-by-antecedent (:index kb) 'not)) rh)))
-        (is (contains? (set (p/rules-by-antecedent (:index kb) bird)) rh)))
+        (is (contains? (set (reads/as-stored-rules-by-antecedent-global (:index kb) [:not flies])) rh))
+        (is (not (contains? (set (reads/as-stored-rules-by-antecedent-global (:index kb) 'not)) rh)))
+        (is (contains? (set (reads/as-stored-rules-by-antecedent-global (:index kb) bird)) rh)))
       (testing "negation last: the negative datum is the trigger"
         (v/assert kb (list bird Tweety) CxNeg)
         (let [nh (v/assert kb (list 'not (list flies Tweety)) CxNeg)]
@@ -57,7 +58,7 @@
         (is (v/ask? kb (list grounded Opus) CxNeg)))
       (testing "a negation on another predicate finds no rule under its key"
         (v/assert kb (list 'not (list other Tweety)) CxNeg)
-        (is (empty? (p/rules-by-antecedent (:index kb) [:not other])))
+        (is (empty? (reads/as-stored-rules-by-antecedent-global (:index kb) [:not other])))
         (is (v/ask? kb (list grounded Opus) CxNeg))))))
 
 (deftest reindex-rebuilds-the-negated-antecedent-key
@@ -72,7 +73,7 @@
         (reindex/reindex kb)
         (v/recover kb)
         (testing "the rebuilt index files the rule under the same key the live one did"
-          (is (contains? (set (p/rules-by-antecedent (:index kb) [:not flies])) rh))
-          (is (empty? (p/rules-by-antecedent (:index kb) 'not))))
+          (is (contains? (set (reads/as-stored-rules-by-antecedent-global (:index kb) [:not flies])) rh))
+          (is (empty? (reads/as-stored-rules-by-antecedent-global (:index kb) 'not))))
         (testing "and the conclusion is back"
           (is (v/ask? kb (list grounded Tweety) 'CxUniverse)))))))

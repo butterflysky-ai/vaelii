@@ -7,10 +7,10 @@
   Three entry points, one per site in `vaelii.core`:
 
   - `reconcile-assert`, after a sentence is stored: the collision merge an equality may
-    have caused, the correspondence reconciliation, the structural `genlCx` edges the
-    new fact entails, and the merges those edges license.
+    have caused, the correspondence reconciliation, and the structural `genlCx` edges the
+    new fact entails.
   - `reconcile-revivals!`, after a teardown has settled: the edges the producer could not
-    build while their declaration was OUT, and the merges they license.
+    build while their declaration was OUT.
   - `collect-orphans!`, on the same teardown: the reified constants no live use
     references any more, removed to a fixpoint.
 
@@ -21,41 +21,23 @@
   The teardown entry point is an **argument**, not a require: the orphan sweep retracts
   through `vaelii.core/retract!`, and the engine never requires the API namespace
   (docs/namespaces.md, \"The layering\").  `vaelii.core` hands its own `retract!` in."
-  (:require [vaelii.impl.chain :as chain]
-            [vaelii.impl.context-nat :as context-nat]
+  (:require [vaelii.impl.context-nat :as context-nat]
             [vaelii.impl.nat :as nat]
             [vaelii.impl.settle :as settle]
             [vaelii.impl.special :as special]
-            [vaelii.impl.violations :as violations]
             [vaelii.impl.wiring :refer [*defer-settle?*]]))
 
 ;; ---- computed genlCx edges: the merges they license -----------------------
 
-(defn- apply-computed-edge-merges
-  "The follow-through a **computed** `genlCx` edge's merges owe, in the order
-  `vaelii.core`'s `assert-one` runs the same three for an asserted one: the retired
-  spellings reconciled, the twins put on the agenda as seeds, the violations reported
-  after the chain that could add to them, and one settle.
-
-  `mig` is what `context-nat/reconcile-genlCx` — or, on the teardown path,
-  `context-nat/reconcile-revivals` — carried up from `special/reconcile-context-edge`.  It
-  is nil whenever the producer merged nothing, which is every KB that states no equality
-  and every re-run over edges it already had, so the common case costs one test.
-
-  **Separate from `assert-one`'s own block, and it has to be.**  A structural edge is
-  entailed *by the fact that was just stored* — the mint of one context beside another
-  is what creates the sibling pair to order — so the producer cannot run until that
-  fact is in, and by then `assert-one` has chained and settled.  The merges a computed
-  edge licenses are therefore genuinely later knowledge, and they need their own pass
-  rather than a second settle nested inside the first."
-  [kb mig opts]
-  (when mig
-    (when (seq (:superseded mig))
-      (special/refresh-supersessions kb (:superseded mig)))
-    (when (and (:chain? opts true) (seq (:new mig)))
-      (chain/chain-all kb (special/minted-seeds kb (:new mig)) opts))
-    (violations/report kb (:violations mig))
-    (when-not *defer-settle?* (settle/settle kb)))
+(defn- settle-computed-edges
+  "Settle once a computed `genlCx` edge was built (`built?`), so the settle's drain reads
+  what it shows (`special/drain-context-moves!`), seeding no chaining when `opts` asks
+  `{:chain? false}`.  The producer runs after the write that entails the edge has
+  settled, so the edge needs a settle of its own."
+  [kb built? opts]
+  (when (and built? (not *defer-settle?*))
+    (binding [special/*seed-moves?* (:chain? opts true)]
+      (settle/settle kb)))
   nil)
 
 ;; ---- the assert path ------------------------------------------------------
@@ -72,22 +54,18 @@
     settle (docs/nat.md).
   - `context-nat/reconcile-genlCx` — the structural `genlCx` edges a context's mint, a
     `contextArgSubrelation` declaration or an `R`-evidence fact entails; materialized
-    justified so they belief-follow (docs/context-nat.md).  A computed edge widens which
-    merges a context can see exactly as a stated one does, so
-    `apply-computed-edge-merges` gives it the same follow-through — nil, and one test,
-    whenever it merged nothing (vaelii#56).
+    justified so they belief-follow (docs/context-nat.md), and settled
+    (`settle-computed-edges`).
 
-  **The gate covers all of it.**  A `context_denoting_function` is a reify-kind, so any
-  KB with a context NAT to order already passes `nat/any-reifiable-functions?` — a free
-  in-memory read — and one that declares no reifiable function has no `cx/` context and
-  nothing to reconcile.  So a KB that reifies nothing pays neither the
-  `any-context-subrelations?` index read nor the correspondence count
-  (`assert_cost_test`)."
+  **One gate covers all of it**, `nat/any-reified-constants?`: a KB with a reifiable
+  function or a stored `termOfUnit` map.  A context slot mints a `cx/` constant with no
+  declaration, so the map count is what admits a KB whose only constants are contexts.  A
+  KB that has minted nothing and declares no reifiable function pays neither the
+  `any-context-subrelations?` index read nor the correspondence count."
   [kb sentence opts]
-  (when (and (nat/any-reifiable-functions? kb) (sequential? sentence))
+  (when (and (nat/any-reified-constants? kb) (sequential? sentence))
     (nat/reconcile-nats! kb sentence)
-    (apply-computed-edge-merges
-     kb (context-nat/reconcile-genlCx kb sentence) opts)))
+    (settle-computed-edges kb (context-nat/reconcile-genlCx kb sentence) opts)))
 
 ;; ---- the teardown path ----------------------------------------------------
 
@@ -99,13 +77,11 @@
   back IN by retracting a monotonic defeater above it, and the producer runs on the
   assert path only — so an edge never built while the declaration was OUT would stay
   absent with nothing for the JTMS to revive.  `context-nat/reconcile-revivals` rebuilds
-  it against the settled belief, and an edge built here widens an ancestor set the moment
-  it is built, whichever entry point built it — so it takes the same follow-through the
-  assert path gives a computed edge.
+  it against the settled belief, and settles what it built.
 
   Gated internally on the KB declaring a context function."
   [kb]
-  (apply-computed-edge-merges kb (context-nat/reconcile-revivals kb) nil))
+  (settle-computed-edges kb (context-nat/reconcile-revivals kb) nil))
 
 (def ^:dynamic ^:private *in-orphan-removal?*
   "Bound true while `remove-orphaned-nats!` retracts orphaned reified NAT bookkeeping, so
@@ -167,9 +143,8 @@
 (defn collect-orphans!
   "Sweep a reified NAT orphaned by a teardown — its termOfUnit map and materialized types
   would dangle a raw `nat/` symbol (docs/nat.md), and an emptied `cx/` context would be
-  a place nothing can reach and nothing is in (docs/context-nat.md).  Gated on the KB
-  declaring a reifiable function at all — `context_denoting_function` is one — and
-  suppressed while already removing orphans.  `retract!` is the teardown entry point the
+  a place nothing can reach and nothing is in (docs/context-nat.md).  Gated on
+  `nat/any-reified-constants?`, and suppressed while already removing orphans.  `retract!` is the teardown entry point the
   sweep takes each bookkeeping handle out with.
 
   Two arms, and which one a caller takes turns on whether it can name the region the
@@ -196,5 +171,5 @@
   constants are orphaned *now*, which is the stronger reading and the one a restore owes."
   ([kb retract!] (collect-orphans! kb nil retract!))
   ([kb sink retract!]
-   (when (and (not *in-orphan-removal?*) (nat/any-reifiable-functions? kb))
+   (when (and (not *in-orphan-removal?*) (nat/any-reified-constants? kb))
      (remove-orphaned-nats! kb sink retract!))))

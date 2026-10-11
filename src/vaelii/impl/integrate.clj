@@ -76,7 +76,7 @@
   defeats it removed (`settle/defeat-moves`), and it is not free: it retains every sentex
   a teardown removes for as long as the teardown runs, which on a cascade is the whole
   cascade held in a vector.  The caller passes the gate its readers consult
-  (`nat/any-reifiable-functions?`, a stored `defeat`), so a KB with none of them pays the
+  (`nat/any-reified-constants?`, a stored `defeat`), so a KB with none of them pays the
   retention of nothing at all."
   ([] (removal-sink true))
   ([want?] (when want? (or *removed-sink* (volatile! [])))))
@@ -126,10 +126,7 @@
     ;; one event that falsifies it — so the invalidation belongs beside the removal
     ;; itself, not in the caller that happens to have a cache bound
     (observe/forget-handle! (sx/sentence-of sentex) (:context sentex))
-    ;; a defeat leaving moves what a scoped read memoized, the remove half of
-    ;; `kb/create-sentex`'s add; it reads the departing sentex rather than the index
-    (kb/note-defeat! kb sentex false)
-    ;; ...and a defeat leaving moves its target's belief, which its watchers re-check
+    ;; a defeat leaving moves its target's belief, which its watchers re-check
     (special/recheck-defeat-target kb sentex)
     ;; ...and the candidates of the nogood families the settle places
     (decide/note-candidate! kb sentex false)
@@ -142,10 +139,9 @@
     ;; After the record is deleted, which is what drops a departing spelling's entry
     (special/reconcile-removed-supersession! kb sentex)
     ;; An except's departure changes the effective belief of the declaration it hid.
-    ;; Run after the roster drop so the common reconcile reads the new visibility state;
-    ;; report the visibility move explicitly because the exception record is already gone.
+    ;; Run after the roster drop so the common reconcile reads the new visibility state.
     (when except-target
-      (special/reconcile-belief-change kb #{except-target} true))
+      (special/reconcile-belief-change kb #{except-target}))
     (special/recheck-on-sentence kb (sx/sentence-of sentex))))
 
 ;; ## The spellings a permuting mark folded
@@ -201,7 +197,9 @@
                                          (p/delete-provenance! recs h))))))
 
 (defn permuting?
-  "Does a stored mark permute `pred`'s arguments — `symmetric`, or a commuting group?"
+  "Does a stored mark permute `pred`'s arguments — `symmetric`, or a commuting group?
+
+  Read unscoped: the fold decides the stored key, which every reader shares."
   [kb pred]
   (let [tax (reasoning/taxonomy kb)]
     (boolean (and pred (or (tax/has-prop? tax :symmetric pred)
@@ -271,7 +269,10 @@
 
 (defn mark-witness
   "A believed statement of a permuting mark on `pred` (`witness-among`), for
-  `commute-predicate`."
+  `commute-predicate`.
+
+  The marks are read unscoped, a superset that `witness-among` narrows to a believed
+  statement."
   [kb pred]
   (let [tax (reasoning/taxonomy kb)]
     (witness-among kb (concat (tax/prop-supporters tax :symmetric pred)
@@ -382,11 +383,12 @@
             :let [j     (or (p/get-justification recs jid) (jtms/justification tms jid))
                   antes (mapv #(if (= % doomed) survivor %) (:antecedents j))]
             :when (and j (not= (:consequence j) survivor)
-                       (not (jtms/has-justification? tms (:informant j) antes
-                                                     (:consequence j))))]
+                       (not (jtms/has-justification?
+                             tms (:informant j) antes (:consequence j)
+                             (jtms/justification-key (:informant j) antes (:subsumptions j)))))]
       (let [nid  (p/next-id recs)
             just (jtms/->just nid (:informant j) antes (:consequence j)
-                              (:bindings j) (:strength j))]
+                              (:bindings j) (:strength j) (:subsumptions j))]
         (p/put-justification recs just)
         (jtms/add-justification tms just)
         ;; the copy concludes what the original did, spelled as the original was
@@ -418,11 +420,13 @@
     (reduce (fn [copied jid]
               (let [j (or (p/get-justification recs jid) (jtms/justification tms jid))]
                 (if (and j (not (some #{survivor} (:antecedents j)))
-                         (not (jtms/has-justification? tms (:informant j) (:antecedents j)
-                                                       survivor)))
+                         (not (jtms/has-justification?
+                               tms (:informant j) (:antecedents j) survivor
+                               (jtms/justification-key (:informant j) (:antecedents j)
+                                                       (:subsumptions j)))))
                   (let [nid  (p/next-id recs)
                         just (jtms/->just nid (:informant j) (vec (:antecedents j)) survivor
-                                          (:bindings j) (:strength j))]
+                                          (:bindings j) (:strength j) (:subsumptions j))]
                     (p/put-justification recs just)
                     (jtms/add-justification tms just)
                     (assoc copied jid nid))
@@ -593,7 +597,10 @@
 
   The mark must also be **installed**, not merely written: a declaration the taxonomy has
   not taken up re-spells nothing, and asking here is what keeps the walk off a store the
-  arriving sentex does not actually move."
+  arriving sentex does not actually move.
+
+  The mark is read unscoped: the fold decides the stored key, which every reader
+  shares."
   [kb sentence]
   (when (and (sequential? sentence) (symbol? (nm/functor sentence)))
     (let [tax (reasoning/taxonomy kb)

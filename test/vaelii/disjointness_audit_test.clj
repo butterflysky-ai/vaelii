@@ -144,7 +144,7 @@
     (doseq [[[a b] ms] [[[one two] [Zed Abe]] [[three four] [Abe Zed]]]
             m ms t [a b]]
       (v/assert kb (list t m) 'CxUniverse))
-    (let [via #(:via (#'v/subsumption-reading kb %1 %2 'CxUniverse))]
+    (let [via #(:via (#'v/subsumption-reading kb %1 %2 'CxUniverse (#'v/instance-reads kb 'CxUniverse)))]
       (is (= Abe (via one two) (via three four))))))
 
 (tu/deftest-kb a-shared-subtype-below-two-separated-types-is-no-witness
@@ -276,10 +276,27 @@
     (is (= :orthogonal (v/subsumption-status kb 'striped 'aquatic 'CxOrthoProbe))
         "read from CxOrthoProbe, the shared instance settles the pair as orthogonal")))
 
-(tu/deftest-kb the-audit-defaults-its-vantage-to-cxuniverse
+(tu/deftest-kb the-audit-defaults-its-vantage-to-cxwell
   (is (= (v/disjointness-audit kb)
-         (v/disjointness-audit kb 'CxUniverse))
-      "the no-context audit passes CxUniverse as the shared-instance vantage"))
+         (v/disjointness-audit kb 'CxWell))
+      "the no-context audit passes CxWell, the starter spindle's collector, as its
+      vantage — every type and declaration CxWell sees, and no opt-in theory's"))
+
+;; ---- the swept type set is read from the same vantage as its coverage -----
+
+(tu/deftest-kb a-type-declared-only-in-an-opt-in-context-is-outside-the-default-sweep
+  ;; A fresh context below CxUniverse, the way an opt-in theory sits: CxUniverse sees it,
+  ;; CxWell does not, since no `genlCx CxWell ...` edge names it.
+  (tu/with-terms [optInKind]
+    (v/assert kb (list 'genlCx 'CxOptInProbe 'CxUniverse) 'CxUniverse)
+    (v/assert kb (list 'genl optInKind 'thing) 'CxOptInProbe)
+    (let [swept (fn [ctx] (into #{} (mapcat (juxt :a :b)) (:pairs-data (v/disjointness-audit kb ctx))))]
+      (is (not (contains? (swept 'CxWell) optInKind))
+          "CxWell does not see CxOptInProbe, so a type declared only there is outside the audit's type set")
+      (is (contains? (swept 'CxOptInProbe) optInKind)
+          "read from CxOptInProbe itself, the type is in scope")
+      (is (not (contains? (swept 'CxUniverse) optInKind))
+          "CxUniverse does not see CxOptInProbe either — the opt-in direction is the same at both vantages"))))
 
 ;; ---- a type node need not be a symbol ------------------------------------
 
@@ -311,10 +328,13 @@
 ;; grows. Lower one only in the commit that removes the separation, and name the
 ;; removed pairs in that commit.
 ;;
-;; The audit sweeps the nodes of the genl hierarchy less each `relation?`, so the five
+;; The audit sweeps the nodes of the genl hierarchy visible from its vantage (default
+;; CxWell, the starter spindle's collector) less each `relation?` there, so the five
 ;; relations CxCore puts under a `genl` edge (`orthogonal`, `siblingDisjointException`
-;; and the three arity-class predicates) are not swept: 199 types, 19,701 pairs, 13,762
-;; of them disjoint (69.9%) and 4,069 unknown (20.7%).
+;; and the three arity-class predicates) are not swept: 201 types, 20,100 pairs, 14,211
+;; of them disjoint (70.7%) and 3,992 unknown (19.9%). The 201st is CxSocial's
+;; `dwelling`. No opt-in theory's type is among the 201: CxWell does not see one, so the
+;; sweep does not either.
 
 (tu/deftest-kb disjointness-coverage-ratchet
   (let [a          (v/disjointness-audit kb)
@@ -324,9 +344,9 @@
         unknown    (get by-status :unknown 0)
         disjoint-% (* 100.0 (/ disjoint pairs))
         unknown-%  (* 100.0 (/ unknown pairs))]
-    (is (>= disjoint 13762)
-        (format "disjoint pairs must not fall below 13762 (got %d)" disjoint))
-    (is (>= disjoint-% 69.85)
-        (format "disjoint coverage must not regress below 69.85%% (got %.2f%%)" disjoint-%))
-    (is (<= unknown-% 20.66)
-        (format "unknown pairs must not grow above 20.66%% (got %.2f%%)" unknown-%))))
+    (is (>= disjoint 14211)
+        (format "disjoint pairs must not fall below 14211 (got %d)" disjoint))
+    (is (>= disjoint-% 70.70)
+        (format "disjoint coverage must not regress below 70.70%% (got %.2f%%)" disjoint-%))
+    (is (<= unknown-% 19.87)
+        (format "unknown pairs must not grow above 19.87%% (got %.2f%%)" unknown-%))))

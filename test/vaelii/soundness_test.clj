@@ -52,7 +52,8 @@
                        (default-rule [(list bird '?x)] (list 'not (list swims '?x))))
               'CxUniverse)
     (v/assert kb (default-rule [(list penguin '?x)] (list swims '?x))              'CxUniverse)
-    (v/assert kb (list penguin Opus) 'CxUniverse)
+    ;; known-true: a `:default` blocker stores the conclusion with a defeat instead
+    (v/assert kb (list penguin Opus) 'CxUniverse {:strength :monotonic})
     (testing "only the excepted rule's conclusion survives"
       (is (seq    (v/sentexes-matching kb (list 'not (list flies Opus)) 'CxUniverse)))
       (is (empty? (v/sentexes-matching kb (list flies Opus) 'CxUniverse))))

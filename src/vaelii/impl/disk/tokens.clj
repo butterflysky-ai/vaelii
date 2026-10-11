@@ -40,7 +40,7 @@
             [vaelii.impl.sentex :as sx]
             vaelii.impl.tokens
             [vaelii.impl.types.store :as store-types])
-  (:import [java.util HashMap]
+  (:import [java.util ArrayList HashMap]
            [vaelii.impl.tokens Key]))
 
 ;; The forward map is keyed on `tokens/Key`, the same wrapper the in-RAM `TokenDict`
@@ -85,15 +85,17 @@
     ;; one state `close-dir!` exists to prevent
     (try
       (f/truncate-log! log (f/log-tail-offset log))
-      ;; a reloaded token is pooled, so every record decoded through the dictionary shares
-      ;; the one vocabulary object per name with the in-memory store — as it did before the
-      ;; restart, when the token came from a canonicalized sentence
-      (f/truncate-log! log
-                       (f/scan-log log path
-                                   (fn [_ tok]
-                                     (let [tok (sx/intern-sym tok)]
-                                       (.put fwd (Key. tok) (Integer/valueOf (count @rev)))
-                                       (vswap! rev conj! tok)))))
+      (let [toks (ArrayList.)]
+        (f/truncate-log! log (f/scan-log log path (fn [_ tok] (.add toks tok))))
+        ;; a reloaded token is pooled, so every record decoded through the dictionary shares
+        ;; the one vocabulary object per name with the in-memory store — as it did before
+        ;; the restart, when the token came from a canonicalized sentence.  The pool is
+        ;; sized to the dictionary first, so interning it does not rotate the names out.
+        (sx/size-symbol-pool (.size toks))
+        (doseq [tok toks]
+          (let [tok (sx/intern-sym tok)]
+            (.put fwd (Key. tok) (Integer/valueOf (count @rev)))
+            (vswap! rev conj! tok))))
       (store-types/->TokenLog log path fwd (atom (persistent! @rev)) (Object.))
       (catch Throwable t
         (try (f/close! log) (catch Throwable _ nil))

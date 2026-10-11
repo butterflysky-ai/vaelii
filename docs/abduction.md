@@ -165,6 +165,12 @@ the hypotheses are inspectable, `why` works on what they licensed, and `abduce-d
 ends it.  Without `:keep?` the reported `:handle` is **nil**, because after the teardown
 there is no such sentex (`preview` reports its handles the same way).
 
+**A KB holds at most 64 kept contexts** (`vaelii.impl.abduce/max-kept`).  A `:keep?` call
+past that is refused with `:too-many-kept` before it searches, and the refusal lists the
+standing contexts under `:contexts`.  Nothing is evicted: the caller holds each context,
+so a context discarded unasked would make that caller's later read or `abduce-discard!`
+fail without a reason.  A call without `:keep?` is not counted and still runs at the cap.
+
 **Committing is the caller's.**  To keep a hypothesis, assert it in a context that
 outlives the scratch.  There is no promotion path, for the sandbox's reason: a scratch
 context with no exit path cannot be half-committed.

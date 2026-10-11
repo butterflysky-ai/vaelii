@@ -20,6 +20,7 @@
   (:require [clojure.set :as set]
             [clojure.test :refer [deftest is testing]]
             [vaelii.core :as v]
+            [vaelii.impl.dense-roots :as dense-roots]
             [vaelii.impl.protocols :as p]
             [vaelii.impl.rules :as vr]
             [vaelii.test-util :as tu])
@@ -36,12 +37,13 @@
     (case (nth k 0)
       :trie            [:trie (nth k 1)]
       (:argument-root :predicate-extent :rule-antecedent :rule-consequent :rule-extent
-                      :opposed :tax-support :mint :mint-in :self-tuple)
+                      :opposed :tax-support :mint :mint-in :self-tuple :arity-binding :shape-tuple)
       [(nth k 0) (nth k 1)]
       :exception-index (if (= :rules (nth k 1)) [:exception-index :rules] [:exception-index :predicate])
       (:context-root :argument-slot :unary-slot :term-index :term-roster :rule-antecedent-keys
                      :opposed-in :opposed-bodies :tax-installs :mint-terms :unary-multi
-                     :shape-count :shape-lengths)
+                     :unary-kept :unary-kept-types :unary-denied :unary-denied-types
+                     :shape-lengths :arity-binding-kinds :arity-bound)
       [(nth k 0)]
       [:unclassified k])))
 
@@ -51,7 +53,8 @@
   #{[:trie :handles] [:argument-root :handles] [:predicate-extent :handles]
     [:context-root] [:term-index]
     [:rule-antecedent :handles] [:rule-consequent :handles] [:rule-extent :handles]
-    [:opposed :handles] [:opposed-in] [:self-tuple :handles]
+    [:opposed :handles] [:opposed-in] [:self-tuple :handles] [:arity-binding :handles]
+    [:shape-tuple :handles]
     [:tax-support :handles] [:mint :handles] [:mint-in :handles]
     [:exception-index :predicate] [:exception-index :rules]})
 
@@ -63,8 +66,8 @@
   rule key, are counters in its fallback."
   #{[:trie :count] [:argument-root :count] [:predicate-extent :count]
     [:rule-antecedent :count] [:rule-consequent :count] [:rule-extent :count]
-    [:opposed :count] [:tax-support :count] [:mint :count] [:mint-in :count] [:shape-count]
-    [:self-tuple :count]})
+    [:opposed :count] [:tax-support :count] [:mint :count] [:mint-in :count]
+    [:self-tuple :count] [:arity-binding :count] [:shape-tuple :count]})
 
 (def ^:private other-families
   "Families whose value is deliberately *not* a handle set, so packing them as handles
@@ -78,36 +81,26 @@
           [:opposed :children] [:self-tuple :children] [:term-roster] [:argument-slot] [:unary-slot]
           [:rule-antecedent-keys] [:opposed-bodies]
           [:tax-support :children] [:tax-installs]
-          [:mint :children] [:mint-in :children] [:mint-terms] [:unary-multi] [:shape-lengths]}
+          [:mint :children] [:mint-in :children] [:mint-terms] [:unary-multi] [:unary-kept]
+          [:unary-kept-types] [:unary-denied] [:unary-denied-types] [:shape-lengths]
+          [:arity-binding :children] [:arity-binding-kinds] [:arity-bound]
+          [:shape-tuple :children]}
         count-families))
 
-(def ^:private interned-name-families
-  "Name families the columnar roots pack anyway: a count trie's node children are
-  contexts, and `dense-roots` holds each as its id in the shared token dictionary, in a
-  posting under a packed key (an argument node's carries its interned `(pred, pos)`
-  scope), so the family's per-node mass is ints rather than a boxed key and set in the
-  fallback."
-  #{[:argument-root :children] [:predicate-extent :children] [:rule-antecedent :children]
-    [:rule-consequent :children] [:rule-extent :children] [:opposed :children]
-    [:mint :children] [:self-tuple :children]})
+(def ^:private fallback-families
+  "The families the columnar roots keep in their fallback: the counters keyed by a
+  predicate, functor, rule key or kind, and the one `:mint-in` node's children.  Every
+  other family packs — a handle set as handles, a node's children and a name set as ids in
+  the shared token dictionary — and a node count the roots read off the node's leaves is
+  stored nowhere (`counted-families`)."
+  #{[:predicate-extent :count] [:rule-antecedent :count] [:rule-consequent :count]
+    [:rule-extent :count] [:self-tuple :count] [:mint-in :count] [:mint-in :children]})
 
-(def ^:private unpackable-handle-families
-  "Handle families the dense layout cannot int-route, and why.
-
-  One, the taxonomy's supporter leaves; every other handle family packs. The one that
-  carries the most names — the argument trie's leaf
-  `[:argument-root :handles [pred pos term ctx]]`, index layout 4 in `kv.clj` — packs
-  because its `(pred, pos, ctx)` scope is interned to a dense id of its own and rides the
-  `pos` field (`dense-roots`' `argfam-id`), so the packed long spends family 8 bits |
-  scope 24 | term id 32 and no family is left keyed by a boxed vector.
-
-  A family added here must state which of the two it lacks: a term the shared dictionary
-  can intern, or a field in the packed long to put it in.
-
-  `[:tax-support :handles [k ctx]]` lacks the term: its node `k` is a taxonomy key, a
-  vector such as `[:genl a b]` or `[:disjoint #{a b}]`, which the dictionary does not
-  intern."
-  #{[:tax-support :handles]})
+(def ^:private counted-families
+  "The node counts the columnar roots answer from the node's leaves: `kv-get` computes
+  them, and no entry holds them."
+  #{[:argument-root :count] [:opposed :count] [:mint :count] [:tax-support :count]
+    [:arity-binding :count] [:shape-tuple :count]})
 
 ;;; ── the KB, and the backends under test ───────────────────────────────
 
@@ -151,7 +144,9 @@
     ;; a body stored in both polarities: the opposed family
     (v/assert kb (list feathered Opus) CxRouting)
     ;; a ground binary self tuple: the self-tuple trie
-    (v/assert kb (list parentOf Cid Cid) CxRouting)))
+    (v/assert kb (list parentOf Cid Cid) CxRouting)
+    ;; a length binding: the arity-binding trie
+    (v/assert kb (list 'binary_predicate grandparentOf) CxRouting {:strength :monotonic})))
 
 (defn- families-present
   "The families the built index actually holds, with one representative key each."
@@ -220,24 +215,51 @@
             :when   (not= :trie (first fam))]      ; the columnar trie is native; no [:trie …] key reaches the roots
       (testing (pr-str fam)
         (cond
+          (counted-families fam)
+          (do (is (pos? (long (p/kv-get roots k))) (str fam " answers the node's count"))
+              (is (not-any? #(= k (first %)) (dense-roots/fallback-entries roots))
+                  (str fam " is read off the leaves, so the fallback holds no entry for it")))
+
           (count-families fam)
           (is (pos? (long (p/kv-get roots k))) (str fam " answers the node's count"))
 
-          (or (and (handle-families fam) (not (unpackable-handle-families fam)))
-              (interned-name-families fam))
+          (fallback-families fam)
           (do (is (seq (p/kv-members roots k)) (str fam " is missing from the roots backend"))
-              (is (nil? (p/kv-get roots k))
-                  (str fam " is a packed family but " (pr-str k) " is readable through `kv-get`"
-                       " — it sits in the fallback backend, un-interned and boxed")))
+              (is (some? (p/kv-get roots k)) (str fam " stays in the fallback")))
 
           :else
           (do (is (seq (p/kv-members roots k)) (str fam " is missing from the roots backend"))
-              (is (some? (p/kv-get roots k))
-                  (str fam " must stay in the fallback — it is either not a handle family"
-                       " or one the packed layout cannot carry (see"
-                       " `unpackable-handle-families`)"))))))
+              (is (nil? (p/kv-get roots k))
+                  (str fam " is a packed family but " (pr-str k) " is readable through `kv-get`"
+                       " — it sits in the fallback backend, un-interned and boxed"))))))
     ;; and the trie families really are elsewhere — the roots hold no path keys at all
     (doseq [[fam k] present :when (= :trie (first fam))]
       (is (empty? (p/kv-members roots k))
           (str fam " reached the roots backend; the columnar trie is supposed to own it")))
     (tu/clear-kb! kb)))
+
+;;; ── the fallback is vocabulary-scaled ─────────────────────────────────
+
+(defn- fallback-size
+  "How many entries the columnar roots' fallback holds after `n` individuals, each a member
+  of two types, related to the next, and each the type of one `genl` edge, over a
+  vocabulary that does not grow with `n`."
+  [n]
+  (let [kb (open-kb! :memory-columnar 83)]
+    (tu/with-terms [bird pet likes CxScale]
+      (dotimes [i n]
+        (let [x (symbol (str "Scale" i)) y (symbol (str "Scale" (inc i)))
+              t (symbol (str "scale" i))]
+          (v/assert kb (list bird x) CxScale)
+          (v/assert kb (list pet x) CxScale)
+          (v/assert kb (list likes x y) CxScale)
+          (v/assert kb (list 'genl t bird) CxScale {:strength :monotonic})))
+      (let [size (count (dense-roots/fallback-entries (:roots (:index kb))))]
+        (tu/clear-kb! kb)
+        size))))
+
+(deftest the-columnar-roots-fallback-holds-no-entry-per-fact
+  ;; The terms, their slots, their memberships and the taxonomy's supporters all grow with
+  ;; the facts, and each packs; what stays behind is keyed by the vocabulary, which is the
+  ;; same at both sizes.
+  (is (= (fallback-size 8) (fallback-size 32))))

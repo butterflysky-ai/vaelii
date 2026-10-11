@@ -393,7 +393,8 @@
 (defn unsatisfiable-sources
   "The unsatisfiable sources a narrowing of `calc` read in `context`, each
   `{:source kw :pairs [[p q] …] :support #{handle} :stand-in #{[a b]}}`, a `:metric` source
-  adding `:cycle [instant …]`.  `:stand-in` is the pair of this network the narrowing
+  adding `:cycle [instant …]`, or naming `:dimensions [dimension …]` in place of both when
+  its problem is refused.  `:stand-in` is the pair of this network the narrowing
   emptied for the source and no stored fact emptied.  nil when no source is unsatisfiable."
   [kb calc context]
   (:unsatisfiable-sources (read-network kb calc context)))
@@ -1147,11 +1148,13 @@
 
 (caches/register-derived
  {:id :R4 :label "QCN join baselines" :kind :cache :keyed-by :context :reads [:R3]
+  :holds-content? false
   :retired-by {:cleared :W} :computed :write :imaged? false :at [[:qcn-joined]]
   :note "one re-join baseline per calculus and reader context, compared by identity; never trimmed"})
 
 (caches/register-derived
  {:id :K4 :label "Path-consistency and support passes" :cache :path-consistency
+  :holds-content? false
   :kind :cache :keyed-by :value :reads []
   :retired-by {:caches-cleared :W} :computed :read :imaged? false :var #'built-calculi
   :value (fn [_] (into {} (map (fn [[nm c]] [nm [(some-> (:pc-cache c) deref)
@@ -1161,12 +1164,14 @@
 
 (caches/register-derived
  {:id :K11 :label "Calculus registry memo" :kind :cache :keyed-by :value :reads []
+  :holds-content? false
   :retired-by (caches/on-every :I) :computed :read :imaged? false :var #'registry-calculi
   :value (fn [_] @registry-calculi)
   :note "one slot, compared by identity against the prover registry of the KB read; a read of a KB holding another registry replaces it"})
 
 (caches/register-derived
  {:id :K12 :label "Built calculi" :kind :cache :keyed-by :value :reads []
+  :holds-content? false
   :retired-by {} :computed :read :imaged? false :var #'built-calculi
   :value (fn [_] (set (keys @built-calculi)))
   :note "the calculi built in this process by name, each holding the K4 caches; replaced by name"})

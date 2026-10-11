@@ -362,6 +362,26 @@
           (str "what thirty more edges add to pruning in a recover must not grow with the "
                "subtree under them (" (per-30 5) " -> " (per-30 20) ")")))))
 
+(deftest a-recover-pages-the-defeats-not-the-store
+  ;; A `recover`'s settle relabels every stored sentex, and the settle posts the re-check
+  ;; each relabelled `defeat` owes its target.  What is priced is the difference one
+  ;; stored defeat makes, and it must not grow with the facts beside it.
+  (tu/with-shipped-config
+    (let [probe (fn [population defeat?]
+                  (let [kb (fresh)]
+                    (dotimes [i population]
+                      (v/assert kb (list 'rfPlain (ind "RfP" i) 'RfQ) 'CxPerf {}))
+                    (when defeat?
+                      (v/assert kb '(rf_denied RfN) 'CxPerf {})
+                      (v/assert kb '(not (rf_denied RfN)) 'CxPerf {:strength :monotonic}))
+                    (prof/start)
+                    (v/recover kb)
+                    (reduce + 0 (vals (:fetches (prof/stop))))))
+          defeat (fn [population] (- (long (probe population true)) (long (probe population false))))]
+      (is (= (defeat 20) (defeat 200))
+          (str "what a stored defeat pages in a recover must be flat in the facts beside it ("
+               (defeat 20) " -> " (defeat 200) ")")))))
+
 (deftest the-instrument-counts-nothing-when-off
   ;; The budgets are only meaningful if the call sites add no work when nobody is collecting.
   (testing "a workload outside `start`/`stop` records no fetch"

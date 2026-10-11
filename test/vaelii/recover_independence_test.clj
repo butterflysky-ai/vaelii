@@ -268,7 +268,7 @@
   ;; whether those three add up to the reading the deriving KB reached: a merge the live
   ;; KB performed off a route the rebuild does not travel is exactly the structure that
   ;; answers one way today and another after a restart.
-  (v/assert kb '(context_denoting_function CxCalFn) 'CxUniverse)
+  (v/assert kb '(result CxCalFn context) 'CxUniverse)
   (v/assert kb '(unreifiable_function DatetimeFn) 'CxUniverse)
   (v/assert kb '(contextArgSubrelation CxCalFn 2 subintervalOf) 'CxUniverse)
   (let [year  '(CxCalFn CxMonad (DatetimeFn "2000"))

@@ -41,13 +41,14 @@
   [tag (second (:space tu/plain-memory-space))])
 
 (defn- wait-for
-  "Block until no load is running (or the deadline passes) — the tests drive an API that
-  is deliberately asynchronous."
-  []
-  (let [deadline (+ (System/currentTimeMillis) 120000)]
-    (while (and (cat/loading?) (< (System/currentTimeMillis) deadline))
-      (Thread/sleep 20))
-    (not (cat/loading?))))
+  "Block until no load is running (or `ms`, 120 s by default, passes) — the tests drive an
+  API that is deliberately asynchronous."
+  ([] (wait-for 120000))
+  ([ms]
+   (let [deadline (+ (System/currentTimeMillis) ms)]
+     (while (and (cat/loading?) (< (System/currentTimeMillis) deadline))
+       (Thread/sleep 20))
+     (not (cat/loading?)))))
 
 ;; ---- sources -------------------------------------------------------------
 
@@ -268,6 +269,21 @@
     (is (= 1 (count (cat/entries))) "and nothing was registered beside it")
     (is (false? (cat/loading?)) "nor was a loader started")
     (cat/unload! "core")))
+
+(deftest a-load-past-the-entry-cap-is-refused-and-evicts-nothing
+  (let [cap  @#'cat/max-entries
+        held (mapv #(str "remote#" %) (range cap))]
+    ;; remote handles, as `--attach` files a daemon: an entry with no stores to release
+    (doseq [k held] (cat/register! k k {:mode :remote :conn ::stub}))
+    (let [e (is (thrown? clojure.lang.ExceptionInfo (cat/load-source "generated" {:types 2})))]
+      (is (= :too-many-kbs (:type (ex-data e))))
+      (is (= held (:entries (ex-data e))) "the refusal names the entries in the way"))
+    (is (= held (mapv :key (cat/entries))) "and every entry is still there")
+    (is (false? (cat/loading?)) "nor was a loader started")
+    (cat/unload! (first held))
+    (testing "an unload makes room"
+      (is (string? (cat/load-source "core")))
+      (is (wait-for)))))
 
 (deftest live-kbs-lists-in-process-kbs-and-omits-a-remote-handle
   ;; The memory-pressure guard trims per-KB caches, so catalog/install-memory-guard! feeds it
@@ -749,6 +765,30 @@
       (Thread/sleep 20))
     (not (cat/exporting?))))
 
+(deftest a-durable-load-and-a-blank-export-go-under-the-write-root-by-the-servers-name
+  (let [root (io/file (System/getProperty "java.io.tmpdir")
+                      (str "vaelii-write-root-" (System/nanoTime)))
+        prop (System/getProperty "vaelii.kb.path")]
+    (try
+      (System/setProperty "vaelii.kb.path" (.getAbsolutePath root))
+      (is (= (.getAbsoluteFile root) (.getAbsoluteFile (cat/write-root))))
+      (let [k (cat/load-source "core" {:durable? true})
+            _ (is (wait-for))
+            d (get-in (cat/entry k) [:where :dir])]
+        (is (= :disk-log (get-in (cat/entry k) [:where :backend])))
+        (is (= (.getAbsolutePath root) (.getParent (io/file d))))
+        (is (str/starts-with? (.getName (io/file d)) "core-"))
+        (cat/export-entry! k "" {:compression :none})
+        (is (wait-for-export))
+        (let [dump (:dir (jobs/latest :export))]
+          (is (= (.getAbsolutePath root) (.getParent (io/file dump))))
+          (is (str/starts-with? (.getName (io/file dump)) "core-export-"))
+          (is (= :dump (cat/classify (io/file dump)))))
+        (cat/unload! k))
+      (finally
+        (if prop (System/setProperty "vaelii.kb.path" prop) (System/clearProperty "vaelii.kb.path"))
+        (doseq [f (reverse (file-seq root))] (.delete ^java.io.File f))))))
+
 (deftest exporting-a-loaded-kb-closes-the-loop-back-to-a-source
   (let [root (io/file (System/getProperty "java.io.tmpdir")
                       (str "vaelii-catalog-export-" (System/nanoTime)))
@@ -954,9 +994,6 @@
     ;; how `vaelii.browser.web`'s `--attach` files a daemon: an entry like any other, whose
     ;; KB is in another process
     (cat/register! "daemon" "Daemon host:4200" {:mode :remote :conn ::stub})
-    (testing "a destination is not optional — there is nowhere for a dump to go"
-      (is (thrown-with-msg? clojure.lang.ExceptionInfo #"destination"
-                            (cat/export-entry! "mine" "" {}))))
     (testing "an entry that is not here cannot be written from here"
       (is (thrown-with-msg? clojure.lang.ExceptionInfo #"nothing is loaded"
                             (cat/export-entry! nil "/tmp/vaelii-nowhere" {})))
@@ -987,8 +1024,19 @@
     ;; a directory no walk reaches: every refusal below runs before the destination is
     ;; touched, so nothing is created and nothing needs cleaning up
     (let [nowhere "/vaelii-export-that-is-never-written"]
-      (let [e (is (thrown? clojure.lang.ExceptionInfo (cat/export-entry! "mine" "" {})))]
-        (is (= :no-destination (:type (ex-data e)))))
+      (let [kb-dir (io/file (System/getProperty "java.io.tmpdir")
+                            (str "vaelii-every-entry-a-kb-" (System/nanoTime)))
+            prop   (System/getProperty "vaelii.kb.path")]
+        (try
+          ;; every search-path entry is itself a KB, so there is no write root
+          (.mkdirs kb-dir)
+          (spit (io/file kb-dir "meta.edn") (pr-str {:format-version 1}))
+          (System/setProperty "vaelii.kb.path" (.getAbsolutePath kb-dir))
+          (let [e (is (thrown? clojure.lang.ExceptionInfo (cat/export-entry! "mine" "" {})))]
+            (is (= :no-destination (:type (ex-data e)))))
+          (finally
+            (if prop (System/setProperty "vaelii.kb.path" prop) (System/clearProperty "vaelii.kb.path"))
+            (doseq [f (reverse (file-seq kb-dir))] (.delete ^java.io.File f)))))
       (let [e (is (thrown? clojure.lang.ExceptionInfo (cat/export-entry! "daemon" nowhere {})))]
         (is (= :not-in-process (:type (ex-data e))))
         (is (= "daemon" (:key (ex-data e)))))
@@ -1033,7 +1081,9 @@
       (v/assert kb '(unary_predicate spindle_retired_kind) 'CxCore)
       (v/export! kb dir {})
       (let [key (cat/load-dir dir {:belief? :rebuild})]
-        (is (wait-for))
+        ;; 15 min: the load imports a starter-sized dump and rebuilds its belief, and the
+        ;; spindle sync loads the starter again into a scratch KB (`spindle/shipped`)
+        (is (wait-for 900000))
         (let [e      (cat/entry key)
               loaded (:kb e)]
           (is (= :done (:status (#'cat/with-job e))))

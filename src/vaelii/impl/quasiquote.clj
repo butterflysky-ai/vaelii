@@ -55,7 +55,9 @@
 
 (defn any-quasiquote?
   "Gate: is quasiquotation enabled — `(quoting_function Quasiquote)` declared?  False ⇒ the
-  reducer short-circuits, one prop read.  Mirrors `nat/any-reifiable-functions?`."
+  reducer short-circuits, one prop read.  Mirrors `nat/any-reifiable-functions?`.
+
+  The mark is read unscoped: the gate asks whether the KB stores it."
   [kb]
   (tax/quoting-function? (reasoning/taxonomy kb) quasiquote-function))
 
@@ -65,7 +67,9 @@
   `Quasiquote` unreifiable + quoting (an open template stays structural and is a mention).
   The last of them, `(quoting_function Quasiquote)`, is the gate `any-quasiquote?` reads, so
   this call is what turns the reducer on.  Idempotent, asserted without chaining or settling
-  since it is pure metadata — the shape `skolem/ensure-skolem-function` uses."
+  since it is pure metadata — the shape `skolem/ensure-skolem-function` uses.
+
+  The marks are read unscoped: the question is whether the KB stores each one."
   [kb]
   (let [tax (reasoning/taxonomy kb)]
     (doseq [s (cond-> []
@@ -103,7 +107,10 @@
   "Every **ground** `(Quasiquote T)` subterm of `term` replaced by `(reify-fn (Quote E))`,
   `E` its constructed expression.  An open template (a hole still unbound) is left
   untouched — in a rule consequent it reduces at firing, once substitution grounds it; a
-  direct open assert is a non-ground fact `wff` already refuses."
+  direct open assert is a non-ground fact `wff` already refuses.
+
+  The `quoting_function` mark is read unscoped: whether an argument is a mention is a
+  fact about the sentence (`tax/mention-marks`)."
   [kb term reify-fn]
   (cond
     (and (quasiquote-form? term) (sx/ground-term? term))

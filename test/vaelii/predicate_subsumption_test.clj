@@ -21,7 +21,7 @@
   conclusion and mask the backward path."
   (:require [clojure.test :refer [deftest is testing use-fixtures]]
             [vaelii.core :as v]
-            [vaelii.impl.protocols :as p]
+            [vaelii.impl.reads :as reads]
             [vaelii.impl.resolution :as res]
             [vaelii.impl.taxonomy :as tax]
             [vaelii.impl.types.reasoning :as reasoning]
@@ -126,7 +126,7 @@
         (testing "with fatherOf ⊑ parentOf, a parentOf goal reaches the fatherOf rule"
           (is (contains? (res/concluding-rule-handles kb parentOf) rule)))
         (testing "and it is exactly specs(parentOf) ∩ rules-by-consequent"
-          (is (= (into #{} (mapcat #(seq (p/rules-by-consequent (:index kb) %)))
+          (is (= (into #{} (mapcat #(seq (reads/as-stored-rules-by-consequent-global (:index kb) %)))
                        (tax/specs-global (reasoning/taxonomy kb) parentOf))
                  (res/concluding-rule-handles kb parentOf))))
         (testing "retracting the edge withdraws the rule from the parentOf goal"

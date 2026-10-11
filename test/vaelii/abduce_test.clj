@@ -228,6 +228,28 @@
         (is (= {:removed-sentexes 0 :removed-justifications 0}
                (v/abduce-discard! kb r)))))))
 
+(tu/deftest-kb a-keep-past-the-cap-is-refused-and-names-the-kept-contexts
+  (tu/with-terms [wabGoal wabPremise A B C CxTheory]
+    (wabd! kb wabGoal wabPremise CxTheory)
+    (with-redefs [abduce/max-kept 2]
+      (let [a (v/abduce kb (list wabGoal A) CxTheory {:keep? true})
+            b (v/abduce kb (list wabGoal B) CxTheory {:keep? true})]
+        (try
+          (let [sx-before (tu/sentex-ids kb)
+                refusal   (try (v/abduce kb (list wabGoal C) CxTheory {:keep? true})
+                               nil
+                               (catch clojure.lang.ExceptionInfo e (ex-data e)))]
+            (is (= :too-many-kept (:type refusal)))
+            (is (= 2 (:max refusal)))
+            (is (= (sort [(:context a) (:context b)]) (:contexts refusal)))
+            (is (= sx-before (tu/sentex-ids kb)) "the refused call stored nothing"))
+          (testing "a call that keeps nothing still runs at the cap"
+            (is (seq (:hypotheses (v/abduce kb (list wabGoal C) CxTheory)))))
+          (testing "discarding a kept context makes room for another"
+            (v/abduce-discard! kb a)
+            (v/abduce-discard! kb (v/abduce kb (list wabGoal C) CxTheory {:keep? true})))
+          (finally (v/abduce-discard! kb a) (v/abduce-discard! kb b)))))))
+
 (tu/deftest-kb a-throw-mid-search-still-tears-the-scratch-context-down
   (tu/with-terms [wabGoal wabPremise N CxTheory]
     (wabd! kb wabGoal wabPremise CxTheory)

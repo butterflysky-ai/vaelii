@@ -124,7 +124,7 @@
   (testing "one entry per refused firing, and it goes when the firing is made"
     (tu/with-cleared-kb [kb tu/isolated-fresh]
       (skip-rule! kb)
-      (v/assert kb '(rskip RM1) ctx)
+      (v/assert kb '(rskip RM1) ctx {:strength :monotonic})
       (let [h (v/assert kb '(rmark RM1) ctx)]
         (is (= 1 (recorded kb)) "the refused firing left an entry")
         (is (empty? (v/sentexes-matching kb '(rseen RM1) '?ctx)))
@@ -143,7 +143,7 @@
     ;; from a premise nobody believes.
     (tu/with-cleared-kb [kb tu/isolated-fresh]
       (skip-rule! kb)
-      (v/assert kb '(rskip RM1) ctx)
+      (v/assert kb '(rskip RM1) ctx {:strength :monotonic})
       (let [h (v/assert kb '(rmark RM1) ctx)]
         (is (= 1 (recorded kb)))
         (v/retract! kb h)
@@ -169,7 +169,7 @@
           reading (fn [kb] [(v/ask? kb '(cseen RM1) ctx) (v/ask? kb '(dseen RM1) ctx)])]
       (tu/with-cleared-kb [kb tu/isolated-fresh]
         (rules! kb)
-        (v/assert kb '(rskip RM1) ctx)
+        (v/assert kb '(rskip RM1) ctx {:strength :monotonic})
         (v/assert kb '(rmark RM1) ctx)
         (is (= 2 (recorded kb)))
         (v/retract! kb (v/handle-of kb '(rskip RM1) ctx))
@@ -187,7 +187,7 @@
     ;; the run's own, the release honours what the firing was refused under.
     (tu/with-cleared-kb [kb tu/isolated-fresh]
       (skip-rule! kb)
-      (v/assert kb '(rskip RM1) ctx)
+      (v/assert kb '(rskip RM1) ctx {:strength :monotonic})
       ;; the mark's chain runs at a non-default max-depth; the firing it refuses must
       ;; remember *that* bound
       (v/assert kb '(rmark RM1) ctx {:max-depth 7})
@@ -208,7 +208,7 @@
     ;; reset depths bound future chaining against that same default.
     (tu/with-cleared-kb [kb tu/isolated-fresh]
       (skip-rule! kb)
-      (v/assert kb '(rskip RM1) ctx)
+      (v/assert kb '(rskip RM1) ctx {:strength :monotonic})
       (v/assert kb '(rmark RM1) ctx {:max-depth 7})
       (is (= 7 (:max-depth (-> @(reasoning/refused kb) vals first first)))
           "the live entry carries the run's bound")
@@ -222,7 +222,7 @@
   (testing "nothing was believed and nothing conflicts: the rule simply did not fire"
     (tu/with-cleared-kb [kb tu/isolated-fresh]
       (skip-rule! kb)
-      (v/assert kb '(rskip RM1) ctx)
+      (v/assert kb '(rskip RM1) ctx {:strength :monotonic})
       (v/assert kb '(rmark RM1) ctx)
       (is (= 1 (recorded kb)))
       (is (empty? (v/contradictions kb)) "a refusal is not a represented dilemma")
@@ -235,7 +235,7 @@
     ;; restarted.
     (tu/with-cleared-kb [kb tu/isolated-fresh]
       (skip-rule! kb)
-      (v/assert kb '(rskip RM1) ctx)
+      (v/assert kb '(rskip RM1) ctx {:strength :monotonic})
       (v/assert kb '(rmark RM1) ctx)
       (is (= 1 (recorded kb)))
       (v/recover kb)
@@ -254,8 +254,8 @@
     ;; leave the KB as it found it, and the record is part of what it found.
     (tu/with-cleared-kb [kb tu/isolated-fresh]
       (skip-rule! kb)
-      (v/assert kb '(rskip RM1) ctx)
-      (v/assert kb '(rskip RM2) ctx)
+      (v/assert kb '(rskip RM1) ctx {:strength :monotonic})
+      (v/assert kb '(rskip RM2) ctx {:strength :monotonic})
       (v/assert kb '(rmark RM1) ctx)
       (is (= 1 (recorded kb)))
       (let [h (v/handle-of kb '(rskip RM1) ctx)
@@ -284,7 +284,7 @@
         ;; `rmark` firing meets a condition that already holds and is refused rather
         ;; than placed and swept
         (v/assert kb '(set/forwardRule (implies (and (rpre ?x)) (rskip ?x))) ctx)
-        (dotimes [i 10] (v/assert kb (list 'rpre (symbol (str "RM" i))) ctx))
+        (dotimes [i 10] (v/assert kb (list 'rpre (symbol (str "RM" i))) ctx {:strength :monotonic}))
         (dotimes [i 10] (v/assert kb (list 'rmark (symbol (str "RM" i))) ctx))
         (is (empty? (v/sentexes-matching kb '(rseen ?x) '?ctx))
             "every firing is refused")
@@ -298,15 +298,16 @@
 
 (defn- swept-then-released
   "`[recorded rseen? recorded re-chained]` for the firing of `skip-rule!` placed before its
-  blocker `(rskip RM1)` arrives: the entries recorded once the blocker sweeps it, whether
-  it is believed and the entries recorded after `trigger` lifts the block, and the rules
-  re-chained over their extent meanwhile.  `:except` hides the blocker, `:retract`
-  retracts it, `:defeat` stores a `:monotonic` denial whose placed defeat hides it."
-  [trigger]
+  blocker `(rskip RM1)`, asserted at `strength`, arrives: the entries recorded once the
+  blocker sweeps it, whether it is believed and the entries recorded after `trigger` lifts
+  the block, and the rules re-chained over their extent meanwhile.  `:except` hides the
+  blocker, `:retract` retracts it, `:defeat` stores a `:monotonic` denial whose placed
+  defeat hides it."
+  [strength trigger]
   (tu/with-cleared-kb [kb tu/isolated-fresh]
     (skip-rule! kb)
     (v/assert kb '(rmark RM1) ctx)
-    (let [blk   (v/assert kb '(rskip RM1) ctx)
+    (let [blk   (v/assert kb '(rskip RM1) ctx {:strength strength})
           swept (recorded kb)
           seen  (atom #{})
           real  settle/rechain-exception-rules]
@@ -318,8 +319,15 @@
       [swept (v/ask? kb '(rseen RM1) ctx) (recorded kb) @seen])))
 
 (deftest a-firing-a-late-blocker-swept-is-released-from-the-refusal-record
-  ;; The sweep records the firing as a refusal, so each trigger that lifts the block
-  ;; re-derives it from its bindings and re-chains no rule over its extent.
-  (doseq [trigger [:except :retract :defeat]]
-    (testing (name trigger)
-      (is (= [1 true 0 #{}] (swept-then-released trigger))))))
+  ;; A `:monotonic` blocker sweeps the firing and records it as a refusal, so each trigger
+  ;; that lifts the block re-derives it from its bindings and re-chains no rule over its
+  ;; extent.  A `:default` blocker sweeps nothing: the firing stays stored with a guard
+  ;; defeat resting on the blocker (design ruling 25), and each trigger gives it back with
+  ;; nothing recorded or re-chained.
+  (doseq [[strength trigger expected] [[:monotonic :except [1 true 0 #{}]]
+                                       [:monotonic :retract [1 true 0 #{}]]
+                                       [:default :except [0 true 0 #{}]]
+                                       [:default :retract [0 true 0 #{}]]
+                                       [:default :defeat [0 true 0 #{}]]]]
+    (testing (str (name strength) " " (name trigger))
+      (is (= expected (swept-then-released strength trigger))))))

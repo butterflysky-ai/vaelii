@@ -1,0 +1,144 @@
+;; CxComputing — a vocabulary of software tools, their invocations and receipts, media
+;; resources and network names. Sees the shared upper ontology via CxUniverse. CxWell
+;; does not see it, so the everyday contexts below CxWell read no computing relation. A
+;; context opts in by placing itself under CxComputing. CxComputing states no rule.
+;;
+;; The sixteen computing kinds that the relations here are typed over
+;; (computational_system, software_tool, tool_invocation, media_resource, ip_address and
+;; the kinds below them) are stated here too, with their comments, genl edges and
+;; disjointness. A context that does not see CxComputing reads none of them.
+;;
+;; Two positions declare no type and are rows of ontology_test's untyped-positions
+;; roster. Position 1 of agentHasTool holds whatever can invoke a tool, and the upper
+;; ontology ships no type for that: agent names a registered koinii participant
+;; (resources/kb/koinii/CxRegistry.txt). Position 3 of toolArgType holds a type of any
+;; kind.
+
+(genlCx CxComputing CxUniverse)
+
+;; ---- the computing kinds: the types the relations below are typed over ----
+;; CxAbstract's tool is a tangible made thing. A software tool has no mass, so
+;; software_tool is placed under computational_system and has no edge to tool.
+(comment computational_system "Software that computes when it runs, e.g. an interpreter, a database server, a running web service. The hardware that runs a computational system is a separate thing and is not a computational system.")
+(genl computational_system intangible)
+;; A computational system is not something that happens, and is not a form the KB
+;; represents.
+(disjoint computational_system event)
+(disjoint computational_system expression)
+
+(comment software_tool "A computational system that performs one bounded operation each time an agent invokes it, e.g. a command-line program, a Model Context Protocol tool, a web API endpoint.")
+(genl software_tool computational_system)
+
+(comment command_line_tool "A software tool invoked by a command line that a shell runs, e.g. a text-search program, a file-copy program.")
+(genl command_line_tool software_tool)
+
+(comment mcp_tool "A software tool that a Model Context Protocol server lists and runs on request, e.g. a file-reading tool, a calendar-lookup tool.")
+(genl mcp_tool software_tool)
+
+;; The edges to acausal and causal separate the two kinds below, through CxAbstract's
+;; (disjoint causal acausal), so no disjoint is stated between them.
+(comment read_only_software_tool "A software tool whose invocation reads state and changes none, e.g. a text search, a directory listing, a DNS lookup.")
+(genl read_only_software_tool software_tool)
+(genl read_only_software_tool acausal)
+
+(comment write_capable_software_tool "A software tool whose invocation can change state outside the invocation, e.g. a file deletion, a message send, a database update.")
+(genl write_capable_software_tool software_tool)
+(genl write_capable_software_tool causal)
+
+(comment information_bearing_thing "Information as carried, apart from the medium that holds it, e.g. the text of a document, a recording, the content of a file. The paper or the disk is a separate thing and is not an information-bearing thing. A reading of the information can be a cause where the information is not.")
+(genl information_bearing_thing intangible)
+(genl information_bearing_thing acausal)
+
+(comment digital_artifact "An information-bearing thing encoded as bits, e.g. a file, a byte stream, a web page.")
+(genl digital_artifact information_bearing_thing)
+
+(comment media_resource "A digital artifact retrievable over a network at a URL, e.g. a hosted photograph, a streamed film, the audio file of a podcast episode.")
+(genl media_resource digital_artifact)
+
+(comment image "A media resource holding a static visual representation, e.g. a photograph, a diagram, a scanned page.")
+(genl image media_resource)
+
+(comment video "A media resource holding moving images, with or without audio, e.g. a film clip, a screen recording.")
+(genl video media_resource)
+;; A media resource can be neither an image nor a video, so the pair is a disjoint and
+;; not a partition of media_resource.
+(disjoint image video)
+
+(comment tool_invocation "An event in which an agent calls a software tool with arguments and receives a result, e.g. one run of a text-search command, one request to a web API endpoint.")
+(genl tool_invocation event)
+
+(comment tool_receipt "An attributed record that a tool invocation produced: what the tool returned, as evidence of the call, e.g. the captured output of one command run, the response to one web API request. A sentence a receipt reports holds in the KB only where a separate assertion states it.")
+(genl tool_receipt acausal_event)
+(disjoint tool_receipt tool_invocation)
+
+(comment ip_address "A string denoting an Internet Protocol network address, e.g. 192.0.2.1, 2001:db8::1. A host name is not an IP address.")
+(genl ip_address string)
+
+(comment ipv4_address "A string denoting a 32-bit Internet Protocol version 4 address, e.g. 192.0.2.1.")
+(comment ipv6_address "A string denoting a 128-bit Internet Protocol version 6 address, e.g. 2001:db8::1.")
+;; Every IP address is of one version or the other. The partition installs both genl
+;; edges to ip_address and separates the two parts.
+(partition ip_address ipv4_address ipv6_address)
+
+;; ---- a media resource's address ------------------------------------------
+(comment resourceUrl "(resourceUrl ?resource ?url) means that ?resource is retrievable at ?url, e.g. an https address.")
+(binary_predicate resourceUrl)
+(set/monotonic (instance_relation_predicate resourceUrl))
+(arg resourceUrl 1 media_resource)
+(quotedArg resourceUrl 2 string)
+
+;; ---- a tool's name, its declared arguments and its availability ----------
+(comment toolName "(toolName ?tool ?name) means that ?name is the identifier ?tool is invoked by, e.g. the program name of a command-line tool, the tool name a Model Context Protocol server lists.")
+(binary_predicate toolName)
+(set/monotonic (instance_relation_predicate toolName))
+(arg toolName 1 software_tool)
+(quotedArg toolName 2 string)
+(set/monotonic (functional toolName))
+
+(comment toolArgType "(toolArgType ?tool ?key ?type) means that ?tool accepts an argument named ?key whose values belong to ?type, e.g. a key named pattern whose values are strings.")
+(ternary_predicate toolArgType)
+(arg toolArgType 1 software_tool)
+(quotedArg toolArgType 2 string)
+
+(comment toolArgComment "(toolArgComment ?tool ?key ?comment) means that ?comment documents the argument of ?tool named ?key, e.g. a sentence saying what a pattern argument matches.")
+(ternary_predicate toolArgComment)
+(arg toolArgComment 1 software_tool)
+(quotedArg toolArgComment 2 string)
+(quotedArg toolArgComment 3 string)
+
+(comment agentHasTool "(agentHasTool ?agent ?tool) means that ?tool is available to ?agent: ?agent can invoke ?tool.")
+(binary_predicate agentHasTool)
+(set/monotonic (instance_relation_predicate agentHasTool))
+(arg agentHasTool 2 software_tool)
+
+(comment probesPredicate "(probesPredicate ?tool ?predicate) means that an invocation of ?tool can return evidence about a sentence whose predicate is ?predicate.")
+(binary_predicate probesPredicate)
+(set/monotonic (instance_relation_predicate probesPredicate))
+(arg probesPredicate 1 software_tool)
+(arg probesPredicate 2 predicate)
+
+;; ---- invocations and receipts --------------------------------------------
+(comment invokesTool "(invokesTool ?invocation ?tool) means that ?invocation is a call of ?tool.")
+(binary_predicate invokesTool)
+(set/monotonic (instance_relation_predicate invokesTool))
+(arg invokesTool 1 tool_invocation)
+(arg invokesTool 2 software_tool)
+
+(comment toolInvocationArg "(toolInvocationArg ?invocation ?key ?value) means that ?invocation passed the argument named ?key with the value ?value, in the text form the call carried, e.g. the key pattern with the value written for one run.")
+(ternary_predicate toolInvocationArg)
+(arg toolInvocationArg 1 tool_invocation)
+(quotedArg toolInvocationArg 2 string)
+(quotedArg toolInvocationArg 3 string)
+
+(comment receipt "(receipt ?invocation ?receipt) means that ?invocation produced ?receipt as the record of its output.")
+(binary_predicate receipt)
+(set/monotonic (instance_relation_predicate receipt))
+(arg receipt 1 tool_invocation)
+(arg receipt 2 tool_receipt)
+
+;; ---- name resolution -----------------------------------------------------
+(comment dnsResolvesTo "(dnsResolvesTo ?name ?address) means that DNS resolves the host name ?name to the address ?address, under the resolver in effect where the fact is stated, e.g. example.org resolved to 192.0.2.1. One name can resolve to several addresses.")
+(binary_predicate dnsResolvesTo)
+(set/monotonic (instance_relation_predicate dnsResolvesTo))
+(quotedArg dnsResolvesTo 1 string)
+(quotedArg dnsResolvesTo 2 string)

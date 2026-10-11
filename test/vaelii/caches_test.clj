@@ -572,7 +572,7 @@
   #{:literal-matches :resident :stored-handles :closure-neighbours :closure-answers
     :pinned-values :justification-dedup :symbol-pool :compiled-algebras :relation-decode
     :path-consistency :network-support :taxonomy-closures :taxonomy-supporters
-    :hot-records :rete-alpha :source-parses :preservation-crossing})
+    :hot-records :rete-alpha :source-parses :preservation-crossing :arity-lengths})
 
 (def ^:private optional-roster
   "Caches registered by a namespace core does **not** load, so whether they are present
@@ -671,6 +671,7 @@
    "*symbol-pool-limit*"   :symbol-pool
    "generation-limit"      :symbol-pool
    "closure-memo-limit"    :taxonomy-closures
+   "lengths-cache-limit"   :arity-lengths
    "supporter-cache-limit" :taxonomy-supporters
    "parse-memo-limit"      :source-parses
    "crossing-reads-limit"  :preservation-crossing})

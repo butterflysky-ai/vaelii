@@ -180,33 +180,13 @@
 ;; evaluator — a closed level-6 existence check — and its whole block / sweep / revive
 ;; machinery, differing only in polarity and combination: each `unknown` is an
 ;; *independent* block condition (block if **any** inner holds), where an exception's
-;; conjuncts are one condition (block if **all** hold).  Nothing is stored; the inner
-;; query is re-evaluated on the same triggers.  See docs/naf.md.
-
-(defn- unknown-inner-holds?
-  "Does the query inside an `(unknown …)` antecedent hold under `bindings`, evaluated
-  in `pctx`?  Run exactly like an exception — `provers/exception-holds?` over the
-  query's conjuncts — so `unknown` and `exceptWhen` share one level-6 evaluator and
-  cannot drift; a nested `thereExists` is dispatched to its prover from there.  When it
-  holds, `S` is derivable, so `(unknown S)` is false and the firing is blocked.
-
-  A conjunctive query is the same block-if-**all**-hold the exception's conjuncts are,
-  and it is **joined** (`provers/conjunction-solutions`): a ground conjunction's
-  conjuncts share nothing and the join is the independent existence check they always
-  were, while a quantified one shares its binder and takes one witness for all of them."
-  [kb unk bindings pctx]
-  (provers/exception-holds? kb (sx/naf-query-conjuncts unk) bindings pctx))
-
-(defn naf-blocks?
-  "Is a firing blocked by any of its `unknown` antecedents `naf-antes` — is any inner
-  query derivable under `bindings`, in `pctx`?  Block-if-**any**: each `(unknown S)`
-  independently requires `S` absent, so one derivable `S` withdraws the conclusion."
-  [kb naf-antes bindings pctx]
-  (boolean (some #(unknown-inner-holds? kb % bindings pctx) naf-antes)))
+;; conjuncts are one condition (block if **all** hold).  Both are read as block
+;; conditions (`block-conditions`) and decided by `own-guard-block` at the placement and by
+;; `guard-defeat-placements` below it.  See docs/naf.md.
 
 (defn different-blocks?
   "Is a firing blocked because one of its `(different …)` antecedents no longer holds
-  under `bindings`?  Block-if-**any**, for `naf-blocks?`' reason: each one independently
+  under `bindings`?  Block-if-**any**, as an `unknown` is: each one independently
   requires its arguments to lie in no shared equivalence class and neither of them to be
   an unpinned `indeterminate_term`, so one that stops holding withdraws the conclusion.
 
@@ -410,6 +390,13 @@
                (some #(contains? inherit/declarations (placed-functor %)) conjuncts))
       (vreset! v nil))))
 
+(defn- declaration-record?
+  "Is the record `sxr` a preservation declaration (`inherit/declarations`): a handle a
+  firing that joined on an inherited claim names among its antecedents?"
+  [sxr]
+  (let [s (:sentence sxr)]
+    (boolean (and (sequential? s) (contains? inherit/declarations (nm/functor s))))))
+
 (defn- preserving-antecedent?
   "Does `ante` name a predicate carrying a preserved argument position, visible from
   `context`?  False for every literal in a KB that declares no preservation, at the
@@ -426,44 +413,41 @@
               (declarations-exist? kb)
               (boolean (seq (inherit/positions kb f context)))))))
 
-(defn- inheritance-withdrawn?
-  "Was this firing licensed by an inherited claim the KB no longer licenses?
-
-  A justification's antecedents cannot express that.  They name the claim that was
-  stated, the declaration that licensed the move and the relation edges the reach
-  travelled — and every one of them is still stored and believed when a **more specific
-  contrary claim** arrives and undercuts what they licensed.  Nothing is defeated
-  there: the general claim simply stops firing for that tuple (docs/inherit.md), so
-  there is no label to read the withdrawal off.  The firing is blocked the way an
-  excepted one is, and revived by the same machinery when the specific claim goes.
-
-  Asked only of an antecedent the KB does **not** state at the bound tuple.  A stored
-  claim is withdrawn by its own handle going, and asking `verdict` about one would
-  block an ordinary firing over a pair the KB happens to hold in both polarities —
-  which is a represented dilemma the chainer has never refused to fire on.
-
-  In the conclusion's context, like every other re-check here: a specific claim that
-  context cannot see is not one it should defer to, and everything the firing rests on
-  is visible from there by construction, placement having required it.  The claims are
-  read in the network and through the excepts, and no placed defeat is read
-  (`tax/*network-belief*`), so a defeated specific claim still undercuts (design ruling
-  19).
-
-  `bindings` is a delay, forced only once a preserved antecedent is found — every rule
-  reaches here and almost none names one."
+(defn- inherited-goals
+  "The ground goals the preserved antecedents of the rule `rsx` take under `bindings` (a
+  delay) that the network does not state at `pctx`: the antecedents a firing joined on
+  an inherited claim.  A stored claim is withdrawn by its own handle going, and asking
+  `verdict` about one would block an ordinary firing over a pair the KB happens to hold in
+  both polarities, which is a represented dilemma.  `bindings` is forced only once a
+  preserved antecedent is found."
   [kb rsx bindings pctx]
   (let [as (filterv #(preserving-antecedent? kb % pctx) (:antecedent rsx))]
-    (boolean
-     (and (seq as)
-          (binding [tax/*network-belief* true
-                    inherit/*memo*       nil]
-            (some (fn [a]
-                    (let [g (res/substitute a @bindings)]
-                      (and (inherit/ground-goal? g)
-                           (not-any? #(jtms/in? (reasoning/tms kb) (first %))
-                                     (res/matches-visible kb g pctx))
-                           (not= :for (inherit/verdict kb g pctx)))))
-                  as))))))
+    (when (seq as)
+      (binding [tax/*network-belief* true]
+        (into []
+              (comp (map #(res/substitute % @bindings))
+                    (filter inherit/ground-goal?)
+                    (filter (fn [g] (not-any? #(jtms/in? (reasoning/tms kb) (first %))
+                                              (res/matches-visible kb g pctx)))))
+              as)))))
+
+(defn- inheritance-withdrawn?
+  "Was this firing licensed by an inherited claim a `:monotonic` contrary claim undercuts
+  in `pctx`?  The justification names the claim, the declaration and the reach edges,
+  and each is still believed when a more specific contrary claim arrives, so the firing
+  is blocked the way an excepted one is and revived by the same machinery when the
+  contrary goes.  A `:default` contrary is set aside
+  (`inherit/*default-contraries-set-aside*`): the firing stays, with a defeat resting on
+  the contrary (`inheritance-defeat-placements`, design ruling 25).  The claims are read
+  in the network and through the excepts (`tax/*network-belief*`), and no placed defeat
+  is read (design ruling 19).  See docs/inherit.md."
+  [kb rsx bindings pctx]
+  (boolean
+   (when-let [gs (seq (inherited-goals kb rsx bindings pctx))]
+     (binding [tax/*network-belief*                  true
+               inherit/*memo*                        nil
+               inherit/*default-contraries-set-aside* true]
+       (some #(not= :for (inherit/verdict kb % pctx)) gs)))))
 
 (defn- post-join-withdrawn?
   "Was this firing licensed by a count the KB no longer computes?  Re-runs the rule's
@@ -521,57 +505,6 @@
   (if-let [hidden? (exc/except-closure-hidden-fn kb pctx)]
     (boolean (some hidden? antes))
     false))
-
-(defn- rule-firing-blocked?
-  "Is a firing of the rule stored at `rh` — settled bindings `bindings` (a delay),
-  placed in `pctx` — blocked by something the *rule* carries: its `exceptWhen`
-  exception, an `(unknown S)` antecedent whose `S` is now derivable, a `(different …)`
-  antecedent a merge or an indeterminacy has since withdrawn, a **closed-extent**
-  negative antecedent that no longer holds, an **aggregate** antecedent whose count has
-  moved, an **inherited** antecedent a more specific claim has undercut, or the
-  qualitative network it joined on having become unsatisfiable?
-
-  The context is the **conclusion's**, not the rule's: an exceptWhen query and a NAF
-  literal are *about* the conclusion, and one invisible from where it lives has no
-  business blocking it.  Nothing is cached: this re-runs the checks every time, which is
-  what keeps blocking from drifting out of step with belief.
-
-  Both re-decision paths come here — a firing that *was* placed and is now a
-  justification, and one that was refused before it could become one — so the two cannot
-  drift about what counts as blocked."
-  [kb rh rsx bindings pctx]
-  (boolean
-   (or (when (or (rules/has-naf? rsx) (reads/watched-rule? (:index kb) rh))
-         (or (provers/exceptions-block? kb rh @bindings pctx)
-             (and (rules/has-naf? rsx)
-                  (naf-blocks? kb (rules/naf-antecedents rsx) @bindings pctx))))
-       (when (rules/has-different? rsx)
-         (different-blocks? kb (rules/different-antecedents rsx) @bindings))
-       (when-let [ce (seq (closed-extent-antecedents kb (:antecedent rsx)))]
-         (closed-extent-blocks? kb ce @bindings pctx))
-       (post-join-withdrawn? kb rsx bindings pctx)
-       (inheritance-withdrawn? kb rsx bindings pctx)
-       (entailment-withdrawn? kb rsx pctx))))
-
-(defn justification-excepted?
-  "Is justification `j` currently blocked — by a visibility `except` hiding one of its
-  antecedents, or by anything its rule carries (`rule-firing-blocked?`)?
-
-  The conclusion's record names the placement context every check is evaluated in, and
-  the informant names the rule."
-  [kb j]
-  (boolean
-   (when-let [csx (p/get-sentex (:records kb) (:consequence j))]
-     (let [pctx (:context csx)
-           inf  (:informant j)]
-       (or (antecedent-hidden? kb (let [b (exc/belief-only-antecedent j)]
-                                    (cond->> (jtms/rests-on j) b (remove #{b})))
-                               pctx)
-           (when (integer? inf)
-             (when-let [rsx (p/get-sentex (:records kb) inf)]
-               (rule-firing-blocked? kb inf rsx
-                                     (delay (settled-bindings kb (:bindings j) pctx))
-                                     pctx))))))))
 
 ;; ---- forward chaining ---------------------------------------------------
 
@@ -793,8 +726,8 @@
   (let [ak (rules/antecedent-key literal)]
     (for [{:keys [bindings handles matched]} states
           :let [g (res/substitute literal bindings)]
-          {b :bindings sup :handles claim :claim} (inherit/solve-with-support
-                                                   kb g '?ctx)]
+          {b :bindings sup :handles claim :claim} (binding [inherit/*default-contraries-set-aside* true]
+                                                    (inherit/solve-with-support kb g '?ctx))]
       ;; the claim satisfied the antecedent like any other match, and it may have done
       ;; so through a sub-predicate — so it is paired with the antecedent's key and
       ;; `subsumption-links` reads the taxonomy edges *that* pairing rests on.  The
@@ -872,6 +805,34 @@
           :when (seq sup)]
       {:bindings (merge bindings bnd) :handles (into handles sup) :matched matched}))))
 
+(defn- computed-withdrawn?
+  "Was this firing licensed by a computed answer the KB no longer computes?  Each
+  antecedent `computed-antecedent?` claims is solved again in `pctx` under the firing's
+  stored `bindings` (a delay) minus its outputs, the variables no other binding
+  antecedent shares, and the firing is withdrawn when the answer it bound is not among
+  the answers and no believed stored fact states it.  The post-join arm's
+  twin for a joined literal: a tightest bound narrows as sources arrive, so the
+  justification's handles all stay believed while the answer moves (docs/inference.md,
+  \"What a computed answer rests on\")."
+  [kb rsx bindings pctx]
+  (let [antes (:antecedent rsx)]
+    (when-let [cs (seq (filter #(computed-antecedent? kb %) antes))]
+      (let [b   @bindings
+            tms (reasoning/tms kb)]
+        (boolean
+         (some (fn [a]
+                 (let [shared (into #{} (comp (remove #{a})
+                                              (remove sx/deferred-literal?)
+                                              (remove #(computed-antecedent? kb %))
+                                              (mapcat sx/free-vars))
+                                    antes)
+                       outs   (remove shared (sx/free-vars a))
+                       g      (res/substitute a (apply dissoc b outs))
+                       want   (res/substitute a b)]
+                   (and (not-any? #(= want (res/substitute g %)) (provers/solve-goal kb g pctx))
+                        (not-any? #(jtms/in? tms (first %)) (res/matches-visible kb want pctx)))))
+               cs))))))
+
 ;; ---- a transitive antecedent reads the closure, with the edges it crossed ----
 ;; An antecedent on a `(transitive P)` predicate is a fourth shape the join answers by
 ;; computation and not only by matching, beside the qualitative, the computed and the
@@ -910,7 +871,10 @@
   specific `pred`, so its firing and the walk cannot disagree about `pred`'s chains, and
   suppressing the walk there would drop sound two-hop derivations for nothing.  So only
   `pred ∈ genls*(cpred)` (which is reflexive, catching the `pred = cpred` closure rule),
-  never `pred ∈ specs*(cpred)`."
+  never `pred ∈ specs*(cpred)`.
+
+  The `genls` read is unscoped for that reason: the answer is a property of the rule
+  and not of one reader."
   [kb pred cpred]
   (let [tx (reasoning/taxonomy kb)]
     (boolean (and cpred (symbol? cpred)
@@ -928,7 +892,10 @@
 
   One map read on a KB that declares no transitive predicate, which is where it stops for
   nearly every rule; the closure reads behind the recursion test are paid only for an
-  antecedent on a predicate this KB actually declared transitive."
+  antecedent on a predicate this KB actually declared transitive.
+
+  The mark is read unscoped, a superset: the walk it admits is
+  `TransitivePredicateProver`'s, which reads the mark from the context it is asked at."
   [kb ante cpred]
   (and (sequential? ante) (= 3 (count ante))
        (let [f (nm/functor ante)]
@@ -1031,6 +998,117 @@
         :else   {:bindings (merge bindings bnd) :handles (into handles (map first) path)
                  :matched  matched}))))
 
+;; ---- a disjoint antecedent reads the separations ----------------------------
+;; `DisjointnessProver` answers a `disjoint` goal from the taxonomy's separations: a
+;; stated `disjoint` over a supertype of each side, a `partition` or `separating` roster,
+;; a `disjoint_metatype` and a `sibling_disjoint` parent.  The matcher reads only the
+;; stated sentence, so the separation arm below unions the separations' answers with the
+;; matcher's, as the closure arm does for `genl`.
+;;
+;; A separation answer names no stored tuple.  Each answer is one route
+;; (`tax/separation-routes`): the declarations the route reads go on `:handles`, one
+;; believed supporter per key, and the `genl` subsumptions it climbs go on `:matched` as
+;; closure links, so placement lands the conclusion where a path is visible and names the
+;; path's edges.  The join reads no `siblingDisjointException`: an exception exempts a
+;; pair at the readers that see it, so `separation-exempted?` asks at the conclusion's
+;; context.
+
+(defn- route-supporters
+  "Each choice of one believed supporter per flat-cache key of `ks`, as a vector of
+  `[handle context]`."
+  [kb ks]
+  (let [tax  (reasoning/taxonomy kb)
+        tms  (reasoning/tms kb)
+        recs (:records kb)]
+    (reduce (fn [acc k]
+              (let [hs (sort (filter #(jtms/in? tms %) (tax/visible-supporters tax k nil)))]
+                (for [xs acc, h hs] (conj xs [h (:context (p/get-sentex recs h))]))))
+            [[]] ks)))
+
+(defn- separation-literal?
+  "Is `ante` a positive binary literal on `disjoint`?"
+  [ante]
+  (and (sequential? ante) (= 3 (count ante)) (= 'disjoint (nm/functor ante))))
+
+(defn- separation-antecedent?
+  "Is `ante` a `disjoint` literal the join answers from the separations as well as from
+  the stored sentences?  A rule concluding `disjoint`, or a sub-predicate of it, takes
+  the matcher alone, for `closure-antecedent?`'s reason."
+  [kb ante cpred]
+  (and (separation-literal? ante)
+       (not (walks-its-own-conclusion? kb 'disjoint cpred))))
+
+(defn- separated-from
+  "Every type a declaration separates from `t`, read globally and with no exception
+  exempting a pair: the subtypes of each `tax/separating-partners` answer.  Global for
+  `solve-separation`'s reason."
+  [tx t]
+  (distinct (mapcat #(tax/specs-global tx %)
+                    (tax/separating-partners tx t nil (constantly false)))))
+
+(defn- solve-separation
+  "Solve a `disjoint` antecedent from the separations, per join state: one solution per
+  route `tax/separation-routes` gives and per choice of believed supporters for the keys
+  the route reads.
+
+  Both ends bound reads the routes between them.  One end bound reads the routes to every
+  type `separated-from` the bound end, the set `DisjointnessProver` answers for the same
+  goal at a reader that sees every declaration.  Both ends open contributes nothing, for
+  `solve-closure`'s reason: the answer is every pair under two separated subtrees.
+
+  A bound end's `tax/separation-test` is read once per call, so a join that tests many
+  pairs builds one separation frame per distinct end and reads routes for the separated
+  pairs alone.
+
+  The separations are read globally, as `solve-closure` reads the closure: which pairs a
+  declaration separates is a property of the KB, and which contexts see the route is
+  placement's question, with an exception asked there (`separation-exempted?`)."
+  [kb ante states]
+  (let [tx     (reasoning/taxonomy kb)
+        ak     (rules/antecedent-key ante)
+        ground sx/ground-term?
+        sep    (memoize #(tax/separation-test tx % nil (constantly false)))
+        routes (fn [a b]
+                 (cond
+                   (and (ground a) (ground b))
+                   (when-let [t (sep a)]
+                     (when (t b) (map #(vector % {}) (tax/separation-routes tx a b))))
+                   (and (ground a) (sx/variable? b))
+                   (for [y (separated-from tx a), r (tax/separation-routes tx a y)] [r {b y}])
+                   (and (sx/variable? a) (ground b))
+                   (for [x (separated-from tx b), r (tax/separation-routes tx x b)] [r {a x}])))]
+    (for [{:keys [bindings handles matched]} states
+          :let [[_ a b] (res/substitute ante bindings)]
+          [{ks :keys links :links} bnd] (routes a b)
+          sups (route-supporters kb ks)
+          ;; a route over the stated sentence the literal names, with no edge climbed, is
+          ;; the matcher's own hit, which the arrival filter already admits or declines
+          :when (not (and (empty? links)
+                          (every? #(= (res/substitute ante (merge bindings bnd))
+                                      (:sentence (p/get-sentex (:records kb) (first %))))
+                                  sups)))]
+      {:bindings (merge bindings bnd)
+       :handles  (into handles (map first) sups)
+       :matched  (into matched (map #(vector ak nil %)) links)})))
+
+(defn- separation-exempted?
+  "Does the reader `pctx` read some `disjoint` antecedent of `antes`, ground under
+  bindings `b`, as no separation, while no believed sentence `pctx` sees states it?  A
+  `siblingDisjointException` that `pctx` sees, or a `genl` edge that makes two marked
+  types genl-related, spares a pair the join read separated, and the firing is then
+  refused or blocked there."
+  [kb antes b pctx]
+  (let [tx  (reasoning/taxonomy kb)
+        tms (reasoning/tms kb)]
+    (boolean
+     (some (fn [ante]
+             (when (separation-literal? ante)
+               (let [[_ x y :as g] (res/substitute ante b)]
+                 (and (sx/ground-term? x) (sx/ground-term? y)
+                      (not (tax/disjoint? tx x y pctx))
+                      (not-any? #(jtms/in? tms (first %)) (res/matches-visible kb g pctx))))))
+           antes))))
+
 (defn- mirrored-antecedent?
   "Is `ante` a literal the matcher answers through the **symmetric mirror** — a binary
   literal any of whose sub-predicates is declared `symmetric` (`res/raw-match`)?
@@ -1047,7 +1125,11 @@
   fans the functor first and mirrors each fanned literal on **its** own declaration.
   Driven from the declared symmetric predicates (a handful) tested against the closure,
   as `matches-hierarchical` does, rather than the closure scanned for a mark: a broad
-  functor's closure is the whole type hierarchy, and this runs per join."
+  functor's closure is the whole type hierarchy, and this runs per join.
+
+  The mark is read unscoped: a firing read through the mirror names the mark among its
+  supports (`inherit/permuted-read-supports`), and the read walk hides that firing at
+  a reader that does not believe the mark."
   [kb ante]
   (and (sequential? ante) (= 3 (count ante))
        (let [f (nm/functor ante)]
@@ -1065,7 +1147,9 @@
   Wider than `mirrored-antecedent?`, which decides the arrival filter and asks only for
   `symmetric`: the trigger fans a commuting antecedent's arrangements itself
   (`trigger-bindings`), so a commuting position keeps its filter, while either one names
-  the mark it was read through."
+  the mark it was read through.
+
+  The marks are read unscoped, for `mirrored-antecedent?`'s reason."
   [kb ante]
   (and (sequential? ante) (next ante)
        (let [f (nm/functor ante)]
@@ -1100,7 +1184,9 @@
   combination that needs the mirror is enumerated by nobody, and the same two facts
   derive a conclusion or not depending on which arrived second.  Asked of the **fact**
   and once per datum: it is the fact's own declaration that makes its mirror true, and a
-  super-predicate being symmetric says nothing about the sub the fact is stated at."
+  super-predicate being symmetric says nothing about the sub the fact is stated at.
+
+  The mark is read unscoped, for `mirrored-antecedent?`'s reason."
   [kb fact]
   (when (and (sequential? fact) (= 3 (count fact)))
     (let [f (nm/functor fact)]
@@ -1115,7 +1201,9 @@
   Asked of the **fact** for `symmetric-mirror`'s reason: it is the fact's declaration that
   makes its permutations true, and a super-predicate carrying the mark says nothing about
   the sub the fact is stated at.  Read once per datum, since every antecedent position
-  asks the same fact."
+  asks the same fact.
+
+  The groups are read unscoped, for `mirrored-antecedent?`'s reason."
   [kb fact]
   (when (and (sequential? fact) (next fact))
     (let [f (nm/functor fact)]
@@ -1255,16 +1343,17 @@
 
   `admit` is the arrival filter on the handles this antecedent yields — a
   `(fn [handle] -> boolean)` from `complete-antecedents`, or nil for no suppression
-  (`*agenda-arrivals*`).  **Five** positions decline it, and the rule is the same one
+  (`*agenda-arrivals*`).  **Six** positions decline it, and the rule is the same one
   each time: the join reaches a satisfier no trigger can, so there is nothing to order
   it against.  A **qualitative** antecedent draws its handles from what a network
   entails rather than from the fact that satisfied it; a **computed** one draws them from
   what a prover read out of the store rather than from a tuple; an **inherited** one is
   satisfied by a claim nobody stored, whose handles name the stated claim, the
   declaration and the reach edges rather than the tuple that matched; a **closure** one
-  is satisfied by a `genl` / `genlCx` pair no edge states (`solve-closure`); and a
+  is satisfied by a `genl` / `genlCx` pair no edge states (`solve-closure`); a
+  **separation** one by a pair no `disjoint` sentence states (`solve-separation`); and a
   **mirrored** one is reachable by the join and not by the trigger
-  (`mirrored-antecedent?`).  The first four decline it structurally — the filter is
+  (`mirrored-antecedent?`).  The first five decline it structurally — the filter is
   applied to `hit` alone, and each arrives by its own `concat`.  Declining is always
   safe — it re-derives a duplicate the TMS already rejects — where suppressing wrongly
   loses a firing.
@@ -1299,7 +1388,7 @@
     ;; the conclusion's placement context — exactly where `exceptWhen` is checked, and
     ;; for the same reason: forward and backward must evaluate it in the same context.
     ;; It binds nothing and names no fact, so the join passes straight through; the
-    ;; block decision is `naf-blocks?` in `place-conseq`, and later fact arrivals
+    ;; block decision is `own-guard-block` in `place-conseq`, and later fact arrivals
     ;; re-block it through the same re-check path exceptions use.
     (sx/unknown? ante) states
 
@@ -1336,6 +1425,8 @@
         (distinct (concat hit (solve-computed kb ante states)))
         (closure-antecedent? kb ante cpred)
         (distinct (concat hit (solve-closure kb ante states)))
+        (separation-antecedent? kb ante cpred)
+        (distinct (concat hit (solve-separation kb ante states)))
         (transitive-antecedent? kb ante cpred)
         (distinct (concat hit (solve-computed kb ante states
                                               (transitive-contexts kb (nm/functor ante)))))
@@ -1345,14 +1436,16 @@
 
 (defn- open-ends
   "The two end variables of `ante` when it is a closure antecedent
-  (`closure-antecedent?`) with both ends open, else nil.  `solve-closure` answers the
-  pairs no edge states only once an end is bound, so `plan/order` holds the literal back
-  until a generator binds one (`:end-vars`).  Canonical order stores `(genl ?a ?b)`
-  ahead of `(pairOf ?a ?b)`, so without this an unranked join reads only the edges."
+  (`closure-antecedent?`) or a separation antecedent (`separation-antecedent?`) with both
+  ends open, else nil.  `solve-closure` and `solve-separation` answer the pairs no
+  sentence states only once an end is bound, so `plan/order` holds the literal back until
+  a generator binds one (`:end-vars`).  Canonical order stores `(genl ?a ?b)` ahead of
+  `(pairOf ?a ?b)`, so without this an unranked join reads only the edges."
   [kb ante cpred]
   (when (and (sequential? ante) (= 3 (count ante)))
     (let [[_ a b] ante]
-      (when (and (sx/variable? a) (sx/variable? b) (closure-antecedent? kb ante cpred))
+      (when (and (sx/variable? a) (sx/variable? b)
+                 (or (closure-antecedent? kb ante cpred) (separation-antecedent? kb ante cpred)))
         #{a b}))))
 
 (defn- planned-join
@@ -1367,8 +1460,10 @@
   KB-registered evaluatable is not in that static set, so it is pinned by cost instead —
   the `:est-override` below reports it maximally unselective until its inputs are bound.
   Antecedents are substituted with `b0` before planning so the trigger's bindings make
-  the estimates exact, mirroring the backward path.  A closure antecedent with both ends
-  open waits for the literal that binds one (`open-ends`).
+  the estimates exact, mirroring the backward path.  A closure or separation antecedent
+  with both ends open waits for the literal that binds one (`open-ends`).  A separation
+  antecedent whose variables the other antecedents all bind is joined after every planned
+  literal, so it tests two bound ends.
 
   The **post-join** literals are withheld entirely (`rules/post-join-literals`): an
   aggregate and everything reading its output are evaluated per placement context, so
@@ -1382,6 +1477,13 @@
   neither reads it nor disturbs it."
   [kb antecedents b0 consequent-pred seed admit]
   (let [subbed (mapv #(res/substitute % b0) antecedents)
+        ;; a `disjoint` literal whose variables the other literals all bind is joined
+        ;; after them, as a test of two bound ends, and never enumerates the types
+        ;; separated from one end (`solve-separation`)
+        bound-by (into #{} (comp (remove separation-literal?) (mapcat sx/form-variables)) subbed)
+        held   (filterv #(and (separation-literal? %) (every? bound-by (sx/form-variables %)))
+                        subbed)
+        subbed (if (seq held) (filterv (complement (set held)) subbed) subbed)
         ;; ...and a closed-extent negative literal with them, for the sibling reason: it
         ;; is a **test** on what the conclusion's context believes, not a fact to look up,
         ;; so joining it would find only the stored negatives and miss the whole point of
@@ -1391,16 +1493,21 @@
         ;; A registered evaluatable is not in `plan/order`'s static deferred set, so it is
         ;; pinned after its binders by cost instead — computed, so maximally unselective
         ;; until its inputs are bound.  A literal a `SupportingProver` answers is costed by
-        ;; that prover, since its stored rows are not its fan-out.  Every other antecedent
-        ;; is ranked by the index model.
+        ;; that prover, since its stored rows are not its fan-out, and a `disjoint`
+        ;; literal by `DisjointnessProver` for the same reason (`solve-separation`).
+        ;; Every other antecedent is ranked by the index model.
         ev     (provers/evaluatable-est-override (evaluatable-antecedent-preds kb))
         sp     (provers/support-est-override kb)
-        est    (if ev (fn [g b] (or (ev g b) (sp g b))) sp)]
+        dj     (provers/separation-est-override kb)
+        est    (if ev
+                 (fn [g b] (or (ev g b) (sp g b) (dj g b)))
+                 (fn [g b] (or (sp g b) (dj g b))))]
     (reduce (fn [states ante]
               (if (post ante) states (join-antecedent kb ante states admit consequent-pred)))
             seed
-            (plan/order kb subbed '?ctx {:consequent-pred consequent-pred :est-override est
-                                         :end-vars #(open-ends kb % consequent-pred)}))))
+            (into (plan/order kb subbed '?ctx {:consequent-pred consequent-pred :est-override est
+                                               :end-vars #(open-ends kb % consequent-pred)})
+                  held))))
 
 (defn- arrival-admit
   "The filter `complete-antecedents` puts on the handles the join yields, or nil when
@@ -1566,67 +1673,6 @@
     (doseq [jid removed-justifications] (p/delete-justification! recs jid))
     (special/retire-unjustified-mints! kb r)))
 
-(defn- mint-rule
-  "Store the rule a **generator** firing stamped out (docs/generators.md), justified by
-  the firing, and return its handle in the newly-created vector `place-conclusion`
-  returns.
-
-  One thing separates this from a rule somebody asserted, and it is the whole point of
-  minting rather than macro-expanding: the mint is **derived**, so it is justified
-  rather than marked a premise, and the ordinary relabel un-believes it the moment what
-  licensed it goes.  Both chainers ask belief of a rule before using it
-  (`res/rule-believed?`), so an un-believed mint stops firing without anything having to
-  hunt it down and delete it.
-
-  Everything else is what the assert entry point does, because a rule is a rule whichever entry point
-  it came through: the same check list (`checks/rule-violation`, read through
-  `checks/check-rule!` so the two cannot drift), the same rule postings
-  (`special/index-rule-sentex`), and the direction the *stamped* rule's own
-  `set/*Rule` wrapper set — which rides in the sentence and so survives substitution
-  untouched.
-
-  Returned as a new handle so the agenda takes it: a minted rule is a datum, and
-  `process-datum` joins a forward-capable one over the facts already stored, exactly as
-  it does for a rule somebody typed.  That is what makes a generator's two arrival
-  orders agree — facts first or generator first, the same rules exist and have seen the
-  same facts — without a retroactive sweep of its own.
-
-  A refused mint is **dropped and recorded**, never thrown, for the reason every check
-  on this path is a value: an exception escaping a firing would leave the fixpoint half
-  computed, and which rule fired first would decide what the KB believes."
-  [kb rule sentence pctx all-antes depth bindings strength]
-  (let [sentence (stamped-rule sentence)
-        ;; A stamped rule is polycanonicalized exactly as an asserted one is
-        ;; (`rules/expand-rule`) — one rule per DNF alternative of a disjunctive
-        ;; antecedent, and one per conjunct of a conjunctive consequent, each keyed by its
-        ;; own predicates.  This is where a generator's stamped `or` expands: the holes are
-        ;; ground by now, so the alternatives the mint stores are the alternatives of the
-        ;; rule it stamped.  Checked before any of them is stored, for the reason
-        ;; `core/assert` checks its conjuncts first: a mapv is not a transaction, and a mint
-        ;; that half-landed would leave the KB holding part of a rule nobody wrote.
-        minted (rules/expand-rule sentence)]
-    (if-let [v (some #(checks/rule-violation kb % pctx) minted)]
-      (do (violations/report kb [(assoc v :sentence sentence :context pctx
-                                        :rule (:rule-handle rule))])
-          [])
-      (into []
-            (mapcat
-             (fn [one]
-               (let [[h s new?] (kb/find-or-create-sentex kb one pctx)]
-                 (when new? (special/index-rule-sentex kb h s))
-                 (jtms/ensure-node (reasoning/tms kb) h depth)
-                 (when-not (jtms/has-justification? (reasoning/tms kb) (:name rule) all-antes h)
-                   (let [jid  (p/next-id (:records kb))
-                         ;; content order is bought here, inside the dedup guard, for
-                         ;; `place-fact-conclusion`'s reason: the question above is
-                         ;; set-keyed and only the record being written needs an order
-                         just (jtms/->just jid (:name rule) (kb/antecedent-order kb all-antes)
-                                           h bindings strength)]
-                     (p/put-justification (:records kb) just)
-                     (jtms/add-justification (reasoning/tms kb) just)))
-                 (if new? [h] []))))
-            minted))))
-
 ;; `place-conseq` declines to place a firing whose block condition already holds.  That
 ;; is the right call for the placement — the conclusion would be swept on the same
 ;; settle pass — but such a firing leaves **no trace**: no justification, no node,
@@ -1643,11 +1689,15 @@
 ;; answer moved.  Re-evaluating k recorded refusals costs k queries, in place of a join
 ;; over the whole fact extent.
 ;;
-;; **Two of the four refusal reasons are recorded**, and the two that are not are not
-;; oversights — and a fifth, which is not a refusal at all, rides the same record:
+;; **Three of the five refusal reasons are recorded**, and the two that are not are not
+;; oversights — and a sixth, which is not a refusal at all, rides the same record:
 ;;
 ;;   held exception    recorded — re-askable from the bindings alone
-;;   `naf-blocks?`     recorded — likewise, and the same evaluator
+;;   held `unknown`    recorded — likewise, and the same evaluator
+;;   spared pair       recorded, as `:separation` — a `disjoint` antecedent the join read
+;;                     separated and the placement does not, through a
+;;                     `siblingDisjointException` or a `genl` edge; re-asked when either
+;;                     arrives or leaves
 ;;   argument          recorded, as `:constraint` — a conclusion `place-fact-conclusion`
 ;;   constraint        dropped because an `arg` / `genlArg` / `interArg` / `quotedArg`
 ;;                     declaration convicts it.  That conviction reads the *absence* of a
@@ -1702,7 +1752,8 @@
   so a later `release-refusal!` honours that bound rather than the default — the release
   runs in a settle with no run config in scope, so the bound has to travel with the
   entry.  `extra` rides into the entry as well: a `:constraint` drop's term and the
-  taxonomy generations it was decided under (`record-constraint-drop!`).  It joins the entry's identity, so a firing refused under two different bounds is
+  taxonomy generations it was decided under (`record-constraint-drop!`), and a
+  subsumed firing's `:subsumptions`.  It joins the entry's identity, so a firing refused under two different bounds is
   two entries; both release idempotently, and in practice a KB's runs share one bound."
   ([kb rule conseq pctx antes handles bindings max-depth]
    (record-refusal! kb rule conseq pctx antes handles bindings max-depth nil))
@@ -1744,11 +1795,12 @@
   them can have moved.  `:handles` is the whole antecedent list, which is what the
   release recomputes the depth from; the rule handle and the taxonomy supporters in it
   sit at depth 0."
-  [kb rule conseq pctx all-antes bindings v]
+  [kb rule conseq pctx all-antes bindings subs v]
   (let [antes (kb/antecedent-order kb all-antes)]
     (record-refusal! kb rule conseq pctx antes antes bindings nil
-                     (merge {:constraint true :gens (constraint-generations kb)}
-                            (checks/conviction-watch v)))))
+                     (cond-> (merge {:constraint true :gens (constraint-generations kb)}
+                                    (checks/conviction-watch v))
+                       subs (assoc :subsumptions subs)))))
 
 (defn record-swept-firing!
   "Record the rule firing whose justification record is `j` as a refusal, when the
@@ -1767,7 +1819,8 @@
               pctx  (:context csx)]
           (when-not (antecedent-hidden? kb antes pctx)
             (record-refusal! kb {:rule-handle rh} (:sentence csx) pctx antes
-                             (into [] (remove #{rh}) antes) (:bindings j) nil)))))))
+                             (into [] (remove #{rh}) antes) (:bindings j) nil
+                             (when-let [subs (:subsumptions j)] {:subsumptions subs}))))))))
 
 (defn- into-some
   "`(into to from)`, returning `to` itself when `from` is empty.  A placement gathers its
@@ -1802,11 +1855,40 @@
   "Drop the fact conclusion `conseq` for violation `v`: report it, and remember an
   argument conviction for `settle` to re-ask once a type arriving later can lift it.
   Returns the empty vector of new handles a placement that stored nothing returns."
-  [kb rule conseq pctx all-antes bindings v]
+  [kb rule conseq pctx all-antes bindings subs v]
   (violations/report kb [(assoc v :sentence conseq :context pctx :rule (:rule-handle rule))])
   (when (constraint-drop-kinds (:violation v))
-    (record-constraint-drop! kb rule conseq pctx all-antes bindings v))
+    (record-constraint-drop! kb rule conseq pctx all-antes bindings subs v))
   [])
+
+(def ^:dynamic *witnesses*
+  "nil, or a volatile `{:clock n :held {key value}}` that `place-nogoods!` binds for one
+  call: the witnesses `subsumption-support` and `visibility-support` read, and the edge
+  supporters' defeat classes, read while the change clock read `n`, keyed by what was
+  read, the walk's scope (`tax/read-scope`) and the reading (`tax/*network-belief*`,
+  `tax/*search*`).  An entry is answered
+  only while the clock still reads `n`, so it equals a fresh read
+  (`observe/note-change`); a placement pass reads every route of a family before it
+  writes (`plan-sets`), and the nogoods of one family share their subsumptions."
+  nil)
+
+(defn- held
+  "`(read)` for the key `k`, answered from the volatile `memo` (`*witnesses*`) while the
+  change clock has not moved since it was held there, else read and held under the clock
+  read before the read (`caches/held-if-settled`)."
+  [memo k read]
+  (let [clock (observe/change-clock)
+        {c :clock m :held} @memo]
+    (if (and (= c clock) (contains? m k))
+      (get m k)
+      (caches/held-if-settled
+       read
+       (fn [v]
+         (vswap! memo (fn [{c :clock m :held}]
+                        {:clock clock :held (assoc (if (= c clock) m {}) k v)}))
+         v)))))
+
+(defn- reading [] [tax/*network-belief* tax/*search*])
 
 (defn- visibility-support
   "A witness for each context `pctx` had to see to hold the firing: the `genlCx` edge
@@ -1839,7 +1921,11 @@
                 (distinct)
                 ;; asked from the placement's own view, so a path it reads as hidden or
                 ;; withdrawn is never the one named when another reaches
-                (mapcat #(tax/reach-support tax :genlCx pctx % pctx))
+                (mapcat (fn [c]
+                          (let [walk #(tax/reach-support tax :genlCx pctx c pctx)]
+                            (if-let [memo *witnesses*]
+                              (held memo [:genlCx pctx c (tax/read-scope tax :genlCx pctx) (reading)] walk)
+                              (walk)))))
                 (map first)
                 (distinct))
           ctxs)))
@@ -1910,9 +1996,10 @@
 
 (defn- justify-placed!
   "Store `sentence` in `pctx` justified by `antes` under `informant` (`nogood-informant`
-  unless given) at `:default`, and return its handle when the record is new."
-  ([kb sentence pctx antes] (justify-placed! kb sentence pctx antes nogood-informant))
-  ([kb sentence pctx antes informant]
+  unless given) at `:default`, carrying `bindings`, and return its handle when the record
+  is new."
+  ([kb sentence pctx antes] (justify-placed! kb sentence pctx antes nogood-informant {}))
+  ([kb sentence pctx antes informant bindings]
    (let [tms        (reasoning/tms kb)
          recs       (:records kb)
          antes      (kb/antecedent-order kb antes)
@@ -1925,7 +2012,7 @@
      (jtms/ensure-node tms h (inc (long (reduce (fn [d a] (max (long d) (long (jtms/depth tms a))))
                                                 0 antes))))
      (when-not (jtms/has-justification? tms informant antes h)
-       (let [just (jtms/->just (p/next-id recs) informant antes h {} :default)]
+       (let [just (jtms/->just (p/next-id recs) informant antes h bindings :default)]
          (p/put-justification recs just)
          (jtms/add-justification tms just)))
      (when new? h))))
@@ -1985,11 +2072,13 @@
 (defn- membership-owned?
   "Is the placed nogood over `members` with antecedents but the `genlCx` edges `core` one
   the membership families place (`place-memberships!`): a ground among `core` supports a
-  separation or cover declaration (`tax/separation-ends`)?"
+  separation or cover declaration (`tax/separation-ends`), or the members are a
+  membership and a denial of a strict supertype of its type (`membership/kind-of`)?"
   [kb members core]
   (let [tax (reasoning/taxonomy kb)]
-    (boolean (some (fn [h] (some #(tax/separation-ends tax %) (tax/supported-keys tax [h])))
-                   (remove (set members) core)))))
+    (boolean (or (some (fn [h] (some #(tax/separation-ends tax %) (tax/supported-keys tax [h])))
+                       (remove (set members) core))
+                 (= :supertype (membership/kind-of (decide/write-view tax) (:records kb) members))))))
 
 (defn- place-justified!
   "Place the nogood over the handles `members` at each `[context antecedents]` of
@@ -2040,7 +2129,7 @@
   Returns the handles it created.  The caller states the nogood: every member IN in the
   network.  With the context set `within`, only the placements in it are compared
   (`place-justified!`): a `genlCx` move changes the placements in the contexts whose
-  ancestor sets it changed and no others (`decide/edge-reach`'s `:under`).  See
+  ancestor sets it changed and no others (`special/drain-context-moves!`' `:reach`).  See
   docs/nmtms.md."
   ([kb members grounds] (place-nogood! kb members grounds nil))
   ([kb members grounds within]
@@ -2075,7 +2164,7 @@
   and return the handles created: the pairs of the bodies `bodies` whose placement left
   (`negation/take-moved!`), of the bodies with a member among the handles `fresh` the
   pass relabelled (a stored member among them) or `placed` (`placed-members`), and of the
-  bodies with a member stated in a context of `reach`'s `:below` (`decide/edge-reach`,
+  bodies with a member stated in a context of `reach`'s `:below` (`special/drain-context-moves!`,
   `reads/as-stored-opposed-in`).  A pair reached through `:below` alone compares only its
   placements in `reach`'s `:under`.  Every body stored in both polarities when `first?`
   (`decide/take-edge-cursor!`) or the relation was rebuilt.  A pair is placed when both
@@ -2188,10 +2277,19 @@
   ;; rests on the *strongest* path relating the two functors, not the shortest, so its
   ;; conclusion is capped at that path's floor.  `supporter-class` is the live JTMS
   ;; defeat-class of each edge supporter, read here where the tms is in hand.
-  (let [supporter-class #(jtms/defeat-class (reasoning/tms kb) %)]
-    (reduce (fn [acc [sub super]]
-              (if-let [hs (tax/reach-support (reasoning/taxonomy kb) :genl sub super
-                                             vantage supporter-class)]
+  (let [memo  *witnesses*
+        tms   (reasoning/tms kb)
+        supporter-class (if memo
+                          (fn [h] (held memo [:class h] #(jtms/defeat-class tms h)))
+                          #(jtms/defeat-class tms %))
+        walk  (fn [[sub super]] (tax/reach-support (reasoning/taxonomy kb) :genl sub super
+                                                   vantage supporter-class))
+        read  (if memo
+                (let [scope (tax/read-scope (reasoning/taxonomy kb) :genl vantage)]
+                  (fn [link] (held memo [:genl link scope (reading)] #(walk link))))
+                walk)]
+    (reduce (fn [acc link]
+              (if-let [hs (read link)]
                 (into acc hs)
                 (reduced nil)))
             []
@@ -2209,14 +2307,20 @@
   below their own context, so each reader that reaches over its own edges reads it, and
   no placement depends on which route arrived first.  A placement two combinations
   decide names the first in content order.  nil when some subsumption has no route the
-  view sees."
-  [kb links ingredients]
+  view sees.  Given the context set `within`, only the placements in it.  Each link's
+  routes, and each supporter's class, are held in `*witnesses*` while it is bound."
+  [kb links ingredients within]
   (let [tax      (reasoning/taxonomy kb)
         tms      (reasoning/tms kb)
-        rank     #(strength/rank-of (or (jtms/defeat-class tms %) :default))
-        per-link (mapv (fn [[sub super]]
-                         (tax/reach-supports tax :genl sub super nil
-                                             #(jtms/defeat-class tms %)))
+        memo     *witnesses*
+        class-of (if memo
+                   (fn [h] (held memo [:class h] #(jtms/defeat-class tms h)))
+                   #(jtms/defeat-class tms %))
+        rank     #(strength/rank-of (or (class-of %) :default))
+        walk     (fn [[sub super]] (tax/reach-supports tax :genl sub super nil class-of))
+        per-link (mapv (if memo
+                         (fn [link] (held memo [:genl-routes link (reading)] #(walk link)))
+                         walk)
                        links)]
     (when (every? seq per-link)
       (let [combos (reduce (fn [acc routes] (vec (for [x acc, r routes] (into x r))))
@@ -2235,14 +2339,18 @@
                             m
                             (nm/sort-by-content-key
                              nm/print-key compare
-                             (tax/maximal-common-descendant-contexts tax ectxs)))))
+                             (cond->> (tax/maximal-common-descendant-contexts tax ectxs)
+                               within (filter within))))))
                 {} combos)))))
 
 (defn- placements-over*
   "`placements-over` under the network reading it binds."
-  [kb links supporters ingredients]
+  [kb links supporters ingredients within]
   (let [tax  (reasoning/taxonomy kb)
-        base (res/exception-aware-placements kb supporters ingredients)]
+        ;; with `links`, a descent placement reads every candidate's path, so
+        ;; `placements-over` filters the candidates' answer instead
+        base (cond->> (res/exception-aware-placements kb supporters ingredients)
+               (and within (empty? links)) (filterv within))]
     (if (empty? links)
       ;; no subsumption to witness, so the whole support map is the visibility one —
       ;; and it is empty for the firing whose rule and facts are where the conclusion
@@ -2267,7 +2375,7 @@
                 ;; own reads that candidate's conclusion already
                 descent (into {}
                               (remove (fn [[p _]] (some #(tax/sees? tax p %) (keys seeing))))
-                              (descent-placements kb links ingredients))]
+                              (descent-placements kb links ingredients within))]
             (when (or (seq seeing) (seq descent))
               [(into (filterv seeing base)
                      (nm/sort-by-content-key nm/print-key compare (keys descent)))
@@ -2283,10 +2391,14 @@
   (`guard-defeat-placements`), so a premise except sweeps its placement as it sweeps a
   firing's, and a member its own `defeat` hides is no reason to move it.  Every
   witness search here reads the network and the `except` roster, and no placed `defeat`
-  (`tax/*network-belief*`), so a defeat of a `genl` supporter moves no placement."
-  [kb links supporters ingredients]
-  (binding [tax/*network-belief* true]
-    (placements-over* kb links supporters ingredients)))
+  (`tax/*network-belief*`), so a defeat of a `genl` supporter moves no placement.  Given
+  the context set `within`, only the placements in it, and with no `links` the support of
+  only those is read."
+  ([kb links supporters ingredients] (placements-over kb links supporters ingredients nil))
+  ([kb links supporters ingredients within]
+   (binding [tax/*network-belief* true]
+     (cond-> (placements-over* kb links supporters ingredients within)
+       (and within (seq links)) (some-> (update 0 #(filterv within %)))))))
 
 ;; ---- a guard that holds below the placement places a defeat ---------------
 
@@ -2338,20 +2450,65 @@
             named #(into #{} (mapcat (fn [h] (reads/as-stored-naming idx % h))) sup)]
         (into (named sx/except-functor) (remove own) (named sx/defeat-functor))))))
 
+(defn- defeasible?
+  "Does one of the handles `hs` take a `:default` class in the network, so a placed defeat
+  can hide it?"
+  [kb hs]
+  (let [tms (reasoning/tms kb)]
+    (boolean (some #(not= :monotonic (jtms/defeat-class tms %)) hs))))
+
+(defn- guard-solution-placements
+  "`[[q blockers defeasible?] …]` for the block conditions `conds` (`block-conditions`'
+  shape) of a firing whose conclusion F is placed in `pctx`, under the settled bindings
+  `b`.  For each solution read with no context (`guard-solutions`), each context
+  `placements-over` gives for the handles the solution read, over their contexts and
+  `pctx`, with the `genl` pairs its match climbed (`subsumption-links`), where the
+  condition holds in the network and through the excepts (`provers/exception-holds?`
+  under `tax/*network-belief*`).  `blockers` is the solution's handles, the
+  `exceptWhen`'s own handle, and the `genl` and `genlCx` edges `placements-over` names for
+  `q`; `defeasible?` is whether one of them but the `exceptWhen`'s handle is `:default`.
+  With `own?` only `pctx` is read.
+  Otherwise a placement at `pctx` resting on `:monotonic` handles alone is left out, since
+  that solution refuses F (`own-guard-block`), and each except or defeat that can take a
+  blocker's defeat out of force (`blocker-support-hiders`) is one more supporter, placed
+  the same way; a context that sees a placement the solution gives without it takes none
+  (design ruling 23).  `cpred` is the rule's consequent functor."
+  [kb conds b pctx f cpred own?]
+  (let [rec    #(p/get-sentex (:records kb) %)
+        tax    (reasoning/taxonomy kb)
+        holds? (fn [conds q] (binding [tax/*network-belief* true]
+                               (provers/exception-holds? kb conds b q)))
+        ;; the `exceptWhen`'s own handle `hs` is no blocker a defeat can hide
+        placed (fn [conds hs links blk]
+                 (let [ctxs   (into [pctx] (comp (keep #(:context (rec %))) (distinct)) blk)
+                       [ps m] (placements-over kb links blk ctxs)]
+                   (into [] (comp (filter #(or (not own?) (= pctx %)))
+                                  (filter #(holds? conds %))
+                                  (map (fn [q] (let [bs (into blk (get m q))]
+                                                 [q bs (defeasible? kb (remove hs bs))])))
+                                  (filter (fn [[q _ d?]] (or own? (not= q pctx) d?))))
+                         ps)))]
+    (for [[cs hs] conds
+          {sup :handles matched :matched}
+          (distinct (map #(select-keys % [:handles :matched]) (guard-solutions kb cs b cpred)))
+          :let [blk   (into hs sup)
+                links (subsumption-links kb matched rec)
+                base  (placed cs hs links blk)
+                bctxs (mapv first base)]
+          pl (if own?
+               base
+               (into base
+                     (comp (mapcat #(placed cs hs links (conj blk %)))
+                           (remove (fn [[q]] (some #(tax/sees? tax q %) bctxs))))
+                     (blocker-support-hiders kb blk f)))]
+      pl)))
+
 (defn- guard-defeat-placements
   "`#{[context antecedents]}`: where the firing `j`, a justification record of a rule,
-  owes a guard defeat of its conclusion F.  For each solution of a block condition read
-  with no context (`guard-solutions`), each context `placements-over` gives for the
-  handles the solution read, over their contexts and F's, with the `genl` pairs its match
-  climbed (`subsumption-links`), other than F's own context, where the condition holds
-  in the network and through the excepts (`provers/exception-holds?` under
-  `tax/*network-belief*`), so a blocker a defeat hides there still places one.  Each
-  except or defeat that can take a blocker's defeat out of force
-  (`blocker-support-hiders`) is one more supporter, placed the same way; a context that
-  sees a placement the solution gives without it takes none (design ruling 23).  The antecedents are those handles, the
-  `exceptWhen`'s own handle, the firing's rule and antecedents, F, and the `genl` and
-  `genlCx` edges `placements-over` names for the context.  `given` is `block-conditions`'
-  answer, when the caller holds it."
+  owes a guard defeat of its conclusion F (`guard-solution-placements`).  F's own context
+  is among them when a `:default` blocker blocks F there (design ruling 25).  The
+  antecedents are the blockers, the firing's rule and antecedents, and F.  `given` is
+  `block-conditions`' answer, when the caller holds it."
   [kb j given]
   (let [recs (:records kb)
         rh   (:informant j)
@@ -2360,50 +2517,165 @@
         pctx (:context (p/get-sentex recs f))]
     (if-not (and pctx rsx (rules/rule? rsx))
       #{}
-      (let [b      (settled-bindings kb (:bindings j) pctx)
-            core   (-> (set (:antecedents j)) (conj rh f))
-            rec    #(p/get-sentex recs %)
-            tax    (reasoning/taxonomy kb)
-            holds? (fn [conds q] (and (not= q pctx)
-                                      (binding [tax/*network-belief* true]
-                                        (provers/exception-holds? kb conds b q))))
-            placed (fn [conds links blk]
-                     (let [ctxs   (into [pctx] (comp (keep #(:context (rec %))) (distinct)) blk)
-                           [ps m] (placements-over kb links blk ctxs)]
-                       (into [] (comp (filter #(holds? conds %))
-                                      (map (fn [q] [q (-> core (into blk) (into (get m q)))])))
-                             ps)))]
+      (let [core (-> (set (:antecedents j)) (conj rh f))]
         (into #{}
-              (for [[conds hs] (or given (block-conditions kb rh rsx))
-                    {sup :handles matched :matched}
-                    (distinct (map #(select-keys % [:handles :matched])
-                                   (guard-solutions kb conds b (nm/functor (:consequent rsx)))))
-                    :let [blk   (into hs sup)
-                          links (subsumption-links kb matched rec)
-                          base  (placed conds links blk)
-                          bctxs (mapv first base)]
-                    pl (into base
-                             (comp (mapcat #(placed conds links (conj blk %)))
-                                   (remove (fn [[q]] (some #(tax/sees? tax q %) bctxs))))
-                             (blocker-support-hiders kb blk f))]
-                pl))))))
+              (map (fn [[q hs]] [q (into core hs)]))
+              (guard-solution-placements kb (or given (block-conditions kb rh rsx))
+                                         (settled-bindings kb (:bindings j) pctx)
+                                         pctx f (nm/functor (:consequent rsx)) false))))))
+
+(defn- inheritance-defeat-placements
+  "`#{[context antecedents]}`: the defeats of the conclusion F of the firing `j` that the
+  `:default` contrary claims of its inherited antecedents owe (`inherited-goals`,
+  `inherit/contraries`), each at F's context, resting on one contrary claim, the firing's
+  rule and antecedents, and F (design ruling 25).  Read in the network and through the
+  excepts.  A `:monotonic` contrary withdraws the firing instead
+  (`inheritance-withdrawn?`)."
+  [kb j]
+  (let [recs (:records kb)
+        rh   (:informant j)
+        f    (:consequence j)
+        rsx  (when (integer? rh) (p/get-sentex recs rh))
+        pctx (:context (p/get-sentex recs f))]
+    (if-not (and pctx rsx (rules/rule? rsx)
+                 (some #(declaration-record? (p/get-sentex recs %)) (:antecedents j)))
+      #{}
+      (let [gs (inherited-goals kb rsx (delay (settled-bindings kb (:bindings j) pctx)) pctx)]
+        (if (empty? gs)
+          #{}
+          (let [core (-> (set (:antecedents j)) (conj rh f))]
+            (binding [tax/*network-belief* true
+                      inherit/*memo*       nil]
+              (into #{}
+                    (for [g gs
+                          c (inherit/contraries kb g pctx)
+                          :when (= :default (:class c))]
+                      [pctx (conj core (:handle c))])))))))))
+
+(defn- own-guard-block
+  "How a firing's block conditions hold at its own placement `pctx`, under bindings `b`,
+  read in the network and through the excepts: nil when none holds there; `:exception`
+  or `:naf` when one holds with no solution placed at `pctx` or with a solution there
+  resting on `:monotonic` handles alone, which refuses the firing; `:soft` when every
+  solution placed at `pctx` rests on a `:default` handle, which stores the firing and a
+  guard defeat of it at `pctx` (design ruling 25).  `entries` are the rule's
+  `exceptWhen`s (`provers/rule-exception-entries`), of which those `pctx` sees are read,
+  and `naf` its `unknown` antecedents."
+  [kb entries naf b pctx cpred]
+  (let [conds (-> (into [] (comp (filter #(provers/exception-visible-from? kb pctx %))
+                                 (map (fn [{:keys [handle query]}] [query #{handle}])))
+                        entries)
+                  (into (map (fn [u] [(sx/naf-query-conjuncts u) #{}])) naf))
+        held  (filterv (fn [[cs]] (binding [tax/*network-belief* true]
+                                    (provers/exception-holds? kb cs b pctx)))
+                       conds)
+        hard  (first (remove (fn [c] (let [own (guard-solution-placements kb [c] b pctx nil cpred true)]
+                                       (and (seq own) (every? #(nth % 2) own))))
+                             held))]
+    (cond hard        (if (seq (second hard)) :exception :naf)
+          (seq held)  :soft)))
+
+(defn- rule-firing-blocked?
+  "Is a firing of the rule stored at `rh` — settled bindings `bindings` (a delay),
+  placed in `pctx` — blocked by something the *rule* carries: its `exceptWhen`
+  exception or an `(unknown S)` antecedent holding through a `:monotonic` blocker
+  (`own-guard-block`), a `(different …)` antecedent a merge or an indeterminacy has since
+  withdrawn, a **closed-extent** negative antecedent that no longer holds, an
+  **aggregate** antecedent whose count has moved, a **computed** antecedent whose answer
+  has moved, a `disjoint` antecedent `pctx` no longer reads separated
+  (`separation-exempted?`), an **inherited** antecedent a more
+  specific `:monotonic` claim has undercut, or the qualitative network it joined on having
+  become unsatisfiable?
+
+  The context is the **conclusion's**, not the rule's: an exceptWhen query and a NAF
+  literal are *about* the conclusion, and one invisible from where it lives has no
+  business blocking it.  Nothing is cached: this re-runs the checks every time, which is
+  what keeps blocking from drifting out of step with belief.
+
+  Both re-decision paths come here — a firing that *was* placed and is now a
+  justification, and one that was refused before it could become one — so the two cannot
+  drift about what counts as blocked."
+  [kb rh rsx bindings pctx]
+  (boolean
+   (or (let [watched? (reads/watched-rule? (:index kb) rh)]
+         (when (or (rules/has-naf? rsx) watched?)
+           (#{:exception :naf}
+            (own-guard-block kb (when watched? (provers/rule-exception-entries kb rh))
+                             (rules/naf-antecedents rsx) @bindings pctx
+                             (nm/functor (:consequent rsx))))))
+       (when (rules/has-different? rsx)
+         (different-blocks? kb (rules/different-antecedents rsx) @bindings))
+       (when-let [ce (seq (closed-extent-antecedents kb (:antecedent rsx)))]
+         (closed-extent-blocks? kb ce @bindings pctx))
+       (post-join-withdrawn? kb rsx bindings pctx)
+       (computed-withdrawn? kb rsx bindings pctx)
+       (when (some separation-literal? (:antecedent rsx))
+         (separation-exempted? kb (:antecedent rsx) @bindings pctx))
+       (inheritance-withdrawn? kb rsx bindings pctx)
+       (entailment-withdrawn? kb rsx pctx))))
+
+(defn justification-excepted?
+  "Is justification `j` currently blocked — by a visibility `except` hiding one of its
+  antecedents, or by anything its rule carries (`rule-firing-blocked?`)?
+
+  The conclusion's record names the placement context every check is evaluated in, and
+  the informant names the rule."
+  [kb j]
+  (boolean
+   (when-let [csx (p/get-sentex (:records kb) (:consequence j))]
+     (let [pctx (:context csx)
+           inf  (:informant j)]
+       (or (antecedent-hidden? kb (let [b (exc/belief-only-antecedent j)]
+                                    (cond->> (jtms/rests-on j) b (remove #{b})))
+                               pctx)
+           (when (integer? inf)
+             (when-let [rsx (p/get-sentex (:records kb) inf)]
+               (rule-firing-blocked? kb inf rsx
+                                     (delay (settled-bindings kb (:bindings j) pctx))
+                                     pctx))))))))
 
 (defn- guard-justifications
   "`{jid [sentence context antecedents]}`: the justifications under `guard-informant`
-  that the firing `j` owns, those resting on its conclusion whose antecedents hold its
-  rule and every antecedent of it."
+  resting on the conclusion of the firing `j` that `j` owns (`exc/guard-owners`, read
+  among `j` and the other justifications of the conclusion)."
   [kb j]
   (let [tms  (reasoning/tms kb)
         recs (:records kb)
-        core (conj (set (:antecedents j)) (:informant j))]
+        js   (into [j] (comp (remove #{(:id j)}) (keep #(jtms/justification tms %)))
+                   (jtms/supports tms (:consequence j)))]
     (into {}
           (comp (keep #(jtms/justification tms %))
                 (filter #(= guard-informant (:informant %)))
-                (keep (fn [g] (let [as (set (:antecedents g))]
-                                (when (every? as core)
-                                  (let [c (p/get-sentex recs (:consequence g))]
-                                    [(:id g) [(:sentence c) (:context c) as]]))))))
+                (keep (fn [g] (when (contains? (exc/guard-owners recs g js) (:id j))
+                                (let [c (p/get-sentex recs (:consequence g))]
+                                  [(:id g) [(:sentence c) (:context c) (set (:antecedents g))]])))))
           (jtms/dependents tms (:consequence j)))))
+
+(defn- drop-unowned-guard-justifications!
+  "Drop each justification under `guard-informant` of a defeat of `f` that no rule firing
+  of `f` owns (`exc/guard-owners`): the defeat of a firing a replacing route took away
+  (`special/drop-replaced-routes!`).  A
+  change posts F's re-check (`special/recheck-defeat-target`)."
+  [kb f]
+  (let [tms   (reasoning/tms kb)
+        recs  (:records kb)
+        firings (into [] (comp (keep #(jtms/justification tms %))
+                               (filter #(integer? (:informant %))))
+                      (jtms/supports tms f))
+        gone  (into [] (comp (mapcat #(jtms/supports tms %))
+                             (keep #(jtms/justification tms %))
+                             (filter #(= guard-informant (:informant %)))
+                             (remove #(seq (exc/guard-owners recs % firings)))
+                             (map :id))
+                    (reads/as-stored-naming (:index kb) sx/defeat-functor f))]
+    (when (seq gone)
+      (apply-removals! kb (reduce (fn [acc jid]
+                                    (let [r (jtms/drop-justification! tms jid)]
+                                      (p/delete-justification! recs jid)
+                                      (merge-with into acc r)))
+                                  nil gone))
+      (special/recheck-defeat-target
+       kb {:sentence (list sx/defeat-functor (sx/sentex-handle f))}))))
 
 (defn place-guard-defeats!
   "For each `[j live? conds]` of `firings`, `j` a firing's justification record and
@@ -2413,33 +2685,106 @@
   justification the firing owns (`guard-justifications`) that the current state no longer
   gives.  A firing that is not `live?`, blocked or gone, keeps none.  A change posts F's
   re-check (`special/recheck-defeat-target`).  Returns the conclusions whose guard
-  defeats moved.  The defeat is read at read time (`exc/defeat-hidden-fn`, its coverage);
-  `chain` reads none.  See docs/naf.md."
-  [kb firings]
-  (let [tms  (reasoning/tms kb)
-        recs (:records kb)
-        place!
-        (fn [[j live? conds]]
-          (when (p/get-sentex recs (:consequence j))
-            (let [s     (list sx/defeat-functor (sx/sentex-handle (:consequence j)))
-                  want  (into #{} (map (fn [[q antes]] [s q antes]))
-                              (when live? (guard-defeat-placements kb j conds)))
-                  have  (guard-justifications kb j)
-                  gone  (into [] (keep (fn [[jid k]] (when-not (contains? want k) jid))) have)
-                  added (nm/sort-by-content-key (fn [[s q]] [s q]) (remove (set (vals have)) want))]
-              (when (seq gone)
-                (apply-removals! kb (reduce (fn [acc jid]
-                                              (let [r (jtms/drop-justification! tms jid)]
-                                                (p/delete-justification! recs jid)
-                                                (merge-with into acc r)))
-                                            nil gone)))
-              (doseq [[s q antes] added] (justify-placed! kb s q antes guard-informant))
-              (when (or (seq gone) (seq added))
-                (special/recheck-defeat-target kb {:sentence s})
-                (:consequence j)))))]
-    (into [] (keep place!) firings)))
+  defeats moved.  With `drop?` false (a settle that sweeps nothing, `core/preview`'s) no
+  justification is dropped, so a suspended blocker takes its defeat OUT and the rollback
+  finds the records it left.  The defeat is read at read time (`exc/defeat-hidden-fn`, its
+  coverage); `chain` reads none.  See docs/naf.md."
+  ([kb firings] (place-guard-defeats! kb firings true))
+  ([kb firings drop?]
+   (let [tms  (reasoning/tms kb)
+         recs (:records kb)
+         place!
+         (fn [[j live? conds]]
+           (when (p/get-sentex recs (:consequence j))
+             (let [s     (list sx/defeat-functor (sx/sentex-handle (:consequence j)))
+                   want  (into #{} (map (fn [[q antes]] [s q antes]))
+                               (when live?
+                                 (into (guard-defeat-placements kb j conds)
+                                       (inheritance-defeat-placements kb j))))
+                   have  (guard-justifications kb j)
+                   gone  (if drop?
+                           (into [] (keep (fn [[jid k]] (when-not (contains? want k) jid))) have)
+                           [])
+                   added (nm/sort-by-content-key (fn [[s q]] [s q]) (remove (set (vals have)) want))]
+               (when (seq gone)
+                 (apply-removals! kb (reduce (fn [acc jid]
+                                               (let [r (jtms/drop-justification! tms jid)]
+                                                 (p/delete-justification! recs jid)
+                                                 (merge-with into acc r)))
+                                             nil gone)))
+               (doseq [[s q antes] added] (justify-placed! kb s q antes guard-informant (:bindings j)))
+               (when (or (seq gone) (seq added))
+                 (special/recheck-defeat-target kb {:sentence s})
+                 (:consequence j)))))]
+     (into [] (keep place!) firings))))
 
 ;; ---- a firing places its conclusion -------------------------------------
+
+(defn- mint-rule
+  "Store the rule a **generator** firing stamped out (docs/generators.md), justified by
+  the firing, and return its handle in the newly-created vector `place-conclusion`
+  returns.
+
+  One thing separates this from a rule somebody asserted, and it is the whole point of
+  minting rather than macro-expanding: the mint is **derived**, so it is justified
+  rather than marked a premise, and the ordinary relabel un-believes it the moment what
+  licensed it goes.  Both chainers ask belief of a rule before using it
+  (`res/rule-believed?`), so an un-believed mint stops firing without anything having to
+  hunt it down and delete it.
+
+  Everything else is what the assert entry point does, because a rule is a rule whichever entry point
+  it came through: the same check list (`checks/rule-violation`, read through
+  `checks/check-rule!` so the two cannot drift), the same rule postings
+  (`special/index-rule-sentex`), and the direction the *stamped* rule's own
+  `set/*Rule` wrapper set — which rides in the sentence and so survives substitution
+  untouched.
+
+  Returned as a new handle so the agenda takes it: a minted rule is a datum, and
+  `process-datum` joins a forward-capable one over the facts already stored, exactly as
+  it does for a rule somebody typed.  That is what makes a generator's two arrival
+  orders agree — facts first or generator first, the same rules exist and have seen the
+  same facts — without a retroactive sweep of its own.
+
+  A refused mint is **dropped and recorded**, never thrown, for the reason every check
+  on this path is a value: an exception escaping a firing would leave the fixpoint half
+  computed, and which rule fired first would decide what the KB believes."
+  [kb rule sentence pctx all-antes depth bindings strength subs]
+  (let [sentence (stamped-rule sentence)
+        ;; A stamped rule is polycanonicalized exactly as an asserted one is
+        ;; (`rules/expand-rule`) — one rule per DNF alternative of a disjunctive
+        ;; antecedent, and one per conjunct of a conjunctive consequent, each keyed by its
+        ;; own predicates.  This is where a generator's stamped `or` expands: the holes are
+        ;; ground by now, so the alternatives the mint stores are the alternatives of the
+        ;; rule it stamped.  Checked before any of them is stored, for the reason
+        ;; `core/assert` checks its conjuncts first: a mapv is not a transaction, and a mint
+        ;; that half-landed would leave the KB holding part of a rule nobody wrote.
+        minted (rules/expand-rule sentence)]
+    (if-let [v (some #(checks/rule-violation kb % pctx) minted)]
+      (do (violations/report kb [(assoc v :sentence sentence :context pctx
+                                        :rule (:rule-handle rule))])
+          [])
+      (into []
+            (mapcat
+             (fn [one]
+               (let [[h s new?] (kb/find-or-create-sentex kb one pctx)]
+                 (when new? (special/index-rule-sentex kb h s))
+                 (jtms/ensure-node (reasoning/tms kb) h depth)
+                 (when-not (jtms/has-justification? (reasoning/tms kb) (:name rule) all-antes h
+                                                    (jtms/justification-key (:name rule) all-antes subs))
+                   (let [jid  (p/next-id (:records kb))
+                         ;; content order is bought here, inside the dedup guard, for
+                         ;; `place-fact-conclusion`'s reason: the question above is
+                         ;; set-keyed and only the record being written needs an order
+                         just (jtms/->just jid (:name rule) (kb/antecedent-order kb all-antes)
+                                           h bindings strength subs)]
+                     (p/put-justification (:records kb) just)
+                     (jtms/add-justification (reasoning/tms kb) just)
+                     ;; a `:default` blocker at the placement, or a guard below it,
+                     ;; places a defeat of the minted rule
+                     (when (and (integer? (:name rule)) (:watched? rule))
+                       (place-guard-defeats! kb [[just true (guard-conditions-of rule)]]))))
+                 (if new? [h] []))))
+            minted))))
 
 (defn- place-fact-conclusion
   "Persist/justify a rule conclusion `conseq` in context `pctx` at justification
@@ -2475,7 +2820,7 @@
   path from the argument's types to the constraint type, so there is no second sentex to
   weigh the conclusion against and nothing for a defeat class to compare.  A nogood needs
   two sides; this has one."
-  [kb rule conseq pctx all-antes depth bindings strength]
+  [kb rule conseq pctx all-antes depth bindings strength subs]
   (let [existing (kb/find-sentex-handle kb conseq pctx)
         ;; Checked only when the conclusion is **new**.  Re-deriving a sentence already
         ;; stored in this context adds a *justification*, not content — whatever it says
@@ -2500,12 +2845,12 @@
         ;; roster rules it out and supports its conclusion once the roster stops
         forced   (when-not v (checks/forced-conclusion-violation kb (:rule-handle rule) conseq))]
     (if v
-      (drop-fact-conclusion! kb rule conseq pctx all-antes bindings v)
+      (drop-fact-conclusion! kb rule conseq pctx all-antes bindings subs v)
       (let [[h s new?] (if existing
                          [existing (p/get-sentex (:records kb) existing) false]
                          (let [[h s] (kb/create-sentex kb conseq pctx)] [h s true]))
             ;; the dedup key, built once for the question and the add that follows it
-            jkey       (jtms/justification-key (:name rule) all-antes)]
+            jkey       (jtms/justification-key (:name rule) all-antes subs)]
         (when forced
           (violations/report kb [(assoc forced :sentence conseq :context pctx
                                         :rule (:rule-handle rule))]))
@@ -2531,17 +2876,20 @@
                 ;; rebuild its whole `implies` sentence to compare it.
                 inf  (:name rule)
                 just (jtms/->just jid inf (kb/antecedent-order kb (remove #(= inf %) all-antes))
-                                  h bindings strength)]
+                                  h bindings strength subs)]
             (when forced (jtms/set-forced (reasoning/tms kb) :void [jid] true))
             (p/put-justification (:records kb) just)
             (jtms/add-justification (reasoning/tms kb) just jkey)
-            ;; a guard that holds below the placement places a defeat of the firing
-            (when (and (integer? inf) (:watched? rule))
+            ;; a guard that holds below the placement, or a `:default` blocker at it,
+            ;; places a defeat of the firing
+            (when (and (integer? inf) (or (:watched? rule) (:inherited? rule)))
               (place-guard-defeats! kb [[just true (guard-conditions-of rule)]]))
             ;; a firing over a route the witness rule now names replaces the same firing
             ;; over the route it named before, which only a stored conclusion can hold
             (when-not new?
-              (apply-removals! kb (special/drop-replaced-routes! kb just)))
+              (when-let [r (special/drop-replaced-routes! kb just)]
+                (apply-removals! kb r)
+                (drop-unowned-guard-justifications! kb h)))
             ;; a conclusion a permuting mark re-spelled keeps the spelling it was drawn
             ;; in, for the mark's leaving to put it back at (`reconcile-spellings!`)
             (when (and (not= conseq (:sentence s)) (integer? (:name rule))
@@ -2596,21 +2944,6 @@
               ;; candidates the settle places, as an asserted one does
               _    (when new? (special/offer-marked-existing kb conseq))
               _    (when new? (special/offer-marked-under-edge kb conseq))
-              ;; ...and a derived `genlCx` edge restates the sentexes its widened ancestor set
-              ;; newly exposes to a merge, as an asserted one does — or which spelling a
-              ;; context reads a fact under would depend on whether the spindle was
-              ;; written or inferred
-              ;; ...and the fourth arrival order of the functional/antisymmetric merge, a
-              ;; derived `genlCx` edge making two already-marked facts jointly visible for
-              ;; the first time, exactly as an asserted one does.  **A rule-concluded edge
-              ;; is placed here and never through the assert entry point**, so this line is the
-              ;; whole of what runs the equality reconcilers for it — which is why it is
-              ;; the same call `assert-one` and the structural producer make rather than a
-              ;; third hand-written copy of the list (vaelii#56).  And it sits *after* the
-              ;; justification above for that call's own reason: the sweeps read the
-              ;; belief-filtered genlCx closure, and a line earlier the conclusion supports
-              ;; nothing and the ancestor set has not widened
-              cxe  (when new? (special/reconcile-context-edge kb conseq))
               ;; ...and a *derived* `(symmetric P)` re-spells the rows stored before it
               ;; exactly as an asserted one does — the mark sorts arguments at the entry point,
               ;; so without this whether one proposition is one record would depend on
@@ -2620,9 +2953,9 @@
               ;; no equality and every re-derivation on one that does — and a fixpoint
               ;; re-derives the same conclusion on every round of every defaults pass, so
               ;; this is the arm that must added no work rather than a little
-              mig  (when (or eq fnl fex fed asym axe axd cxe symx)
+              mig  (when (or eq fnl fex fed asym axe axd symx)
                      (merge-with into {:new [] :superseded [] :violations []}
-                                 eq fnl fex fed asym axe axd cxe symx))
+                                 eq fnl fex fed asym axe axd symx))
               ;; The spellings those merges retired, applied here rather than left to the
               ;; settle that follows.  A supersession *starts* when migration says so and
               ;; reaches the reconcile only as its `extra` (`special/supersession-map`),
@@ -2647,7 +2980,9 @@
               ;; they entail of an asserted one.  Drawn only for a new conclusion, like
               ;; the checks above: a re-derivation adds a justification, not content, and
               ;; whatever the sentence entailed was entailed when it was first placed.
-              args (special/deduce-arg-types kb (:entailments adm) h pctx)
+              args (merge-with into
+                               (special/deduce-arg-types kb (:entailments adm) h pctx)
+                               (when new? (special/deduce-below kb conseq h pctx)))
               ;; ...and a conclusion that *is* a declaration reaches back over the stored
               ;; facts, as an asserted one does.
               back (special/entail-existing kb conseq h)
@@ -2690,10 +3025,7 @@
               ;; `(parentOf P0 P1)` under a recursive `ancestorOf` runs to
               ;; `max-derivations`.  A re-derivation grew no closure, so there is
               ;; nothing for it to re-drive.
-              (into-some (when new? (special/transitive-seeds kb conseq)))
-              ;; and a derived genlCx edge widens what a rule can see, for the
-              ;; same reason and with the same remedy
-              (into-some (special/visibility-seeds kb conseq))))))))
+              (into-some (when new? (special/transitive-seeds kb conseq)))))))))
 
 (defn- mint-violation
   "The refusal a nested mint threw, `e`, as the `:mint-refused` violation that drops the
@@ -2768,8 +3100,10 @@
   them**; both arms sort it by content (`kb/antecedent-order`) at the point they write a
   justification, and neither reads a position before that.  A released refusal hands over
   a vector that is already sorted, which the sort returns unchanged — the key is a
-  function of the handle, so re-sorting is idempotent."
-  [kb rule conseq pctx all-antes depth bindings strength]
+  function of the handle, so re-sorting is idempotent.  `subs` is the firing's
+  subsumptions, the set of its `subsumption-links` or nil, which the justification
+  records."
+  [kb rule conseq pctx all-antes depth bindings strength subs]
   (let [rule?  (rules/rule-sentence? (peek (sx/peel-rule-wrapper conseq)))
         [c v]  (reify-conclusion kb conseq
                                  (if rule?
@@ -2779,9 +3113,9 @@
       (and v rule?) (do (violations/report kb [(assoc v :sentence (stamped-rule c) :context pctx
                                                       :rule (:rule-handle rule))])
                         [])
-      v             (drop-fact-conclusion! kb rule c pctx all-antes bindings v)
-      rule?         (mint-rule kb rule c pctx all-antes depth bindings strength)
-      :else         (place-fact-conclusion kb rule c pctx all-antes depth bindings strength))))
+      v             (drop-fact-conclusion! kb rule c pctx all-antes bindings subs v)
+      rule?         (mint-rule kb rule c pctx all-antes depth bindings strength subs)
+      :else         (place-fact-conclusion kb rule c pctx all-antes depth bindings strength subs))))
 
 (defn- placement-ingredients
   "Where a firing's conclusion may live, and which taxonomy supporters it names getting
@@ -2815,18 +3149,6 @@
 
 ;; ---- the families that place their nogoods -----------------------------
 
-(defn- route-supporters
-  "Each choice of one believed supporter per flat-cache key of `ks`, as a vector of
-  `[handle context]`."
-  [kb ks]
-  (let [tax  (reasoning/taxonomy kb)
-        tms  (reasoning/tms kb)
-        recs (:records kb)]
-    (reduce (fn [acc k]
-              (let [hs (sort (filter #(jtms/in? tms %) (tax/visible-supporters tax k nil)))]
-                (for [xs acc, h hs] (conj xs [h (:context (p/get-sentex recs h))]))))
-            [[]] ks)))
-
 (defn- route-placements
   "The `[context antecedents]` placements of the nogood over `members` that the `routes`
   give (`membership/routes`, `related/routes`, `tuple/routes`): for each route and each
@@ -2835,8 +3157,9 @@
   those supporters and the route's subsumptions at, with the members, the supporters and
   the edge handles it names as antecedents.  A placement that reads a
   `siblingDisjointException` exempting a mark route's separated pair is left out
-  (`tax/route-exempted?`), and so is one the route's `:excluded-at` names."
-  [kb members routes]
+  (`tax/route-exempted?`), and so is one the route's `:excluded-at` names.  Given the
+  context set `within`, only the placements in it (`placements-over`)."
+  [kb members routes within]
   (let [tax   (reasoning/taxonomy kb)
         recs  (:records kb)
         exc?  (tax/sib-exceptions? tax)
@@ -2845,7 +3168,7 @@
           (for [{:keys [keys links choices excluded-at] :as route} routes
                 sups (or choices (route-supporters kb keys))
                 :let [[ps m] (placements-over kb links (into (vec members) (map first) sups)
-                                              (into mctxs (map second) sups))]
+                                              (into mctxs (map second) sups) within)]
                 pctx ps
                 :when (not (and exc? (tax/route-exempted? tax route pctx)))
                 :when (not (and excluded-at (excluded-at pctx)))]
@@ -2856,35 +3179,82 @@
   [kb ms]
   (sort nm/compare-form (map #(let [s (p/get-sentex (:records kb) %)] [(:sentence s) (:context s)]) ms)))
 
-(defn- place-sets!
-  "Place each nogood of `ngs` whose members are all IN in the network
-  (`jtms/network-in?`) at the placements its `routes-of` gives, and remove the
-  placements of each member set of `stale`, each under `owns?` (`place-justified!`), in
-  content order.  Returns the handles created."
-  [kb ngs stale routes-of owns?]
-  (let [tms (reasoning/tms kb)]
-    (-> []
-        (into (mapcat #(place-justified! kb % [] (fn [core] (owns? % core))))
-              (nm/sort-by-content-key #(content-key kb %) nm/compare-form stale))
-        (into (comp (filter (fn [ng] (every? #(jtms/network-in? tms %) (:members ng))))
-                    (mapcat (fn [{ms :members :as ng}]
-                              (place-justified! kb ms (route-placements kb ms (routes-of ng))
-                                                (fn [core] (owns? ms core))))))
-              (nm/sort-by-content-key #(content-key kb (:members %)) nm/compare-form ngs)))))
-
 (defn- stale-sets
   "The member sets of the nogoods placed over a handle of `hs` that `kind-of` names and
-  `current`, a set of member sets, does not hold."
-  [kb hs kind-of current]
-  (let [recs (:records kb)]
-    (into #{} (comp (mapcat #(placed-justifications kb %))
-                    (map :members)
-                    (remove current)
-                    (filter #(kind-of recs %)))
-          hs)))
+  `current`, a set of member sets, does not hold.  Given the context set `within`, only
+  the placements in it are read: the placed `(contradicts …)` stated there, while fewer
+  are than the term index holds sentexes naming a handle of `hs`, otherwise that read
+  filtered."
+  [kb hs kind-of current within]
+  (let [recs (:records kb)
+        idx  (:index kb)
+        hs   (set hs)
+        ms   (cond
+               (nil? within)
+               (into [] (comp (mapcat #(placed-justifications kb %)) (map :members)) hs)
+
+               (< (reads/stored-count-with-functor-in idx 'contradicts within)
+                  (transduce (map #(count (reads/as-stored-with-term idx (sx/sentex-handle %)))) + hs))
+               (filter #(some hs %)
+                       (placed-members kb (reads/as-stored-with-functor-in idx 'contradicts within)))
+
+               :else
+               (into [] (comp (mapcat #(placed-justifications kb %))
+                              (filter #(contains? within (second (:key %))))
+                              (map :members))
+                     hs))]
+    (into #{} (comp (remove current) (filter #(kind-of recs %))) ms)))
+
+(defn- plan-sets*
+  [kb reach full reached nogoods-of kind-of routes-of owns?]
+  (let [tms     (reasoning/tms kb)
+        under   (:under reach)
+        full    (set full)
+        reached (when under (into #{} (remove full) reached))
+        fngs    (nogoods-of full)
+        fms     (into #{} (map :members) fngs)
+        ngs     (into fngs (when (seq reached) (remove #(fms (:members %)) (nogoods-of reached))))
+        current (into #{} (map :members) ngs)
+        fstale  (stale-sets kb full kind-of current nil)
+        stale   (into fstale (when (seq reached) (stale-sets kb reached kind-of current under)))
+        within  (fn [ms] (when-not (or (fms ms) (fstale ms)) under))
+        removes (mapv (fn [ms] [ms [] (within ms)])
+                      (nm/sort-by-content-key #(content-key kb %) nm/compare-form stale))
+        places  (into [] (comp (filter (fn [ng] (every? #(jtms/network-in? tms %) (:members ng))))
+                               (map (fn [{ms :members :as ng}]
+                                      (let [w (within ms)]
+                                        [ms (route-placements kb ms (routes-of ng) w) w]))))
+                      (nm/sort-by-content-key #(content-key kb (:members %)) nm/compare-form ngs))]
+    (fn []
+      (into [] (mapcat (fn [[ms ps w]] (place-justified! kb ms ps (fn [core] (owns? ms core)) w)))
+            (into removes places)))))
+
+(defn- plan-sets
+  "`place-sets!` with its reads taken now and its writes deferred: a fn of no arguments
+  that places and removes what the reads decided, and returns the handles created.  A
+  family over many terms reads every term's routes before it places the first, so the
+  routes share the witnesses `*witnesses*` holds: a placement's writes move no route,
+  witness or member label another term's nogood reads (docs/nmtms.md, \"The placement
+  pass\").  The reads hold the scoped walks' neighbours and edge supporters
+  (`tax/with-neighbours`), since no write runs among them."
+  [kb reach full reached nogoods-of kind-of routes-of owns?]
+  (tax/with-neighbours (atom {}) #(plan-sets* kb reach full reached nogoods-of kind-of routes-of owns?)))
+
+(defn- place-sets!
+  "Place each nogood `nogoods-of` gives for the handles `full` or `reached` whose members
+  are all IN in the network (`jtms/network-in?`) at the placements its `routes-of` gives,
+  and remove the placements of each member set placed over one of those handles that it
+  no longer gives (`stale-sets`), each under `owns?` (`place-justified!`), in content
+  order.  `nogoods-of` takes a handle set.  A nogood or a member set found through
+  `reached` alone compares only its placements in `reach`'s `:under`
+  (`special/drain-context-moves!`): `reached` holds the handles a `genlCx` move reaches,
+  and a placement the move creates or retires lies in `:under`.  Returns the handles
+  created.  The reads all precede the writes (`plan-sets`)."
+  [kb reach full reached nogoods-of kind-of routes-of owns?]
+  ((plan-sets kb reach full reached nogoods-of kind-of routes-of owns?)))
 
 (defn- reach-handles
-  "What a `genlCx` move `reach` (`decide/edge-reach`) can give or take a placement through,
+  "What a `genlCx` move `reach` (`special/drain-context-moves!`' `:reach`) can give or take a placement through,
   `[handles grounds]`: the candidates (`decide/handles-at`) stated in a context of its
   `:below`, and the handles stated in the contexts of `:below` that state a `genl` edge or
   a declaration (`tax/asserting-contexts-among`, read by context with
@@ -2922,14 +3292,13 @@
 
 (defn- mark-ends
   "The predicates the grounds among the handles `hs` reach a tuple nogood under: the lower
-  end of a stated `genl` edge with a mark at or above it (`tuple/under-mark?`), and the
+  end of a stated `genl` edge with a mark at or above it (`tuple/under-marks`), and the
   predicate a mark's flat-cache key names (`tuple/owned?`'s keys)."
   [kb hs]
   (let [tax (reasoning/taxonomy kb)]
     (into (into #{} (keep (fn [[kind a b]] (case kind :prop b :functional-in-arg a nil)))
                 (tax/supported-keys tax hs))
-          (filter #(tuple/under-mark? tax %))
-          (genl-lower-ends kb hs))))
+          (tuple/under-marks tax (genl-lower-ends kb hs)))))
 
 (defn- place-memberships!
   "Place the membership nogoods whose placement can have moved, and remove the placements
@@ -2947,25 +3316,30 @@
           recs (:records kb)
           w    (decide/write-view tax)
           rh   (reach-handles kb c reach)
-          xs   (-> (set (keys moved))
+          full (-> (set (keys moved))
                    (into (membership/terms-of kb c fresh))
                    (into (membership/terms-of kb c placed))
-                   (into (membership/terms-under w c (into #{} (comp (keep #(tax/separation-ends tax %)) cat)
-                                                           (tax/supported-keys tax fresh))))
-                   (into (if (= ::all rh)
-                           (membership/nogoods-terms c)
-                           (let [[hs gs] rh]
-                             (cond-> (membership/terms-of kb c hs)
-                               (seq gs) (into (membership/terms-under w c (ground-ends kb gs))))))))]
+                   (into (membership/terms-under kb w c (into #{} (comp (keep #(tax/separation-ends tax %)) cat)
+                                                              (tax/supported-keys tax fresh))))
+                   (into (when (= ::all rh) (membership/nogoods-terms c))))
+          xs   (into full (when (vector? rh)
+                            (let [[hs gs] rh]
+                              (cond-> (membership/terms-of kb c hs)
+                                (seq gs) (into (membership/terms-under kb w c (ground-ends kb gs)))))))]
+      ;; every term's routes are read before the first term's writes (`plan-sets`)
       (into []
-            (mapcat (fn [x]
-                      (let [ngs (membership/nogoods-of c x)
-                            hs  (into (set (get moved x)) (mapcat :members) ngs)]
-                        (place-sets! kb ngs
-                                     (stale-sets kb hs membership/kind-of (into #{} (map :members) ngs))
-                                     #(membership/routes w recs %)
-                                     #(membership-owned? kb %1 %2)))))
-            (sort xs)))))
+            (mapcat (fn [place!] (place!)))
+            (tax/with-neighbours
+              (atom {})
+              (fn []
+                (mapv (fn [x]
+                        (let [ngs (membership/nogoods-of c x)
+                              hs  (into (set (get moved x)) (mapcat :members) ngs)
+                              f?  (contains? full x)]
+                          (plan-sets kb reach (when f? hs) (when-not f? hs) #(when (seq %) ngs)
+                                     #(membership/kind-of w %1 %2) #(membership/routes w recs %)
+                                     #(membership-owned? kb %1 %2))))
+                      (sort xs))))))))
 
 (defn- place-related!
   "Place the related-types nogoods whose placement can have moved, and remove the
@@ -2987,21 +3361,21 @@
         sep    (related/reread-separated! kb w ends)
         c      (if (seq sep) (decide/synced kb) c)
         rh     (reach-handles kb c reach)
-        hs     (-> (set moved)
-                   (into (filter #(holds? c %)) fresh)
+        full   (-> (set moved)
+                   (into (filter #(holds? kb c %)) fresh)
                    (into (comp (filter #(related/kind-of w recs %)) cat) placed)
                    (into sep)
-                   (into (cond
-                           (nil? rh)         nil
-                           (= ::all rh)      ((:handles related/family) c)
-                           (seq (second rh)) ((:handles related/family) c)
-                           :else             (filter #(holds? c %) (first rh)))))]
-    (when (seq hs)
-      (let [ngs (into #{} (mapcat #(related/nogoods-holding c %)) hs)]
-        (place-sets! kb ngs
-                     (stale-sets kb hs #(related/kind-of w %1 %2) (into #{} (map :members) ngs))
-                     #(related/routes w recs %)
-                     (fn [ms _] (boolean (related/kind-of w recs ms))))))))
+                   (into (when (= ::all rh) ((:handles related/family) kb c))))
+        rhs    (when (vector? rh)
+                 (if (seq (second rh))
+                   ((:handles related/family) kb c)
+                   (filter #(holds? kb c %) (first rh))))]
+    (when (or (seq full) (seq rhs))
+      (place-sets! kb reach full rhs
+                   #(into #{} (mapcat (fn [h] (related/nogoods-holding kb c h))) %)
+                   #(related/kind-of w %1 %2)
+                   #(related/routes w recs %)
+                   (fn [ms _] (boolean (related/kind-of w recs ms)))))))
 
 (defn- place-tuples!
   "Place the tuple nogoods whose placement can have moved, and remove the placements of
@@ -3019,23 +3393,20 @@
           w    (decide/write-view tax)
           rh   (reach-handles kb c reach)
           mem? #(tuple/member? kb c %)
-          hs   (-> (set moved)
+          full (-> (set moved)
                    (into (filter mem?) fresh)
                    (into (filter mem?) placed)
                    (into (tuple/members-under kb w c (mark-ends kb fresh)))
-                   (into (cond
-                           (nil? rh)    nil
-                           (= ::all rh) (tuple/members kb w c)
-                           :else        (let [[hs gs] rh]
-                                          (-> (filterv mem? hs)
-                                              (into (tuple/self-tuples-in kb w (:below reach)))
-                                              (into (tuple/members-under kb w c (mark-ends kb gs))))))))]
-      (when (seq hs)
-        (let [ngs (tuple/nogoods-holding kb c hs)]
-          (place-sets! kb ngs
-                       (stale-sets kb hs (constantly true) (into #{} (map :members) ngs))
-                       #(tuple/routes kb w c %)
-                       (fn [ms core] (tuple/owned? tax ms core))))))))
+                   (into (when (= ::all rh) (tuple/members kb w c))))
+          rhs  (when (vector? rh)
+                 (let [[hs gs] rh]
+                   (-> (filterv mem? hs)
+                       (into (tuple/self-tuples-in kb w (:below reach)))
+                       (into (tuple/members-under kb w c (mark-ends kb gs))))))]
+      (when (or (seq full) (seq rhs))
+        (place-sets! kb reach full rhs #(tuple/nogoods-holding kb c %) (constantly true)
+                     #(tuple/routes kb w c %)
+                     (fn [ms core] (tuple/owned? tax ms core)))))))
 
 (defn- place-arities!
   "Place the arity nogoods whose placement can have moved, and remove the placements of
@@ -3052,24 +3423,21 @@
     (let [tax  (reasoning/taxonomy kb)
           w    (decide/write-view tax)
           rh   (reach-handles kb c reach)
-          mem? #(arity/member? c %)
-          hs   (-> (set moved)
+          mem? #(arity/member? kb c %)
+          full (-> (set moved)
                    (into (filter mem?) fresh)
                    (into (filter mem?) placed)
                    (into (arity/members-under kb w c (genl-lower-ends kb fresh)))
-                   (into (cond
-                           (nil? rh)    nil
-                           (= ::all rh) ((:handles arity/family) c)
-                           :else        (let [[hs gs] rh]
-                                          (-> (filterv mem? hs)
-                                              (into (arity/members-under kb w c (genl-lower-ends kb gs)))
-                                              (into (arity/reached kb w c (:below reach))))))))]
-      (when (seq hs)
-        (let [ngs (arity/nogoods-holding kb w c hs)]
-          (place-sets! kb ngs
-                       (stale-sets kb hs (constantly true) (into #{} (map :members) ngs))
-                       #(arity/routes kb w c % (fn [h] (exc/closure-excepted-anywhere? kb h)))
-                       (fn [ms core] (arity/owned? kb ms core))))))))
+                   (into (when (= ::all rh) ((:handles arity/family) kb c))))
+          rhs  (when (vector? rh)
+                 (let [[hs gs] rh]
+                   (-> (filterv mem? hs)
+                       (into (arity/members-under kb w c (genl-lower-ends kb gs)))
+                       (into (arity/reached kb w c (:below reach))))))]
+      (when (or (seq full) (seq rhs))
+        (place-sets! kb reach full rhs #(arity/nogoods-holding kb w c %) (constantly true)
+                     #(arity/routes kb w c % (fn [h] (exc/closure-excepted-anywhere? kb h)))
+                     (fn [ms core] (arity/owned? kb ms core)))))))
 
 (defn placement-queued?
   "Has the negation, membership, related-types, tuple or arity index queued a nogood the
@@ -3091,9 +3459,10 @@
   them over, and remove the placements of each member set no longer found
   (`place-justified!`), in content order.  Returns the handles created.  A clash whose
   memo entry was carried keeps its placements.  A rebuild's settle places too
-  (docs/nmtms.md, \"A `recover` places the nogoods its store does not hold\")."
-  [kb region]
-  (let [{:keys [found left]} (discovery/discover-inherited! kb region)
+  (docs/nmtms.md, \"A `recover` places the nogoods its store does not hold\").  `moves`
+  is the pass's `genlCx` moves (`special/drain-context-moves!`)."
+  [kb region {:keys [reach first?]}]
+  (let [{:keys [found left]} (discovery/discover-inherited! kb region reach first?)
         tax   (reasoning/taxonomy kb)
         recs  (:records kb)
         owns? (fn [ms] (let [ms (set ms)] #(= ms %)))]
@@ -3118,12 +3487,12 @@
   Each family reads what its write-time index queued, the handles among `region` (a delay)
   relabelled that `read` (a volatile set) does not hold yet, which this adds, the handles
   an except of which arrived or left and what rests on them, the placed `contradicts`
-  among them, and the `genlCx` edges moved since (`decide/edge-reach`).  Reads nothing
-  while no family holds a nogood or queued one and no `orthogonal` is stored."
-  [kb region read]
+  among them, and what the pass's `genlCx` moves reach (`moves`' `:reach`,
+  `special/drain-context-moves!`, a delay forced here).  Reads nothing while no family
+  holds a nogood or queued one and no `orthogonal` is stored."
+  [kb region read {:keys [reach first?]}]
   (let [c (decide/synced kb)
         bodies (negation/take-moved! kb)
-        [since first?] (decide/take-edge-cursor! kb)
         mmoved (membership/take-moved! kb)
         rmoved (related/take-moved! kb)
         tax    (reasoning/taxonomy kb)
@@ -3136,10 +3505,11 @@
         tmoved (placing (tuple/held? tax c) (tuple/take-moved! kb))
         amoved (placing (arity/held? c) (arity/take-moved! kb))]
     (when (or (reads/stores-opposed? (:index kb)) (seq mmoved) (seq (membership/nogoods-terms c))
-              (seq rmoved) (seq ((:handles related/family) c))
-              (related/orthogonals? kb (decide/write-view tax))
-              (seq tmoved) (tuple/held? tax c) (seq amoved) (arity/held? c))
-      (let [fresh  (into [] (comp (distinct) (remove @read)) @region)
+              (seq rmoved) (related/orthogonals? kb (decide/write-view tax))
+              (seq tmoved) (tuple/held? tax c) (seq amoved) (arity/held? c)
+              (related/held? kb c))
+      (let [reach  @reach
+            fresh  (into [] (comp (distinct) (remove @read)) @region)
             _      (vswap! read into fresh)
             ;; an except arriving or leaving moves a placement with no relabel of the
             ;; handle it names or of what rests on it (`special/except-moved`, its
@@ -3148,13 +3518,13 @@
                          (jtms/consequence-closure (reasoning/tms kb) (special/except-moved kb)))
             psets  (placed-members kb fresh)
             placed (into #{} cat psets)
-            reach  (when since (decide/edge-reach tax since))
-            made   (-> []
-                       (into (place-negations! kb bodies reach first? fresh placed))
-                       (into (place-memberships! kb c mmoved reach fresh placed))
-                       (into (place-related! kb c rmoved reach fresh psets))
-                       (into (place-tuples! kb c tmoved reach fresh placed))
-                       (into (place-arities! kb c amoved reach fresh placed)))]
+            made   (binding [*witnesses* (volatile! nil)]
+                     (-> []
+                         (into (place-negations! kb bodies reach first? fresh placed))
+                         (into (place-memberships! kb c mmoved reach fresh placed))
+                         (into (place-related! kb c rmoved reach fresh psets))
+                         (into (place-tuples! kb c tmoved reach fresh placed))
+                         (into (place-arities! kb c amoved reach fresh placed))))]
         ;; a placement this pass created is relabelled by its creation alone, so the next
         ;; pass does not read it as moved and place its nogood again
         (vswap! read into made)
@@ -3164,23 +3534,26 @@
 ;;
 (defn- refusal-reason
   "Why a completed firing may not be placed in `pctx`, or nil — `:post-join`,
-  `:exception`, `:naf` or `:hidden`, in the order they are cheapest to decide.  A
-  closed-extent negative antecedent that does not hold reports `:naf`, which is what it
-  is: the same undercutting block, recorded in the same refusal record, released by the
-  same re-evaluation.
+  `:exception`, `:naf`, `:separation` or `:hidden`, in the order they are cheapest to
+  decide.  A closed-extent negative antecedent that does not hold reports `:naf`, which is
+  what it is: the same undercutting block, recorded in the same refusal record, released
+  by the same re-evaluation.  `:separation` is a `disjoint` antecedent the join read
+  separated and `pctx` does not (`separation-exempted?`).
 
   Reading the rule *view* rather than the record: `:excepts` and `:naf` are already in
   hand on the firing path, and fetching them again per firing is what the view exists to
   avoid.  `bindings` is nil when a post-join literal had no answer, or more than one."
   [kb rule antes bindings pctx]
-  (cond
-    (nil? bindings)                                                 :post-join
-    (some #(and (provers/exception-visible-from? kb pctx %)
-                (exception-holds? kb (:query %) bindings pctx))
-          (:excepts rule))                                          :exception
-    (naf-blocks? kb (:naf rule) bindings pctx)                       :naf
-    (closed-extent-blocks? kb (:closed-extent rule) bindings pctx)   :naf
-    (antecedent-hidden? kb antes pctx)                               :hidden))
+  (if (nil? bindings)
+    :post-join
+    (let [g (when (or (seq (:excepts rule)) (seq (:naf rule)))
+              (own-guard-block kb (:excepts rule) (:naf rule) bindings pctx
+                               (nm/functor (:consequent rule))))]
+      (cond
+        (#{:exception :naf} g)                                          g
+        (closed-extent-blocks? kb (:closed-extent rule) bindings pctx)   :naf
+        (separation-exempted? kb (:antecedents rule) bindings pctx)      :separation
+        (antecedent-hidden? kb antes pctx)                               :hidden))))
 
 (def ^:dynamic *report-no-placement?*
   "Whether a completed firing that finds no placement context files a `:no-placement`
@@ -3228,6 +3601,16 @@
                                handles)]
         [(mapv first keep) (mapv second keep)]))))
 
+(defn- restates-an-antecedent?
+  "Is `conclusion` the stored sentence of one of `facts`, the records a firing's
+  placement reads?  Such a firing places nothing and stores no justification: every
+  placement context sees the fact, and a justification resting on its own conclusion
+  never brings it IN.  Compared as substituted, so a symmetric conclusion spelled as the
+  fact's mirror is not caught.  See docs/inference.md, \"A firing whose conclusion is
+  one of the facts it matched\"."
+  [conclusion facts]
+  (boolean (some #(= conclusion (:sentence %)) facts)))
+
 (defn- place-conseq
   "Place one ground conclusion literal `raw-c` from a firing: resolve its placement
   contexts — the maximal contexts that see the rule and all antecedent facts — and
@@ -3247,6 +3630,7 @@
   release computes the depth a fresh firing would."
   [kb rule conseq handles placed all-antes links depth max-depth bindings]
   (let [[phs facts]          placed
+        subs                 (when (seq links) (set links))
         fact-ctxs            (map :context facts)
         [placements support] (placement-ingredients kb rule links phs fact-ctxs)]
     (if (empty? placements)
@@ -3346,16 +3730,17 @@
                             c (when bindings
                                 (cond-> conseq (seq post) (res/substitute bindings)))]
                         (if-let [why (refusal-reason kb rule antes bindings pctx)]
-                          (when (or (= :exception why) (= :naf why))
+                          (when (#{:exception :naf :separation} why)
                             ;; a refusal entry is content the ledger keeps and
                             ;; deduplicates by value, and `release-refusal!` hands its
                             ;; `:antes` straight to `place-conclusion` — so it is
                             ;; ordered here, exactly as a stored justification is
                             (record-refusal! kb rule c pctx (kb/antecedent-order kb antes)
-                                             handles bindings max-depth)
+                                             handles bindings max-depth
+                                             (when subs {:subsumptions subs}))
                             nil)
                           (place-conclusion kb rule c pctx antes depth bindings
-                                            (:strength rule))))))
+                                            (:strength rule) subs)))))
             placements))))
 
 (defn- derive-conclusion
@@ -3390,27 +3775,30 @@
             ;; it — a no-op unless quasiquotation is declared
             ;; (`quasiquote/any-quasiquote?`, the `(quoting_function Quasiquote)` gate)
             raw       (quasiquote/maybe-reduce kb raw)
-            ;; a conjunctive skolemized head shares one witness across its conjuncts
-            ;; (only a head existential stores a conjunctive consequent — an ordinary
-            ;; one is split by `expand-consequent` before storage)
-            conjuncts (if (and (sequential? raw) (= sx/and-functor (first raw)))
-                        (vec (rest raw)) [raw])
-            all-antes (conj (vec handles) (:rule-handle rule))
             ;; the matched records, fetched once: placement reads their contexts, and
             ;; the subsumption links read their antecedent keys
             facts     (mapv #(p/get-sentex (:records kb) %) handles)
-            ;; a handle's record, read off the two aligned vectors: a firing has a
-            ;; handful of antecedents, and a map built per firing to look them up
-            ;; costs more than scanning them
-            record-of (fn [h] (loop [i 0]
-                                (when (< i (count facts))
-                                  (if (= h (nth handles i)) (nth facts i) (recur (inc i))))))
-            links     (subsumption-links kb matched record-of)
             placed    (placement-antecedents handles facts matched)
-            new       (reduce (fn [acc c]
-                                (into acc (place-conseq kb rule c handles placed all-antes links
-                                                        depth max-depth bindings)))
-                              [] conjuncts)]
+            ;; a conjunctive skolemized head shares one witness across its conjuncts
+            ;; (only a head existential stores a conjunctive consequent — an ordinary
+            ;; one is split by `expand-consequent` before storage)
+            conjuncts (into [] (remove #(restates-an-antecedent? % (second placed)))
+                            (if (and (sequential? raw) (= sx/and-functor (first raw)))
+                              (rest raw) [raw]))
+            new       (when (seq conjuncts)
+                        (let [all-antes (conj (vec handles) (:rule-handle rule))
+                              ;; a handle's record, read off the two aligned vectors: a
+                              ;; firing has a handful of antecedents, and a map built per
+                              ;; firing to look them up costs more than scanning them
+                              record-of (fn [h] (loop [i 0]
+                                                  (when (< i (count facts))
+                                                    (if (= h (nth handles i)) (nth facts i) (recur (inc i))))))
+                              links     (subsumption-links kb matched record-of)
+                              rule      (cond-> rule (some declaration-record? facts) (assoc :inherited? true))]
+                          (reduce (fn [acc c]
+                                    (into acc (place-conseq kb rule c handles placed all-antes links
+                                                            depth max-depth bindings)))
+                                  [] conjuncts)))]
         ;; a firing is the finest unit of work the fixpoint has, so it is where a long
         ;; datum reports from — including a firing that placed nothing, since a join
         ;; grinding through matches that all turn out blocked is exactly the stretch that
@@ -3418,7 +3806,7 @@
         (when *tick* (*tick* (count new)))
         ;; a placed preservation declaration changes what every later join may inherit
         (note-placed-declaration! conjuncts)
-        {:new new}))))
+        {:new (or new [])}))))
 
 (defn rule-view-of
   "The chainer's view of a rule sentex.  `:strength` is the justification class its
@@ -3581,7 +3969,7 @@
   (let [rec (:records kb)
         tms (reasoning/tms kb)
         idx (:index kb)
-        rule-hs (into (sorted-set) (reads/as-stored-rules-in idx :rule nil))]
+        rule-hs (into (sorted-set) (reads/as-stored-rules-in-global idx :rule))]
     (into []
           (keep (fn [rh]
                   (when-let [rsx (p/get-sentex rec rh)]
@@ -3641,7 +4029,9 @@
   (case (refusal-state kb rh entry)
     :blocked []
     :dead    (do (drop-refusal! kb rh entry) [])
-    :free    (let [rule  (rule-view kb rh)
+    :free    (let [rule  (cond-> (rule-view kb rh)
+                           (some #(declaration-record? (p/get-sentex (:records kb) %)) (:antes entry))
+                           (assoc :inherited? true))
                    depth (inc (reduce max 0 (map #(jtms/depth (reasoning/tms kb) %) (:handles entry))))
                    ;; the bound the refusing run was configured with, kept on the entry;
                    ;; the default is the fallback for an entry that carries none — one a
@@ -3653,7 +4043,7 @@
                  []
                  (let [placed (vec (place-conclusion kb rule (:conseq entry) (:pctx entry)
                                                      (:antes entry) depth (:bindings entry)
-                                                     (:strength rule)))]
+                                                     (:strength rule) (:subsumptions entry)))]
                    ;; the drop's ledger entry described a conclusion that is now stored,
                    ;; and left standing it would report the arrival order: an order that
                    ;; brought the type first files nothing
@@ -3696,9 +4086,8 @@
       nil)))
 
 (def respell-informant
-  "The informant of a justification storing a spelling a reader reads of a fact, from the
-  row holding the fact as written and the marks that sort it (`ensure-respellings!`)."
-  'respell)
+  "`jtms/respell-informant`, the informant `ensure-respellings!` justifies a spelling by."
+  jtms/respell-informant)
 
 (defn- piece-holder?
   "Does row `h` hold a piece of a fact: a premise assertion or a rule firing?  Every other
@@ -3805,7 +4194,7 @@
                                      (at-home w #(place-conclusion
                                                   kb (rule-view kb rh) % ctx (conj (vec (:antecedents j)) rh)
                                                   (inc (reduce max 0 (map (fn [a] (jtms/depth tms a)) (:antecedents j))))
-                                                  (:bindings j) (:strength j)))))))
+                                                  (:bindings j) (:strength j) (:subsumptions j)))))))
                        (sort-by (comp nm/print-key val) move-d))
         homes    (into (set (vals moved-p))
                        (keep #(at-home % (fn [hw] (kb/find-sentex-handle kb hw ctx))))
@@ -3906,7 +4295,10 @@
 
 (defn- reified-fns
   "The `reifiable_function` functions some reader does not believe the mark of whose
-  applications `s` holds, written or as a constant minted for one, sorted."
+  applications `s` holds, written or as a constant minted for one, sorted.
+
+  The mark is read unscoped, a superset that `nat/split-reifiable?` narrows to the
+  functions some reader does not believe the mark of."
   [kb s]
   (let [tax (reasoning/taxonomy kb)]
     (->> (tree-seq sequential? seq (nat/expand-expression kb s nat/reified-object-symbol?))
@@ -4019,6 +4411,32 @@
              (planned-join kb (vec antecedents) {} (nm/functor consequent)
                            [{:bindings {} :handles [] :matched []}] admit)))))
 
+(def ^:dynamic *separation-moved*
+  "`{rule-handle types}` while a settle re-joins the rules a separation move queued
+  (`special/recheck-on-separation`), else nil.  A rule handle named here that reaches the
+  agenda is joined over `types` (`fire-rule-over-separation`) instead of over its extent."
+  nil)
+
+(defn- fire-rule-over-separation
+  "Re-join the rule at `rule-handle` over the types `moved` whose separations moved: once
+  per variable end of each `disjoint` antecedent and per type of `moved`, in content
+  order, with that end bound to the type.  A pair neither of whose types moved reads the
+  separation it read when the rule was last joined, so the firings over it stand.  A
+  `disjoint` antecedent with a ground end among `moved` re-joins the rule in full."
+  [kb rule-handle moved max-depth truncated]
+  (let [{:keys [antecedents consequent] :as rule} (rule-view kb rule-handle)
+        ends (into [] (comp (filter separation-literal?) (mapcat rest) (distinct))
+                   antecedents)]
+    (if (some #(and (not (sx/variable? %)) (contains? moved %)) ends)
+      (fire-rule kb rule-handle max-depth truncated)
+      (into []
+            (comp (mapcat (fn [b0]
+                            (planned-join kb (vec antecedents) b0 (nm/functor consequent)
+                                          [{:bindings b0 :handles [] :matched []}] nil)))
+                  (mapcat #(:new (derive-conclusion kb rule % max-depth truncated))))
+            (for [v ends :when (sx/variable? v), t (sort nm/compare-form moved)]
+              {v t})))))
+
 (defn- delta-fire-rule
   "Re-join one rule over a qualitative **delta**: the same full join `fire-rule` runs, but
   with one qualitative antecedent's enumeration narrowed to the pairs that moved
@@ -4106,34 +4524,8 @@
     (let [p (first (nm/args fact))]
       (when (and (symbol? p) (not (sx/variable? p)))
         (not-empty
-         (into #{} (mapcat #(reads/as-stored-rules-by-antecedent (:index kb) %))
+         (into #{} (mapcat #(reads/as-stored-rules-by-antecedent-global (:index kb) %))
                (tax/genls-global (reasoning/taxonomy kb) p)))))))
-
-(defn- computed-rejoin-rules
-  "The forward rules to re-join because `bfn` is a predicate a registered
-  `SupportingProver` **reads** (`provers/support-source-preds`) — the rules carrying an
-  antecedent that such a prover answers.
-
-  The qualitative shape one layer over, and needed for the same reason: a
-  `(conversionFactor Gram Kilogram 0.001)` decides whether `(quantityGreaterThan ?q
-  (QuantityFn 1 Kilogram))` holds of a mass in grams, and nothing connects the two
-  predicates — the trigger index keys on the antecedent's own functor, and the facts that
-  would have triggered the rule have already arrived.  Without this the same three
-  sentences derive a conclusion or not depending on whether the unit table came last.
-
-  `bfn` is the functor of the sentence's **underlying body**, so a believed `(not
-  (conversionFactor …))` reaches here too: it defeats the positive row and so moves the
-  reading exactly as removing it would.
-
-  Two set lookups for every datum that is not one of these — the source set is
-  `#{dimensionOf conversionFactor}` on the shipped registry — and the index reads only for
-  a datum that is."
-  [kb bfn]
-  (let [srcs (provers/support-source-preds kb)]
-    (when (contains? srcs bfn)
-      (not-empty
-       (into #{} (mapcat #(reads/as-stored-rules-by-antecedent (:index kb) %))
-             (provers/support-answered-preds kb))))))
 
 (defn- transitive-rejoin-rules
   "The forward rules to re-join because the arriving datum moved a transitive walk — it is
@@ -4148,8 +4540,8 @@
   (`transitive-antecedent?`), so this keys on `P` itself rather than on its `genl`
   closure.
 
-  The same problem `computed-rejoin-rules` solves one predicate family over, and the same
-  answer.  An arriving `(causes B C)` triggers a `(causes ?a ?c)` antecedent at the tuple
+  The same problem `special/computed-reading-rules` solves one predicate family over, and
+  the same answer.  An arriving `(causes B C)` triggers a `(causes ?a ?c)` antecedent at the tuple
   it is *stated* at, `?a = B`; the pair it licenses through an already-stored `(causes A
   B)` is `?a = A`, and no trigger enumerates that.  Without the re-join the same three
   sentences derive a conclusion or not depending on which hop of the chain arrived last.
@@ -4181,7 +4573,7 @@
                          (seq (filter #(contains? (tax/inverses-under tx %) bfn) ts)))))]
     (when-let [hit (seq (distinct (concat declared edges)))]
       (not-empty
-       (into #{} (mapcat #(reads/as-stored-rules-by-antecedent (:index kb) %)) hit)))))
+       (into #{} (mapcat #(reads/as-stored-rules-by-antecedent-global (:index kb) %)) hit)))))
 
 (defn- closure-rejoin-rules
   "The forward rules to re-join because the arriving datum is a `genl` or `genlCx` edge —
@@ -4201,7 +4593,7 @@
   [kb fact]
   (when-let [f (special/closure-edge-relation fact)]
     (when (reads/stored-rule-key? (:index kb) f)
-      (not-empty (into #{} (reads/as-stored-rules-by-antecedent (:index kb) f))))))
+      (not-empty (into #{} (reads/as-stored-rules-by-antecedent-global (:index kb) f))))))
 
 (defn- rejoin-in-full
   "Re-join in full every forward rule the arriving datum moved a preserved predicate
@@ -4245,14 +4637,15 @@
   permuting, computed, transitive or closure re-join (`fire-rules-for`'s sources)?
   Storage, not belief: a rule the index posts counts whether or not it is believed."
   [kb fact]
-  (let [ffn (nm/functor fact)
-        bfn (if (= sx/not-functor ffn) (nm/functor (kb/body-under-not fact)) ffn)]
+  (let [ffn  (nm/functor fact)
+        body (if (= sx/not-functor ffn) (kb/body-under-not fact) fact)
+        bfn  (nm/functor body)]
     (boolean
      (or (seq (rules/trigger-keys (reasoning/taxonomy kb) fact (reads/as-stored-rule-keys (:index kb))))
          (seq (qkb/calculi-triggered-by kb bfn))
          (inherit/rejoin-rules kb fact)
          (permuting-rejoin-rules kb fact)
-         (computed-rejoin-rules kb bfn)
+         (special/computed-reading-rules kb bfn body)
          (transitive-rejoin-rules kb fact bfn)
          (closure-rejoin-rules kb fact)))))
 
@@ -4307,7 +4700,7 @@
         ;; record decides whether it may fire here — forward-capable, and believed, which
         ;; for a rule is `res/rule-believed?` rather than the `jtms/in?` a fact takes
         ;; (a rule the TMS holds no node for is available, not disbelieved)
-        rhs      (into #{} (mapcat #(reads/as-stored-rules-by-antecedent (:index kb) %)) preds)
+        rhs      (into #{} (mapcat #(reads/as-stored-rules-by-antecedent-global (:index kb) %)) preds)
         ;; A qualitative fact changes the *whole* network, so it can license an
         ;; entailment on any predicate of its calculus — including predicates the
         ;; trigger index would never connect it to, since a new `ntpp` fact licenses a
@@ -4337,7 +4730,7 @@
         qrules   (when-let [cs (qkb/calculi-triggered-by
                                 kb (if (and (= 'genl ffn) (= 3 (count fact))) (nth fact 2) bfn))]
                    (mapv (fn [c]
-                           [c (into #{} (mapcat #(reads/as-stored-rules-by-antecedent (:index kb) %))
+                           [c (into #{} (mapcat #(reads/as-stored-rules-by-antecedent-global (:index kb) %))
                                     (:predicates c))])
                          cs))
         qrhs     (when qrules (not-empty (into #{} (mapcat second) qrules)))
@@ -4357,7 +4750,8 @@
         ;; And once more for a prover rather than for the matcher: a datum on a predicate
         ;; a `SupportingProver` reads moves what a computed antecedent answers, and no
         ;; walk from `conversionFactor` reaches `quantityGreaterThan`.
-        crhs     (computed-rejoin-rules kb bfn)
+        crhs     (special/computed-reading-rules
+                  kb bfn (if (= sx/not-functor ffn) (kb/body-under-not fact) fact))
         ;; And once more for the walk rather than for the table: an arriving edge makes
         ;; pairs a `(transitive P)` antecedent reaches through it, and the trigger index
         ;; offers only the tuple the edge is stated at.
@@ -4410,16 +4804,24 @@
               (reduce (fn [nh2 i]
                         (reduce
                          (fn [nh3 b0]
-                           (reduce (fn [nh4 state]
-                                     (into nh4 (:new (derive-conclusion kb @rule state max-depth truncated))))
-                                   nh3
-                                   (complete-antecedents
-                                    kb antecedents i datum b0
-                                    ;; only the fact's own mark rearranges it at a trigger
-                                    (if (or mirror comps)
-                                      (read-marks kb (nth antecedents i) b0 datum nil)
-                                      [[]])
-                                    cpred)))
+                           ;; a trigger binding that already fixes the conclusion to the
+                           ;; datum itself makes only firings `derive-conclusion` would
+                           ;; place nothing for (`restates-an-antecedent?`), so the join
+                           ;; is skipped; a deferred position does not rest on the datum
+                           (if (and (= cpred ffn)
+                                    (= fact (res/substitute (:consequent rsx) b0))
+                                    (not (deferred-antecedent? kb (nth antecedents i))))
+                             nh3
+                             (reduce (fn [nh4 state]
+                                       (into nh4 (:new (derive-conclusion kb @rule state max-depth truncated))))
+                                     nh3
+                                     (complete-antecedents
+                                      kb antecedents i datum b0
+                                      ;; only the fact's own mark rearranges it at a trigger
+                                      (if (or mirror comps)
+                                        (read-marks kb (nth antecedents i) b0 datum nil)
+                                        [[]])
+                                      cpred))))
                          nh2
                          (trigger-bindings kb (nth antecedents i) fact mirror comps)))
                       nh
@@ -4467,7 +4869,9 @@
           ;; here as well as there: a rule reaches the agenda as a *datum* when it is
           ;; asserted or derived, and a derived one can arrive already defeated.
           (if (and (rules/forward-sentex? sx) (res/rule-believed? kb datum))
-            (fire-rule kb datum max-depth truncated (rule-arrival-admit datum))
+            (if-let [moved (get *separation-moved* datum)]
+              (fire-rule-over-separation kb datum moved max-depth truncated)
+              (fire-rule kb datum max-depth truncated (rule-arrival-admit datum)))
             [])
           ;; A **superseded** fact is the one unbelieved datum that does not fire, and
           ;; the asymmetry with a defeated one is the whole of the reason.  A defeat is
@@ -4668,5 +5072,6 @@
 
 (caches/register-derived
  {:id :R11 :label "Chaining run memos" :kind :pass :keyed-by :value :reads [:index :records]
+  :holds-content? false
   :retired-by {} :computed :pass :imaged? false :var #'*declarations-cell*
   :note "`*agenda-arrivals*`, `*declarations-cell*`, `*closure-rejoins*`, `*evaluatable-preds*` for one run and `*qcn-contexts*` for one datum"})

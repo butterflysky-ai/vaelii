@@ -23,6 +23,7 @@
             [vaelii.core :as v]
             [vaelii.impl.literal-cache :as lc]
             [vaelii.impl.protocols :as p]
+            [vaelii.impl.reads :as reads]
             [vaelii.impl.resolution :as res]
             [vaelii.test-util :as tu]
             [vaelii.world :as world]))
@@ -200,7 +201,7 @@
       ;; the branch is genuinely the small side: more specs than A has postings, so `:auto`
       ;; reads the agnostic bucket — assert it rather than trust the construction
       (is (> (count (#'res/sub-predicates kb broadRel 'CxSocialWorld))
-             (long (p/count-with-arg (:index kb) 1 A)))
+             (long (reads/stored-count-with-arg-global (:index kb) 1 A)))
           "the constructed KB does not force the small-side branch — retune it")
       ;; the reference fan-out and the small side, as the pair `probed` reads: four sides
       ;; agreeing on nothing is the same non-evidence two do

@@ -46,7 +46,7 @@
   plus `DatetimeFn` as the structural (unreifiable) constructor.  Returns the function."
   [kb]
   (let [cxfn (fresh-cxfn)]
-    (v/assert kb (list 'context_denoting_function cxfn) 'CxUniverse)
+    (v/assert kb (list 'result cxfn 'context) 'CxUniverse)
     (v/assert kb '(unreifiable_function DatetimeFn) 'CxUniverse)
     (v/assert kb (list 'contextArgSubrelation cxfn 2 'subintervalOf) 'CxUniverse)
     cxfn))
@@ -342,7 +342,7 @@
   (with-tmp-dir
     (fn [dir]
       (let [k (let [kb1 (v/open-kb {:backend :disk-log :dir dir :recover? false})]
-                (v/assert kb1 '(context_denoting_function CxTmpDurableFn) 'CxUniverse)
+                (v/assert kb1 '(result CxTmpDurableFn context) 'CxUniverse)
                 (v/assert kb1 '(unreifiable_function DatetimeFn) 'CxUniverse)
                 (let [expr  '(CxTmpDurableFn CxMonad (DatetimeFn "2020"))
                       [h k] (context-in kb1 '(likes Tom Ann) expr)]

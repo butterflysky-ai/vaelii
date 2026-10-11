@@ -5,7 +5,7 @@
   predicates."
   (:require [clojure.test :refer [deftest is testing use-fixtures]]
             [vaelii.core :as v]
-            [vaelii.impl.protocols :as p]
+            [vaelii.impl.reads :as reads]
             [vaelii.impl.rules :as vr]
             [vaelii.test-util :as tu]))
 
@@ -54,8 +54,8 @@
         (is (= :default (v/defeat-class kb h)))
         (is (= #{} (:engines (v/sentex kb h)))))
       (testing "and it is indexed both ways, which is what makes it browsable"
-        (is (contains? (set (p/rules-by-consequent (:index kb) ancestorOf)) h))
-        (is (contains? (set (p/rules-by-antecedent (:index kb) parentOf)) h))))))
+        (is (contains? (set (reads/as-stored-rules-by-consequent-global (:index kb) ancestorOf)) h))
+        (is (contains? (set (reads/as-stored-rules-by-antecedent-global (:index kb) parentOf)) h))))))
 
 (tu/deftest-kb a-transitivity-rule-is-written-down-inert-while-the-closure-answers
   ;; The pattern `docs/taxonomy.md` describes: transitivity is not run as a rule — the

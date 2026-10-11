@@ -18,6 +18,10 @@
                                 fill it, the comparisons, weightOf / heightOf, and the
                                 sign vocabulary for the quantities nobody has a figure
                                 for (signOf / trendOf / the qualitative* arithmetic).
+        - CxReflection.txt — the expression lattice (atomic and non-atomic, open and
+                                closed, well-formed and ill-formed expressions) and the
+                                use/mention vocabulary (proposition, means, denotes,
+                                expresses).
         - CxSpace.txt    — qualitative space, four independent calculi: RCC-8
                                 topology (eight base + six derived), cardinal direction
                                 (nine + four), relative direction over a frame's own axes
@@ -38,14 +42,35 @@
         - CxChange.txt    — a simple event calculus: a state persists until an
                                  event ends it, so holdsAt is inertia over what
                                  initiates and terminates say.
+        - CxComputing.txt — relations over software tools, their invocations and
+                                 receipts, media resources and DNS names, and
+                                 the kinds the relations are typed over.
+                                 Opt-in: it sees CxUniverse and CxWell does not
+                                 see it.
         - CxKinship.txt   — grandparentOf, ancestorOf, olderThan, and parenthood
                                  from maternity and paternity.
         - CxMereology.txt — a part is located where its whole is; owning a whole
                                  entails owning its parts.
+        - CxNormalPhysicalConditions.txt — the states of matter at room temperature
+                                 and pressure: stone, wood and glass are solid,
+                                 mercury is liquid, a metal is solid by default.
+                                 Opt-in: it sees CxUniverse and CxWell does not
+                                 see it.
+        - CxPerception.txt — perception relations: perceives, sees, seeImage,
+                                 watchVideo. Opt-in: it sees CxUniverse and CxWell
+                                 does not see it.
         - CxSize.txt      — comparative size: stated between kinds, computed
                                  between objects from their measures.
         - CxSocial.txt    — what acquaintance follows from; employment as one way
-                                 of belonging.
+                                 of belonging; the general relationship and
+                                 dwelling vocabulary over two persons.
+        - CxSocialExtension.txt — relationship and plural-identity vocabulary
+                                 narrower than CxSocial's own. Opt-in: it sees
+                                 CxSocial and CxWell does not see it. The
+                                 Extension suffix names a theory that extends
+                                 an existing starter theory with vocabulary
+                                 most contexts under the base theory have no
+                                 occasion to see.
 
   A spindle is three layers — a head every member sees, members that see the head and
   not each other, and a collector that sees every member — and the topology is two of

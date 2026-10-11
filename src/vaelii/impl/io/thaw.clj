@@ -43,7 +43,9 @@
   come up against another one."
   (:require [clojure.java.io :as io]
             [taoensso.nippy :as nippy]
-            [taoensso.nippy.io :as nippy-io]))
+            [taoensso.nippy.io :as nippy-io]
+            [vaelii.impl.sentex :as sx])
+  (:import [it.unimi.dsi.fastutil.longs Long2ObjectOpenHashMap]))
 
 (def allowed-classes
   "The class names a file the engine wrote may state — **none**.
@@ -229,12 +231,37 @@
   (try (with-guard (f))
        (catch Throwable t (throw (or (refusal t) (vm-error t) t)))))
 
+(defn sharing
+  "A `nippy/*thaw-xform*` under which a thaw keeps one object per value it repeats: each
+  symbol a thawed collection holds, as an element, a map key or a map value, is the symbol
+  pool's (`sentex/intern-sym`), and each `Long` is the first one this xform met with that
+  value.  A thaw otherwise allocates a symbol and a box per occurrence, where the process
+  that froze the value held one object shared by every structure naming it.  The `Long`
+  pool belongs to the returned xform and lives as long as the caller holds it."
+  []
+  (let [boxes (Long2ObjectOpenHashMap.)
+        one   (fn [x]
+                (cond
+                  (symbol? x)       (sx/intern-sym x)
+                  (instance? Long x) (let [l (long x)]
+                                       (or (.get boxes l) (do (.put boxes l x) x)))
+                  :else             x))]
+    (map (fn [x]
+           (if (map-entry? x)
+             (let [k (key x) v (val x) k' (one k) v' (one v)]
+               (if (and (identical? k k') (identical? v v')) x (clojure.lang.MapEntry/create k' v')))
+             (one x))))))
+
 (defn thaw
-  "`nippy/thaw` of `bs` behind the entry point."
-  [^bytes bs]
-  (guarded (fn [] (nippy/thaw bs))))
+  "`nippy/thaw` of `bs` behind the entry point, with nippy's `*thaw-xform*` bound to
+  `xform` when given (`sharing`)."
+  ([^bytes bs] (guarded (fn [] (nippy/thaw bs))))
+  ([^bytes bs xform]
+   (guarded (fn [] (binding [nippy/*thaw-xform* xform] (nippy/thaw bs))))))
 
 (defn thaw-from-in!
-  "`nippy/thaw-from-in!` from `in` behind the entry point."
-  [^java.io.DataInput in]
-  (guarded (fn [] (nippy/thaw-from-in! in))))
+  "`nippy/thaw-from-in!` from `in` behind the entry point, with `xform` as `thaw` takes
+  it."
+  ([^java.io.DataInput in] (guarded (fn [] (nippy/thaw-from-in! in))))
+  ([^java.io.DataInput in xform]
+   (guarded (fn [] (binding [nippy/*thaw-xform* xform] (nippy/thaw-from-in! in))))))

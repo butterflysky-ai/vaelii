@@ -124,7 +124,7 @@
 
 (tu/deftest-kb a-context-nat-minted-for-a-refused-sentence-is-taken-back
   (tu/with-terms [CxTimeFn CxMonad Day Rex]
-    (v/assert kb (list 'context_denoting_function CxTimeFn) 'CxUniverse)
+    (v/assert kb (list 'result CxTimeFn 'context) 'CxUniverse)
     (refused-leaves-nothing kb (list 'Bad_Pred Rex) (list CxTimeFn CxMonad Day) :naming)))
 
 (tu/deftest-kb a-nat-whose-result-type-misses-the-demand-is-refused-alike

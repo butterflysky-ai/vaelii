@@ -1571,12 +1571,18 @@
   (binding [*print-length* nil *print-level* nil *print-meta* false]
     (pr-str x)))
 
-(defn- by-print-key
-  "`coll` as a vector ordered by its elements' printed form.  Decorate-sort-undecorate, so
-  the key is built once per element and one binding frame covers the whole sort."
-  [coll]
+(defn- sort-by-once
+  "`coll` as a vector ordered by `(f x)`, with `f` called once per element:
+  decorate-sort-undecorate, where `sort-by` calls its key fn at every comparison.  The
+  print bounds are released for the whole sort, so `f` may print."
+  [f coll]
   (binding [*print-length* nil *print-level* nil *print-meta* false]
-    (mapv second (sort-by first (mapv (fn [x] [(pr-str x) x]) coll)))))
+    (mapv second (sort-by first (mapv (fn [x] [(f x) x]) coll)))))
+
+(defn- by-print-key
+  "`coll` as a vector ordered by its elements' printed form (`sort-by-once`)."
+  [coll]
+  (sort-by-once pr-str coll))
 
 (defn- comment-first
   "0 for a `(comment term \"…\")` sentex and 1 for everything else — the leading component
@@ -1610,7 +1616,7 @@
   extent and printing a context per member to show sixty rows."
   [sentexes n]
   (if (<= (long n) group-sort-cap)
-    (sort-by (juxt comment-first (comp print-key :context) :id) sentexes)
+    (sort-by-once (juxt comment-first (comp print-key :context) :id) sentexes)
     sentexes))
 
 (def ^:private derived-scan
@@ -2118,8 +2124,8 @@
         ;; the same pair for the same reason
         rows  (cond->> (v/sentexes-with-functor kb 'comment)
                 (<= total sortable-cap)
-                (sort-by (juxt (comp print-key second :sentence)
-                               (comp print-key #(nth (:sentence %) 2 nil)))))
+                (sort-by-once (juxt (comp print-key second :sentence)
+                                    (comp print-key #(nth (:sentence %) 2 nil)))))
         shown (into [] (comp (drop offset) (take (inc front-cap))) rows)
         page  (take front-cap shown)]
     ;; the extent is what is *stored*; belief is the page's own question, asked in one read
@@ -2704,28 +2710,41 @@
                          extra)))))
 
 (defn- graph-step
-  "One expansion: the direct neighbours of `node` under `pred` going `:up` or `:down`, at
+  "One expansion: the nearest neighbours of `node` under `pred` going `:up` or `:down`, at
   most `cap` of them, and how many there are.
 
-  **The neighbours drawn are the first `cap` in print order, of every neighbour the node
-  has.**  The read realizes at most `graph-row-limit` + 1 of them, so it costs at most
-  that many records whatever the node's fan-out.  A node with no more than
-  `graph-row-limit` neighbours is realized whole, sorted, and counted exactly.  A node
-  with more contributes **no** neighbours: the index hands them back in an order that is
-  not the print order, so any `cap` of a partial read would be a sample of that order,
-  and two knowledge bases holding the same edges could draw different ones.  `:more?`
-  marks that case, `:total` is then the limit it exceeded, and the caption says the node
-  has too many to draw.  A `genl` step reads the closure's one-step adjacency
-  (`direct-genls` / `direct-specs`), so an edge a cover roster installs is a neighbour as
-  a stated edge is."
+  **A `genl` step draws the node's minimal supertypes going up and its maximal subtypes
+  going down** (`min-genls` / `max-specs`), computed by the engine over every believed
+  edge.  The closure's one-step adjacency (`direct-genls` / `direct-specs`) holds a stated
+  edge, a derived edge and an edge a cover roster installs alike, and the engine leaves
+  out each one-step neighbour another one stands between.  A stated `(genl dog animal)`
+  beside `dog ⊂ mammal ⊂ animal` therefore draws `animal` above `mammal` and not beside
+  it.  The step does not read `hide-derived?`: which sentexes the page lists does not move
+  a node.  A `genlCx` step draws every one-step neighbour, since the facade has no such
+  read for contexts.
+
+  **The neighbours drawn are the first `cap` in print order, of every nearest neighbour
+  the node has.**  The read realizes at most `graph-row-limit` + 1 one-step neighbours, so
+  it costs at most that many records whatever the node's fan-out.  A `genl` node with two
+  to `graph-row-limit` one-step neighbours costs a second facade read, in which the engine
+  makes one memoized up-closure read per neighbour.  A node with no more than
+  `graph-row-limit` one-step neighbours is realized whole, sorted, and counted exactly.  A
+  node with more contributes **no** neighbours and makes no second read: the index hands
+  them back in an order that is not the print order, so any `cap` of a partial read would
+  be a sample of that order, and two knowledge bases holding the same edges could draw
+  different ones.  `:more?` marks that case, `:total` is then the limit it exceeded, and
+  the caption says the node has too many to draw."
   [kb pred dir node cap]
-  (let [read  (if (= :up dir) parent-terms child-terms)
-        got   (into [] (take (inc graph-row-limit)) (read kb pred node))
-        more? (> (count got) graph-row-limit)]
-    (if more?
+  (let [up? (= :up dir)
+        got (into [] (take (inc graph-row-limit))
+                  ((if up? parent-terms child-terms) kb pred node))]
+    (if (> (count got) graph-row-limit)
       {:terms [] :total graph-row-limit :exact? false :more? true}
-      {:terms (into [] (take cap) (by-print-key got)) :total (count got)
-       :exact? true :more? false})))
+      (let [near (if (and (= 'genl pred) (> (count got) 1))
+                   ((if up? v/min-genls v/max-specs) kb node)
+                   got)]
+        {:terms (into [] (take cap) (by-print-key near)) :total (count near)
+         :exact? true :more? false}))))
 
 (defn- fresh-neighbours
   "The neighbours a row is built from: what the expansions found, minus anything already
@@ -2740,8 +2759,9 @@
                  [[] #{}] found)))
 
 (defn- grow
-  "One side of the taxonomy view: up to `hops` rows of direct neighbours of `centre` under
-  `rel`, going `dir`.
+  "One side of the taxonomy view: up to `hops` rows of nearest neighbours of `centre` under
+  `rel`, going `dir`.  Each row entry is `{:term :rel :from}`, which is one drawn
+  subsumption edge between `:term` and the node `:from` it was found from.
 
   Each row is capped, each node past the first row contributes at most `graph-spread`,
   and every expansion is spent from `budget` — so the number of reads is bounded before
@@ -2975,6 +2995,14 @@
      :edges (keep (fn [[n e]] (rel-edge centre n e)) placed)
      :shown (count placed)}))
 
+(defn- drawn-subsumptions
+  "The subsumption edges one side of the taxonomy view draws, as a set of `[sub super]`
+  pairs: plain data, for a caller that asks whether the picture drew a given edge."
+  [{:keys [rows]} dir]
+  (into #{}
+        (map (fn [{:keys [term from]}] (if (= :up dir) [from term] [term from])))
+        (apply concat rows)))
+
 (defn- taxonomy-scene
   "The top-down view: the term in the middle, its supertypes in rows above and its
   subtypes in rows below, relations flanking.  Vertical position **is** the subsumption
@@ -3004,6 +3032,7 @@
                         placed)]
     {:nodes (concat [centre] placed (:nodes flank))
      :edges (concat tax-edges (:edges flank))
+     :subsumptions (into (drawn-subsumptions up :up) (drawn-subsumptions down :down))
      :up up :down down
      :flank {:shown (:shown flank)}}))
 
@@ -3794,10 +3823,14 @@
 (defn- search-answers
   "The answers the search found, each tagged with the node it came off — so the answer is
   reachable to the subtree that produced it."
-  [view {:keys [answers]}]
+  [view {:keys [answers unenumerated]}]
   (let [n (count answers)]
     [:div
      [:h3 (commas n) " answer" (when (not= 1 n) "s")]
+     (when (seq unenumerated)
+       [:p [:b "Incomplete: "] "a goal asked " (interpose ", " (map #(term-link view %) unenumerated))
+        " with both arguments open, which answers the stored pairs and not the transitive "
+        "closure. Bind one argument to get the derived pairs."])
      (if (seq answers)
        (list
         [:ul (for [a (take 50 answers)]
@@ -4038,9 +4071,13 @@
                        (when-not (seq (:unsatisfiable-sources net))
                          [:p.legend "No single pair is to blame — composition is what "
                           "emptied a constraint, so the clash is a property of the set."]))
-                     (for [{:keys [source pairs cycle support]} (:unsatisfiable-sources net)]
+                     (for [{:keys [source pairs cycle dimensions support]}
+                           (:unsatisfiable-sources net)]
                        [:p.legend "The " (name source) " network this calculus reads is "
                         "unsatisfiable"
+                        (when (seq dimensions)
+                          (list ": its constraints span the dimensions "
+                                (interpose ", " (for [d dimensions] (term-link view d)))))
                         (when (seq cycle)
                           (list ": the instants on a negative cycle are "
                                 (interpose ", " (for [i cycle] (term-link view i)))))
@@ -4486,8 +4523,10 @@
     "start"   (do (sandbox/open kb sandbox)
                   (v/edit! kb {:add [[(demo-claim 'bird) sandbox]]})
                   (v/handle-of kb (demo-cap 'flying) sandbox))
+    ;; known-true, so the exception sweeps the conclusion: a `:default` blocker stores it
+    ;; with a defeat instead (docs/naf.md)
     "except"  (do (sandbox/open kb sandbox)
-                  (v/edit! kb {:add [[(demo-claim 'penguin) sandbox]]})
+                  (v/edit! kb {:add [[(demo-claim 'penguin) sandbox {:strength :monotonic}]]})
                   first-h)
     "restore" (do (when-let [h (and (sandbox/live? kb sandbox)
                                     (v/handle-of kb (demo-claim 'penguin) sandbox))]
@@ -4600,6 +4639,9 @@
           (list n (if (= 1 n) " sentex" " sentexes")
                 [:span.muted " (what you wrote, and what the rules concluded from it)"])
           "empty")]
+       [:p.muted "This server keeps at most " (sandbox/max-sandboxes) " sandboxes of up to "
+        sandbox/max-sentexes " sentexes each. When a new one needs room, the one least "
+        "used lately is cleared, so a sandbox left idle can be cleared."]
        (when (pos? n)
          [:form {:hx-post "/sandbox/reset" :hx-target "#main" :hx-select "#main"
                  :hx-swap "outerHTML"}
@@ -4752,8 +4794,8 @@
             (when (some (comp seq :premises first) rows)
               [:p.legend "The examples that need individuals write them into "
                (if live? (list [:code (str sandbox)] ", ") "a context of this browser session's own, ")
-               "which sees the whole shipped ontology and which nothing shipped can see "
-               "into. "
+               "which sees what CxWell sees, every shipped context but the opt-in theories, "
+               "and which nothing shipped can see into. "
                (when live?
                  (demo-step-form {:op "reset" :label "Discard my sandbox"}))])
             (for [g ex/groups]
@@ -5601,7 +5643,10 @@
   context-scoped, so a sandbox with no `genlCx` edge yet would see none of the shipped
   vocabulary they are checked against.  When the check then refuses the form, the edge
   this call wrote is taken out again (`sandbox/reset!` over the empty extent), so a
-  refused form leaves the KB as it found it."
+  refused form leaves the KB as it found it.
+
+  A form whose lines would take the sandbox past `sandbox/max-sentexes` is refused with
+  `:over-ceiling` before the sandbox is opened."
   [{:keys [kb sandbox] :as view} {:keys [text ctx monotonic?] :as state}]
   (let [ctx-sym (->form ctx)
         opts    (when monotonic? {:strength :monotonic})
@@ -5611,7 +5656,16 @@
                         :message (str "the context must be a bare symbol, got "
                                       (if (str/blank? (str ctx)) "nothing" (pr-str ctx)))}])
         batch    {:add (mapv :entry entries)}
-        readable? (and (seq entries) (empty? problems) (not ctx-problem))
+        into-sbx (when sandbox (count (filter #(= sandbox (second (:entry %))) entries)))
+        held     (when (and into-sbx (pos? into-sbx))
+                   (+ (v/count-in-context kb sandbox) into-sbx))
+        cap-problem (when (and held (> held sandbox/max-sentexes))
+                      [{:type :over-ceiling :option :sandbox-sentexes :requested held
+                        :ceiling sandbox/max-sentexes
+                        :message (str "these lines would take your sandbox to " held
+                                      " sentexes, past its ceiling of " sandbox/max-sentexes
+                                      " — reset it, or write fewer")}])
+        readable? (and (seq entries) (empty? problems) (not ctx-problem) (not cap-problem))
         opening? (and readable? sandbox (= ctx-sym sandbox) (not (sandbox/live? kb sandbox)))
         _        (when opening? (sandbox/open kb sandbox))
         checked  (when readable?
@@ -5619,7 +5673,7 @@
                           (cond-> (select-keys p [:type :message])
                             (= :add (:in p)) (assoc :line (:line (nth entries (:index p) nil)))))))
         _        (when (and opening? (seq checked)) (sandbox/reset! kb sandbox))
-        all      (vec (concat ctx-problem problems checked))]
+        all      (vec (concat ctx-problem problems cap-problem checked))]
     (cond
       (empty? entries)
       (assert-page view (assoc state :problems
@@ -5836,7 +5890,7 @@
   entry's load-time stats, so it tracks a KB that has been asserted into since — and a
   KB still loading, whose bar is then two readings of the same thing: how far the load has
   got, and what it is costing."
-  [{:keys [key name status stats progress error elapsed-ms summary kb? job]} active?]
+  [{:keys [key name status stats progress error elapsed-ms summary kb? job params]} active?]
   (let [fp (catalog/footprint key)]
     [:div.kb-card {:class (str "kb-" (clojure.core/name status) (when active? " kb-on"))}
      [:div.kb-head
@@ -5849,6 +5903,7 @@
       ;; what the jobs screen says about it
       (when job [:a.muted.kb-job {:href "/jobs"} "job " job])]
      (when (#{:running :cancelling} status) (progress-bar progress))
+     (when-let [d (:dir params)] [:p.muted "On disk at " [:span.kb-path d]])
      (when error [:p.kb-error error])
      (when (and stats (= :done status))
        [:p.muted (commas (:sentexes stats)) " sentexes · " (commas (:terms stats)) " terms · "
@@ -5983,9 +6038,16 @@
    [:p.muted "Writes " [:b entry-name] " as a portable dump — one that survives a "
     "backend, index or record-name change the on-disk store would not."]
    [:div.kb-opts
-    [:label.kb-opt [:span "Destination directory "]
-     [:input {:type "text" :name "dir" :size 40 :placeholder "/path/to/new-dump"}]
-     [:span.muted " — a path on this machine; must be empty or not exist yet"]]
+    (if (catalog/request-paths?)
+      [:label.kb-opt [:span "Destination directory "]
+       [:input {:type "text" :name "dir" :size 40 :placeholder "/path/to/new-dump"}]
+       [:span.muted " — a path on this machine; must be empty or not exist yet. Empty"
+        " writes under " (str (or (catalog/write-root) "the KB search path")) "."]]
+      (if-let [root (catalog/write-root)]
+        [:p.muted "Written under " [:span.kb-path (str root)]
+         ", in a new directory named after the KB and the time."]
+        [:p.muted "Every " [:code "VAELII_KB_PATH"] " entry is itself a KB, so there is"
+         " no directory to write a dump under."]))
     (for [[param label] [["variant" "Variant "] ["compression" "Compression "]]]
       [:label.kb-opt [:span label]
        [:select {:name param}
@@ -6441,11 +6503,25 @@
                   (catch clojure.lang.ExceptionInfo e (.getMessage e)))]
     (kbs-page (make-view) note)))
 
+(defn- refuse-a-named-dir!
+  "Throw `:path-not-served` when `params` name a `dir` and `catalog/request-paths?` is
+  off: the server picks where a store or a dump goes (`catalog/write-root`), and a request
+  names no directory.  `route` names the route in the refusal."
+  [route params]
+  (when (and (not (str/blank? (str (get params "dir")))) (not (catalog/request-paths?)))
+    (throw (ex-info (str "a request names no directory for this server to write: " route
+                         " writes under " (or (catalog/write-root) "the KB search path") " with a name the server"
+                         " picks.  VAELII_REQUEST_PATHS=1 at the server's start lets a"
+                         " request name one.")
+                    {:type :path-not-served :op route}))))
+
 (defn kbs-load
   "Start loading source `id` with the options the form submitted.  An id the catalog
   holds no source for reaches `load-source` all the same, so its `:unknown-source`
-  refusal — which names the ids there are — is the note `kbs-post` puts on the page."
+  refusal — which names the ids there are — is the note `kbs-post` puts on the page.
+  A `dir` is refused unless `catalog/request-paths?` (`refuse-a-named-dir!`)."
   [id params]
+  (refuse-a-named-dir! "/kbs/load" params)
   ;; the one KB write that does not go through this namespace's write monitor, and
   ;; deliberately: a loader opens brand-new stores nothing else can name yet, so there is
   ;; no KB on screen for it to interleave with.  Its `:writes` claim in the job registry
@@ -6844,14 +6920,17 @@
   the job needs and time out every time.
 
   `late-refusal` is asked again once the monitor is held: an unload or an export can
-  start while the write waits for it."
+  start while the write waits for it.  A write that runs is recorded against the
+  session's sandbox (`sandbox/note-write!`)."
   [target req f]
   (let [kb (current target)]
     (or (write-refusal kb req)
         (let [label (kb-name kb)]
           (locking write-monitor
             (or (late-refusal target kb label req)
-                (f kb)))))))
+                (let [resp (f kb)]
+                  (sandbox/note-write! kb (sandbox/context-of req))
+                  resp)))))))
 
 (defn- writing-job
   "The same guard for a write that runs as a **job**: refuse for the same reasons, then
@@ -7015,7 +7094,7 @@
     409 :still-exporting  an export walks the records with no snapshot
 
   The two 409s refuse reads as well as writes, because the op table does not mark which
-  ops write.
+  ops write.  A `:kb-diff` side names a catalog entry by its key (`serve/*served-kbs*`).
 
   The op waits for the write monitor after these checks, so `handle-op` asks
   `late-refusal-type` again once it holds the monitor: a KB `/kbs/unload` released
@@ -7042,10 +7121,12 @@
 
       :else
       (let [label (kb-name kb)]
-        (serve/handle-op kb op-registry write-monitor req
-                         (fn []
-                           (when-let [[ty msg] (late-refusal-type kb label)]
-                             {:status (if (= :not-found ty) 404 409) :type ty :error msg})))))))
+        (binding [serve/*served-kbs* (fn [id] (when (catalog/in-process? id)
+                                                (:kb (catalog/entry id))))]
+          (serve/handle-op kb op-registry write-monitor req
+                           (fn []
+                             (when-let [[ty msg] (late-refusal-type kb label)]
+                               {:status (if (= :not-found ty) 404 409) :type ty :error msg}))))))))
 
 (defn- unload-entry!
   "`catalog/unload!` entry `key` under the write monitor, and end the change feeds over the
@@ -7325,11 +7406,12 @@
                                                                       " — or leave it out for "
                                                                       (ffirst (export-choices p)))))
                                             :else
-                                            (kbs-post #(catalog/export-entry!
-                                                        (catalog/active)
-                                                        (get-in req [:params "dir"])
-                                                        (assoc (export-opts (:params req))
-                                                               :run-in after-writes-drain))
+                                            (kbs-post #(do (refuse-a-named-dir! "/kbs/export" (:params req))
+                                                           (catalog/export-entry!
+                                                            (catalog/active)
+                                                            (get-in req [:params "dir"])
+                                                            (assoc (export-opts (:params req))
+                                                                   :run-in after-writes-drain)))
                                                       #(view (current target) req)))))}]
          ["/kbs/export/cancel" {:post (fn [req]
                                         (if (same-origin? req)
@@ -7654,7 +7736,7 @@
       (guard/wrap-body-limit body-too-large-refusal)
       ;; every request carries a session token, minted into a cookie the first time.  It
       ;; only *names* a sandbox — nothing is created until something is written there.
-      sandbox/wrap-session))
+      (sandbox/wrap-session #(current target))))
 
 (defn- unframed
   "Wrap `h` so no other site can frame a page.  `same-origin?` passes a POST a framed

@@ -10,7 +10,8 @@
       binary_predicate type, so the property is the classification);
     * decontextualized_predicate — a fact stated in one context deduced into
       CxUniverse and thereby visible everywhere."
-  (:require [clojure.test :refer [deftest is testing use-fixtures]]
+  (:require [clojure.string :as str]
+            [clojure.test :refer [deftest is testing use-fixtures]]
             [clojure.walk :as walk]
             [vaelii.core :as v]
             [vaelii.impl.checks :as checks]
@@ -153,8 +154,11 @@
     ;; the domain relations and orthogonal are the symmetric marks, decontextualized like
     ;; the other algebraic marks, so they answer the enumeration wherever CxUniverse is
     ;; seen.  seeAlso is NOT among them — it is a directional cross-reference, not
-    ;; symmetric.
-    (is (= '#{siblingOf marriedTo friendOf orthogonal siblingDisjointException}
+    ;; symmetric.  The social relations (CxSocial and CxSocialExtension) are among them:
+    ;; their marks are stated in CxUniverse like the rest, and ?ctx is open.
+    (is (= '#{siblingOf marriedTo friendOf orthogonal siblingDisjointException
+              relativeOf romanticPartnerOf coworkerOf roommateOf
+              nestingPartnerOf chosenSiblingOf}
            (set (map #(get % '?p) (v/ask kb '(symmetric ?p) '?ctx)))))
     ;; `genl` and `genlCx` are in the enumeration because CxCore asserts (transitive genl)
     ;; / (transitive genlCx) outright.  They *are* transitive; answering them from cached
@@ -277,6 +281,88 @@
       (is (v/ask? kb (list flies_kind Tweety) 'CxUniverse))
       (v/assert kb (list 'forced_monotonic_predicate flies_kind) 'CxUniverse)
       (is (= [false true] (concluded? kb (list flies_kind Tweety)))))))
+
+(defn- definitional-rule
+  "A forward rule concluding `(orthogonal ?s made)` from the membership `(trigger ?s)`
+  and the further antecedents `more`, each over `?s`."
+  [trigger made & more]
+  (list 'set/forwardRule
+        (list 'implies (apply list 'and (list trigger '?s) more) (list 'orthogonal '?s made))))
+
+(tu/deftest-kb why-not-names-the-conviction-of-a-void-firing
+  (tu/with-terms [trigger_kind made_kind species_kind]
+    (let [r (v/assert kb (definitional-rule trigger_kind made_kind) 'CxUniverse)]
+      (v/assert kb (list trigger_kind species_kind) 'CxUniverse)
+      (let [h (v/handle-of kb (list 'orthogonal species_kind made_kind) 'CxUniverse)
+            w (v/why-not kb h)]
+        (is (some? h) "the firing is stored")
+        (is (= :forced-conclusion (:reason w)))
+        (is (= [[r [trigger_kind]]] (mapv (juxt :informant :off-roster) (:convicted w))))))))
+
+(tu/deftest-kb the-forced-conclusion-report-names-the-antecedents-off-the-roster
+  (tu/with-terms [trigger_kind other_kind made_kind rival_kind species_kind]
+    (v/assert kb (definitional-rule trigger_kind made_kind (list other_kind '?s)
+                   (list 'disjoint '?s rival_kind))
+              'CxUniverse)
+    (doseq [s [(list trigger_kind species_kind) (list other_kind species_kind)
+               (list 'disjoint species_kind rival_kind)]]
+      (v/assert kb s 'CxUniverse))
+    (let [c  (list 'orthogonal species_kind made_kind)
+          vs (filterv #(and (= :forced-conclusion (:violation %)) (= c (:sentence %)))
+                      (v/violations kb))]
+      (is (= [#{trigger_kind other_kind}] (mapv (comp set :off-roster :detail) vs))
+          "disjoint is on the roster and is not named")
+      (is (every? #(and (str/includes? % (str trigger_kind)) (str/includes? % (str other_kind)))
+                  (map (comp :message :detail) vs))))))
+
+(tu/deftest-kb a-forced-trigger-keeps-its-strength-and-its-conclusion-takes-it
+  (tu/with-terms [trigger_kind made_kind species_kind]
+    (v/assert kb (list 'forced_monotonic_predicate trigger_kind) 'CxUniverse)
+    (v/assert kb (definitional-rule trigger_kind made_kind) 'CxUniverse)
+    (let [t (v/assert kb (list trigger_kind species_kind) 'CxUniverse)
+          c (list 'orthogonal species_kind made_kind)]
+      (is (= :default (v/defeat-class kb t)))
+      (is (= [true false] (concluded? kb c)))
+      (is (= :default (v/defeat-class kb (v/handle-of kb c 'CxUniverse))))
+      (v/retract! kb t)
+      (is (nil? (v/handle-of kb c 'CxUniverse)) "retracting the trigger sweeps the conclusion"))))
+
+(tu/deftest-kb forcing-a-trigger-moves-the-verdict-not-the-class
+  ;; [forced? rival strength] -> [trigger believed? rival believed? conclusion believed?
+  ;; hard clash?]; the trigger keeps class :default in every row
+  (doseq [[forced? rival-strength expected]
+          [[false :default   [true  true  false false]]   ; a dilemma
+           [false :monotonic [false true  false false]]   ; the trigger loses
+           [true  :default   [true  false true  false]]   ; the rival loses
+           [true  :monotonic [true  true  true  true]]]]  ; a hard clash
+    (tu/with-terms [trigger_kind rival_kind made_kind species_kind]
+      (let [why (str "forced " forced? ", rival " rival-strength)
+            c   (list 'orthogonal species_kind made_kind)]
+        (when forced? (v/assert kb (list 'forced_monotonic_predicate trigger_kind) 'CxUniverse))
+        (v/assert kb (list 'disjoint trigger_kind rival_kind) 'CxUniverse {:strength :monotonic})
+        (v/assert kb (definitional-rule trigger_kind made_kind) 'CxUniverse)
+        (let [t (v/assert kb (list trigger_kind species_kind) 'CxUniverse)
+              v (v/assert kb (list rival_kind species_kind) 'CxUniverse {:strength rival-strength})]
+          (is (= expected [(v/ask? kb (list trigger_kind species_kind) 'CxUniverse)
+                           (v/ask? kb (list rival_kind species_kind) 'CxUniverse)
+                           (v/ask? kb c 'CxUniverse)
+                           (boolean (some #(= #{t v} (set (:nogood %))) (v/conflicts kb)))])
+              why)
+          (is (= :default (v/defeat-class kb t)) why)))))
+  (testing "a denial of a forced trigger is inert, and the trigger and its consequences stand"
+    (doseq [forced? [false true]]
+      (tu/with-terms [trigger_kind made_kind species_kind qq]
+        (when forced? (v/assert kb (list 'forced_monotonic_predicate trigger_kind) 'CxUniverse))
+        (v/assert kb (definitional-rule trigger_kind made_kind) 'CxUniverse)
+        (v/assert kb (list 'set/forwardRule (list 'implies (list trigger_kind '?s) (list qq '?s)))
+                  'CxUniverse)
+        (let [t (list trigger_kind species_kind)
+              d (v/assert kb (list 'not t) 'CxUniverse {:strength :monotonic})]
+          (v/assert kb t 'CxUniverse)
+          (is (= [forced? forced? forced? forced?]
+                 [(inert? kb d) (v/ask? kb t 'CxUniverse) (v/ask? kb (list qq species_kind) 'CxUniverse)
+                  (v/ask? kb (list 'orthogonal species_kind made_kind) 'CxUniverse)])
+              (str "forced " forced?)))))))
 
 (tu/deftest-kb an-exception-on-a-roster-rule-makes-its-firings-inert-in-either-order
   ;; a context per order, so the rule and its exception are two sentexes per order

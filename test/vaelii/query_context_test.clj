@@ -542,7 +542,7 @@
       (is (= :shape (refusal #(v/query kb goal '(CxTimeFn ?t))))
           "not ground, so it names no context")
       (is (= :shape (refusal #(v/query kb goal '(CxBogusFn ZQ))))
-          "not a declared context-denoting function, so it names none either")
+          "no believed (result CxBogusFn context) declares it a context, so it names none either")
       (is (= :shape (refusal #(v/query kb goal [CxA])))
           "and a vector is not a context at all")
       (testing "the shapes a read does take are unaffected"

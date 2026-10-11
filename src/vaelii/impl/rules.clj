@@ -128,7 +128,10 @@
   KB.  Keeping the negated keys some rule actually reads costs one `genls` membership
   test per such key, and rules reading a negation are few.  The positive side is the up
   set intersected with the roster, walking the smaller of the two.  Complete because the
-  roster is the rule index's own root level, written in the batch that files the keys."
+  roster is the rule index's own root level, written in the batch that files the keys.
+
+  The closures are unscoped: a firing is placed in a context the join decides, so the
+  keys are a superset over every reader that the placement narrows."
   [tax sentence roster]
   (let [k (antecedent-key sentence)]
     (if (vector? k)
@@ -1565,7 +1568,7 @@
                        :literals (mapv second bad) :sentence sentence})))))
 
 (defn consequent-index-pred
-  "The key the consequent slot of `p/index-rule` files `rule-sentex` under: its
+  "The key the consequent slot of `index-rule` files `rule-sentex` under: its
   `consequent-predicate`, or `p/var-consequent-key` when that predicate is a variable —
   a rule with concrete antecedents concluding `(?p …)`, which `check-indexable-functors`
   allows.  Such a rule is filed under the one shared catch-all bucket rather than the
@@ -1584,6 +1587,50 @@
       p/var-consequent-key
       c)))
 
+;; ---- the rule indexes' writes ---------------------------------------------
+;; A rule is posted under each antecedent key in the `:rule-antecedent` count trie and under
+;; its consequent key in `:rule-consequent`, each ending in the rule's context; a watched
+;; rule is posted in the `:exception-index` set of each predicate its re-check condition
+;; mentions and in the `[:rules]` roster.  Each is one `p/family-apply!` batch, and a post
+;; of a handle already filed (or a retire of one not filed) changes nothing.
+
+(defn- rule-family-ops
+  [op handle ante-keys conseq-key context]
+  (cond-> (mapv (fn [k] [op :rule-antecedent [k context] handle]) (distinct ante-keys))
+    (some? conseq-key) (conj [op :rule-consequent [conseq-key context] handle])))
+
+(defn index-rule
+  "Post rule `handle`, stated in `context`, under each of `ante-keys` and under
+  `conseq-key` (nil when it has none).  `antecedent-keys` and `consequent-index-pred`
+  compute the keys."
+  [index handle ante-keys conseq-key context]
+  (p/family-apply! index (rule-family-ops :post handle ante-keys conseq-key context))
+  nil)
+
+(defn unindex-rule!
+  "Retire rule `handle`, stated in `context`, from the keys `index-rule` posted it under."
+  [index handle ante-keys conseq-key context]
+  (p/family-apply! index (rule-family-ops :retire handle ante-keys conseq-key context))
+  nil)
+
+(defn- watched-ops [op handle preds]
+  (conj (mapv (fn [pd] [op :exception-index [pd] handle]) preds)
+        [op :exception-index [:rules] handle]))
+
+(defn index-exception
+  "Post rule `handle` under each predicate of `preds` in the re-check index, and into the
+  `[:rules]` roster whatever `preds` holds."
+  [index handle preds]
+  (p/family-apply! index (watched-ops :post handle preds))
+  nil)
+
+(defn unindex-exception!
+  "Retire rule `handle` from each predicate of `preds` in the re-check index and from the
+  `[:rules]` roster."
+  [index handle preds]
+  (p/family-apply! index (watched-ops :retire handle preds))
+  nil)
+
 (defn direct-concluders
   "Rule handles whose consequent predicate is exactly `pred`, unioned with the
   variable-consequent catch-all (`p/var-consequent-key`): a rule concluding `(?p …)` could
@@ -1592,5 +1639,5 @@
   **stored-graph** read — no spec fan, unlike `resolution/concluding-rule-handles` — shared
   by the stratification-cycle check and the blocked-firing explanation."
   [index pred]
-  (into (set (reads/as-stored-rules-by-consequent index p/var-consequent-key))
-        (reads/as-stored-rules-by-consequent index pred)))
+  (into (set (reads/as-stored-rules-by-consequent-global index p/var-consequent-key))
+        (reads/as-stored-rules-by-consequent-global index pred)))

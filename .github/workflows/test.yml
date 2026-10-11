@@ -14,11 +14,10 @@ name: test
 # 317s; deferring them here is only honest because deep.yml runs `:all`. If
 # that job is ever removed, this one has to become `:all`.
 #
-# BOTH LEGS ARE SHARDED ACROSS RUNNER VMs, the memory leg three ways and the
-# disk-log leg four. In run 33979380791 the memory leg ran 24m08s in one job and
-# the slower of the two disk jobs 17m48s, both against a 30-minute timeout. Split
-# this way each memory runner carries 467s of namespaces and each disk runner
-# 438s, and the workflow answers in about nine minutes. This is not the same-host
+# BOTH LEGS ARE SHARDED ACROSS RUNNER VMs, four ways each. In run 33979380791 the
+# memory leg ran 24m08s in one job and the slower of the two disk jobs 17m48s, both
+# against a 30-minute timeout. Split this way scripts/ci-test-weights.tsv puts 496s
+# of namespaces on each runner, and the workflow answers in about nine minutes. This is not the same-host
 # JVM sharding scripts/test-parallel.sh refuses for durable backends — separate
 # VMs share neither a disk nor a registry, the same reason deep.yml runs nine
 # backends in parallel. Shards are whole namespaces (a `:once` fixture is what
@@ -54,8 +53,8 @@ concurrency:
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
-  # The in-RAM end of the durability axis, split across three runner VMs, each
-  # reporting under its own name and all three gated by the `memory` job below.
+  # The in-RAM end of the durability axis, split across four runner VMs, each
+  # reporting under its own name and all four gated by the `memory` job below.
   #
   # `memory` and `disk` are REQUIRED checks on `develop`, and what makes that
   # safe is that this workflow carries no path filter: it runs on every pull
@@ -77,7 +76,7 @@ jobs:
     # not one. deep.yml carries the long form of the argument.
     if: github.event_name != 'schedule' || github.repository_owner == 'vaelii'
     runs-on: ubuntu-latest
-    # Twice the 8m50s a balanced shard is predicted to take. A shard that grows
+    # Twice the 8m16s a balanced shard is predicted to take. A shard that grows
     # into this has grown by more than 100%, which is a change to investigate
     # rather than a slow runner to wait out.
     timeout-minutes: 20
@@ -86,7 +85,7 @@ jobs:
       # should not be hidden by another shard going red first.
       fail-fast: false
       matrix:
-        shard: [1, 2, 3]
+        shard: [1, 2, 3, 4]
     steps:
       # No credentials left in .git/config: nothing here pushes, and a token
       # sitting in the workspace is reachable by anything the build runs.

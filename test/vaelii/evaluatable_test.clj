@@ -7,7 +7,6 @@
   as a leaf of a node-engine derivation."
   (:require [clojure.test :refer [is testing use-fixtures]]
             [vaelii.core :as v]
-            [vaelii.impl.plan :as plan]
             [vaelii.impl.provers :as provers]
             [vaelii.test-util :as tu]))
 
@@ -90,90 +89,74 @@
 ;; ---- a computed conjunct joins in the node engine -----------------------
 
 (tu/deftest-kb an-evaluatable-check-joins-after-the-generator-that-binds-it
-  ;; The cost RANKING is what places a registered evaluatable, and `VAELII_PLAN=0`
-  ;; removes the ranking — so this test is pinned rather than swept.  `partition-literals`
-  ;; defers the fifteen `sentex/deferred-predicates` by name and nothing else, so an
-  ;; `add-evaluatable` predicate is an ordinary generator to it; what actually puts one
-  ;; behind its binder is `est-bindings` reporting it unselective while its inputs are
-  ;; unbound (docs/inference.md).  Written evaluatable-first and run unranked, the check
-  ;; computes on nothing and the join answers empty.
-  (tu/with-pinned [#'plan/*enabled*]
-    (tu/with-terms [big_enough hasScore Alice Bob]
-      (v/add-evaluatable kb big_enough (fn [n] (>= n 60)))
-      (v/assert kb (list hasScore Alice 75) 'CxUniverse {:strength :monotonic})
-      (v/assert kb (list hasScore Bob 40)   'CxUniverse {:strength :monotonic})
-      (testing "the join binds ?n from the fact and then computes the check — either order"
-        (is (= #{Alice}
-               (set (map #(get % '?x)
-                         (v/query kb [(list hasScore '?x '?n) (list big_enough '?n)]
-                                  'CxUniverse {:max-depth 1})))))
-        (is (= #{Alice}
-               (set (map #(get % '?x)
-                         (v/query kb [(list big_enough '?n) (list hasScore '?x '?n)]
-                                  'CxUniverse {:max-depth 1}))))))
-      (testing "a result-binding function likewise consumes a bound input and produces a value"
-        (tu/with-terms [doubled]
-          (v/add-evaluatable kb doubled (fn [n] (* 2 n)) {:result :first})
-          (is (= #{[Alice 150] [Bob 80]}
-                 (set (map (juxt #(get % '?x) #(get % '?d))
-                           (v/query kb [(list hasScore '?x '?n) (list doubled '?d '?n)]
-                                    'CxUniverse {:max-depth 1}))))))))))
+  (tu/with-terms [big_enough hasScore Alice Bob]
+    (v/add-evaluatable kb big_enough (fn [n] (>= n 60)))
+    (v/assert kb (list hasScore Alice 75) 'CxUniverse {:strength :monotonic})
+    (v/assert kb (list hasScore Bob 40)   'CxUniverse {:strength :monotonic})
+    (testing "the join binds ?n from the fact and then computes the check — either order"
+      (is (= #{Alice}
+             (set (map #(get % '?x)
+                       (v/query kb [(list hasScore '?x '?n) (list big_enough '?n)]
+                                'CxUniverse {:max-depth 1})))))
+      (is (= #{Alice}
+             (set (map #(get % '?x)
+                       (v/query kb [(list big_enough '?n) (list hasScore '?x '?n)]
+                                'CxUniverse {:max-depth 1}))))))
+    (testing "a result-binding function likewise consumes a bound input and produces a value"
+      (tu/with-terms [doubled]
+        (v/add-evaluatable kb doubled (fn [n] (* 2 n)) {:result :first})
+        (is (= #{[Alice 150] [Bob 80]}
+               (set (map (juxt #(get % '?x) #(get % '?d))
+                         (v/query kb [(list hasScore '?x '?n) (list doubled '?d '?n)]
+                                  'CxUniverse {:max-depth 1})))))))))
 
 ;; ---- an evaluatable is a leaf of a derivation, and it follows belief ----
 
 (tu/deftest-kb an-evaluatable-reads-as-a-leaf-of-a-rule-derivation
-  ;; The cost RANKING is what places a registered evaluatable, and `VAELII_PLAN=0`
-  ;; removes the ranking — so this test is pinned rather than swept.  `partition-literals`
-  ;; defers the fifteen `sentex/deferred-predicates` by name and nothing else, so an
-  ;; `add-evaluatable` predicate is an ordinary generator to it; what actually puts one
-  ;; behind its binder is `est-bindings` reporting it unselective while its inputs are
-  ;; unbound (docs/inference.md).  Written evaluatable-first and run unranked, the check
-  ;; computes on nothing and the join answers empty.
-  (tu/with-pinned [#'plan/*enabled*]
-    (tu/with-terms [passing hasScore hasPassed Alice Bob]
-      (v/add-evaluatable kb passing (fn [n] (>= n 60)))
-      (v/assert kb (list hasScore Alice 75) 'CxUniverse {:strength :monotonic})
-      (v/assert kb (list hasScore Bob 40)   'CxUniverse {:strength :monotonic})
-      (v/assert kb (list 'implies
-                         (list 'and (list hasScore '?x '?n) (list passing '?n))
-                         (list hasPassed '?x))
-                'CxUniverse {:direction :forward})
-      (testing "the rule derives only the individual whose bound score computes true"
-        (is (= #{Alice}
-               (set (map #(get % '?x)
-                         (v/query kb (list hasPassed '?x) 'CxUniverse {:max-depth 2}))))))
-      ;; Forward chaining materializes the conclusion (an evaluatable antecedent is computed
-      ;; in the join, not looked up and dropped), so a `query {:proof? true}` reads the
-      ;; *believed* `(hasPassed Alice)` off the engine's leaf solver directly and expands no
-      ;; rule: the search proof stops there — `:via :leaf`, no `:because`.  Provenance lives
-      ;; in the stored justification instead, which `why` reads.  That is `proof-tree`'s
-      ;; contract: the search proof is for what the KB *derives*, `why` for what it *holds*,
-      ;; and a materialized conclusion is held.
-      (testing "the materialized conclusion appears as a stored leaf of the query proof"
-        (let [proof (:proof (tu/sole-answer (v/query kb (list hasPassed Alice) 'CxUniverse
-                                                     {:max-depth 2 :proof? true})))]
-          (is (= [:leaf] (mapv :via proof)))
-          (is (empty? (mapcat :because proof)))))
-      (testing "the computed antecedent is traceable through the stored justification (why)"
-        (let [h            (v/handle-of kb (list hasPassed Alice) 'CxUniverse)
-              w            (v/why kb h)
-              support      (:support w)
-              rule-syms    (into #{} (mapcat (comp flatten :rule)) support)
-              because-syms (into #{} (comp (mapcat :because) (mapcat (comp flatten :sentence)))
-                                 support)]
-          (testing "the belief is held, drawn by the rule whose antecedent is the evaluatable"
-            (is (:believed? w))
-            (is (contains? rule-syms passing))       ; the computed check is in the firing rule
-            (is (contains? rule-syms hasScore)))
-          (testing "and it rests on the handle-bearing antecedent — the score fact"
-            ;; the computed antecedent contributes no handle, by design, so `:because`
-            ;; carries the fact that gives the belief something to be withdrawn with
-            (is (contains? because-syms hasScore))
-            (is (contains? because-syms Alice)))))
-      (testing "the derivation follows belief: retract the supporting fact and it is gone"
-        (let [h (v/handle-of kb (list hasScore Alice 75) 'CxUniverse)]
-          (v/retract! kb h)
-          (is (empty? (v/query kb (list hasPassed '?x) 'CxUniverse {:max-depth 2}))))))))
+  (tu/with-terms [passing hasScore hasPassed Alice Bob]
+    (v/add-evaluatable kb passing (fn [n] (>= n 60)))
+    (v/assert kb (list hasScore Alice 75) 'CxUniverse {:strength :monotonic})
+    (v/assert kb (list hasScore Bob 40)   'CxUniverse {:strength :monotonic})
+    (v/assert kb (list 'implies
+                       (list 'and (list hasScore '?x '?n) (list passing '?n))
+                       (list hasPassed '?x))
+              'CxUniverse {:direction :forward})
+    (testing "the rule derives only the individual whose bound score computes true"
+      (is (= #{Alice}
+             (set (map #(get % '?x)
+                       (v/query kb (list hasPassed '?x) 'CxUniverse {:max-depth 2}))))))
+    ;; Forward chaining materializes the conclusion (an evaluatable antecedent is computed
+    ;; in the join, not looked up and dropped), so a `query {:proof? true}` reads the
+    ;; *believed* `(hasPassed Alice)` off the engine's leaf solver directly and expands no
+    ;; rule: the search proof stops there — `:via :leaf`, no `:because`.  Provenance lives
+    ;; in the stored justification instead, which `why` reads.  That is `proof-tree`'s
+    ;; contract: the search proof is for what the KB *derives*, `why` for what it *holds*,
+    ;; and a materialized conclusion is held.
+    (testing "the materialized conclusion appears as a stored leaf of the query proof"
+      (let [proof (:proof (tu/sole-answer (v/query kb (list hasPassed Alice) 'CxUniverse
+                                                   {:max-depth 2 :proof? true})))]
+        (is (= [:leaf] (mapv :via proof)))
+        (is (empty? (mapcat :because proof)))))
+    (testing "the computed antecedent is traceable through the stored justification (why)"
+      (let [h            (v/handle-of kb (list hasPassed Alice) 'CxUniverse)
+            w            (v/why kb h)
+            support      (:support w)
+            rule-syms    (into #{} (mapcat (comp flatten :rule)) support)
+            because-syms (into #{} (comp (mapcat :because) (mapcat (comp flatten :sentence)))
+                               support)]
+        (testing "the belief is held, drawn by the rule whose antecedent is the evaluatable"
+          (is (:believed? w))
+          (is (contains? rule-syms passing))       ; the computed check is in the firing rule
+          (is (contains? rule-syms hasScore)))
+        (testing "and it rests on the handle-bearing antecedent — the score fact"
+          ;; the computed antecedent contributes no handle, by design, so `:because`
+          ;; carries the fact that gives the belief something to be withdrawn with
+          (is (contains? because-syms hasScore))
+          (is (contains? because-syms Alice)))))
+    (testing "the derivation follows belief: retract the supporting fact and it is gone"
+      (let [h (v/handle-of kb (list hasScore Alice 75) 'CxUniverse)]
+        (v/retract! kb h)
+        (is (empty? (v/query kb (list hasPassed '?x) 'CxUniverse {:max-depth 2})))))))
 
 ;; ---- forward chaining computes an evaluatable antecedent, so ask? = query ----
 ;; Forward chaining computes an evaluatable antecedent through the registry rather than
@@ -209,30 +192,22 @@
 ;; fact and the rule arrives first cannot change what is derived.
 
 (tu/deftest-kb an-evaluatable-antecedent-fires-with-the-facts-asserted-before-the-rule
-  ;; The cost RANKING is what places a registered evaluatable, and `VAELII_PLAN=0`
-  ;; removes the ranking — so this test is pinned rather than swept.  `partition-literals`
-  ;; defers the fifteen `sentex/deferred-predicates` by name and nothing else, so an
-  ;; `add-evaluatable` predicate is an ordinary generator to it; what actually puts one
-  ;; behind its binder is `est-bindings` reporting it unselective while its inputs are
-  ;; unbound (docs/inference.md).  Written evaluatable-first and run unranked, the check
-  ;; computes on nothing and the join answers empty.
-  (tu/with-pinned [#'plan/*enabled*]
-    (tu/with-terms [big_enough score topScorer Dave Erin]
-      (v/add-evaluatable kb big_enough (fn [n] (> n 60)))
-      (v/assert kb (list score Dave 90) 'CxUniverse {:strength :monotonic})
-      (v/assert kb (list score Erin 40) 'CxUniverse {:strength :monotonic})
-      ;; the rule is added last — `fire-rule` runs the full join over the existing facts,
-      ;; and the evaluatable must still land after `score` binds its input
-      (v/assert kb (list 'implies
-                         (list 'and (list score '?x '?s) (list big_enough '?s))
-                         (list topScorer '?x))
-                'CxUniverse {:direction :forward :strength :monotonic})
-      (testing "the full join over stored facts computes the check for each"
-        (is (v/ask? kb (list topScorer Dave)))
-        (is (not (v/ask? kb (list topScorer Erin))))
-        (is (= #{Dave}
-               (set (map #(get % '?x)
-                         (v/query kb (list topScorer '?x) 'CxUniverse {:max-depth 5})))))))))
+  (tu/with-terms [big_enough score topScorer Dave Erin]
+    (v/add-evaluatable kb big_enough (fn [n] (> n 60)))
+    (v/assert kb (list score Dave 90) 'CxUniverse {:strength :monotonic})
+    (v/assert kb (list score Erin 40) 'CxUniverse {:strength :monotonic})
+    ;; the rule is added last — `fire-rule` runs the full join over the existing facts,
+    ;; and the evaluatable must still land after `score` binds its input
+    (v/assert kb (list 'implies
+                       (list 'and (list score '?x '?s) (list big_enough '?s))
+                       (list topScorer '?x))
+              'CxUniverse {:direction :forward :strength :monotonic})
+    (testing "the full join over stored facts computes the check for each"
+      (is (v/ask? kb (list topScorer Dave)))
+      (is (not (v/ask? kb (list topScorer Erin))))
+      (is (= #{Dave}
+             (set (map #(get % '?x)
+                       (v/query kb (list topScorer '?x) 'CxUniverse {:max-depth 5}))))))))
 
 ;; ---- the sole-prover guard applies to the wrapper too -------------------
 

@@ -44,6 +44,7 @@ case " $* " in
   *" --only "*) ;;
   *) require_primary "lein perf without --only" ;;
 esac
+perf_lock_take lein perf "$@"
 
 PERF_ROOT="logs/perf"
 LOG="$PERF_ROOT/run-$$.log"

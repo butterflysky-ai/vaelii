@@ -40,12 +40,11 @@
     (`dense-roots`' `argfam-id`).  The
     table is vocabulary-scaled and rides this file because this file's key column is its
     only reader: written in one pass, discarded as one unit, so the two cannot drift.
-  * `roots-fallback.nippy` — everything the routed families do not claim: the term and
-    slot rosters, whose members are *names* rather than handles.  Both are
-    vocabulary-scaled.  It is still index truth — the slot roster is what the
-    predicate-agnostic argument reads descend through — so its entry count and byte
-    length ride the meta and are checked on open like the CSR sections' lengths, and its
-    load is strict (`read-fallback`).
+  * `roots-fallback.nippy` — everything the routed families do not claim: the counters
+    keyed by a predicate, functor, rule key or kind, which are vocabulary-scaled.  It is
+    still index truth — the predicate extent's count is what the planner prices a scan
+    by — so its entry count and byte length ride the meta and are checked on open like
+    the CSR sections' lengths, and its load is strict (`read-fallback`).
   * `tokens.log` — the durable token dictionary the `int` edges cite, in
     `vaelii.impl.disk.tokens`' format (append-only, id = append position, content-keyed,
     first-writer-wins, never reused).  That module is reused rather than a second
@@ -130,8 +129,10 @@
   "The snapshot's own layout number, beside `kv/index-layout-version` (which says what the
   *entries* mean).  Bump when a section's shape or order changes, or when a packed key
   cites a different scope.  4 packs each `[key ctx]` leaf of a count trie other than the
-  argument trie under its context's scope `[ctx 0 ctx]`."
-  4)
+  argument trie under its context's scope `[ctx 0 ctx]`.  5 packs the taxonomy's supporter
+  and length-binding count tries, their nodes interned whole, and every name set, so the
+  fallback blob holds counters alone."
+  5)
 
 (def ^:private ^:const trie-magic  0x56545249)     ; "VTRI"
 (def ^:private ^:const roots-magic 0x56524f54)     ; "VROT"
@@ -635,8 +636,8 @@
               :records      stamp
               :trie         tstat
               :roots        rstat
-              ;; the blob carries the slot roster, which the agnostic argument reads
-              ;; descend through, so its size is recorded and checked like the CSR sections'
+              ;; the blob carries the counters the planner prices a scan by, so its size
+              ;; is recorded and checked like the CSR sections'
               :fallback     {:entries (count fents)
                              :bytes   (.length (File. (fallback-path root)))}
               :tokens       (dtok/token-count tl)})
@@ -770,7 +771,8 @@
   "Rebuild the in-RAM dictionary from the durable log, **in id order**, so an in-RAM id is
   the durable id the mapped edges cite.  O(dictionary), which this namespace's own header
   is careful to say is **fact-scaled** rather than vocabulary-scaled: a token is often a
-  whole compound term, and the term index keys one per record.  Nor is it the only
+  whole compound term, the term index keys one per record, and the taxonomy's supporter
+  family interns one per taxonomy key.  Nor is it the only
   per-entry cost of an open — `load-trie!` copies the node and edge skeletons into heap,
   named in the header for what it is.
 
@@ -831,11 +833,10 @@
       (finally (dtok/close! tl)))))
 
 (defn- read-fallback
-  "The fallback blob, read strictly: it carries the slot roster, which the
-  predicate-agnostic argument reads descend through, so a torn thaw or an entry count
-  that disagrees with the meta throws (into `load!`'s catch, which rebuilds) rather than
-  defaulting to an empty value the index would then serve as `#{}` on every
-  `sentexes-with-arg`."
+  "The fallback blob, read strictly: it carries the vocabulary's counters, the predicate
+  extent's among them, so a torn thaw or an entry count that disagrees with the meta
+  throws (into `load!`'s catch, which rebuilds) rather than defaulting to an empty value
+  the index would then serve as a count of 0 for every predicate."
   [root m]
   (let [v    (f/read-nippy-file (fallback-path root) ::torn)
         want (long (get-in m [:fallback :entries] -1))]
@@ -844,8 +845,8 @@
                            (if (= ::torn v)
                              "unreadable"
                              (str (count v) " entries where the meta records " want))
-                           " — and it holds the term and slot rosters, which the"
-                           " predicate-agnostic argument reads descend through")
+                           " — and it holds the vocabulary's counters, the predicate"
+                           " extent's among them")
                       {:type :torn-snapshot :path (fallback-path root)
                        :entries (when-not (= ::torn v) (count v)) :expected want})))
     v))
@@ -869,6 +870,9 @@
   [dir store stamp-fn]
   (let [root (snapshot-root dir)
         m    (f/read-nippy-file (meta-path root) nil)]
+    ;; sized from the image's count whatever the decision, since a rebuild thaws every
+    ;; record and re-interns the same vocabulary (`sentex/size-symbol-pool`)
+    (when (integer? (:tokens m)) (sx/size-symbol-pool (:tokens m)))
     (cond
       (not (col/columnar? store)) {:index :rebuild :reason :absent}
       (nil? m)                    {:index :rebuild :reason :absent}

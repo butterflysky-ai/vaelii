@@ -146,22 +146,20 @@ later query came back short — which is why `dense_kv_oracle_test` snapshots ev
 across a run of intersections and compares.
 
 **Which families get packed is a decision, and it is checked.** A handle family is one
-whose value is a set of handles: the leaves of the trie `[:trie :handles …]` and of the
-ten count tries ending in the context (`[:argument-root :handles …]`,
-`[:predicate-extent :handles …]`, `[:rule-antecedent :handles …]`, `[:rule-consequent
-:handles …]`, `[:rule-extent :handles …]`, `[:opposed :handles …]`, `[:self-tuple
-:handles …]`, `[:tax-support :handles …]`, `[:mint :handles …]`, `[:mint-in :handles …]`),
-the context root `[:context-root …]`, the opposed members by context
-`[:opposed-in …]`, the term index `[:term-index …]`, and both halves of the exception
-index `[:exception-index <pred>|:rules]`. The rest must *not* be packed as handles: the
-counts (`:count`) are integers, `[:trie :children …]` holds path tokens (numbers among
-them), a count trie's `:children` hold contexts, and `[:term-roster]`, `[:argument-slot
-…]`, `[:rule-antecedent-keys]`, `[:opposed-bodies]` and `[:tax-installs …]` hold term,
-predicate, rule-key, body and taxonomy-key *names*. `TieredKvBackend` packs every handle
-family. `dense-roots` packs every one but the taxonomy's supporter leaves, whose node is a
-taxonomy key (`[:genl a b]`, `[:disjoint #{a b}]`) that the token dictionary does not
-intern; those stay in its fallback. The argument trie's leaves are the family that has to
-earn its packing:
+whose row in `kv/index-families` has `:leaf :handles`
+([indexing.md](indexing.md#the-index-family-registry)): the leaves of the trie and of the
+count tries, and the context root, the opposed members by context, the term index and
+both halves of the exception index. The rest must *not* be packed as handles: the counts
+are integers, `[:trie :children …]` holds path tokens (numbers among them), a count
+trie's `:children` hold contexts, and the rosters (`:leaf :names`) hold term, predicate,
+rule-key, body, taxonomy-key and binding-kind *names*. `TieredKvBackend` reads its
+handle test off `:leaf`, so it packs every handle family. `dense-roots` routes from a
+table of its own (`routes`), keyed by family tag, and a family absent from it goes to the
+fallback; it packs every handle family. The taxonomy's supporters, whose node is a taxonomy
+key (`[:genl a b]`, `[:disjoint #{a b}]`), the arity bindings, whose node `[pred kind
+value]` is three tokens, and the shape trie, whose node `[f n]` is two, intern the node
+whole as one token, wrapped so it cannot equal a trie path's literal list. The argument
+trie's leaves are the family that has to earn its packing:
 `[:argument-root :handles [pred pos term ctx]]` carries three names beside its term, and
 the packed long has a single term field. The room is in `pos` — 24 bits reserved for an
 argument position, which every flat family passes 0 in — so `dense-roots` interns the
@@ -170,19 +168,23 @@ trie's leaf `[key ctx]` (predicate extent, rule index, opposed, mint, self tuple
 context's scope `(ctx, 0, ctx)` the same way, its term field holding the key, so the scope
 table grows with the contexts and never with the minted terms or opposed bodies. No
 argument position is 0, so the two scope shapes never meet. `dense_routing_test` records
-which handle families are left in the fallback.
+which families are left in the fallback.
 
-`dense-roots` packs the count tries' nodes too, though their members are not handles.
-An argument node's children ride the `(pred, pos)` scope, and a predicate-extent or
-rule-index node's children hold the key in the term field, each context held as its id in
-the shared token dictionary, so the per-node mass is an `int` run rather than a boxed key
-and set in the fallback; a snapshot writes those ids through the remap it applies to the
-keys. An argument node's count is not stored: `dense-roots` answers it as the sum of the
-node's leaf sizes, one leaf per context it lists, replies to the index's increment with
-that sum, and emits it in `kv-entries` beside the children, so the projection matches the
-flat map's and a snapshot carries no count column. The predicate-extent and rule-index
-counts, one per predicate or rule key, are counters in the fallback. On `:memory-dense` the counts and children are a
-`Long` and an ordinary set per node, as the positional trie's are.
+`dense-roots` packs the count tries' nodes and the name sets too, though their members are
+not handles. An argument node's children ride the `(pred, pos)` scope, and every other
+node's children hold the node in the term field, each context held as its id in the shared
+token dictionary; a name set (the term, slot and membership rosters, a handle's installed
+taxonomy keys, a predicate's binding kinds and lengths) holds each name the same way. So
+the per-key mass is an `int` run rather than a boxed key and set in the fallback, and a
+snapshot writes those ids through the remap it applies to the keys. A node's count in the
+argument, supporter, length-binding, shape, opposed and mint tries is not stored:
+`dense-roots` answers it as the sum of the node's leaf sizes, one leaf per context it
+lists, replies to the index's increment with that sum, and emits it in `kv-entries` beside
+the children, so the projection matches the flat map's and a snapshot carries no count
+column. The predicate-extent, rule-index and self-tuple counts, one per predicate or rule
+key, are counters in the fallback, which is all it holds; a batch hands the fallback its
+ops as one batch. On `:memory-dense` the counts and children are a `Long` and an ordinary
+set per node, as the positional trie's are.
 
 Both dense backends keep a fallback for keys they don't route, which makes a routing
 mistake behaviourally invisible — a misrouted family is stored as an ordinary boxed set,
@@ -668,7 +670,9 @@ pred pos term]` had no packed spelling, so the family rode the resident blob and
 whole on open. That row once measured **34.10 GB, linear**, 90% of the image's remaining heap
 and the difference between this backend being over budget and under it. The interned
 `(pred, pos)` scope gave it a packed spelling; the argument roots now ride the mapped
-handle column with every other family, and the blob keeps the term and slot rosters alone.
+handle column with every other family. The 19.0 MB row holds the term and slot rosters;
+at snapshot format 5 those ride the mapped run as token ids, and the blob keeps the
+vocabulary's counters alone.
 No resident section of the image tracks the fact count except the CSR skeleton.
 
 **The routed map's jump is a threshold, not a slope, and the fourth point is what tells
@@ -745,12 +749,14 @@ small at any vocabulary a KB actually has.
 them cost 400,000 sentexes of the rows above, 0.4% of a 100M extent, and memberships the
 same. Widening the ontology moves the total twice and both moves are small.
 
-**The fallback blob is the row that does not have this defence.** It holds the term and
-slot rosters, it is vocabulary-scaled rather than closure-bounded, and 8,070 terms is a
-very small vocabulary. It measures flat here only inside the 0.25 tolerance — 11.0 → 13.3
-→ 16.0 MB is 1.20× then 1.20× against facts at 1.68× then 1.73× — so it is *not tracking
-the extent*, which is the finding, but it is not constant either. Sizing it wants a sweep
-that holds the facts fixed and grows the vocabulary, which no bench here runs.
+**The fallback blob is the row that does not have this defence.** In the measurement
+above it holds the term and slot rosters, which grow with the terms, and 8,070 terms is a
+very small vocabulary. It measures flat there only inside the 0.25 tolerance — 11.0 → 13.3
+→ 16.0 MB is 1.20× then 1.20× against facts at 1.68× then 1.73×. On a KB of millions of
+sentexes the same blob, holding the rosters and the taxonomy's supporters, grows with the
+terms into gigabytes. Since snapshot format 5 it holds the counters keyed by a predicate,
+functor or rule key alone, and `perf`'s `roots-fallback-section` holds it flat in the
+facts.
 
 ## Caveats on these numbers
 

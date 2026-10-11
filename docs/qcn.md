@@ -451,7 +451,8 @@ Three things make the fold sound rather than merely convenient:
 - **It only narrows.** Intersection is commutative and associative, so the network is a
   function of what both readers saw and never of which ran first. A pair the narrowing
   leaves at the universe it does not record, which is the same claim as recording it. A
-  narrowing whose source is unsatisfiable empties a pair (`stp/unsatisfiable-narrowing`),
+  narrowing whose source is unsatisfiable or refused empties a pair
+  (`stp/unsatisfiable-narrowing`),
   so the network reading it is unsatisfiable too and answers nothing. Answering nothing
   from the source instead would widen the network when a fact arrives, and a firing
   resting on an entailment the widening lost would stay believed, since
@@ -461,7 +462,8 @@ Three things make the fold sound rather than merely convenient:
   out. The narrowing describes the source instead (`qcn-kb/unsatisfiable-sources`), and
   `qualitative-network` answers the description as `:unsatisfiable-sources`: the source
   network (`:metric` or `:point`), its pairs unsatisfiable as written, the instants on a
-  negative cycle for `:metric`, and the handles of the facts behind them.
+  negative cycle for `:metric`, and the handles of the facts behind them. A refused
+  `:metric` source names its `:dimensions` instead of pairs and a cycle.
 - **It carries support.** A pair narrowed by a second reader names the facts *that* reader
   read, so a conclusion drawn through it is withdrawn by retracting one of them, exactly as
   a conclusion drawn through a stored fact is. A node-set narrowing reads no fact and names
@@ -926,7 +928,7 @@ nothing, which the numbers below confirm. Loading a containment chain of *n* reg
 The cost grows faster than the input and slower than *n*³: 40 → 80 regions is 2× the
 facts for 6.5× the time — super-quadratic (4× would be quadratic), sub-cubic.
 `lein perf`'s `qcn-chain-load` reads the prover + rule column per fact at 20 and 80
-regions, as a baseline it prints and does not judge. At 80 regions the network reads are
+regions, and holds it under 40× for the 4× step, under the 64× a cubic pass reads. At 80 regions the network reads are
 about 3% of that load, and the two passes below most of the rest.
 Deferring the chaining is no penalty, because the one big datum it produces
 joins over a delta like any other.

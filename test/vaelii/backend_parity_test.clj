@@ -26,6 +26,7 @@
             [vaelii.impl.checks :as checks]
             [vaelii.impl.kb :as kb]
             [vaelii.impl.protocols :as p]
+            [vaelii.impl.reads :as reads]
             [vaelii.test-util :as tu]))
 
 ;; Own db numbers, outside the suite's block, one pair per backend — so a parity KB
@@ -109,16 +110,16 @@
          ;; the index reads the engine leans on
          :by-functor     (sentences kb (p/sentexes-with-functor ix 'dog))
          :count-functor  (p/count-with-functor ix 'dog)
-         :by-arg         (sentences kb (p/sentexes-with-arg ix 2 'Rex))
+         :by-arg         (sentences kb (reads/as-stored-with-arg-global ix 2 'Rex))
          :by-args        (sentences kb (p/sentexes-with-args ix 'ownerOf [[1 'Ann] [2 'Rex]]))
-         :in-context     (count (p/sentexes-in-context ix 'CxParity))
-         :by-term        (sentences kb (p/sentexes-with-term ix 'Rex))
+         :in-context     (count (reads/as-stored-in-context ix 'CxParity))
+         :by-term        (sentences kb (reads/as-stored-with-term ix 'Rex))
          :find-sentexes  (sentences kb (v/find-sentexes kb 'Muffet))
          ;; the trie itself, through the protocol
          :lookup-0       (sentences kb (v/lookup kb 0 '(dog Rex) 'CxParity))
          :count-at       (p/count-at ix '[dog])
          :children       (set (p/children ix '[dog]))
-         :count-children (p/count-children ix '[dog])
+         :count-children (reads/stored-count-children ix '[dog])
          ;; the lookup-to-query stack and belief
          :levels         (into {} (for [n (range 2 8)]
                                     [n (count (v/lookup kb n '(mammal Rex) 'CxParity))]))

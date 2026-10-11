@@ -16,6 +16,7 @@
             [taoensso.nippy :as nippy]
             [vaelii.core :as v]
             [vaelii.impl.decide :as decide]
+            [vaelii.impl.dense-jtms :as dense]
             [vaelii.impl.discovery :as discovery]
             [vaelii.impl.disk.record-store :as drs]
             [vaelii.impl.jtms :as jtms]
@@ -578,3 +579,73 @@
               (try (is (installed? kb) "the next open installs it")
                    (finally (v/close! kb))))
             (finally (rm-rf! dir))))))))
+
+(deftest a-heap-failure-writing-an-image-keeps-the-image-it-had
+  (tu/with-snapshot-platform
+    ;; A close or a seal that runs out of heap while it writes the sections leaves the
+    ;; directory's image installable, and leaves no temp file beside it.
+    (doseq [[label v] [["in the network section" #'dense/write-image]
+                       ["in the state section" #'ri/state-of]]]
+      (testing label
+        (let [dir (tmpdir)]
+          (try
+            (let [kb (open dir)] (content! kb) (v/close! kb))
+            (let [before (manifest-text dir)
+                  kb     (open dir)]
+              (try
+                (is (installed? kb))
+                (with-redefs-fn {v (fn [& _] (throw (OutOfMemoryError. "Java heap space")))}
+                  #(is (nil? (ri/save! kb)) "the failed write is logged and returns nil"))
+                (is (= before (manifest-text dir)) "the image it had is in place")
+                (is (= #{"manifest.edn" "network.bin" "state.nippy"}
+                       (set (.list (io/file dir "reasoning")))))
+                (finally (v/close! kb))))
+            (let [kb (open dir)]
+              (try (is (installed? kb) "the next open installs it")
+                   (finally (v/close! kb))))
+            (finally (rm-rf! dir))))))))
+
+(defn- repeats
+  "`{:symbol n :long n}`: for each class, how many more objects of it `x` holds, counted by
+  identity, than distinct values.  Atoms are read through."
+  [x]
+  (let [seen (java.util.IdentityHashMap.)
+        objs {:symbol (java.util.IdentityHashMap.) :long (java.util.IdentityHashMap.)}]
+    (letfn [(walk [x]
+              (cond
+                (symbol? x)                   (.put ^java.util.Map (:symbol objs) x true)
+                (instance? Long x)            (.put ^java.util.Map (:long objs) x true)
+                (not (or (coll? x) (instance? clojure.lang.IAtom x))) nil
+                (.containsKey seen x)         nil
+                :else (do (.put seen x true)
+                          (cond (instance? clojure.lang.IAtom x) (walk @x)
+                                (map? x) (run! (fn [[k v]] (walk k) (walk v)) x)
+                                :else    (run! walk x)))))]
+      (walk x))
+    (update-vals objs (fn [^java.util.Map m] (- (.size m) (count (set (.keySet m))))))))
+
+(deftest an-installed-image-holds-one-object-per-symbol-and-handle-it-repeats
+  (tu/with-snapshot-platform
+    ;; The KB that writes an image names a symbol or a handle with one object wherever it
+    ;; repeats, and so does the KB that installs it.  The network's snapshot boxes its
+    ;; handles as it reads them, so only its symbols are counted.
+    (let [dir (tmpdir)]
+      (try
+        (let [kb (open dir)]
+          (content! kb)
+          ;; a dilemma per context, so the network holds a `nogood` informant per clash, and
+          ;; handles past the boxed `Long`s the JVM caches (-128 to 127)
+          (doseq [i (range 64) :let [r (symbol (str "CxImgR" i)) x (symbol (str "ImgPet" i))]]
+            (v/assert kb (list 'genlCx r 'CxUniverse) 'CxUniverse {:strength :monotonic})
+            (v/assert kb (list 'dog x) r {:strength :default})
+            (v/assert kb (list 'cat x) r {:strength :default}))
+          (v/close! kb))
+        (let [kb (open dir)]
+          (try
+            (is (installed? kb))
+            (is (= {:symbol 0 :long 0} (repeats (state kb))))
+            (let [net (jtms/snapshot (reasoning/tms kb))]
+              (is (< 1 (count (filter #(symbol? (:informant %)) (vals (:justs net))))))
+              (is (zero? (:symbol (repeats net)))))
+            (finally (v/close! kb))))
+        (finally (rm-rf! dir))))))

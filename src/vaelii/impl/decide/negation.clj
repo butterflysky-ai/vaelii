@@ -22,7 +22,7 @@
   members are the index family's, split by the `[:false b]` leaves."
   [kb b]
   (let [idx (:index kb)
-        ms  (reads/as-stored-opposed-members idx b)]
+        ms  (reads/as-stored-opposed-members-global idx b)]
     (if (empty? ms)
       [#{} #{}]
       (let [neg (into #{} (filter #(contains? ms %))
@@ -52,11 +52,12 @@
         q pos]
     [n q]))
 
-;; ---- the placements that left ---------------------------------------------
+;; ---- the placements that left, and the rows respelled -----------------------
 ;; A `(contradicts …)` placement can leave the store while its pair stands: a `genlCx`
-;; edge it rests on left with it, and that edge's move reaches no member.  `::moved`
-;; queues the pair's body, and the settle places it at its common descendants as they
-;; stand (`take-moved!`).
+;; edge it rests on left with it, and that edge's move reaches no member.  A row moved to
+;; another spelling in place (`kb/respell-sentex!`) can join a pair with no relabel.
+;; `::moved` queues the pair's body, and the settle places it at its common descendants
+;; as they stand (`take-moved!`).
 
 (defn- note-placement-left!
   "Queue the body of the negation pair a `(contradicts …)` sentex `sx` leaving the store
@@ -68,8 +69,17 @@
         (when (seq bs)
           (swap! (reasoning/nogood-candidates kb) update ::moved (fnil into #{}) bs))))))
 
+(defn note-respelled!
+  "Queue the body of the fact `sx` when it is stored in both polarities: `sx` was just
+  moved to its spelling in place (`kb/respell-sentex!`), which relabels nothing."
+  [kb sx]
+  (let [bs (bodies-of kb [(:id sx)])]
+    (when (seq bs)
+      (swap! (reasoning/nogood-candidates kb) update ::moved (fnil into #{}) bs))))
+
 (defn take-moved!
-  "The bodies `note-placement-left!` queued since the last call, and the queue emptied."
+  "The bodies `note-placement-left!` and `note-respelled!` queued since the last call,
+  and the queue emptied."
   [kb]
   (let [[old _] (swap-vals! (reasoning/nogood-candidates kb) dissoc ::moved)]
     (::moved old #{})))
@@ -90,8 +100,9 @@
 
 (caches/register-derived
  {:id :Q7 :label "Negation placement queue" :kind :queue :keyed-by :literal
+  :holds-content? false
   :reads [:records :index]
   :retired-by {:removed :K :settle-pass :Q :recover :R :image-install :R}
   :computed :write :imaged? :state
   :at [[:nogood-candidates ::moved]]
-  :note "the bodies of the negation pairs whose `contradicts` placement left the store, which `take-moved!` drains once a pass"})
+  :note "the bodies of the negation pairs whose `contradicts` placement left the store or whose row was respelled in place, which `take-moved!` drains once a pass"})

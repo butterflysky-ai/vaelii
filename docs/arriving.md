@@ -40,10 +40,10 @@
   and full backchaining, and `query`, `prove`, `ask` and `sentexes-matching` enter it at
   different heights → [levels.md](levels.md), [api.md](api.md)
 
-Four properties hold across all of it, and the [README](../README.md)'s model section
-states them: order independence, locality, context scoping, and belief filtering. They are
-worth reading before the page for your own arrival, because most of the surprises below
-are one of the four showing through.
+Five properties hold across all of it, and the [README](../README.md)'s model section
+states them: order independence, locality, context scoping, belief filtering, and separated
+state. They are worth reading before the page for your own arrival, because most of the
+surprises below are one of the five showing through.
 
 ## What these pages are not
 

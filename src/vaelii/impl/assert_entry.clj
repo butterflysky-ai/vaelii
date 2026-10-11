@@ -25,6 +25,7 @@
             [clojure.string :as str]
             [vaelii.impl.chain :as chain]
             [vaelii.impl.checks :as checks]
+            [vaelii.impl.decide :as decide]
             [vaelii.impl.imperative :as imperative]
             [vaelii.impl.integrate :as integrate]
             [vaelii.impl.jtms :as jtms]
@@ -371,7 +372,10 @@
   an `(ist Ctx S)` sentence and for nothing else, and `:bulk?`, the caller-guaranteed
   bulk-load mode that turns off the per-fact machinery which only validates or dedups.
   `:bulk?` is a value rather than a var read because the public knob is
-  `vaelii.core/*bulk-load?*`, and an engine namespace may not read `vaelii.core`."
+  `vaelii.core/*bulk-load?*`, and an engine namespace may not read `vaelii.core`.
+
+  The bulk path reads the `symmetric` mark unscoped: the argument-order fold decides
+  the stored key, which every reader shares (docs/canonicalization.md)."
   [kb sentence context opts {:keys [assert-fn bulk?]}]
   (cond
     ;; A `do/` imperative is an instruction, not a fact: nothing is stored, and what
@@ -475,7 +479,11 @@
         ;; the labeller's forced memberships go in before the mark, so a denial of a
         ;; roster literal is never IN (docs/nmtms.md, "The forced-monotonic roster")
         (checks/force-sentex! kb s)
-        (mark-premise kb h strength)
+        (let [was (jtms/premise-strength (reasoning/tms kb) h)]
+          (mark-premise kb h strength)
+          ;; a stored premise's class rising moves the arity nogoods it can ground
+          (when (and was (not= was (jtms/premise-strength (reasoning/tms kb) h)))
+            (decide/note-reading-moved! kb h)))
         (when permuted?
           (integrate/note-premise-spelling! kb h (:sentence s) sentence strength prior))
         ;; The add-side choke point: the sentex is reflected into every cache
@@ -517,22 +525,6 @@
               ;; facts, and the edge bringing them under a mark above
               _    (special/offer-marked-existing kb sentence)
               _    (special/offer-marked-under-edge kb sentence)
-              ;; ...and the same three ingredients once more, through the *other*
-              ;; closure, which takes all three of them in one call.  A `genlCx` edge
-              ;; widens which merges a context can see, so it restates the sentexes the
-              ;; widened ancestor set newly exposes to one — or the record keeps a spelling every
-              ;; read from below has retired (docs/equality.md, "An equality applies where
-              ;; it is visible") — and it is the fourth arrival order of the
-              ;; functional/antisymmetric merge besides, alongside the declaration meeting
-              ;; the facts and the `genl` edge bringing them under a mark above them: two
-              ;; already-marked facts can be made jointly visible for the first time by an
-              ;; edge, and without this the merge those two arrival orders derive would
-              ;; depend on whether the contexts were ever wired together before the facts
-              ;; arrived.  One call and not three because a *computed* edge — one the
-              ;; structural producer materializes with nobody asserting it — has to make
-              ;; the same one, and a list each entry point remembers separately is a list one of
-              ;; them forgets (vaelii#56)
-              cxe  (special/reconcile-context-edge kb sentence)
               ;; ...and the one mark whose retroactive half is a *storage* migration
               ;; rather than a derivation: `(symmetric P)` sorts a literal's arguments at
               ;; the entry point, so the rows stored before it are spelled the way no row stored
@@ -540,7 +532,7 @@
               ;; proposition, each retractable without the other (vaelii#61)
               sym  (integrate/commute-existing kb sentence h)
               mig  (merge-with into {:new [] :superseded [] :violations []}
-                               eq own fnl fex fdn asym axe axd cxe sym)]
+                               eq own fnl fex fdn asym axe axd sym)]
           ;; Only when this assert actually merged something.  The reconcile re-examines
           ;; every entry the closure currently displaces, and an assert that merged
           ;; nothing cannot change one: an entry stops being displaced when its terms
@@ -563,7 +555,11 @@
                 ;; came from `constraint-checks`, so `entailment-check` already ran the
                 ;; definitional constraint check over them before the store, and the
                 ;; materializer need not run it a second time (special/inadmissible).
-                args  (special/deduce-arg-types kb ents h context (not bulk?))
+                args  (merge-with into
+                                  (special/deduce-arg-types kb ents h context (not bulk?))
+                                  ;; ...and the declarations stated below this context,
+                                  ;; at the contexts that see both
+                                  (special/deduce-below kb sentence h context))
                 back  (special/entail-existing kb sentence h)
                 ;; ...and the third order of the same three ingredients: a `genl` edge
                 ;; between predicates brings stored sub-predicate facts under the
@@ -580,8 +576,7 @@
                                       (:violations back) (:violations down)
                                       (:violations dfn)))]
             ;; The seeds feed `chain-all` and nothing else, so an assert that does not
-            ;; chain computes none: `visibility-seeds` alone reads the whole rule-relevant
-            ;; corpus per `genlCx` edge, which an unchained bulk load pays for nothing.
+            ;; chain computes none.
             (when (:chain? opts true)
               (chain/chain-all
                kb
@@ -605,10 +600,6 @@
                    ;; or the same knowledge would derive different things in
                    ;; different arrival orders
                    (into (special/subsumption-seeds kb sentence))
-                   ;; ...and a new genlCx edge makes stored facts visible to
-                   ;; a rule that could not see them, which is the same failure
-                   ;; through the other closure
-                   (into (special/visibility-seeds kb sentence))
                    ;; ...and a new link of a declared-transitive predicate extends
                    ;; a closure that is answered rather than stored, so no pair of
                    ;; it is ever a datum: the partner triggers of the rules joined
@@ -622,5 +613,7 @@
             ;; (docs/equality.md, "Interactions — Disjointness").  The ledger itself
             ;; accumulates and is emptied only by `clear-violations!`.
             (violations/report kb (:violations mig))))
-        (when-not *defer-settle?* (settle/settle kb))
+        ;; an unchained assert seeds no chaining from the `genlCx` moves it settles
+        (when-not *defer-settle?*
+          (binding [special/*seed-moves?* (:chain? opts true)] (settle/settle kb)))
         h))))

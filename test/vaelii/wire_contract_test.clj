@@ -15,6 +15,7 @@
             [vaelii.host.guard :as guard]
             [vaelii.host.serve :as serve]
             [vaelii.host.subscribe :as sub]
+            [vaelii.impl.config :as config]
             [vaelii.test-util :as tu])
   (:import [java.io ByteArrayInputStream]))
 
@@ -66,6 +67,9 @@
             (post-raw handler edn-headers (pr-str {:op :assert :args 5}))]
            ["a body over the ceiling" 413 :body-too-large
             oversized]
+           ;; a request picks among the KBs the server serves and names no path
+           ["a path a request names for the server to read" 403 :path-not-served
+            (post-raw handler edn-headers (op-body :kb-diff ["/etc/hosts"]))]
            ;; the change feed's three, which are refusals about a *subscription* rather
            ;; than about a sentence — 400 like the rest, because the caller is who can
            ;; act on each, and a status of their own would break the promise that a
@@ -135,12 +139,13 @@
   ;; reverse proxy and 5xx alarm between the caller and the daemon counts as a backend
   ;; fault — for a request the caller wrote.  `assert`'s own vocabulary is pinned above;
   ;; these are the entry points beside it, one refusal each, driven through the same handler.
-  (tu/with-terms [dog Rex]
+  (tu/with-terms [dog cat Rex]
     (let [handler (open-app kb)
           op!     (fn [op args] (post-raw handler edn-headers (op-body op args)))
-          ;; a directory no export ever reaches: both refusals below run before the
+          ;; a directory no export ever reaches: the refusals below run before the
           ;; destination is touched, so nothing is created and nothing needs cleaning up
-          nowhere "/vaelii-export-that-is-never-written"]
+          nowhere "/vaelii-export-that-is-never-written"
+          paths!  #(with-redefs [config/request-paths? (constantly true)] (%))]
       (doseq [[label ty reply]
               [;; the read entry points that do not resolve a query context refuse it rather
                ;; than answering empty (docs/contexts.md); over the wire that refusal is
@@ -148,9 +153,13 @@
                ["a query context at a read that does not resolve one" :unsupported-context
                 (op! :why-not [(list dog Rex) 'CxEverything])]
                ["a dump variant this build does not write" :unsupported-variant
-                (op! :export [nowhere {:variant :everything}])]
+                (paths! #(op! :export [nowhere {:variant :everything}]))]
                ["a codec this build does not write" :unsupported-compression
-                (op! :export [nowhere {:compression :zstd}])]
+                (paths! #(op! :export [nowhere {:compression :zstd}]))]
+               ["a try-assert that would open a definitional clash" :definitional-clash
+                (do (op! :assert [(list 'disjoint dog cat) 'CxUniverse])
+                    (op! :assert [(list dog Rex) 'CxUniverse])
+                    (op! :try-assert [(list cat Rex) 'CxUniverse]))]
                ;; a `:find-terms` regex whose backtracking blows the per-term step
                ;; budget is the caller's abuse, refused rather than left to pin the
                ;; writer's core (docs/web.md); over the wire it is a 400 like the rest

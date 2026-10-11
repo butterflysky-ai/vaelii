@@ -336,7 +336,7 @@
       (testing "and a Host-less request (curl, every other test here) passes by design"
         (is (= 200 (:status (handler {:request-method :get :uri "/health"}))))))))
 
-(tu/deftest-kb export-over-the-wire-writes-on-the-daemons-own-host
+(tu/deftest-kb export-over-the-wire-refuses-a-path-unless-request-paths-is-on
   (tu/with-terms [dog Muffet CxServe]
     (let [handler (open-app kb)
           root (.toFile (Files/createTempDirectory "vaelii-serve-export-"
@@ -344,20 +344,48 @@
           dump (java.io.File. root "a-dump")]
       (try
         (v/assert kb (list dog Muffet) CxServe)
-        (testing "the op answers with the writer's summary — every value already EDN, so
-                  nothing about it needs the sentex-map projection"
-          (let [r (post-op handler :export [(.getPath dump) {:compression :none}])]
-            (is (:ok r))
-            (is (= (v/sentex-count kb) (:sentexes (:result r))))
-            (is (= (.getAbsolutePath dump) (:dir (:result r))))))
-        (testing "and the directory it names is one on this host — the daemon's — which is
-                  the only place it could be: there is no stream to hand a client back"
-          (is (= :dump (catalog/classify dump))))
-        (testing "a refusal crosses the wire as the writer's own message"
-          (let [r (post-op handler :export [(.getPath dump) {}])]
-            (is (false? (:ok r)))
-            (is (re-find #"is not empty" (:error r)))
-            (is (= :not-empty (:type r)))))
+        (let [r (post-op handler :export [(.getPath dump) {:compression :none}])]
+          (is (= [403 :path-not-served] ((juxt :status :type) r)))
+          (is (not (.exists dump)) "and nothing is written"))
+        (with-redefs [config/request-paths? (constantly true)]
+          (testing "under VAELII_REQUEST_PATHS the op answers with the writer's summary"
+            (let [r (post-op handler :export [(.getPath dump) {:compression :none}])]
+              (is (:ok r))
+              (is (= (v/sentex-count kb) (:sentexes (:result r))))
+              (is (= (.getAbsolutePath dump) (:dir (:result r))))))
+          (testing "and the directory it names is one on the daemon's host"
+            (is (= :dump (catalog/classify dump))))
+          (testing "a refusal crosses the wire as the writer's own message"
+            (let [r (post-op handler :export [(.getPath dump) {}])]
+              (is (false? (:ok r)))
+              (is (re-find #"is not empty" (:error r)))
+              (is (= :not-empty (:type r))))))
+        (finally (doseq [^File f (reverse (file-seq root))] (.delete f)))))))
+
+(tu/deftest-kb kb-diff-over-the-wire-refuses-a-path-and-reads-nothing
+  (tu/with-terms [dog Muffet CxServe]
+    (let [handler (open-app kb)
+          root    (.toFile (Files/createTempDirectory "vaelii-serve-diff-"
+                                                      (into-array FileAttribute [])))
+          export  (java.io.File. root "export")
+          secret  (java.io.File. root "token.txt")
+          spaces  #(count @@#'vaelii.impl.memory/record-spaces)]
+      (try
+        (v/assert kb (list dog Muffet) CxServe)
+        (v/export-text! kb (.getPath export))
+        (spit secret "zzSecret\n")
+        (let [before (spaces)
+              rs     (mapv #(post-op handler :kb-diff [(.getPath ^File %)]) [export secret])]
+          (is (= [[403 :path-not-served] [403 :path-not-served]]
+                 (mapv (juxt :status :type) rs)))
+          (is (not-any? #(str/includes? (:error %) "zzSecret") rs)
+              "the refusal quotes nothing the named file holds")
+          (is (= before (spaces)) "and no KB was opened to read either path"))
+        (testing "VAELII_REQUEST_PATHS lets a request name a text KB on the server's host"
+          (with-redefs [config/request-paths? (constantly true)]
+            (let [r (post-op handler :kb-diff [(.getPath export)])]
+              (is (:ok r))
+              (is (= [] (:added (:result r)) (:removed (:result r)))))))
         (finally (doseq [^File f (reverse (file-seq root))] (.delete f)))))))
 
 ;; ---- the shared bearer token ---------------------------------------------
@@ -687,7 +715,7 @@
 
 (tu/deftest-kb a-re-sent-write-answers-what-operations-md-says
   ;; the re-send table in docs/operations.md, row by row; `:export`'s row is
-  ;; `export-over-the-wire-writes-on-the-daemons-own-host`'s last block
+  ;; `export-over-the-wire-refuses-a-path-unless-request-paths-is-on`'s last block
   (tu/with-terms [dog animal Muffet Rex Bo Tom Ann Cy CxServe]
     (let [handler (open-app kb)
           ok      (fn [op args]

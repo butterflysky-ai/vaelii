@@ -103,7 +103,7 @@
 (def format-version
   "The image's own layout number, beside `dense/image-version` (the network section's).
   An image of any other number is discarded, and the open recovers from the records."
-  11)
+  15)
 
 (def ^String dir-name
   "The directory an image is written to, under a `:disk-snapshot` KB's own directory and
@@ -130,8 +130,8 @@
 (def taxonomy-side-slots
   "The taxonomy keys an image leaves as the open made them: the five callbacks and the
   index store `kb/open-kb` installs with its `:raw?` flag, which belong to the KB, the
-  three side caches, each keyed or stamped by a relation's own `:gen`, and the supporter
-  cache, which fills from the index on a read."
+  three side caches, each keyed or stamped by a relation's own `:gen` or the change clock,
+  and the supporter cache, which fills from the index on a read."
   [:supporter-filter-active? :supporter-visible? :network-filter-active? :network-visible?
    :supporter-reaches? :index :raw? :closure-memo :closure-lru :rewrite-order :supporters])
 
@@ -247,15 +247,20 @@
 
 ;; ---- writing ----------------------------------------------------------------
 
+(defn- move-over!
+  "Rename `from` over `to` in one step."
+  [^File from ^File to]
+  (Files/move (.toPath from) (.toPath to)
+              (into-array CopyOption [StandardCopyOption/ATOMIC_MOVE
+                                      StandardCopyOption/REPLACE_EXISTING])))
+
 (defn- write-atomic!
   "Write `target` through `write-fn` of a sibling temp file, then rename it over `target`."
   [^File target write-fn]
   (let [tmp (File. (str target ".tmp"))]
     (try
       (write-fn tmp)
-      (Files/move (.toPath tmp) (.toPath target)
-                  (into-array CopyOption [StandardCopyOption/ATOMIC_MOVE
-                                          StandardCopyOption/REPLACE_EXISTING]))
+      (move-over! tmp target)
       (finally (.delete tmp)))))
 
 (defn- data-out ^DataOutputStream [^File f]
@@ -283,35 +288,41 @@
 (defn write-sections!
   "Write `kb`'s network and state into `dir`, then a manifest carrying `stamp`, and return
   the manifest — or nil when `commit?`, asked after both sections are written, answers
-  false.  The manifest is deleted first and written last, so from the first byte until the
-  commit `dir` holds no image rather than an old manifest over new sections.  The caller
-  holds the KB still; nothing here stops a writer."
+  false.  Both sections are written to temp files beside the image first, so a write that
+  throws or runs out of heap, or that `commit?` declines, leaves the image `dir` held
+  installable.  Only then is the manifest deleted, the sections renamed over the old
+  ones and the new manifest written last, so from the first rename until the commit `dir`
+  holds no image rather than an old manifest over new sections.  The caller holds the KB
+  still; nothing here stops a writer."
   ([kb dir stamp] (write-sections! kb dir stamp (constantly true)))
   ([kb ^File dir stamp commit?]
-   (let [mf (section dir "manifest.edn")]
+   (let [mf  (section dir "manifest.edn")
+         net (section dir "network.bin.tmp")
+         st  (section dir "state.nippy.tmp")]
      (.mkdirs dir)
-     (.delete mf)
-     (write-atomic! (section dir "network.bin")
-                    (fn [f] (with-open [o (data-out f)] (dense/write-image (reasoning/tms kb) o))))
-     (write-atomic! (section dir "state.nippy")
-                    (fn [f] (with-open [o (data-out f)]
-                              (nippy/freeze-to-out! o (state-of kb)))))
-     (when (commit?)
-       (let [manifest (assoc stamp
-                             :written-at (str (java.time.Instant/now))
-                             :bytes {:network (.length (section dir "network.bin"))
-                                     :state   (.length (section dir "state.nippy"))})]
-         (write-atomic! mf (fn [^File f]
-                             (binding [*print-length* nil *print-level* nil]
-                               (spit f (pr-str manifest)))))
-         manifest)))))
+     (try
+       (with-open [o (data-out net)] (dense/write-image (reasoning/tms kb) o))
+       (with-open [o (data-out st)]
+         (nippy/freeze-to-out! o (state-of kb)))
+       (when (commit?)
+         (let [manifest (assoc stamp
+                               :written-at (str (java.time.Instant/now))
+                               :bytes {:network (.length net) :state (.length st)})]
+           (.delete mf)
+           (move-over! net (section dir "network.bin"))
+           (move-over! st (section dir "state.nippy"))
+           (write-atomic! mf (fn [^File f]
+                               (binding [*print-length* nil *print-level* nil]
+                                 (spit f (pr-str manifest)))))
+           manifest))
+       (finally (.delete net) (.delete st))))))
 
 (defn save!
   "Write a `:disk-snapshot` KB's image into its own directory, and return the manifest —
   or nil when nothing was written: the KB does not keep one (`applies?`, `writable?`), a
   settle is deciding its belief on another thread, or its records or belief moved while
-  the sections were written.  A failure is logged and returns nil: the image is a cache of
-  a recover, and the next open recovers without it.
+  the sections were written.  A failure, running out of heap included, is logged and
+  returns nil, and leaves the image on disk as it was (`write-sections!`).
 
   The stamp covers the records alone, so an image of belief a settle had not finished
   deciding would pass the next open's check.  The write is therefore declined while a
@@ -389,9 +400,11 @@
 ;; ---- installing -------------------------------------------------------------
 
 (defn- read-state
-  "`state.nippy`, thawed behind the class-name check (`vaelii.impl.io.thaw`)."
+  "`state.nippy`, thawed behind the class-name check (`vaelii.impl.io.thaw`), under
+  `safe/sharing`, so a symbol or a handle the taxonomy and the atoms repeat is one object."
   [^File dir]
-  (let [st (with-open [i (data-in (section dir "state.nippy"))] (safe/thaw-from-in! i))]
+  (let [st (with-open [i (data-in (section dir "state.nippy"))]
+             (safe/thaw-from-in! i (safe/sharing)))]
     (when-not (and (map? (:taxonomy st)) (= (set state-atoms) (set (keys (:atoms st)))))
       (throw (IllegalStateException. "state.nippy does not hold the atoms this build images")))
     st))

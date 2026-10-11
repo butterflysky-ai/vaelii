@@ -43,17 +43,33 @@
 ;; stored cycle an older or foreign writer left, past this check, and the taxonomy
 ;; condenses it.  See docs/contexts.md.
 
-(defn genl-problems [tax [_ sub super :as s] _context]
+(defn- type-problems
+  "One problem per occupant of `xs`, a run of positions that name a type, that cannot name
+  one: an individual, read off its spelling, and a value (`nm/value?`), which has no
+  instances.  A compound and a reified `nat/` constant pass.  `why` ends each message."
+  [why xs]
+  (keep (fn [x]
+          (cond (nm/individual? x) (str x " is an individual; " why)
+                (nm/value? x)      (str (pr-str x) " is a value; " why)))
+        xs))
+
+(defn genl-problems
+  "The refusals of the `genl` sentence `s`.  The cycle test reads the unscoped closure
+  (`tax/genl?-global`): a cycle is a property of the whole edge set, which no reader's
+  context changes."
+  [tax [_ sub super :as s] _context]
   (cond-> []
     (not= 3 (count s))     (conj "genl takes two arguments")
-    (nm/individual? sub)   (conj (str sub " is an individual; genl relates types"))
-    (nm/individual? super) (conj (str super " is an individual; genl relates types"))
+    :always                (into (type-problems "genl relates types" [sub super]))
     (= sub super)          (conj (str sub " genl itself"))
     (and (not= sub super) (tax/genl?-global tax super sub))
     (conj (str "genl " sub " " super " creates a cycle (" super
                " is already a subtype of " sub ")"))))
 
-(defn genlCx-problems [tax [_ sub super :as s] _context]
+(defn genlCx-problems
+  "The refusals of the `genlCx` sentence `s`.  The cycle test reads the unscoped closure
+  (`tax/genlCx?-global`), for `genl-problems`' reason."
+  [tax [_ sub super :as s] _context]
   (cond-> []
     (not= 3 (count s))        (conj "genlCx takes two arguments")
     (not (nm/context? sub))   (conj (str sub " is not a context (must start with Cx)"))
@@ -79,8 +95,7 @@
 (defn disjoint-problems [_ [_ a b :as s] _context]
   (cond-> []
     (not= 3 (count s))  (conj "disjoint takes two arguments")
-    (nm/individual? a)  (conj (str a " is an individual; disjoint relates types"))
-    (nm/individual? b)  (conj (str b " is an individual; disjoint relates types"))
+    :always             (into (type-problems "disjoint relates types" [a b]))
     (= a b)             (conj (str a " disjoint with itself"))))
 
 (defn covering-problems
@@ -106,12 +121,8 @@
     (< (count s) 4)
     (conj (str f " takes a whole and at least two parts"))
 
-    (nm/individual? whole)
-    (conj (str whole " is an individual; " f " relates types"))
-
-    (some nm/individual? parts)
-    (conj (str (first (filter nm/individual? parts)) " is an individual; " f
-               " relates types"))
+    :always
+    (into (type-problems (str f " relates types") (cons whole parts)))
 
     (not= (count parts) (count (distinct parts)))
     (conj (str f " names a part twice; each part covers a different piece of " whole))
@@ -126,12 +137,12 @@
 (defn disjoint-metatype-problems [_ [_ m :as s] _context]
   (cond-> []
     (not= 2 (count s)) (conj "disjoint_metatype takes one argument")
-    (nm/individual? m) (conj (str m " is an individual; disjoint_metatype marks a metatype"))))
+    :always            (into (type-problems "disjoint_metatype marks a metatype" [m]))))
 
 (defn sibling-disjoint-problems [_ [_ c :as s] _context]
   (cond-> []
     (not= 2 (count s)) (conj "sibling_disjoint takes one argument")
-    (nm/individual? c) (conj (str c " is an individual; sibling_disjoint marks a collection"))))
+    :always            (into (type-problems "sibling_disjoint marks a collection" [c]))))
 
 (defn type-pair-problems
   "`(orthogonal a b)` and `(siblingDisjointException a b)` — two arguments, neither an
@@ -141,8 +152,7 @@
   [_ [f a b :as s] _context]
   (cond-> []
     (not= 3 (count s)) (conj (str f " takes two arguments"))
-    (nm/individual? a) (conj (str a " is an individual; " f " relates types"))
-    (nm/individual? b) (conj (str b " is an individual; " f " relates types"))))
+    :always            (into (type-problems (str f " relates types") [a b]))))
 
 (defn arg-constraint-problems
   "`arg` and `genlArg` — the two argument constraints — are structurally identical:
@@ -173,7 +183,7 @@
     (conj (str f " constrains a relation, which is named by a symbol or denoted by a"
                " non-atomic term; " (pr-str pred) " is neither"))
     (not (and (integer? n) (pos? n))) (conj (str f " position must be a positive integer"))
-    (nm/individual? type) (conj (str type " is an individual; " f " expects a type"))))
+    :always (into (type-problems (str f " expects a type") [type]))))
 
 (defn inter-arg-constraint-problems
   "`interArg` — the conditional argument constraint: a predicate, a trigger position
@@ -198,8 +208,24 @@
     (conj (str f " trigger position must be a positive integer"))
     (not (and (integer? m) (pos? m)))
     (conj (str f " target position must be a positive integer"))
-    (nm/individual? type)  (conj (str type " is an individual; " f " expects a type"))
-    (nm/individual? utype) (conj (str utype " is an individual; " f " expects a type"))))
+    :always (into (type-problems (str f " expects a type") [type utype]))))
+
+(defn arg-arg-constraint-problems
+  "`argArg` — a relation, the position it constrains, and the position whose argument
+  names the type: `(argArg holdsOf 1 2)`.  The latitude on the constrained relation
+  `arg-constraint-problems` argues for, and both positions checked.  One position named
+  twice is refused: it would demand of each argument that it be an instance of itself."
+  [_ [f pred n m :as s] _context]
+  (cond-> []
+    (not= 4 (count s)) (conj (str f " takes three arguments"))
+    (not (or (symbol? pred) (sequential? pred)))
+    (conj (str f " constrains a relation, which is named by a symbol or denoted by a"
+               " non-atomic term; " (pr-str pred) " is neither"))
+    (not (and (integer? n) (pos? n))) (conj (str f " position must be a positive integer"))
+    (not (and (integer? m) (pos? m)))
+    (conj (str f " type position must be a positive integer"))
+    (and (integer? n) (= n m))
+    (conj (str f " names argument " n " twice; an argument cannot be an instance of itself"))))
 
 (defn covering-constraint-problems
   "The covering argument constraints — `args` / `argsGenl` name a relation and a type,
@@ -223,7 +249,7 @@
                  " non-atomic term; " (pr-str pred) " is neither"))
       (and tail? (not (and (integer? start) (pos? start))))
       (conj (str f " start position must be a positive integer"))
-      (nm/individual? type) (conj (str type " is an individual; " f " expects a type")))))
+      :always (into (type-problems (str f " expects a type") [type])))))
 
 (defn arg-preserving-problems
   "`transitiveInArg` / `transitiveInArgInverse` — a predicate, a positive-integer
@@ -422,7 +448,7 @@
 
 (defn context-arg-subrelation-problems
   "`(contextArgSubrelation F pos R)` declares the structural genlCx ordering for a
-  context-denoting function `F` (docs/context-nat.md): two `F`-contexts identical except
+  context function `F` (docs/context-nat.md): two `F`-contexts identical except
   at argument `pos` are ordered by the sub-relation `R` on that argument — the more
   specific one (its arg `pos` `R`-below the other's) `genlCx` the more general.
 
@@ -554,6 +580,15 @@
   [_ [f & _args] _context]
   [(str f " is not assertible: it is a query operator answered by a prover, not a fact"
         " to store — use it in a rule antecedent or ask it, e.g. (ask? kb '(" f " ...))")])
+
+(defn duration-problems
+  "`totalDuration` and `overlapDuration` are **not assertible**: the `:duration` reasoner
+  computes each from the stored `length` facts and never reads a stored one, so a stored
+  one would be a fact no read returns (docs/duration.md)."
+  [_ [f & args] _context]
+  [(str f " is not assertible: the :duration reasoner computes it from the stored length"
+        " facts and never reads a stored one — state the lengths and ask it, e.g. (ask? kb '("
+        f " " (str/join " " args) "))")])
 
 (defn inverse-problems [_ [_ p q :as s] _context]
   (cond-> []

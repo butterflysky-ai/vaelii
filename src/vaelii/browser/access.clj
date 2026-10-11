@@ -84,6 +84,9 @@
   ;; one `genl` step each way, whatever installed the edge — a stated `genl` or a cover
   ;; roster — which is what the taxonomy view draws and the tree opens
   direct-genls direct-specs
+  ;; the one-step neighbours no other one-step neighbour stands between, which is what the
+  ;; concept graph draws: one round trip an expansion, the reduction done by the engine
+  min-genls max-specs
   ;; whether a `types` node is a relation, by its stored arity, for the term colouring
   relation?
   supporting-justifications dependent-justifications

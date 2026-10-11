@@ -27,6 +27,7 @@
             [vaelii.impl.plan :as plan]
             [vaelii.impl.profile :as prof]
             [vaelii.impl.protocols :as p]
+            [vaelii.impl.reads :as reads]
             [vaelii.impl.taxonomy :as tax]
             [vaelii.impl.types.reasoning :as reasoning]
             [vaelii.test-util :as tu]))
@@ -118,7 +119,7 @@
     (v/assert kb (list dog Muffet) CxPlan)
     (v/assert kb (list animal Other) CxPlan)
     (testing "bounded by the argument root, not by the size of the KB"
-      (is (= (p/count-with-arg (:index kb) 1 Muffet)
+      (is (= (reads/stored-count-with-arg-global (:index kb) 1 Muffet)
              (plan/est-matches kb (list '?c Muffet) #{}))))
     (testing "with nothing indexable to lead with, nothing bounds it"
       (is (< (plan/est-matches kb (list '?c Muffet) #{})
@@ -1236,7 +1237,7 @@
           walked (fn [goal bound]
                    (let [[t a] goal
                          ix (:index kb)]
-                     (if (#'plan/closed? goal bound)
+                     (if (#'plan/settled-when-run? goal bound)
                        1
                        (min 1000000000
                             (reduce (fn [acc t']

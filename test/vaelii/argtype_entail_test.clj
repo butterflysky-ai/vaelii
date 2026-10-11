@@ -627,6 +627,97 @@
       (v/assert kb (list parentOf Fred Mary) CxWorld)
       (is (nil? (v/handle-of kb (list 'integer Fred) CxWorld))))))
 
+;; ---- argArg: the type read off the sentence -----------------------------
+
+(tu/deftest-kb an-arg-arg-entails-the-type-the-sentence-names
+  (tu/with-terms [kindOf dog Rex CxWorld]
+    (a-context kb CxWorld)
+    (a-type kb dog CxWorld)
+    (let [dh (v/assert kb (list 'argArg kindOf 1 2) CxWorld)]
+      (with-entailing
+        (let [fh  (v/assert kb (list kindOf Rex dog) CxWorld)
+              th  (entailed kb (list dog Rex) CxWorld)
+              sup (first (:support (v/why kb th)))]
+          (is (some? th) "the type at argument 2 is a stored, believed membership of argument 1")
+          (is (= 'argArg (:informant sup)))
+          (is (= #{fh dh} (set (map :handle (:because sup))))
+              "resting on the fact and the declaration")
+          (v/retract! kb dh)
+          (is (not (believed? kb (list dog Rex) CxWorld))
+              "and retracting the declaration takes the membership back"))))))
+
+(tu/deftest-kb every-arrival-order-of-an-arg-arg-reaches-the-same-belief
+  ;; The declaration, the fact, and the edge that makes the named type a type.  With the
+  ;; edge last the fact names a type the hierarchy does not hold yet, so it waits on its
+  ;; own handle and is minted when the edge arrives.
+  (doseq [order (permutations [:declaration :fact :type])]
+    (tu/with-neutral-kb [kb tu/fresh]
+      (tu/with-terms [kindOf dog Rex CxWorld]
+        (with-entailing
+          (a-context kb CxWorld)
+          (doseq [step order]
+            (case step
+              :declaration (v/assert kb (list 'argArg kindOf 1 2) CxWorld)
+              :fact        (v/assert kb (list kindOf Rex dog) CxWorld)
+              :type        (a-type kb dog CxWorld)))
+          (is (believed? kb (list dog Rex) CxWorld) (str "entailed under " (vec order))))))))
+
+;; `(resultArg MemberFn 1)` types the constant `(MemberFn x)` mints by the type `x` names,
+;; derived off the `termOfUnit` fact as an `argArg` mint is off its fact.  A row is the
+;; steps in order, the name the application holds, and whether `(name K)` is believed
+;; after them.  A name the hierarchy does not hold waits on the fact and mints nothing,
+;; and the edge that makes it a type releases the mint, across a recover too.
+(tu/deftest-kb a-result-arg-types-a-minted-constant-in-every-order
+  (let [orders (permutations [:declaration :write :type])
+        rows   (concat (for [o orders] [o :kind true])
+                       (for [o orders] [(concat o [:recover]) :kind true])
+                       (for [o orders] [(concat (butlast o) [:recover (last o)]) :kind true])
+                       [[[:declaration :type :write :retract] :kind false]
+                        [[:declaration :type :write] :individual false]])]
+    (doseq [[steps named holds?] rows]
+      (tu/with-neutral-kb [kb tu/fresh]
+        (tu/with-terms [MemberFn kind studies Alice Bob]
+          (tu/with-entailing
+            (v/assert kb (list 'reifiable_function MemberFn) 'CxUniverse)
+            (let [t    (if (= :kind named) kind Bob)
+                  app  (list MemberFn t)
+                  decl (volatile! nil)
+                  k    (volatile! nil)]
+              (doseq [step steps]
+                (case step
+                  :declaration (vreset! decl (v/assert kb (list 'resultArg MemberFn 1) 'CxUniverse))
+                  :write       (let [h (v/assert kb (list studies Alice app) 'CxUniverse)]
+                                 (vreset! k (nth (:sentence (v/sentex kb h)) 2)))
+                  :type        (a-type kb kind 'CxUniverse)
+                  :recover     (v/recover kb)
+                  :retract     (v/retract! kb @decl)))
+              (is (some? (v/handle-of kb (list 'termOfUnit @k app) 'CxUniverse))
+                  (str "the write is stored whole under " (vec steps)))
+              (is (= holds? (believed? kb (list t @k) 'CxUniverse))
+                  (str (vec steps) " over the " (name named))))))))))
+
+(tu/deftest-kb an-arg-arg-convicts-under-the-constraint-reading
+  (tu/with-terms [kindOf dog cat Rex CxWorld]
+    (without-entailing
+     (a-context kb CxWorld)
+     (a-type kb dog CxWorld)
+     (a-type kb cat CxWorld)
+     (v/assert kb (list cat Rex) CxWorld)
+     (v/assert kb (list 'argArg kindOf 1 2) CxWorld)
+     (let [e (try (v/assert kb (list kindOf Rex dog) CxWorld) nil
+                  (catch clojure.lang.ExceptionInfo e (ex-data e)))]
+       (is (= [:arg-type dog 1] [(:type e) (:expected e) (:position e)])
+           "Rex is placed in the hierarchy and not under dog"))
+     (is (some? (v/assert kb (list kindOf Rex cat) CxWorld))
+         "and the sentence naming a type Rex holds is admitted"))))
+
+(tu/deftest-kb an-arg-arg-naming-one-position-twice-is-not-well-formed
+  (tu/with-terms [kindOf CxWorld]
+    (a-context kb CxWorld)
+    (is (= :not-well-formed
+           (try (v/assert kb (list 'argArg kindOf 1 1) CxWorld) nil
+                (catch clojure.lang.ExceptionInfo e (:type (ex-data e))))))))
+
 ;; ---- the minted type is ordinary content --------------------------------
 
 (tu/deftest-kb a-minted-type-is-a-chaining-seed
@@ -753,21 +844,62 @@
                 (v/handle-of kb (list t2 Fred) CxWorld)}]
              (mapv :nogood (v/contradictions kb)))))))
 
-(tu/deftest-kb a-membership-outside-the-declared-type-is-no-evidence-against-the-fact
-  ;; `Bert` is a `rock` and nothing says a rock is not an animal, so the inherited
-  ;; declaration derives `(animal Bert)` beside it and refuses nothing.
-  (tu/with-terms [animal rock parentOf Bert Mary CxUp CxDown]
-    (with-entailing
-      (v/assert kb (list 'genlCx CxUp 'CxUniverse) 'CxUniverse)
-      (v/assert kb (list 'genlCx CxDown CxUp) 'CxUniverse)
-      (a-type kb animal CxUp)
-      (a-type kb rock CxUp)
-      (v/assert kb (list 'arg parentOf 1 animal) CxUp)
-      (v/assert kb (list rock Bert) CxDown)
-      (v/assert kb (list parentOf Bert Mary) CxDown)
-      (is (believed? kb (list parentOf Bert Mary) CxDown))
-      (is (believed? kb (list animal Bert) CxDown))
-      (is (empty? (v/contradictions kb))))))
+(tu/deftest-kb try-assert-refuses-a-fact-whose-mint-clashes
+  ;; The three clashes the tests above store: a mint against a stored membership, the
+  ;; fact against its own mint, and two mints of one cascade.  `try-assert` refuses each,
+  ;; and neither the fact nor a mint is stored.
+  (doseq [row [:stored :own :cascade]]
+    (tu/with-terms [t1 t2 rel Fred Mary CxWorld]
+      (with-entailing
+        (a-context kb CxWorld)
+        (a-type kb t1 CxWorld)
+        (a-type kb t2 CxWorld)
+        (v/assert kb (list 'disjoint t1 t2) CxWorld)
+        (let [fact (case row
+                     :stored  (do (v/assert kb (list 'arg rel 1 t1) CxWorld)
+                                  (v/assert kb (list t2 Fred) CxWorld)
+                                  (list rel Fred Mary))
+                     :own     (do (v/assert kb (list 'arg t1 1 t2) CxWorld)
+                                  (list t1 Fred))
+                     :cascade (do (v/assert kb (list 'arg rel 1 t1) CxWorld)
+                                  (v/assert kb (list 'arg t1 1 t2) CxWorld)
+                                  (list rel Fred Mary)))
+              e    (try (v/try-assert kb fact CxWorld)
+                        (catch clojure.lang.ExceptionInfo e (ex-data e)))]
+          (testing (name row)
+            (is (= [:definitional-clash :disjoint fact]
+                   [(:type e) (:violation e) (:entailed-from e)]))
+            (is (nil? (v/handle-of kb fact CxWorld)))
+            (is (= (if (= row :stored) #{(list t2 Fred)} #{})
+                   (set (filter #(v/handle-of kb % CxWorld) [(list t1 Fred) (list t2 Fred)])))
+                "only the memberships the setup wrote are stored")))))))
+
+(defn- outcome
+  "`:stored`, or the refusal's `:type`."
+  [kb s c]
+  (try (v/assert kb s c) :stored
+       (catch clojure.lang.ExceptionInfo e (:type (ex-data e)))))
+
+(tu/deftest-kb a-fact-under-an-inherited-declaration-is-stored-before-and-after-its-type
+  ;; `Bert` is a `pet` and nothing says a pet is not an animal, so the inherited
+  ;; declaration derives `(animal Bert)` beside it and refuses nothing, whether
+  ;; `(animal Bert)` is stated before the fact or after it.
+  (doseq [order [[:fact :type] [:type :fact]]]
+    (tu/with-neutral-kb [kb tu/fresh]
+      (tu/with-terms [animal pet parentOf Bert Mary CxUp CxDown]
+        (with-entailing
+          (v/assert kb (list 'genlCx CxUp 'CxUniverse) 'CxUniverse)
+          (v/assert kb (list 'genlCx CxDown CxUp) 'CxUniverse)
+          (a-type kb animal CxUp)
+          (a-type kb pet CxUp)
+          (v/assert kb (list 'arg parentOf 1 animal) CxUp)
+          (v/assert kb (list pet Bert) CxDown)
+          (let [step {:fact (list parentOf Bert Mary) :type (list animal Bert)}]
+            (testing (str order)
+              (is (= [:stored :stored] (mapv #(outcome kb (step %) CxDown) order)))
+              (is (believed? kb (list parentOf Bert Mary) CxDown))
+              (is (believed? kb (list animal Bert) CxDown))
+              (is (empty? (v/contradictions kb))))))))))
 
 ;; ---- a derived membership under an inherited declaration -------------------
 ;; `(achieves A B)` under `(genl achieves accomplishes)` and `(arg accomplishes 2 tt)`
@@ -793,12 +925,6 @@
   (tu/with-terms [tt assoc sub accomplishes achieves Ann Bee Cal Dee CxUp CxDown]
     {:tt tt :assoc assoc :sub sub :accomplishes accomplishes :achieves achieves
      :Ann Ann :Bee Bee :Cal Cal :Dee Dee :CxUp CxUp :CxDown CxDown}))
-
-(defn- outcome
-  "`:stored`, or the refusal's `:type`."
-  [kb s c]
-  (try (v/assert kb s c) :stored
-       (catch clojure.lang.ExceptionInfo e (:type (ex-data e)))))
 
 (tu/deftest-kb two-facts-deriving-one-membership-are-both-stored-in-either-order
   (doseq [order [[:ann :dee] [:dee :ann]]]
@@ -1121,6 +1247,197 @@
       (testing "and the one that can see it stores the fact and a dilemma"
         (is (some? (v/assert kb (list rel Bert 'TmpOther) CxLeft)))
         (is (= 1 (count (v/contradictions kb))))))))
+
+;; ---- placement at the most general contexts that see both ------------------
+;; CxTop sits under CxUniverse, CxMid under CxTop and CxLow under CxMid; CxL and CxR
+;; sit under CxTop and join in CxJoin.  Each row states `(P A B)` in one context and
+;; `(arg P 1 tt)` in others, and holds back one `genlCx` edge, which arrives in every
+;; position of the order and is retracted at the end.
+
+(def ^:private placement-graph
+  [[:top :universe] [:mid :top] [:low :mid] [:l :top] [:r :top] [:join :l] [:join :r]])
+
+(def ^:private placement-rows
+  ;; fact context, declaration contexts, the edge held back, placements with it,
+  ;; placements once it is retracted
+  [[:top [:mid]  [:mid :top]  #{:mid}    #{}]
+   [:mid [:top]  [:mid :top]  #{:mid}    #{}]
+   ;; with CxL off CxTop, CxJoin sees CxTop through CxR and CxL directly
+   [:top [:l :r] [:l :top]    #{:l :r}   #{:r :join}]
+   [:l   [:r]    [:join :r]   #{:join}   #{}]
+   [:l   [:r]    [:r :l]      #{:r}      #{:join}]])
+
+(defn- placement-readings
+  "Per order of the fact, the declarations and the held-back edge of `row`: the contexts
+  storing a believed `(tt A)`, whether every context at or below one of them reads it
+  and no other context does, and the contexts storing it once the edge is retracted."
+  [[fact-cx decl-cxs held _ _]]
+  (for [order (permutations (into [:fact :edge] (map-indexed (fn [i _] i) decl-cxs)))]
+    (tu/with-neutral-kb [kb tu/fresh]
+      (tu/with-terms [rel tt A B CxTop CxMid CxLow CxL CxR CxJoin]
+        (with-entailing
+          (let [cx    {:universe 'CxUniverse :top CxTop :mid CxMid :low CxLow
+                       :l CxL :r CxR :join CxJoin}
+                edge  (fn [[s g]] (list 'genlCx (cx s) (cx g)))
+                ctxs  (dissoc cx :universe)
+                mint  (list tt A)
+                where (fn [] (into #{} (keep (fn [[k c]] (when (entailed kb mint c) k))) ctxs))]
+            (doseq [e (remove #{held} placement-graph)] (v/assert kb (edge e) 'CxUniverse))
+            (a-type kb tt 'CxUniverse)
+            (doseq [step order]
+              (case step
+                :fact (v/assert kb (list rel A B) (cx fact-cx))
+                :edge (v/assert kb (edge held) 'CxUniverse)
+                (v/assert kb (list 'arg rel 1 tt) (cx (nth decl-cxs step)))))
+            (let [placed (where)
+                  tax    (reasoning/taxonomy kb)
+                  reads  (every? (fn [[_ c]]
+                                   (= (boolean (some #(tax/sees? tax c (cx %)) placed))
+                                      (v/isa? kb A tt c)))
+                                 ctxs)]
+              (v/retract! kb (v/handle-of kb (edge held) 'CxUniverse))
+              [order placed reads (where)])))))))
+
+(tu/deftest-kb a-mint-is-placed-at-the-most-general-contexts-that-see-the-fact-and-the-declaration
+  (doseq [[fact-cx decl-cxs held want after :as row] placement-rows
+          [order placed reads retracted] (placement-readings row)]
+    (testing (pr-str [fact-cx decl-cxs held order])
+      (is (= want placed))
+      (is reads "a context reads the mint exactly when it sees a placement")
+      (is (= after retracted)))))
+
+;; CxL and CxR sit under CxTop, and CxJ and CxK each under both.  `(genlCx CxK CxJ)` makes
+;; CxJ the one maximal common descendant of CxL and CxR while it stands.  With pruning on,
+;; `(dog A)` in CxJ withholds the mint there and not in CxK.
+
+(tu/deftest-kb a-genlCx-edge-leaving-places-the-mint-at-the-common-descendants-it-gives-back
+  (doseq [[prune? dog? want] [[false false #{:j :k}] [true false #{:j :k}]
+                              [true true #{:k}] [false true #{:j :k}]]]
+    (let [readings
+          (for [order (cons [:fact :decl]
+                            (filter #(< (.indexOf ^java.util.List % :edge)
+                                        (.indexOf ^java.util.List % :unedge))
+                                    (permutations [:fact :decl :edge :unedge])))]
+            (tu/with-neutral-kb [kb tu/fresh]
+              (tu/with-terms [rel tt dog A B CxTop CxL CxR CxJ CxK]
+                (binding [checks/*assertive-arg-types?*  true
+                          checks/*prune-subsumed-mints?* prune?]
+                  (let [edge (list 'genlCx CxK CxJ)]
+                    (doseq [[s g] [[CxTop 'CxUniverse] [CxL CxTop] [CxR CxTop]
+                                   [CxJ CxL] [CxJ CxR] [CxK CxL] [CxK CxR]]]
+                      (v/assert kb (list 'genlCx s g) 'CxUniverse))
+                    (a-type kb tt 'CxUniverse)
+                    (when dog?
+                      (v/assert kb (list 'genl dog tt) 'CxUniverse)
+                      (v/assert kb (list dog A) CxJ))
+                    (doseq [step order]
+                      (case step
+                        :fact   (v/assert kb (list rel A B) CxL)
+                        :decl   (v/assert kb (list 'arg rel 1 tt) CxR)
+                        :edge   (v/assert kb edge 'CxUniverse)
+                        :unedge (v/retract! kb (v/handle-of kb edge 'CxUniverse))))
+                    [order
+                     (into #{} (keep (fn [[k c]] (when (believed? kb (list tt A) c) k)))
+                           {:l CxL :r CxR :j CxJ :k CxK})
+                     (v/isa? kb A tt CxK)])))))]
+      (testing (pr-str [prune? dog?])
+        (is (= #{[want true]} (set (map rest readings)))
+            (pr-str (remove #(= [want true] (rest %)) readings)))))))
+
+(tu/deftest-kb a-route-edge-or-trigger-below-the-placement-places-the-mint-where-it-is-seen
+  ;; The fact and the declaration are in CxTop.  The ingredient a row names, a `genl` route
+  ;; from the fact's predicate to the declared one or the trigger membership an `interArg`
+  ;; waits on, is stated in CxMid below them, so CxMid is the one context that draws the
+  ;; mint; stated in CxTop as well, it places the mint there.  The ingredient is then
+  ;; retracted, CxTop's first.
+  (doseq [kind [:route :trigger]
+          [cxs want after] [[[:mid] #{:mid} [#{}]]
+                            [[:mid :top] #{:top} [#{:mid} #{}]]]]
+    (let [readings
+          (for [order (permutations (into [:fact :decl] cxs))]
+            (tu/with-neutral-kb [kb tu/fresh]
+              (tu/with-terms [rel sup tt carnivore A B CxTop CxMid]
+                (with-entailing
+                  (v/assert kb (list 'genlCx CxTop 'CxUniverse) 'CxUniverse)
+                  (v/assert kb (list 'genlCx CxMid CxTop) 'CxUniverse)
+                  (a-type kb tt 'CxUniverse)
+                  (a-type kb carnivore 'CxUniverse)
+                  (let [cx    {:top CxTop :mid CxMid}
+                        [ingredient decl mint]
+                        (case kind
+                          :route   [(list 'genl rel sup) (list 'arg sup 1 tt) (list tt A)]
+                          :trigger [(list carnivore A) (list 'interArg rel 1 carnivore 2 tt)
+                                    (list tt B)])
+                        x     (second mint)
+                        where (fn [] (into #{} (keep (fn [[k c]] (when (believed? kb mint c) k))) cx))
+                        reads (fn []
+                                (every? (fn [[_ c]]
+                                          (let [r (boolean (some #(tax/sees? (reasoning/taxonomy kb) c (cx %))
+                                                                 (where)))]
+                                            (= [r r] [(v/ask? kb mint c) (v/isa? kb x tt c)])))
+                                        cx))]
+                    (doseq [step order]
+                      (case step
+                        :fact (v/assert kb (list rel A B) CxTop)
+                        :decl (v/assert kb decl CxTop)
+                        (v/assert kb ingredient (cx step))))
+                    (let [held [(where) (reads)]]
+                      [order held
+                       (vec (for [c (sort-by #(if (= :top %) 0 1) cxs)]
+                              (do (v/retract! kb (v/handle-of kb ingredient (cx c)))
+                                  [(where) (reads)])))]))))))]
+      (testing (pr-str [kind cxs])
+        (is (= #{[[want true] (mapv #(vector % true) after)]} (set (map rest readings)))
+            (pr-str readings))))))
+
+(tu/deftest-kb an-except-at-the-placement-places-the-mint-where-the-fact-is-given-back
+  ;; CxTop > CxMid > CxLow.  `(rel A B)` is in CxTop and `(arg rel 1 tt)` in the row's
+  ;; declaration context, which is the mint's placement; an `except` of the fact there
+  ;; hides it, and an `except` of that `except` in CxLow gives it back.  Then either `except`
+  ;; is retracted.
+  (doseq [[decl-cx want gone-inner gone-outer] [[:mid #{:low} #{} #{:mid}]
+                                                [:top #{:low} #{} #{:top}]]
+          leave [:inner :outer]]
+    (let [readings
+          (for [order (filter #(< (.indexOf ^java.util.List % :fact)
+                                  (.indexOf ^java.util.List % :ex1)
+                                  (.indexOf ^java.util.List % :ex2))
+                              (permutations [:fact :decl :ex1 :ex2]))]
+            (tu/with-neutral-kb [kb tu/fresh]
+              (tu/with-terms [rel tt A B CxTop CxMid CxLow]
+                (with-entailing
+                  (v/assert kb (list 'genlCx CxTop 'CxUniverse) 'CxUniverse)
+                  (v/assert kb (list 'genlCx CxMid CxTop) 'CxUniverse)
+                  (v/assert kb (list 'genlCx CxLow CxMid) 'CxUniverse)
+                  (a-type kb tt 'CxUniverse)
+                  (let [cx    {:top CxTop :mid CxMid :low CxLow}
+                        fact  (list rel A B)
+                        mint  (list tt A)
+                        ex    (fn [h] (list 'except (list 'sentexHandle h)))
+                        ex1   #(ex (v/handle-of kb fact CxTop))
+                        ex2   #(ex (v/handle-of kb (ex1) (cx decl-cx)))
+                        where (fn [] (into #{} (keep (fn [[k c]] (when (believed? kb mint c) k))) cx))
+                        reads (fn []
+                                (every? (fn [[_ c]]
+                                          (let [r (boolean (some #(tax/sees? (reasoning/taxonomy kb) c (cx %))
+                                                                 (where)))]
+                                            (= [r r] [(v/ask? kb mint c) (v/isa? kb A tt c)])))
+                                        cx))]
+                    (doseq [step order]
+                      (case step
+                        :fact (v/assert kb fact CxTop)
+                        :decl (v/assert kb (list 'arg rel 1 tt) (cx decl-cx))
+                        :ex1  (v/assert kb (ex1) (cx decl-cx))
+                        :ex2  (v/assert kb (ex2) CxLow)))
+                    (let [held [(where) (reads)]]
+                      (if (= :inner leave)
+                        (v/retract! kb (v/handle-of kb (ex2) CxLow))
+                        (v/retract! kb (v/handle-of kb (ex1) (cx decl-cx))))
+                      [order held [(where) (reads)]]))))))
+          after (if (= :inner leave) gone-inner gone-outer)]
+      (testing (pr-str [decl-cx leave])
+        (is (= #{[[want true] [after true]]} (set (map rest readings)))
+            (pr-str readings))))))
 
 ;; ---- genlArg -------------------------------------------------------------
 

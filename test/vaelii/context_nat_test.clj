@@ -3,10 +3,11 @@
 (ns vaelii.context-nat-test
   "Reified-NAT contexts and structural genlCx — docs/context-nat.md.
 
-  A `context_denoting_function` `Cx*Fn` reifies its ground applications to an opaque `cx/`
-  context constant, so `(CxTimeFn CxMonad (DatetimeFn \"2000\"))` is a context a sentex can
-  be stored in and a `genlCx` node — while its unreifiable argument stays structural in the
-  `termOfUnit` map, readable to the producer.  `(contextArgSubrelation F pos R)` then orders
+  A ground application in a sentex's context slot reifies to an opaque `cx/` context
+  constant, so `(CxTimeFn CxMonad (DatetimeFn \"2000\"))` is a context a sentex can be stored
+  in and a `genlCx` node — while its unreifiable argument stays structural in the
+  `termOfUnit` map, readable to the producer.  A read names the context through the
+  application while CxUniverse believes `(result CxTimeFn context)`.  `(contextArgSubrelation F pos R)` then orders
   sibling contexts structurally: `(CxTimeFn CxMonad (DatetimeFn \"2000-01\"))` is a spec of
   `(CxTimeFn CxMonad (DatetimeFn \"2000\"))` because January 2000 is inside 2000, with nobody
   asserting the `genlCx` edge."
@@ -31,7 +32,7 @@
   context-function symbol."
   [kb]
   (let [cxfn (fresh-cxfn "Time")]
-    (v/assert kb (list 'context_denoting_function cxfn) 'CxUniverse)
+    (v/assert kb (list 'result cxfn 'context) 'CxUniverse)
     (v/assert kb '(unreifiable_function DatetimeFn) 'CxUniverse)
     cxfn))
 
@@ -65,7 +66,117 @@
       (is (contains? (set (v/contexts kb)) k))
       (is (v/sees? kb k 'CxCore)))))
 
-;; ---- object nat/ constants are still refused as contexts -----------------
+;; ---- the stored set and the readings are functions of the offered set ----
+
+;; An `except` of the declaration in CxUniverse, or a monotonic denial of it, hides it from
+;; every reader: `assert` stores the fact in the `cx/` context whichever arrives first, and a
+;; read naming the slot is refused.  An `except` in a sub-context leaves the declaration
+;; believed at CxUniverse, and the slot reads.  `recover` rebuilds the same reading in
+;; either order.
+(defn- hide-mark!
+  "Hide the `(result cxfn context)` declaration `mark` the way `where` names."
+  [kb where mark cxfn sub]
+  (case where
+    :universe (v/assert kb (list 'except (v/sentex-handle mark)) 'CxUniverse)
+    :sub      (v/assert kb (list 'except (v/sentex-handle mark)) sub)
+    :denial   (v/assert kb (list 'not (list 'result cxfn 'context)) 'CxUniverse
+                        {:strength :monotonic})))
+
+(defn- slot-reading
+  "How `fact`, asserted at `slot`, reads: the contexts storing it, whether each is a `cx/`
+  constant, its belief there, and `ask?` at the slot."
+  [kb fact slot]
+  (let [cs (vec (v/contexts-of kb fact))]
+    {:stored (count cs)
+     :cx?    (every? nat/reified-context-symbol? cs)
+     :at-cx  (boolean (some #(v/ask? kb fact %) cs))
+     :slot   (try (v/ask? kb fact slot) (catch clojure.lang.ExceptionInfo _ :refused))}))
+
+(tu/deftest-kb a-context-declaration-no-reader-believes-stores-and-reads-alike-in-either-order
+  (doseq [[where want] [[:universe {:stored 1 :cx? true :at-cx true :slot :refused}]
+                        [:denial {:stored 1 :cx? true :at-cx true :slot :refused}]
+                        [:sub {:stored 1 :cx? true :at-cx true :slot true}]]
+          order        [[:hide :fact] [:fact :hide]]]
+    (tu/with-terms [Winter NewYear holiday CxSub]
+      (let [cxfn (fresh-cxfn "Season")
+            _    (v/assert kb (list 'genlCx CxSub 'CxUniverse) 'CxUniverse {:strength :monotonic})
+            mark (v/assert kb (list 'result cxfn 'context) 'CxUniverse)
+            slot (list cxfn Winter)
+            fact (list holiday NewYear)]
+        (doseq [step order]
+          (case step
+            :hide (hide-mark! kb where mark cxfn CxSub)
+            :fact (v/assert kb fact slot)))
+        (let [before (slot-reading kb fact slot)]
+          (v/recover kb)
+          (is (= [want want] [before (slot-reading kb fact slot)]) (str where " " order)))))))
+
+(defn- run-order!
+  "Run `steps` against a fresh context function: `:declare` asserts `(result cxfn
+  context)`, `:retract` retracts it, `:fact` asserts `fact` at `slot`.  A refused fact
+  stores nothing, which the stored count reports."
+  [kb steps cxfn fact slot]
+  (let [decl (list 'result cxfn 'context)]
+    (doseq [step steps]
+      (case step
+        :declare (v/assert kb decl 'CxUniverse)
+        :retract (v/retract! kb (v/handle-of kb decl 'CxUniverse))
+        :fact    (try (v/assert kb fact slot) (catch clojure.lang.ExceptionInfo _ nil))))))
+
+(tu/deftest-kb the-stored-set-and-the-reading-do-not-depend-on-arrival-order
+  ;; Every order of the declaration, the fact and the declaration's retraction, and a
+  ;; re-declaration after the retraction: the fact is stored in its `cx/` context in every
+  ;; row, and the slot reads exactly when the last step touching the declaration left it
+  ;; stated.  `recover` rebuilds the same reading.
+  (doseq [steps [[:fact]
+                 [:declare :fact] [:fact :declare]
+                 [:declare :fact :retract] [:declare :retract :fact] [:fact :declare :retract]
+                 [:declare :retract :fact :declare] [:declare :fact :retract :declare]
+                 [:fact :declare :retract :declare] [:declare :retract :declare :fact]]]
+    (tu/with-terms [Winter NewYear holiday]
+      (let [cxfn (fresh-cxfn "Order")
+            slot (list cxfn Winter)
+            fact (list holiday NewYear)
+            want {:stored 1 :cx? true :at-cx true
+                  :slot   (if (= :declare (last (filter #{:declare :retract} steps))) true :refused)}]
+        (run-order! kb steps cxfn fact slot)
+        (let [before (slot-reading kb fact slot)]
+          (v/recover kb)
+          (is (= [want want] [before (slot-reading kb fact slot)]) (str steps)))))))
+
+(tu/deftest-kb an-undeclared-context-application-is-stored-and-refused-at-the-read
+  (tu/with-terms [Q NewYear holiday]
+    (let [slot (list 'CxBogusFn Q)
+          fact (list holiday NewYear)
+          h    (v/assert kb fact slot)
+          k    (:context (v/sentex kb h))
+          err  (try (v/ask? kb fact slot) nil
+                    (catch clojure.lang.ExceptionInfo e
+                      {:type (:type (ex-data e)) :message (ex-message e)}))]
+      (testing "the write stores the fact in a cx/ context with no declaration read"
+        (is (nat/reified-context-symbol? k))
+        (is (v/ask? kb fact k) "a read naming the constant answers it"))
+      (testing "a read naming the application is refused, naming the missing declaration"
+        (is (= :shape (:type err)))
+        (is (re-find #"\(result CxBogusFn context\)" (str (:message err))))))))
+
+(tu/deftest-kb a-declaration-admits-the-slot-only-where-cxuniverse-sees-it
+  ;; The slot resolves through the `termOfUnit` map in CxUniverse, so the declaration is
+  ;; read there: stated in CxUniverse or in CxCore above it, it admits the slot; stated in
+  ;; an unwired context or in a spec of CxUniverse, it does not.
+  (doseq [where [:universe :above :unwired :below]]
+    (tu/with-terms [Winter NewYear holiday CxBelow CxElse]
+      (let [cxfn (fresh-cxfn "Scope")
+            _    (v/assert kb (list 'genlCx CxBelow 'CxUniverse) 'CxUniverse {:strength :monotonic})
+            _    (v/assert kb (list 'result cxfn 'context)
+                           ({:universe 'CxUniverse :above 'CxCore :unwired CxElse :below CxBelow}
+                            where))
+            slot (list cxfn Winter)
+            fact (list holiday NewYear)]
+        (v/assert kb fact slot)
+        (is (= (if (#{:universe :above} where) true :refused)
+               (:slot (slot-reading kb fact slot)))
+            (str where))))))
 
 (tu/deftest-kb an-object-nat-is-still-not-a-context
   (tu/with-terms [FruitFn AppleTree]
@@ -150,7 +261,7 @@
       (v/assert kb '(weather Cold) (day 9))
       (is (= 16 @calls) "a mint beside eight siblings"))))
 
-;; ---- Finding #1: the producer reacts to belief REVIVAL, not only to assert ----
+;; ---- the producer reacts to belief revival, not only to assert ------------
 
 (defn- refusal
   "The `:type` a thrown assert refused with, or ::stored when it did not throw."
@@ -193,12 +304,12 @@
       (is (= [{'?h 'NewYear}] (v/ask kb '(holiday ?h) month))
           "and a fact in the year is visible from the month up the ancestor set"))))
 
-;; ---- Finding #2: a Cx*Fn in ARGUMENT position does not alias the context ----
+;; ---- position picks the namespace ----------------------------------------
 
 (tu/deftest-kb a-context-fn-in-argument-position-does-not-alias-the-context
-  ;; A context-denoting `Cx*Fn` application reifies to a `cx/` constant only in the CONTEXT
-  ;; slot; the sentence/argument reify walk must leave it structural, or one `cx/` constant
-  ;; would be both a context and an untyped object relatum (docs/context-nat.md).
+  ;; An application reifies to a `cx/` constant only in the CONTEXT slot.  In argument
+  ;; position a function that is no `reifiable_function` stays structural, so no `cx/`
+  ;; constant is an object relatum (docs/context-nat.md).
   (let [cxfn (declare-datetime-dimension! kb)
         expr (list cxfn 'CxMonad (list 'DatetimeFn "2000"))
         hc   (v/assert kb '(likes Tom Ann) expr)              ; context-slot use → cx/ constant
@@ -213,18 +324,51 @@
       (is (and (sequential? arg2) (= cxfn (first arg2)))
           "it stays a structural compound, exactly as an unreifiable NAT does"))))
 
-;; ---- Finding #3: the context-slot shape gate does not depend on the naming policy ----
+(tu/deftest-kb one-expression-in-both-positions-names-one-constant-per-namespace
+  ;; A reifiable function declared to denote contexts: the application in the context slot
+  ;; mints `cx/k'`, in argument position `nat/k`, in either order.  Each namespace's map is
+  ;; 1:1, so the two are no collision.  The argument constant is typed `context` by the
+  ;; `result` declaration like any minted constant, and nothing is refused; the `cx/`
+  ;; constant carries the role by its spelling and is typed nothing.
+  (doseq [order [[:slot :arg] [:arg :slot]]]
+    (tu/with-terms [PlaceFn Paris likes visited Tom Ann]
+      (v/assert kb (list 'reifiable_function PlaceFn) 'CxUniverse)
+      (v/assert kb (list 'result PlaceFn 'context) 'CxUniverse)
+      (let [E    (list PlaceFn Paris)
+            run  {:slot #(v/assert kb (list likes Tom Ann) E)
+                  :arg  #(v/assert kb (list visited Tom E) 'CxUniverse)}
+            hs   (into {} (map (fn [step] [step ((run step))])) order)
+            kcx  (:context (v/sentex kb (:slot hs)))
+            knat (nth (:sentence (v/sentex kb (:arg hs))) 2)
+            maps (set (map #(second (:sentence %))
+                           (v/sentexes-matching kb (list 'termOfUnit '?k E) 'CxUniverse)))]
+        (testing (str order " the slot and the argument name two constants")
+          (is (nat/reified-context-symbol? kcx))
+          (is (nat/reified-object-symbol? knat))
+          (is (= #{kcx knat} maps)))
+        (testing (str order " each namespace maps the expression once")
+          (is (= kcx (nat/dedup-constant kb E nat/context-namespace)))
+          (is (= knat (nat/dedup-constant kb E)))
+          (is (empty? (nat/colliding-constant-groups kb))))
+        (testing (str order " the argument constant is a context by the result declaration")
+          (is (v/ask? kb (list 'context knat) 'CxUniverse))
+          (is (empty? (v/sentexes-matching kb (list 'context kcx) '?ctx))))
+        (testing (str order " both reads answer")
+          (is (v/ask? kb (list likes Tom Ann) E))
+          (is (v/ask? kb (list visited Tom E) 'CxUniverse)))))))
+
+;; ---- the context-slot shape gate does not depend on the naming policy ------
 
 (tu/deftest-kb naming-off-still-refuses-a-non-symbol-context-for-shape
-  ;; `check-shape!` runs independent of the naming policy, and the gate re-checks that
-  ;; reification would yield a symbol — so an undeclared or non-ground compound context is a
-  ;; `:shape` refusal even under `:naming :off`, never a raw list in a sentex's context slot
+  ;; `check-shape!` runs independent of the naming policy, and the gate checks that
+  ;; reification yields a symbol — so a non-ground compound context is a `:shape` refusal
+  ;; even under `:naming :off`, never a raw list in a sentex's context slot
   ;; (docs/context-nat.md).
   (let [cxfn   (declare-datetime-dimension! kb)
         kb-off (assoc kb :naming :off)]
-    (testing "an UNDECLARED context-function compound is a shape error even with naming off"
-      (is (= :shape (refusal #(v/assert kb-off '(likes Tom Ann)
-                                        (list 'CxBogusFn 'CxMonad (list 'DatetimeFn "2000")))))))
+    (testing "an UNDECLARED ground application reifies to a symbol and stores"
+      (let [h (v/assert kb-off '(likes Tom Ann) (list 'CxBogusFn 'CxMonad (list 'DatetimeFn "2000")))]
+        (is (nat/reified-context-symbol? (:context (v/sentex kb-off h))))))
     (testing "a DECLARED but NON-GROUND context is a shape error even with naming off"
       (is (= :shape (refusal #(v/assert kb-off '(likes Tom Ann)
                                         (list cxfn 'CxMonad '?x))))))
@@ -232,7 +376,7 @@
       (let [h (v/assert kb-off '(likes Tom Ann) (list cxfn 'CxMonad (list 'DatetimeFn "2000")))]
         (is (symbol? (:context (v/sentex kb-off h))))))))
 
-;; ---- Finding #4: the stored-fact R oracle picks its supporter content-keyed ----
+;; ---- the stored-fact R oracle picks its supporter content-keyed ----------
 
 (tu/deftest-kb the-stored-fact-oracle-chooses-its-supporter-by-content
   ;; `subintervalOf` answers `::pure`, so exercise the stored-fact branch with a
@@ -277,7 +421,7 @@
   (tu/with-terms [CxAlias Slot likes Tom Ann]
     (let [cxfn (fresh-cxfn "Alias")
           app  (list cxfn Slot)]
-      (v/assert kb (list 'context_denoting_function cxfn) 'CxUniverse)
+      (v/assert kb (list 'result cxfn 'context) 'CxUniverse)
       (v/assert kb (list 'genlCx CxAlias 'CxUniverse) 'CxUniverse)
       (v/assert kb (list 'rewriteOf CxAlias app) 'CxUniverse)
       (let [h (v/assert kb (list likes Tom Ann) app)]
@@ -321,7 +465,7 @@
   Returns the context-function symbol."
   [kb]
   (let [cxfn (fresh-cxfn "Cal")]
-    (v/assert kb (list 'context_denoting_function cxfn) 'CxUniverse)
+    (v/assert kb (list 'result cxfn 'context) 'CxUniverse)
     (doseq [f '[YearFn MonthFn DayFn]]
       (v/assert kb (list 'unreifiable_function f) 'CxUniverse))
     (v/assert kb (list 'contextArgSubrelation cxfn 2 'subintervalOf) 'CxUniverse)
@@ -378,7 +522,7 @@
   (let [cxfn  (fresh-cxfn "Cal")
         year  (list cxfn 'CxMonad '(YearFn 2000))
         march (list cxfn 'CxMonad '(MonthFn 2000 3))]
-    (v/assert kb (list 'context_denoting_function cxfn) 'CxUniverse)
+    (v/assert kb (list 'result cxfn 'context) 'CxUniverse)
     (doseq [f '[YearFn MonthFn]]
       (v/assert kb (list 'unreifiable_function f) 'CxUniverse))
     (v/assert kb '(holiday NewYear) year)
@@ -415,7 +559,7 @@
         mterm (list 'DatetimeFn "2000-01")
         year  (list cxfn 'CxMonad yterm)
         month (list cxfn 'CxMonad mterm)]
-    (v/assert kb (list 'context_denoting_function cxfn) 'CxUniverse)
+    (v/assert kb (list 'result cxfn 'context) 'CxUniverse)
     (v/assert kb '(unreifiable_function DatetimeFn) 'CxUniverse)
     (v/assert kb (list 'contextArgSubrelation cxfn 2 'subFooOf) 'CxUniverse)
     (v/assert kb '(holiday NewYear) year)
@@ -474,7 +618,7 @@
           mterm (list 'DatetimeFn "2000-01")
           year  (list cxfn 'CxMonad yterm)
           month (list cxfn 'CxMonad mterm)]
-      (v/assert kb (list 'context_denoting_function cxfn) 'CxUniverse)
+      (v/assert kb (list 'result cxfn 'context) 'CxUniverse)
       (v/assert kb '(unreifiable_function DatetimeFn) 'CxUniverse)
       (v/assert kb (list 'contextArgSubrelation cxfn 2 'subFooOf) 'CxUniverse)
       (let [ky   (:context (v/sentex kb (v/assert kb '(holiday NewYear) year)))

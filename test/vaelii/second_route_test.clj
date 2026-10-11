@@ -634,3 +634,44 @@
 
 (deftest ^:slow a-claim-on-its-own-second-route-holds-the-next-firing-in-every-order
   (chained-orders-agree (permutations [:rule :claim :named :other :denial])))
+
+;; ---- a read nested in a search does not leave an answer for the next read ---------
+;;
+;; A forward rule `b2 ⇒ (genl ?x a3)` derives E = `(genl tt a3)` over `b0`'s second route,
+;; `b1 ⊂ b2` denied, and `a3 ⇒ hout` derives H = `(hout tt)` from `(a0 tt)` through E, with
+;; `a1a ⊂ a3` denied.  Reading E opens its firing's goal question; the search reads `a0`'s
+;; ancestor set, which climbs E, whose belief reads the same question while it is open
+;; (`exc/route-answer`).  The four reads answer true in every order.
+
+(defn- open-question-shape []
+  (let [{:syms [a0_t a1a_t a1x_t a1y_t a3_t b0_t b1_t b1b_t b1c_t b1d_t b2_t hout_t tt_t]}
+        (terms '[a0_t a1a_t a1x_t a1y_t a3_t b0_t b1_t b1b_t b1c_t b1d_t b2_t hout_t tt_t])
+        U 'CxUniverse
+        M {:strength :monotonic}
+        edge (fn [a b] [(list 'genl a b) U {}])]
+    {:facts [(edge b0_t b1_t) (edge b1_t b2_t) (edge b0_t b1b_t) (edge b1b_t b2_t)
+             (edge b1c_t b2_t) (edge b1d_t b2_t) (edge a0_t a1a_t) (edge a1a_t a3_t)
+             (edge a0_t tt_t) (edge a1x_t a3_t) (edge a1y_t a3_t)
+             [(list a0_t tt_t) U {}] [(list b0_t tt_t) U {}]
+             [(list 'set/forwardRule (list 'implies (list b2_t '?x) (list 'genl '?x a3_t))) U {}]
+             [(list 'set/forwardRule (list 'implies (list a3_t '?x) (list hout_t '?x))) U {}]
+             [(list 'not (list 'genl b1_t b2_t)) U M]
+             [(list 'not (list 'genl a1a_t a3_t)) U M]]
+     :E (list 'genl tt_t a3_t)
+     :H (list hout_t tt_t)}))
+
+(defn- open-question-answers
+  "The four reads of E and H, `in?` and `ask?`, in `order`, as `{read answer}`."
+  [order]
+  (tu/with-cleared-kb [kb tu/isolated-fresh]
+    (let [{:keys [facts E H]} (open-question-shape)
+          _     (doseq [[s c o] facts] (v/assert kb s c o))
+          in?   #(let [h (v/handle-of kb % 'CxUniverse)] (boolean (and h (v/in? kb h))))
+          reads {:in-E #(in? E) :in-H #(in? H)
+                 :ask-E #(v/ask? kb E 'CxUniverse) :ask-H #(v/ask? kb H 'CxUniverse)}]
+      (into {} (map (fn [r] [r ((reads r))])) order))))
+
+(deftest a-read-inside-a-search-holds-nothing-the-next-read-is-served
+  (doseq [order (permutations [:in-E :in-H :ask-E :ask-H])]
+    (testing (str order)
+      (is (= {:in-E true :in-H true :ask-E true :ask-H true} (open-question-answers order))))))

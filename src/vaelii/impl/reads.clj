@@ -28,9 +28,19 @@
     spelling along with a defeated one (`vaelii.impl.jtms`'s `-in?`), so a believed entry point
     means what `kb/sentexes-matching` means for the handles it yields.
 
-  An entry point is a **wrapper and never a rewrite**: one call to the protocol method it names,
-  the same laziness, the same count-aware path.  It adds no index operation, which is
-  what keeps `assert_cost_test` reading the same numbers on either side of one.
+  An entry point over a named method is a **wrapper and never a rewrite**: one call to
+  the method, the same laziness, the same count-aware path.  An entry point over the
+  `family-*` methods tallies its family's `:reads` here, one per logical read, since the
+  method serves every family and tallies nothing.  An argument read is the slot roster
+  and then a node per predicate in it, and tallies `:argument-slot` and `:argument-root`
+  once each, which is what keeps `assert_cost_test` reading the same numbers.
+
+  ## A read over every context is named `…-global`
+
+  A family read takes the reader's ancestor set, and passes `p/every-context` only where it
+  reads past every reader on purpose: a roster scoped later, the taxonomy's supporters, a
+  census.  The entry point that forwards `p/every-context` ends in `-global`, and lint
+  E16 holds the roster of its callers (docs/indexing.md, \"The family methods\").
 
   ## Where there is only one entry point, and why
 
@@ -38,8 +48,8 @@
     not in the index, so there is no O(1) believed count and this namespace does not
     pretend otherwise — a believed count is `(count (believed-… …))` and is O(n).  The
     public readers state the same thing (`vaelii.core/count-with-functor`).
-  - **The vocabulary** (`stored-terms`, `stored-term-count`) is the roster of names the
-    term index is keyed by.  A name enters with the first sentex mentioning it and leaves
+  - **The vocabulary** (`stored-terms-global`, `stored-term-count-global`) is the roster
+    of names the term index is keyed by.  A name enters with the first sentex mentioning it and leaves
     with the last, so it answers *what this KB talks about* — a question defeat does not
     change.
   - **The watched-rule roster** (`watched-rule?`, `watched-rules`, `watched-rules-on`)
@@ -52,18 +62,36 @@
 
   - **A rule's** belief is `resolution/rule-believed?` and not `jtms/in?`: a sentex the
     TMS holds no node for is *available* rather than disbelieved, which is an arm a plain
-    membership test does not have.  So `as-stored-rules-by-antecedent` and its consequent
-    twin have no believed sibling here, and a chainer asks `res/rule-believed?` of each
-    handle it means to fire.
+    membership test does not have.  So `as-stored-rules-by-antecedent-global` and its
+    consequent twins have no believed sibling here, and a chainer asks
+    `res/rule-believed?` of each handle it means to fire.
   - **`resolution/*belief-blind*`** is not read here.  It is a named opt-out scoped to
     the retrieval entry point that resolves `CxEverything`, and no caller of these entry points is on
     that path — an entry point that consulted it would extend the opt-out to reads nobody granted
     it to."
   (:require [vaelii.impl.jtms :as jtms]
-            [vaelii.impl.kv :as kv]
+            [vaelii.impl.profile :as prof]
             [vaelii.impl.protocols :as p]
             [vaelii.impl.sentex :as sx]
             [vaelii.impl.types.reasoning :as reasoning]))
+
+(def ^:dynamic *contexts-read*
+  "nil, or a volatile set to which each entry point here that reads by context adds the
+  contexts it reads.  A test binds it around a settle step to bound the contexts that
+  step reads (`genlcx_move_oracle_test`); a read over every context adds nothing."
+  nil)
+
+(defn- read-in!
+  "Add the contexts `ctxs` to `*contexts-read*` when it is bound."
+  [ctxs]
+  (when-let [t *contexts-read*]
+    ;; the every-context marker is a keyword, not a collection of contexts
+    (when (coll? ctxs) (vswap! t into ctxs))))
+
+(defn- read-at!
+  "Add the context `c` to `*contexts-read*` when it is bound."
+  [c]
+  (when-let [t *contexts-read*] (vswap! t conj c)))
 
 ;; ---- extents: the trie and the secondary roots ---------------------------
 
@@ -75,7 +103,9 @@
   every record it finds, an ancestor set sweep that fetches each record and decides on the record,
   a level-1 diagnostic reporting what the root holds."
   [index context]
-  (p/sentexes-in-context index context))
+  (read-at! context)
+  (prof/record-read :context-root)
+  (p/family-leaf index :context-root [context]))
 
 (defn as-stored-with-functor
   "Handles of fact sentexes whose functor is `pred`, any arity, either polarity — belief
@@ -88,14 +118,41 @@
   [index pred]
   (p/sentexes-with-functor index pred))
 
-(defn as-stored-with-arg
-  "Handles of fact sentexes holding `term` at 1-based argument `pos` — belief unread.
+(defn- roster-union-global
+  "The union of the `:argument-root` nodes `[pd pos term]` over the predicates `preds`, in
+  every context.  A roster holds one predicate in the common case, and that node's
+  handles are handed back as stored."
+  [index preds pos term]
+  (case (count preds)
+    0 #{}
+    1 (p/family-handles index :argument-root [(first preds) pos term] p/every-context)
+    (reduce (fn [acc pd]
+              (into acc (p/family-handles index :argument-root [pd pos term] p/every-context)))
+            #{} preds)))
 
-  The argument root is scoped by predicate, so this is the narrow read a pattern pinning
-  an argument after a variable wants.  Same shape as `as-stored-with-functor`: a
-  candidate set whose consumer decides per record."
+(defn as-stored-with-arg-global
+  "Handles of fact sentexes holding `term` at 1-based argument `pos`, in every context —
+  belief unread.  One read of the slot roster `[:argument-slot pos term]` for the
+  predicates at the slot, then each predicate's argument-root node.
+
+  Same shape as `as-stored-with-functor`: a candidate set whose consumer decides per
+  record."
   [index pos term]
-  (p/sentexes-with-arg index pos term))
+  (prof/record-read :argument-slot)
+  (prof/record-read :argument-root)
+  (let [term (sx/canon term)]
+    (roster-union-global index (p/family-leaf index :argument-slot [pos term]) pos term)))
+
+(defn as-stored-unary-with-arg-global
+  "Handles of the unary fact sentexes whose lone argument is `term`, either polarity, in
+  every context — belief unread, and a superset (the unary roster outlives its last unary
+  fact where a fact of another arity empties the node), so the caller filters each record
+  by arity.  The `:unary-slot` roster, then the argument-root nodes at position 1."
+  [index term]
+  (prof/record-read :argument-slot)
+  (prof/record-read :argument-root)
+  (let [term (sx/canon term)]
+    (roster-union-global index (p/family-leaf index :unary-slot [term]) 1 term)))
 
 (defn as-stored-with-args
   "Handles with functor `pred` AND each `[pos term]` of `pos-terms`, belief unread:
@@ -105,17 +162,24 @@
   [index pred pos-terms]
   (p/sentexes-with-args index pred pos-terms))
 
+(defn as-stored-with-args-in
+  "`as-stored-with-args` restricted to the handles stated in one of `contexts`, a set: the
+  argument roots end in the context, so no leaf outside `contexts` is read."
+  [index pred pos-terms contexts]
+  (read-in! contexts)
+  (p/sentexes-with-args index pred pos-terms contexts))
+
 (defn as-stored-predicates-at-arg
   "The predicates holding a **stored** fact, either polarity, with `term` at argument `pos`
-  — the slot roster's entry, no handle read and no belief consulted — or nil for an index
-  store that keeps no roster this can reach (`kv/slot-predicates`).
+  — the slot roster's entry, no handle read and no belief consulted.
 
   A roster read rather than a posting read, so it names predicates where the other
   entry points here name handles.  A predicate enters with its first stored fact at the
   slot and leaves with its last, so a defeated claim keeps it listed: the answer is for a
   caller that must over-approximate which predicates a term could be claimed under."
   [index pos term]
-  (kv/slot-predicates index pos term))
+  (prof/record-read :argument-slot)
+  (p/family-leaf index :argument-slot [pos (sx/canon term)]))
 
 (defn as-stored-with-term
   "Handles the inverted term index keys by `term` — belief unread.
@@ -125,7 +189,8 @@
   postings are a candidate set in both cases: a term appears in a sentence the reader then
   has to look at."
   [index term]
-  (p/sentexes-with-term index term))
+  (prof/record-read :term-index)
+  (p/family-leaf index :term-index [(sx/canon term)]))
 
 (defn as-stored-with-terms
   "Handles the inverted term index keys by every one of `terms`, one intersection — belief
@@ -172,7 +237,10 @@
   "How many sentexes are **stored** in `context` — one set-size read, O(1), nothing
   fetched and no belief consulted.  A defeated default still occupies its context."
   [index context]
-  (p/count-in-context index context))
+  (read-at! context)
+  (prof/record-read :context-root)
+  ;; the context root is a flat set per context, so the count over `#{context}` is its size
+  (long (p/family-count index :context-root [] #{context})))
 
 (defn stored-count-with-functor
   "How many fact sentexes are **stored** with functor `pred` — one set-size read, O(1).
@@ -183,12 +251,17 @@
   [index pred]
   (p/count-with-functor index pred))
 
-(defn stored-count-with-arg
-  "How many fact sentexes **store** `term` at argument position `pos` — one O(1) set-size
-  read per predicate declaring an argument at that slot, since the argument roots are
-  scoped by predicate."
+(defn stored-count-with-arg-global
+  "How many fact sentexes **store** `term` at argument position `pos`, in every context —
+  the slot roster, then one O(1) count read per predicate at the slot.  The sum is
+  disjoint: a handle is one sentex with one functor, so it sits under one predicate at a
+  fixed `(pos, term)`."
   [index pos term]
-  (p/count-with-arg index pos term))
+  (prof/record-read :argument-slot)
+  (prof/record-read :argument-root)
+  (let [term (sx/canon term)]
+    (transduce (map #(long (p/family-count index :argument-root [% pos term] p/every-context)))
+               + 0 (p/family-leaf index :argument-slot [pos term]))))
 
 (defn stored-count-at
   "How many sentexes are **stored** under trie prefix `prefix` — the count-aware trie's
@@ -196,14 +269,28 @@
   [index prefix]
   (p/count-at index prefix))
 
+(defn as-stored-children
+  "The child tokens **stored** under trie prefix `prefix`, belief unread: under `[]`, the
+  first token of every stored sentence, so every functor of a stored fact."
+  [index prefix]
+  (p/children index prefix))
+
+(defn as-stored-leaf
+  "Handles stored at exactly the trie leaf `path`: one read, never a wildcard match
+  (`kb/find-sentex-handle`'s dedup)."
+  [index path]
+  (p/leaf-at index path))
+
 (defn stored-count-children
   "How many child tokens sit under interior prefix `prefix` — the trie's distinct-value
   count at a position, answered without building the child set.
 
   What the planner's cost model divides by, so it must not scale with the KB:
-  `(count (stored-children …))` would, and this does not."
+  `(count (stored-children …))` would, and this does not: `family-child-count` answers
+  the child set's cardinality without building it."
   [index prefix]
-  (p/count-children index prefix))
+  (prof/record-read :trie-counts)
+  (long (p/family-child-count index :trie prefix)))
 
 ;; ---- the bodies stored in both polarities ----------------------------------
 
@@ -215,50 +302,165 @@
 (defn stores-opposed?
   "Is any body **stored** in both polarities?  One count read, belief unread."
   [index]
-  (pos? (long (or (kv/opposed-count index) 0))))
+  (prof/record-read :opposed)
+  (pos? (long (p/family-child-count index :opposed-bodies []))))
 
 (defn stored-opposed?
   "Is `body` **stored** in both polarities?  One membership read, belief unread."
   [index body]
-  (boolean (kv/opposed-body? index (sx/canon body))))
+  (prof/record-read :opposed)
+  (boolean (p/family-member? index :opposed-bodies [] (sx/canon body))))
 
 (defn as-stored-opposed-bodies
   "Every body **stored** in both polarities, as a set."
   [index]
-  (or (kv/opposed-bodies index) #{}))
+  (prof/record-read :opposed)
+  (p/family-leaf index :opposed-bodies []))
 
-(defn as-stored-opposed-members
+(defn as-stored-opposed-members-global
   "The handles of `body`'s facts of both polarities while it is **stored** in both, in
   every context, belief unread; empty when it is not."
   [index body]
-  (or (kv/opposed-members index (sx/canon body)) #{}))
+  (prof/record-read :opposed)
+  (p/family-handles index :opposed [(sx/canon body)] p/every-context))
 
 (defn as-stored-opposed-in
   "The handles of the facts of every body **stored** in both polarities that are stated
   in a context of `contexts`, belief unread: |contexts| leaf reads."
   [index contexts]
-  (or (kv/opposed-in index contexts) #{}))
+  (read-in! contexts)
+  (prof/record-read :opposed)
+  (if (empty? contexts) #{} (p/family-handles index :opposed-in [] contexts)))
 
 ;; ---- the shape roster, the terms of two unary predicates, the self tuples ----
 
 (defn as-stored-self-tuples
   "The handles of the **stored** ground positive binary self tuples `(f a a)` of functor
-  `f` stated in a context of `contexts` (every context when nil), belief unread
-  (`kv/self-tuples`)."
+  `f` stated in a context of `contexts`, belief unread."
   [index f contexts]
-  (or (kv/self-tuples index f contexts) #{}))
+  (read-in! contexts)
+  (prof/record-read :predicate-extent)
+  (p/family-handles index :self-tuple [f] contexts))
+
+(defn as-stored-self-tuples-global
+  "`as-stored-self-tuples` in every context."
+  [index f]
+  (prof/record-read :predicate-extent)
+  (p/family-handles index :self-tuple [f] p/every-context))
 
 (defn as-stored-shape-lengths
   "The lengths the positive facts of functor `f` are **stored** at, as a set, belief
-  unread: one roster read (`kv/shape-lengths`).  A length leaves with its last fact."
+  unread: one roster read.  A length leaves with its last fact."
   [index f]
-  (or (kv/shape-lengths index f) #{}))
+  (prof/record-read :predicate-extent)
+  (p/family-leaf index :shape-lengths [f]))
+
+(defn as-stored-shape-tuples-global
+  "The handles of the **stored** positive facts of functor `f` holding `n` arguments, in
+  every context, belief unread."
+  [index f n]
+  (prof/record-read :predicate-extent)
+  (p/family-handles index :shape-tuple [f n] p/every-context))
+
+;; ---- the arity bindings ----------------------------------------------------
+;; The stored facts binding a relation's length (`sx/arity-binding`), read by the arity
+;; family, which keeps a reader's by `jtms/in?` and its ancestor set.
+
+(defn as-stored-arity-binding-kinds
+  "The `[kind value]` of every **stored** length binding of `pred`, as a set, belief
+  unread: one read."
+  [index pred]
+  (prof/record-read :arity-binding)
+  (p/family-leaf index :arity-binding-kinds [pred]))
+
+(defn stored-arity-bound?
+  "Does `pred` hold a **stored** length binding, belief unread: one probe."
+  [index pred]
+  (prof/record-read :arity-binding)
+  (boolean (p/family-member? index :arity-bound [] pred)))
+
+(defn as-stored-arity-bound
+  "Every predicate holding a **stored** length binding, as a set, belief unread."
+  [index]
+  (prof/record-read :arity-binding)
+  (p/family-leaf index :arity-bound []))
+
+(defn stored-count-arity-bound
+  "How many predicates `as-stored-arity-bound` holds: one read."
+  [index]
+  (prof/record-read :arity-binding)
+  (long (p/family-child-count index :arity-bound [])))
+
+(defn- arity-bindings
+  "`[[handle kind value context] ...]` of `pred` in the contexts `ctxs` keeps: per stored
+  `[kind value]`, its node's children in `ctxs` and a leaf read per child kept."
+  [index pred ctxs]
+  (prof/record-read :arity-binding)
+  (into [] (mapcat (fn [[kind v]]
+                     (let [node [pred kind v]]
+                       (for [c (p/family-children index :arity-binding node ctxs)
+                             h (p/family-leaf index :arity-binding (conj node c))]
+                         [h kind v c]))))
+        (p/family-leaf index :arity-binding-kinds [pred])))
+
+(defn as-stored-arity-bindings
+  "`[[handle kind value context] ...]`, the **stored** length bindings of `pred` stated
+  in a context of `contexts`, belief unread."
+  [index pred contexts]
+  (read-in! contexts)
+  (arity-bindings index pred contexts))
+
+(defn as-stored-arity-bindings-global
+  "`as-stored-arity-bindings` in every context."
+  [index pred]
+  (arity-bindings index pred p/every-context))
 
 (defn as-stored-unary-multi-terms
-  "The terms the unary roster lists two or more predicates of, as a set, belief unread
-  (`kv/unary-multi-terms`): a superset of the terms holding two **stored** memberships."
+  "The terms the unary roster lists two or more predicates of, as a set, belief unread:
+  a superset of the terms holding two **stored** memberships."
   [index]
-  (or (kv/unary-multi-terms index) #{}))
+  (prof/record-read :argument-slot)
+  (p/family-leaf index :unary-multi []))
+
+(defn as-stored-unary-kept-terms
+  "The terms of `as-stored-unary-multi-terms` whose unary roster lists `pred`, as a set,
+  belief unread: a superset of the terms holding a **stored** membership or denial of
+  `pred` beside a stored fact of another unary predicate."
+  [index pred]
+  (prof/record-read :argument-slot)
+  (p/family-leaf index :unary-kept [pred]))
+
+(defn as-stored-unary-kept-types
+  "The predicates `as-stored-unary-kept-terms` holds a term under, as a set, belief
+  unread."
+  [index]
+  (prof/record-read :argument-slot)
+  (p/family-leaf index :unary-kept-types []))
+
+(defn stored-count-unary-kept-types
+  "How many predicates `as-stored-unary-kept-types` holds: one read."
+  [index]
+  (prof/record-read :argument-slot)
+  (long (p/family-child-count index :unary-kept-types [])))
+
+(defn as-stored-unary-denied-terms
+  "The terms a **stored** `(not (pred term))` names, as a set, belief unread."
+  [index pred]
+  (prof/record-read :argument-slot)
+  (p/family-leaf index :unary-denied [pred]))
+
+(defn as-stored-unary-denied-types
+  "The predicates `as-stored-unary-denied-terms` holds a term under, as a set, belief
+  unread."
+  [index]
+  (prof/record-read :argument-slot)
+  (p/family-leaf index :unary-denied-types []))
+
+(defn stored-count-unary-denied-types
+  "How many predicates `as-stored-unary-denied-types` holds: one read."
+  [index]
+  (prof/record-read :argument-slot)
+  (long (p/family-child-count index :unary-denied-types [])))
 
 ;; ---- the stored excepts and defeats ----------------------------------------
 ;; A positive `(except (sentexHandle H))` keys in the trie as `[except m sentexHandle H
@@ -282,25 +484,26 @@
 
 (defn stores-in?
   "Does a context of `contexts` **store** a fact of functor `pred`, either polarity?  The
-  predicate extent's children intersected with `contexts`, no leaf read
-  (`kv/extent-contexts`), belief unread."
+  predicate extent's children intersected with `contexts`, no leaf read, belief unread."
   [index pred contexts]
-  (boolean (seq (or (kv/extent-contexts index pred contexts)
-                    (p/sentexes-with-args index pred [] contexts)))))
+  (read-in! contexts)
+  (prof/record-read :predicate-extent)
+  (boolean (seq (p/family-children index :predicate-extent [pred] contexts))))
 
 (defn stored-naming?
   "Is a positive `(functor (sentexHandle h))` **stored** in any context?  One count read."
   [index functor h]
   (pos? (p/count-at index (naming-prefix functor h))))
 
-(defn as-stored-named
+(defn as-stored-named-global
   "The handles the positive `(functor (sentexHandle H))` facts **stored** in any context
-  name, as a set: the children of the trie's `[functor m sentexHandle]` level.  Where the
-  trie is a `KvIndexStore`'s the set is the one the backend holds (`kv/children-held`), so
-  two reads with no write between them answer one object on the map backends."
+  name, as a set: the children of the trie's `[functor m sentexHandle]` level.  On the map
+  backends the set is the one the backend holds, so two reads with no write between them
+  answer one object."
   [index functor]
-  (let [pre (naming-prefix functor)]
-    (or (kv/children-held index pre) (set (p/children index pre)))))
+  (prof/record-read :trie-counts)
+  (let [cs (p/family-children index :trie (naming-prefix functor) p/every-context)]
+    (if (set? cs) cs (set cs))))
 
 (defn as-stored-naming-by-context
   "The positive `(functor (sentexHandle h))` facts **stored**, as one `[context handles]`
@@ -324,68 +527,93 @@
 
 ;; ---- the vocabulary roster -----------------------------------------------
 
-(defn stored-terms
-  "Every symbol term the index is keyed by — the KB's vocabulary, unordered.
+(defn stored-terms-global
+  "Every symbol term the index is keyed by, in every context — the KB's vocabulary,
+  unordered.
 
   A name is in this roster while some **stored** sentex mentions it, so it answers what
   the KB talks about rather than what it currently holds: defeating the one fact about a
   term does not unname the term."
   [index]
-  (p/terms index))
+  (prof/record-read :term-roster)
+  (p/family-children index :term-roster [] p/every-context))
 
-(defn stored-term-count
-  "How many distinct symbol terms the index is keyed by — the roster's own count, no
-  walk over it."
+(defn stored-term-count-global
+  "How many distinct symbol terms the index is keyed by, in every context — the roster's
+  own count, no walk over it."
   [index]
-  (p/term-count index))
+  (prof/record-read :term-roster)
+  (long (p/family-count index :term-roster [] p/every-context)))
 
 ;; ---- the rule indexes ----------------------------------------------------
 
-(defn as-stored-rules-by-antecedent
-  "Handles of rules with an antecedent on `pred` — every rule, whatever its direction,
-  belief unread.
+(defn as-stored-rules-by-antecedent-global
+  "Handles of rules with an antecedent on `pred`, stated in any context — every rule,
+  whatever its direction, belief unread.
 
   Belief for a **rule** is `resolution/rule-believed?` and not `jtms/in?`, which is why
   there is no believed entry point beside this one: a rule the TMS holds no node for is available
   rather than disbelieved, and a chainer asks that question of each handle it means to
   fire."
   [index pred]
-  (p/rules-by-antecedent index pred))
+  (prof/record-read :rule-index)
+  (p/family-handles index :rule-antecedent [pred] p/every-context))
 
-(defn as-stored-rules-by-consequent
-  "Handles of rules concluding `pred` — every rule, whatever its direction, belief unread.
+(defn as-stored-rules-by-consequent-in
+  "Handles of rules concluding `pred` stated in one of `contexts`, a set — every rule,
+  whatever its direction, belief unread.
 
   `resolution/rule-believed?` is the belief question, as for the antecedent entry point above.  A
   rule whose consequent functor is a variable files under `protocols/var-consequent-key`
   rather than under a canonical `?var0`, so a concrete goal's answer is this bucket
   unioned with that catch-all (`resolution/concluding-rule-handles`)."
+  [index pred contexts]
+  (read-in! contexts)
+  (prof/record-read :rule-index)
+  (p/family-handles index :rule-consequent [pred] contexts))
+
+(defn as-stored-rules-by-consequent-global
+  "`as-stored-rules-by-consequent-in` in every context."
   [index pred]
-  (p/rules-by-consequent index pred))
+  (prof/record-read :rule-index)
+  (p/family-handles index :rule-consequent [pred] p/every-context))
 
 (defn as-stored-rule-keys
   "The antecedent keys some **stored** rule takes (`rules/antecedent-key`), as a set: the
-  root level of the `:rule-antecedent` trie (`kv/rule-keys`)."
+  root level of the `:rule-antecedent` trie."
   [index]
-  (or (kv/rule-keys index) #{}))
+  (prof/record-read :rule-index)
+  (p/family-leaf index :rule-antecedent-keys []))
 
 (defn stored-rule-key?
   "Does a **stored** rule take the antecedent key `k`?  One membership test."
   [index k]
-  (boolean (kv/rule-key? index k)))
+  (prof/record-read :rule-index)
+  (boolean (p/family-member? index :rule-antecedent-keys [] k)))
 
 (defn as-stored-rules-in
-  "Handles of the **stored** rules of `kind` stated in one of `contexts` (every context
-  when nil): `:rule` for every rule, `:solve` for the rules a solve reads
-  (`rules/solve-sentex?`).  The rule extent ends in the context, so this costs
-  min(|contexts stating one|, |contexts|) probes plus a leaf read per context kept."
+  "Handles of the **stored** rules of `kind` stated in one of `contexts`: `:rule` for
+  every rule, `:solve` for the rules a solve reads (`rules/solve-sentex?`).  The rule
+  extent ends in the context, so this costs min(|contexts stating one|, |contexts|) probes
+  plus a leaf read per context kept."
   [index kind contexts]
-  (or (kv/rule-extent index kind contexts) #{}))
+  (read-in! contexts)
+  (prof/record-read :rule-index)
+  (p/family-handles index :rule-extent [kind] contexts))
+
+(defn as-stored-rules-in-global
+  "`as-stored-rules-in` in every context."
+  [index kind]
+  (prof/record-read :rule-index)
+  (p/family-handles index :rule-extent [kind] p/every-context))
 
 (defn stores-rule-in?
   "Does a context of `contexts` **store** a rule?  The rule extent's children intersected
   with `contexts`, no leaf read."
   [index contexts]
-  (boolean (seq (kv/rule-extent-contexts index :rule contexts))))
+  (read-in! contexts)
+  (prof/record-read :rule-index)
+  (boolean (seq (p/family-children index :rule-extent [:rule] contexts))))
 
 ;; ---- the mint family ------------------------------------------------------
 ;; The records a **stored** argument-declaration justification concludes
@@ -393,50 +621,61 @@
 ;; stored justification and not about belief: a blocked or OUT mint stays filed, and the
 ;; withdrawal asks each candidate's belief itself (`special/withdrawable-mint`).
 
-(defn stored-mint-count
-  "How many records are filed as mints.  One count read."
+(defn stored-mint-count-global
+  "How many records are filed as mints, in every context.  One count read."
   [index]
-  (long (or (kv/mint-count index) 0)))
+  (prof/record-read :mint)
+  (long (p/family-count index :mint-in [] p/every-context)))
 
 (defn as-stored-mint-terms
   "The terms some filed mint is about, as a set."
   [index]
-  (or (kv/mint-terms index) #{}))
+  (prof/record-read :mint)
+  (p/family-leaf index :mint-terms []))
 
 (defn stored-mint-term-count
   "How many terms some filed mint is about.  One count read."
   [index]
-  (long (or (kv/mint-term-count index) 0)))
+  (prof/record-read :mint)
+  (long (p/family-child-count index :mint-terms [])))
 
 (defn stored-mint-term?
   "Is some filed mint about `term`?  One membership test."
   [index term]
-  (boolean (kv/mint-term? index term)))
+  (prof/record-read :mint)
+  (boolean (p/family-member? index :mint-terms [] term)))
 
-(defn as-stored-mints-about
+(defn as-stored-mints-about-global
   "Handles of the mints filed about `term`, in every context."
   [index term]
-  (or (kv/mints-about index term) #{}))
+  (prof/record-read :mint)
+  (p/family-handles index :mint [term] p/every-context))
 
 (defn stored-mint?
   "Is record `h` filed as a mint about `term` in context `c`?  One membership test."
   [index term c h]
-  (boolean (kv/mint-filed? index term c h)))
+  (read-at! c)
+  (prof/record-read :mint)
+  (boolean (p/family-member? index :mint [term c] h)))
 
-(defn as-stored-mint-contexts
+(defn as-stored-mint-contexts-global
   "The contexts some filed mint is stored in, as a set."
   [index]
-  (or (kv/mint-contexts index) #{}))
+  (prof/record-read :mint)
+  (set (p/family-children index :mint-in [] p/every-context)))
 
 (defn stored-mint-context-count
   "How many contexts some filed mint is stored in.  One count read."
   [index]
-  (long (or (kv/mint-context-count index) 0)))
+  (prof/record-read :mint)
+  (long (p/family-child-count index :mint-in [])))
 
 (defn as-stored-mints-in
   "Handles of the mints filed in context `c`.  One leaf read."
   [index c]
-  (or (kv/mints-in index c) #{}))
+  (read-at! c)
+  (prof/record-read :mint)
+  (p/family-leaf index :mint-in [c]))
 
 ;; ---- the watched-rule (exception re-check) roster -------------------------
 
@@ -449,7 +688,8 @@
   `provers/exceptions-block?`, and whether the rule itself is believed is
   `resolution/rule-believed?`."
   [index handle]
-  (p/exception-rule? index handle))
+  (prof/record-read :exception-index)
+  (p/family-member? index :exception-index [:rules] handle))
 
 (defn watched-rules
   "Handles of every rule carrying a re-check condition — an exception, an `(unknown S)`
@@ -460,13 +700,15 @@
   query at the next settle and under-queueing leaves a conclusion standing on evidence
   that has moved.  A trigger is conservative in the direction the answer is."
   [index]
-  (p/exception-rules index))
+  (prof/record-read :exception-index)
+  (p/family-leaf index :exception-index [:rules]))
 
 (defn watched-rules-on
   "Handles of rules whose re-check condition mentions `pred` — the predicate-scoped slice
   of `watched-rules`, and unfiltered for its reason."
   [index pred]
-  (p/rules-with-exception-on index pred))
+  (prof/record-read :exception-index)
+  (p/family-leaf index :exception-index [pred]))
 
 ;; ---- reads scoped to the contexts a reader sees ---------------------------
 
@@ -476,64 +718,91 @@
   context, so this costs min(|contexts stating one|, |contexts|) membership probes plus
   one leaf read per context kept (docs/indexing.md, \"By-context reads\")."
   [index pred contexts]
+  (read-in! contexts)
   (p/sentexes-with-args index pred [] contexts))
 
+(defn- functor-census
+  [index pred ctxs]
+  (prof/record-read :predicate-extent)
+  (let [n (long (p/family-child-count index :predicate-extent [pred]))]
+    [(if (zero? n) [] (p/family-children index :predicate-extent [pred] ctxs)) n]))
+
 (defn as-stored-contexts-with-functor
-  "`[seen n]`: the contexts of the set `contexts` (every context when nil) in which a fact
-  with functor `pred` is **stored**, either polarity, and how many contexts state one — the
-  predicate extent's children, no handle read and no belief consulted — or nil for an
-  index store that keeps no extent this can reach (`kv/extent-census`).  Costs one count
-  read, then min(|contexts stating one|, |contexts|) membership probes when it is not
-  zero.  A defeated fact keeps its context listed, so the answer is for a caller that must
+  "`[seen n]`: the contexts of the set `contexts` in which a fact with functor `pred` is
+  **stored**, either polarity, and how many contexts state one — the predicate extent's
+  children, no handle read and no belief consulted.  Two calls: the children count, then,
+  when it is not zero, min(|contexts stating one|, |contexts|) membership probes.  A
+  defeated fact keeps its context listed, so the answer is for a caller that must
   over-approximate where `pred` is stated."
   [index pred contexts]
-  (kv/extent-census index pred contexts))
+  (read-in! contexts)
+  (functor-census index pred contexts))
+
+(defn as-stored-contexts-with-functor-global
+  "`as-stored-contexts-with-functor` over every context."
+  [index pred]
+  (functor-census index pred p/every-context))
 
 (defn stored-count-with-functor-in
   "How many facts with functor `pred` are **stored** in the contexts of `contexts`: one
-  leaf count per context stating one, or nil where `as-stored-contexts-with-functor` is
-  nil."
+  leaf count per context stating one."
   [index pred contexts]
-  (kv/extent-count-in index pred contexts))
+  (read-in! contexts)
+  (prof/record-read :predicate-extent)
+  (p/family-count index :predicate-extent [pred] contexts))
 
 (defn stored-count-with-arg-in
   "How many facts with functor `pred` and `term` at argument `pos` are **stored** in the
   contexts of `contexts`: one leaf count per context the argument node lists and
-  `contexts` holds, or nil where `as-stored-contexts-with-functor` is nil."
+  `contexts` holds."
   [index pred pos term contexts]
-  (kv/arg-count-in index pred pos term contexts))
+  (read-in! contexts)
+  (prof/record-read :argument-root)
+  (p/family-count index :argument-root [pred pos (sx/canon term)] contexts))
 
-(defn stored-census-with-arg
+(defn stored-census-with-arg-global
   "`[n k]`: how many facts with functor `pred` and `term` at argument `pos` are **stored**,
-  in every context, and in how many contexts, or nil where
-  `as-stored-contexts-with-functor` is nil.  Two count reads."
+  in every context, and in how many contexts.  Two count reads."
   [index pred pos term]
-  (kv/arg-census index pred pos term))
+  (prof/record-read :argument-root)
+  (let [node [pred pos (sx/canon term)]]
+    [(p/family-count index :argument-root node p/every-context)
+     (long (p/family-child-count index :argument-root node))]))
 
 ;; ---- the taxonomy's supporter families -------------------------------------
 
-(defn as-stored-supporters
+(defn as-stored-supporters-global
   "The **stored** supporters of taxonomy key `k` (`[:genl a b]`, `[:genlCx a b]` or a
-  flat-cache key) as `{handle ctx}`, belief unread (`kv/supporters`): the taxonomy decides
-  an entry's belief from them, and a disbelieved supporter stays listed so that its revival
-  can bring the entry back.  `{}` for an index store this finds no roots store in."
+  flat-cache key) as `{handle ctx}`, belief unread: the node's children, then one leaf
+  read per context.  The taxonomy decides an entry's belief from them, and a disbelieved
+  supporter stays listed so that its revival can bring the entry back."
   [index k]
-  (or (kv/supporters index k) {}))
+  (prof/record-read :tax-support)
+  (reduce (fn [m c] (reduce #(assoc %1 %2 c) m (p/family-leaf index :tax-support (conj k c))))
+          {} (p/family-children index :tax-support k p/every-context)))
 
-(defn stored-supporter-count
-  "How many **stored** handles support taxonomy key `k`: one count read."
+(defn stored-supporter-count-global
+  "How many **stored** handles support taxonomy key `k`, in every context: one count read."
   [index k]
-  (or (kv/supporter-count index k) 0))
+  (prof/record-read :tax-support)
+  (p/family-count index :tax-support k p/every-context))
 
 (defn as-stored-installed-keys
   "The taxonomy keys **stored** handle `h` installs, as a set, belief unread: the keys a
   reconcile re-examines when `h`'s label moves.  One read."
   [index h]
-  (or (kv/installed-keys index h) #{}))
+  (prof/record-read :tax-support)
+  (p/family-leaf index :tax-installs [h]))
 
 (defn as-stored-supporter-map
-  "Every taxonomy key with a **stored** supporter, as `{k {handle ctx}}`, by a walk of the
-  whole store (`kv/all-supporters`): a raw taxonomy's reads, whose private store holds the
+  "Every taxonomy key with a **stored** supporter, as `{k {handle ctx}}`, by a walk of every
+  entry `index` holds: O(store), for a raw taxonomy's private store, which holds the
   supporter families and nothing else."
   [index]
-  (or (kv/all-supporters index) {}))
+  (prof/record-read :tax-support)
+  (reduce (fn [m [ek hs]]
+            (if (and (vector? ek) (= :tax-support (nth ek 0)) (= :handles (nth ek 1)))
+              (let [leaf (nth ek 2)]
+                (reduce #(assoc-in %1 [(pop leaf) %2] (peek leaf)) m hs))
+              m))
+          {} (p/index-entries index)))

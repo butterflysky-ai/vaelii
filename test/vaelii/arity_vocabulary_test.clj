@@ -211,30 +211,36 @@
                               [QuantityFn binary_function]
                               [DayFn ternary_function]
                               [QuantityIntervalFn ternary_function]
-                              [PredAllExistsFn ternary_function]
                               [PredExistsAllFn ternary_function]
                               [PredExistsInstanceFn ternary_function]
                               [PredInstanceExistsFn ternary_function]]]
       (is (v/isa? kb function type) (str function " is " type)))
     (is (v/isa? kb 'InstantFn 'fixed_arity_function)
-        "the six-argument function stays explicitly fixed without minting a named family"))
+        "the six-argument function stays explicitly fixed without minting a named family")
+    (is (v/isa? kb 'PredAllExistsFn 'fixed_arity_function)
+        "and so does the four-argument one"))
   (testing "a function may use the relation-wide variable vocabulary"
     (tu/with-terms [RepeatFn]
       (v/assert kb (list 'variable_arity_function RepeatFn) 'CxUniverse)
       (v/assert kb (list 'arityMin RepeatFn 2) 'CxUniverse)
       (is (v/isa? kb RepeatFn 'function))
       (is (v/isa? kb RepeatFn 'variable_arity))
-      (is (v/isa? kb RepeatFn 'at_least_binary_relation)))))
+      (is (v/isa? kb RepeatFn 'at_least_binary)))))
 
 (tu/deftest-kb arity-minimum-classifies-relations-generically
   (testing "a minimum of two derives only the binary floor"
-    (is (v/isa? kb 'lessThan 'at_least_binary_relation))
-    (is (not (v/isa? kb 'lessThan 'at_least_ternary_relation))))
-  (testing "an exact arity is not also a variable floor"
-    (is (not (v/isa? kb 'interArg 'at_least_binary_relation)))
-    (is (not (v/isa? kb 'interArg 'at_least_ternary_relation))))
+    (is (v/isa? kb 'lessThan 'at_least_binary))
+    (is (not (v/isa? kb 'lessThan 'at_least_ternary))))
+  (testing "a fixed arity of two or more is at least binary too"
+    (is (v/isa? kb 'parentOf 'at_least_binary))
+    (is (not (v/isa? kb 'parentOf 'at_least_ternary)))
+    (is (v/isa? kb 'interArg 'at_least_binary))
+    (is (v/isa? kb 'interArg 'at_least_ternary)
+        "an arity no exact class maps to reaches the floors through the arity rules"))
+  (testing "a unary relation is at neither floor"
+    (is (not (v/isa? kb 'person 'at_least_binary))))
   (testing "the ternary floor specializes the binary floor"
-    (is (v/genl? kb 'at_least_ternary_relation 'at_least_binary_relation))))
+    (is (v/genl? kb 'at_least_ternary 'at_least_binary))))
 
 (tu/deftest-kb admits-argnum-answers-the-position-query
   ;; #68: (admitsArgnum R n) is answered at query time from R's declared arity and
@@ -313,7 +319,7 @@
     (is (empty? violations)
         (str "relations outside the exactly-one arity-policy partition: "
              (pr-str violations)))
-    (is (some? (v/handle-of kb '(disjoint fixed_arity variable_arity) 'CxCore))
+    (is (some? (v/handle-of kb '(partition relation fixed_arity variable_arity) 'CxCore))
         "the partition is declared in KB data")))
 
 ;; ---- the declarations the merge added to the shipped functions ------------
@@ -351,20 +357,29 @@
       (is (v/assert kb (list chainOf A B C) 'CxUniverse))
       (is (v/ask? kb (list chainOf A B C) 'CxUniverse)))))
 
+(tu/deftest-kb a-monotonic-instance-relation-membership-binds-two-arguments
+  ;; CxCore's `(genl instance_relation_predicate binary_predicate)` is :monotonic, so the
+  ;; membership binds as `(binary_predicate P)` does; a :default one binds nothing
+  (tu/with-terms [likesRel hatesRel A B C]
+    (v/assert kb (list 'instance_relation_predicate likesRel) 'CxUniverse {:strength :monotonic})
+    (v/assert kb (list 'instance_relation_predicate hatesRel) 'CxUniverse)
+    (is (tu/stored-in-clash? kb (list likesRel A B C) 'CxUniverse))
+    (is (not (tu/stored-in-clash? kb (list hatesRel A B C) 'CxUniverse)))))
+
 (tu/deftest-kb the-ternary-floor-derives-and-withdraws-with-its-minimum
-  ;; No shipped relation states a minimum above two, so the `at_least_ternary_relation`
+  ;; No shipped relation states a minimum above two, so the `at_least_ternary`
   ;; rule fires on nothing in CxCore.  It is stated vocabulary either way, and this is
   ;; the case that reads it.
   (tu/with-terms [wideChainOf]
     (v/assert kb (list 'variable_arity_predicate wideChainOf) 'CxUniverse)
     (let [h (v/assert kb (list 'arityMin wideChainOf 4) 'CxUniverse)]
-      (is (v/isa? kb wideChainOf 'at_least_ternary_relation))
-      (is (v/isa? kb wideChainOf 'at_least_binary_relation)
+      (is (v/isa? kb wideChainOf 'at_least_ternary))
+      (is (v/isa? kb wideChainOf 'at_least_binary)
           "the ternary floor specializes the binary one")
       (v/retract! kb h)
-      (is (not (v/isa? kb wideChainOf 'at_least_ternary_relation))
+      (is (not (v/isa? kb wideChainOf 'at_least_ternary))
           "the floor rests on the minimum and goes with it")
-      (is (not (v/isa? kb wideChainOf 'at_least_binary_relation)))
+      (is (not (v/isa? kb wideChainOf 'at_least_binary)))
       (is (v/isa? kb wideChainOf 'variable_arity)
           "the policy was asserted separately and stands"))))
 
@@ -634,22 +649,25 @@
   ;; 600 ms of a 3.2 s starter load for 36 memberships, and a firing re-derived through a
   ;; route that appeared after it leaves the shipped KB holding justifications that depend
   ;; on arrival order.  What a caller needs from the classification is the arity, and the
-  ;; relation-wide class answers that.
-  (tu/with-terms [pred2 fn2]
-    (v/assert kb (list 'predicate pred2) 'CxCore)
-    (v/assert kb (list 'arity pred2 2) 'CxCore)
-    (testing "the arity reaches the relation-wide class and the policy"
-      (is (v/isa? kb pred2 'binary))
-      (is (v/isa? kb pred2 'fixed_arity)))
-    (testing "and the kind classes stay where their own memberships put them"
-      (is (not (v/isa? kb pred2 'binary_predicate)))
-      (is (not (v/isa? kb pred2 'fixed_arity_predicate)))
-      (is (not (v/isa? kb pred2 'binary_function))))
-    (testing "a function is in the same position"
-      (v/assert kb (list 'arity fn2 2) 'CxCore)
-      (v/assert kb (list 'function fn2) 'CxCore)
-      (is (v/isa? kb fn2 'binary))
-      (is (not (v/isa? kb fn2 'binary_function))))))
+  ;; relation-wide class answers that.  Pinned to the entailing reading: `(arg arity 1
+  ;; fixed_arity)` refuses `(arity P 2)` for a P nothing else classifies under the
+  ;; constraint-only reading.
+  (tu/with-entailing
+    (tu/with-terms [pred2 fn2]
+      (v/assert kb (list 'predicate pred2) 'CxCore)
+      (v/assert kb (list 'arity pred2 2) 'CxCore)
+      (testing "the arity reaches the relation-wide class and the policy"
+        (is (v/isa? kb pred2 'binary))
+        (is (v/isa? kb pred2 'fixed_arity)))
+      (testing "and the kind classes stay where their own memberships put them"
+        (is (not (v/isa? kb pred2 'binary_predicate)))
+        (is (not (v/isa? kb pred2 'fixed_arity_predicate)))
+        (is (not (v/isa? kb pred2 'binary_function))))
+      (testing "a function is in the same position"
+        (v/assert kb (list 'arity fn2 2) 'CxCore)
+        (v/assert kb (list 'function fn2) 'CxCore)
+        (is (v/isa? kb fn2 'binary))
+        (is (not (v/isa? kb fn2 'binary_function)))))))
 
 (tu/deftest-kb every-exact-class-spelling-declares-the-arity-it-names
   ;; `tax/exact-arity-classes` is the membership spelling of an arity, and CxCore

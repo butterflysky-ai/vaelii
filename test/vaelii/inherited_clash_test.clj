@@ -718,3 +718,68 @@
     (let [rs (into #{} (map #(merged-reading claimed %)) (permutations [:claim :deny :rule :merge]))]
       (is (= #{{:rr false :reported #{}}} rs)
           (str claimed)))))
+
+;; ---- a membership of a separated type --------------------------------------
+
+(defn- separated-reading
+  "What a KB reads after `(partition whole_kind down_kind up_kind)`, `down_kind` preserved
+  down `genl` and `up_kind` up it, `(genl lower upper)`, `(down_kind upper)` and `(up_kind
+  lower)`, the writes in `order`: the inherited sentences reported, spelled by role, and
+  whether `(up_kind lower)` and `(up_kind upper)` are believed.  `(up_kind lower)` is
+  written at `strength`, and every other sentence `:monotonic`.  With `retract?`, the
+  partition is retracted after the last write."
+  [kb strength order & {:keys [retract?]}]
+  (tu/with-terms [whole_kind down_kind up_kind upper_kind lower_kind]
+    (v/assert kb (list 'transitiveInArgInverse down_kind 1 'genl) U mono)
+    (v/assert kb (list 'transitiveInArg up_kind 1 'genl) U mono)
+    (let [sep   (list 'partition whole_kind down_kind up_kind)
+          write {:sep  #(v/assert kb sep U mono)
+                 :edge #(v/assert kb (list 'genl lower_kind upper_kind) U mono)
+                 :down #(v/assert kb (list down_kind upper_kind) U mono)
+                 :up   #(v/assert kb (list up_kind lower_kind) U {:strength strength})}
+          role  {down_kind 'down up_kind 'up upper_kind 'upper lower_kind 'lower}]
+      (doseq [k order] ((write k)))
+      (when retract? (v/retract! kb (v/handle-of kb sep U)))
+      [(into #{}
+             (map #(walk/postwalk-replace role (:sentence (:inherited %))))
+             (concat (inherited-reports kb down_kind) (inherited-reports kb up_kind)))
+       (v/ask? kb (list up_kind lower_kind) U)
+       (v/ask? kb (list up_kind upper_kind) U)])))
+
+(tu/deftest-kb a-membership-beside-a-known-true-inherited-membership-of-a-separated-type-is-a-nogood-in-every-order
+  ;; `(down upper)` reaches `(down lower)`, and `(up lower)` reaches `(up upper)`, so each
+  ;; type is a member of both parts.  Known-true throughout, the two clashes are conflicts
+  ;; and every member stays believed, and `ask` answers `(up upper)` in neither direction,
+  ;; since the stored `(down upper)` denies it.  With `(up lower)` a default, it is the
+  ;; unique weakest member of the clash with `(down lower)` and goes OUT, taking `(up
+  ;; upper)` with it, and the resolved clash is reported by neither reading.
+  (is (= {:monotonic #{[#{'(down lower) '(up upper)} true false]}
+          :default   #{[#{} false false]}}
+         (into {}
+               (for [strength [:monotonic :default]]
+                 [strength (into #{} (map #(separated-reading kb strength %))
+                                 (permutations [:sep :edge :down :up]))])))))
+
+(tu/deftest-kb retracting-the-separation-withdraws-the-inherited-membership-clash
+  (is (= #{[#{} true true]}
+         (into #{} (map #(separated-reading kb :default % :retract? true))
+               [[:sep :edge :down :up] [:edge :down :up :sep]]))))
+
+(tu/deftest-kb a-membership-of-a-type-no-declaration-names-is-denied-by-a-separated-inherited-one
+  ;; `plain_kind` carries nothing, so the one clash is `(plain lower)` beside the
+  ;; `(down lower)` that `(down upper)` reaches.
+  (is (= #{[#{'(down lower)} true]}
+         (into #{}
+               (for [order (permutations [:sep :edge :down :plain])]
+                 (tu/with-terms [down_kind plain_kind upper_kind lower_kind]
+                   (v/assert kb (list 'transitiveInArgInverse down_kind 1 'genl) U mono)
+                   (let [write {:sep   #(v/assert kb (list 'disjoint down_kind plain_kind) U mono)
+                                :edge  #(v/assert kb (list 'genl lower_kind upper_kind) U mono)
+                                :down  #(v/assert kb (list down_kind upper_kind) U mono)
+                                :plain #(v/assert kb (list plain_kind lower_kind) U mono)}]
+                     (doseq [k order] ((write k)))
+                     [(into #{}
+                            (map #(walk/postwalk-replace {down_kind 'down lower_kind 'lower}
+                                                         (:sentence (:inherited %))))
+                            (inherited-reports kb down_kind))
+                      (v/ask? kb (list plain_kind lower_kind) U)])))))))

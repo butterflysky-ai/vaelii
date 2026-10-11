@@ -303,6 +303,49 @@ stated at `(P b a)` itself is a stored converse, which the `asymmetric` family p
 `reference_test/a-converse-an-inherited-claim-reaches-under-a-super-predicate-s-mark-is-out`
 holds this in every arrival order, with the mark on `touchesX` and on `nudgesX`.
 
+**A membership of a separated type.** A stored `(S x)` denies `(P x)` when a separation
+the reader sees holds `S` and `P` apart, since no term is a member of two separated types
+([taxonomy.md](taxonomy.md#disjointness)). `inherit/separated-claims` names the known-true
+claim that reaches `(P x)` by preservation, for each preserved `P` separated from `S`, and
+`preserving-nogoods` forms the pair with the members listed above. The separation is read
+through and is no member, as it is for a `disjoint` nogood. `S` need not be preserved
+itself, and in this example each part carries its membership the other way:
+
+```clojure
+;; every sentence {:strength :monotonic}
+(partition whole_kind down_kind up_kind)
+(transitiveInArgInverse down_kind 1 genl)  (transitiveInArg up_kind 1 genl)
+(genl lower upper)
+(down_kind upper)                              ; reaches (down_kind lower)
+(up_kind lower)                                ; reaches (up_kind upper)
+```
+
+`conflicts` reports two clashes: the stored `(up_kind lower)` beside the reached
+`(down_kind lower)`, and the stored `(down_kind upper)` beside the reached `(up_kind
+upper)`. A `:default` `(up_kind lower)` is the unique weakest member of the first clash
+and is not believed
+(`inherited_clash_test/a-membership-beside-a-known-true-inherited-membership-of-a-separated-type-is-a-nogood-in-every-order`).
+A reading with a `:default` reason forms no nogood, as above. CxCore states
+`(transitiveInArgInverse empty 1 genl)` and `(transitiveInArg nonempty 1 genl)` known-true,
+since each holds by the definition of `genl`, and `empty` and `nonempty` partition
+`unary_predicate`. So a type stated `empty` known-true, with a known-true edge from a subtype
+stated `nonempty`, is a clash of this family on each side
+(`emptiness_test/a-subtype-stated-nonempty-below-a-type-stated-empty-is-an-inherited-clash-in-every-order`). Two reached claims with no stored member, `(P x)` and `(S x)` both inherited, form no
+nogood, as a reached claim and a reached denial form none.
+
+`claims` reads a believed `(S x)` as a claim against `(P x)` at `x`'s own tuple, from each
+reader that sees a separation of `S` and `P` (`inherit/separated-denials`). A `:default`
+claim reaching `(P x)` is undercut by it, and any other claim survives beside it, so `ask`
+answers `(P x)` only where no such membership is believed. A reading known-true throughout
+defeats a `:default` membership by the nogood above, and beside a `:monotonic` one the pair
+is a conflict, which `ask` answers in neither direction. The forward entry
+point reads the membership as any contrary claim
+([below](#forward-chaining-on-a-claim-nobody-stored)): a `:default` membership stores the
+firing with a defeat resting on it, and a `:monotonic` one blocks it
+(`inherit_forward_test/a-separated-membership-denies-an-inherited-antecedent-in-every-order`).
+A membership is read at its own tuple alone: `(S w)` stated of a term `w` that `(P x)` is
+reached from denies `(P w)`, and says nothing of `x`.
+
 **A claim read over several routes opposes at its strongest reading.** A reading's class
 is its weakest member's, and `claim-reading` and `clashing-claim` take the reading whose
 class is highest, the first in content order among equals. A `:default` shortcut edge
@@ -533,7 +576,9 @@ sentences that move a preserved predicate are the declaration itself, a
 claim on the predicate, a fact on the relation — a `genl` or `genlCx` edge included
 — `(transitive R)`, `(asymmetric P)`, and a permuting mark: `(symmetric P)`,
 `(commutative P)`, `(commutativeInArgs P …)` or `(commutativeInArgAndRest P n)`, since
-the matcher reads a claim in every argument order its predicate's marks permit. A `genl`
+the matcher reads a claim in every argument order its predicate's marks permit; and a
+membership of a type a separation holds apart from `P`, a denial in `claims`, and a
+separation or `genl` edge that moves which types those are (`inherit/separation-moved`). A `genl`
 edge, or its denial, moves fewer: only the predicates with a claim, on the predicate or
 a sub-predicate and in either polarity, whose preserved argument lies below the edge's
 lower term or above its upper one (`inherit/crossing-claim?`). The claim is read at
@@ -579,20 +624,29 @@ way ([inference.md](inference.md#forward-chaining)).
 `(typicallyLargerThan maine_coon chihuahua)` undercuts the inherited
 `(typicallyLargerThan chihuahua maine_coon)`, and the general claim is not defeated: it
 simply does not fire for that pair. Every antecedent of the firing is still stored and
-believed, so the justification cannot express the withdrawal. The firing is **blocked**
-the way an `exceptWhen`-excepted one is (`chain/inheritance-withdrawn?`, queued by
-`special/recheck-preserving-firings`), which means the existing sweep collects the
-conclusion and the existing revival machinery brings it back when the specific claim
-goes. A settle re-decides only the firings whose goal the moved sentence can bear on
-([exceptions.md](exceptions.md#two-withdrawals-a-firing-carries)). The check is asked only of an antecedent the KB does not state at the bound tuple:
-a stored claim is withdrawn by its own handle going, and asking `verdict` about one would
-block an ordinary firing over a pair the KB happens to hold in both polarities. The check
-reads the claims in the network and through the excepts, and no placed defeat
-(`tax/*network-belief*`), as every placement in `chain` does: a specific claim a defeat
-hides still undercuts, so what is stored is the same in every arrival order
-(`inherit_forward_test/a-defeated-contrary-claim-withdraws-an-inherited-firing-in-every-order`).
-At a reader that does not believe the specific claim, `ask?` of the inherited claim still
-answers true through the prover, while a forward rule over it has not fired there.
+believed, so the justification cannot express the withdrawal. Which way the firing goes
+depends on the contrary claim's class (design ruling 25). The forward join reads the
+claims with each `:default` contrary set aside (`inherit/*default-contraries-set-aside*`),
+so a firing only `:default` contraries undercut is made and stored, with a guard
+`defeat` of its conclusion at its placement resting on each contrary claim that survives
+there (`inherit/contraries`, `chain/inheritance-defeat-placements`). A reader that does
+not believe the contrary believes the conclusion, as `ask?` there answers the inherited
+claim it joins on
+(`inherit_forward_test/a-defeated-contrary-claim-gives-the-inherited-firing-back-in-every-order`).
+A `:monotonic` contrary **blocks** the firing the way an `exceptWhen`-excepted one is
+(`chain/inheritance-withdrawn?`, queued by `special/recheck-preserving-firings`), so the
+existing sweep collects the conclusion and the existing revival machinery brings it back
+when the contrary goes. A settle re-decides only the firings whose goal the moved sentence
+can bear on ([exceptions.md](exceptions.md#two-withdrawals-a-firing-carries)). The check is
+asked only of an antecedent the KB does not state at the bound tuple: a stored claim is
+withdrawn by its own handle going, and asking `verdict` about one would block an ordinary
+firing over a pair the KB happens to hold in both polarities. Both readings take the
+claims in the network and through the excepts, and no placed defeat
+(`tax/*network-belief*`), as every placement in `chain` does, so what is stored is the
+same in every arrival order. A defeat rests on the contrary claim alone, not on the
+edges that make it more specific, and on each surviving contrary separately: where a
+reader hides one contrary and believes a second that the first displaced, the second
+places no defeat.
 
 **Placement follows the reasons.** The claim, the declarations and the edges are
 antecedents, so `maximal-common-descendant-contexts` sees their contexts alongside the
@@ -803,8 +857,9 @@ both `P` and `(not P)` of one pair — that is a represented dilemma, believed o
 sides and reported by `(contradictions kb)`. Stopping at whichever probe answered first
 would read it here as a clean `:for` and hand `verdict` a decision the engine refuses to
 make about the very same two sentexes. Collecting both sends it on as the `:ambiguous`
-it is, and the prover then answers nothing. The two `:against` sources — an explicit
-negation, and an asymmetric predicate's converse — stay separate rather than folding,
+it is, and the prover then answers nothing. The three `:against` sources — an explicit
+negation, an asymmetric predicate's converse and a membership of a separated type — stay
+separate rather than folding,
 since they can be believed at different strengths and undercutting reads that per claim.
 
 The converse is not read at a **self** tuple `[a a]`, where it is the same sentence as
@@ -853,7 +908,10 @@ standing to deny a claim — without it the specific `(typicallyLargerThan maine
 chihuahua)` is inert and undercuts nothing. Each is read by `special/recheck-declaration`,
 which takes the subject predicate off argument 1 and queues on its `genls` closure;
 `(transitive R)` takes a second posting through `recheck-preserving-along`, since it
-licenses the inheritance for every `P` declared along `R` and names none of them.
+licenses the inheritance for every `P` declared along `R` and names none of them. A
+membership of a separated type and a separation decide it for a unary `P` too, and
+`special/recheck-separated-exceptions` queues the rules whose exception names a `P` they move
+(`inherit/separation-moved-predicates`).
 [exceptions.md](exceptions.md) has the general shape, of which this is one of three
 instances.
 

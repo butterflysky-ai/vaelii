@@ -154,6 +154,21 @@
       (is (tu/stored-in-clash? kb (list animal Rex) 'CxUniverse))
       (is (= [:cover] (mapv :kind (v/contradictions kb)))))))
 
+(tu/deftest-kb a-new-member-of-closed-parts-is-no-refutation
+  ;; With every part's extent closed, a term in no part is denied of each by negation as
+  ;; failure.  The membership under assertion is what withdraws its own part's denial, so
+  ;; the cover is not refuted, and the order the closures and the members arrive in does
+  ;; not decide whether the member is admitted.
+  (tu/with-terms [animal dog cat Rex]
+    (v/assert kb (list 'covering animal dog cat) 'CxUniverse)
+    (v/assert kb (list 'genl dog animal) 'CxUniverse)
+    (v/assert kb (list 'genl cat animal) 'CxUniverse)
+    (v/assert kb (list 'closed_extent_predicate dog) 'CxUniverse)
+    (v/assert kb (list 'closed_extent_predicate cat) 'CxUniverse)
+    (is (= :ok (outcome kb (list dog Rex) 'CxUniverse)))
+    (is (v/ask? kb (list animal Rex) 'CxUniverse))
+    (is (empty? (v/contradictions kb)))))
+
 (tu/deftest-kb a-refuted-cover-names-the-evidence-it-is-against
   (tu/with-terms [animal dog cat Rex]
     (let [c (v/assert kb (list 'covering animal dog cat) 'CxUniverse)
@@ -166,3 +181,38 @@
         (is (= #{m n h} (:nogood r))))
       (testing "and not the declaration the refutation is read through"
         (is (not (contains? (:nogood r) c)))))))
+
+(deftest a-cover-refutation-follows-the-declaration-or-edge-that-makes-it
+  ;; The settle places again only the kept terms with a denial and a membership at or
+  ;; below a moved cover's whole, a moved edge's lower end, or the whole of a cover with a
+  ;; part at or below one (`membership/sync-memberships`); each row arrives that way last
+  ;; and leaves again.
+  (doseq [[label setup final]
+          [["the cover arriving last"
+            (fn [{:keys [animal dog cat Rex]}]
+              [(list animal Rex) (list 'not (list dog Rex)) (list 'not (list cat Rex))])
+            (fn [{:keys [animal dog cat]}] (list 'covering animal dog cat))]
+           ["the cover arriving last over the edges it states, already stated"
+            (fn [{:keys [animal dog cat Rex]}]
+              [(list 'genl dog animal) (list 'genl cat animal) (list animal Rex)
+               (list 'not (list dog Rex)) (list 'not (list cat Rex))])
+            (fn [{:keys [animal dog cat]}] (list 'covering animal dog cat))]
+           ["an edge putting a part under a denied type"
+            (fn [{:keys [animal dog cat canine Rex]}]
+              [(list 'covering animal dog cat) (list animal Rex) (list 'not (list canine Rex))
+               (list 'not (list cat Rex))])
+            (fn [{:keys [dog canine]}] (list 'genl dog canine))]
+           ["an edge putting a membership under the whole"
+            (fn [{:keys [animal dog cat pet Rex]}]
+              [(list 'covering animal dog cat) (list pet Rex) (list 'not (list dog Rex))
+               (list 'not (list cat Rex))])
+            (fn [{:keys [animal pet]}] (list 'genl pet animal))]]]
+    (tu/with-kb [kb]
+      (tu/with-terms [animal dog cat canine pet Rex]
+        (let [m {:animal animal :dog dog :cat cat :canine canine :pet pet :Rex Rex}]
+          (doseq [s (setup m)] (v/assert kb s 'CxUniverse))
+          (is (empty? (v/contradictions kb)) label)
+          (let [h (v/assert kb (final m) 'CxUniverse {:strength :monotonic})]
+            (is (= [:cover] (mapv :kind (v/contradictions kb))) label)
+            (v/retract! kb h)
+            (is (empty? (v/contradictions kb)) label)))))))

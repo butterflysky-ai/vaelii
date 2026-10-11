@@ -105,8 +105,6 @@
     :choices [["ontology" "Ontology (drops the lexical layers)"]
               ["core" "Core (Cyc's own upper vocabulary)"]
               ["full" "Full (everything, including natural language)"]]}
-   {:key :dir :type :path :label "Target directory" :default ""
-    :help "empty loads into memory; a path makes it a durable :disk-log KB"}
    {:key :bulk? :type :flag :label "Bulk load (skip the per-fact checks)" :default false}
    {:key :chain? :type :flag :label "Forward-chain after loading" :default false}
    ;; Bounded for the reason the generator's is, and harder: a generated KB's layer count
@@ -155,9 +153,24 @@
     :choices [[:rebuild "Rebuild now (slow — a JTMS node per sentex)"]
               [:stored  "Store it, rebuild later"]
               [:skip    "Skip it (records and index only)"]]
-    :help "\"rebuild now\" is the finished KB. \"store it\" reads and stores every justification and premise mark but leaves the TMS and the genl/genlCx closures empty, so the KB is findable and countable now and can be recovered later without re-reading the dump. \"skip it\" never reads the justification stream, and for a dump in a foreign dialect that is permanent — nothing a later recover could rebuild belief from is stored"}
-   {:key :dir :type :path :label "Target directory" :default ""
-    :help "empty loads into memory; a path makes it a durable :disk-log KB"}])
+    :help "\"rebuild now\" is the finished KB. \"store it\" reads and stores every justification and premise mark but leaves the TMS and the genl/genlCx closures empty, so the KB is findable and countable now and can be recovered later without re-reading the dump. \"skip it\" never reads the justification stream, and for a dump in a foreign dialect that is permanent — nothing a later recover could rebuild belief from is stored"}])
+
+(defn request-paths?
+  "May a request name a directory for this process to write (`VAELII_REQUEST_PATHS`,
+  default off)?  Off, a durable load's store and an export's dump go under `write-root`
+  with a name `server-dir` picks, and the browser refuses a request that names one."
+  []
+  (v/switch-value "VAELII_REQUEST_PATHS"))
+
+(defn- target-options
+  "The controls that say where a corpus or dump load goes: `:durable?`, plus a `:dir`
+  path when `request-paths?` is on."
+  []
+  (cond-> [{:key :durable? :type :flag :label "Durable (a :disk-log KB on disk)" :default false
+            :help "off loads into memory; on writes a :disk-log store under the KB directory, named by the server"}]
+    (request-paths?)
+    (conj {:key :dir :type :path :label "Target directory" :default ""
+           :help "a path on this machine for the :disk-log store; empty leaves the choice to the durable flag"})))
 
 (def ^:private store-options
   [{:key :recover? :type :flag :label "Recover belief and the taxonomy on open (slow)" :default false
@@ -270,7 +283,7 @@
                           :scale (if sentences (str (format "%,d" (long sentences)) " sentences")
                                      (human-bytes (du d)))
                           :total sentences
-                          :options corpus-options})
+                          :options (into corpus-options (target-options))})
                :dump   (let [{:keys [sentences supports dialect index?]} (dump-scale d)]
                          {:blurb (str (if (= :vaelii dialect)
                                         "A vaelii export dump, in our own dialect"
@@ -285,7 +298,7 @@
                           :scale (if sentences (str (format "%,d" (long sentences)) " sentexes")
                                      (human-bytes (du d)))
                           :total sentences
-                          :options dump-options})
+                          :options (into dump-options (target-options))})
                :store  {:blurb "An on-disk vaelii KB, opened in place — no import, no copy."
                         :scale (human-bytes (du d))
                         :options store-options})))))
@@ -416,6 +429,32 @@
   "The source with this id, or nil."
   [id]
   (first (filter #(= id (:id %)) (sources))))
+
+;; ---- where the server writes --------------------------------------------
+
+(defn write-root
+  "The directory a store or a dump the request did not name goes under: the first
+  search-path entry that is not itself a KB, so a dump written there is a `:dump` source
+  the moment it lands.  Nil when every entry is a KB."
+  ^File []
+  (first (remove classify (map io/file (search-path)))))
+
+(defn- server-dir
+  "A directory under `write-root` that does not exist yet: `stem` with every character
+  outside `[A-Za-z0-9_-]` turned to `-`, then the local time to the second, then `-2`,
+  `-3`… past a name already taken.  Throws `:no-destination` when `write-root` is nil."
+  ^File [stem]
+  (let [root (or (write-root)
+                 (throw (ex-info (str "nowhere to write: every KB search-path entry ("
+                                      (str/join ", " (search-path)) ") is itself a KB."
+                                      "  Name a directory in VAELII_KB_PATH to write under")
+                                 {:type :no-destination})))
+        base (str (str/replace (str stem) #"[^A-Za-z0-9_-]" "-") "-"
+                  (.format (java.time.format.DateTimeFormatter/ofPattern "yyyyMMdd-HHmmss")
+                           (java.time.LocalDateTime/now)))]
+    (first (remove #(.exists ^File %)
+                   (cons (io/file root base)
+                         (map #(io/file root (str base "-" %)) (iterate inc 2)))))))
 
 ;; ---- the registry --------------------------------------------------------
 ;;
@@ -738,7 +777,8 @@
 
 (defn- open-kb-for
   "The KB an entry loads into: an in-memory one over a freshly claimed space, or —
-  when the params name a directory — a durable `:disk-log` one there.  Returns
+  when the params name a directory (`start-load` names one for `:durable?`) — a durable
+  `:disk-log` one there.  Returns
   `[kb where]`, `where` being what `unload!` needs to take it down again."
   [{:keys [dir]}]
   (if (str/blank? (str dir))
@@ -960,6 +1000,13 @@
                        (:order @state))]
       (str prefix (inc (reduce max 0 taken))))))
 
+(def ^:private max-entries
+  "How many entries the catalog holds at most.  `start-load` refuses a load past it with
+  `:too-many-kbs` instead of evicting one: a loaded KB is one a reader chose to open, and
+  unloading it unasked loses their work.  `register!` files past it, since only a start
+  or an attach calls that."
+  16)
+
 (defn- drop-entry!
   "Forget entry `key` — the registry half of `unload!`, and what a load that never started
   leaves behind."
@@ -984,10 +1031,20 @@
   ;; `generated#1` and the second's registration overwrites the first's.  A *second
   ;; load* is refused a layer down, by the writer claim in the registry.
   (locking start-monitor
-    (let [key (entry-key src)]
+    (let [key    (entry-key src)
+          ;; `:durable?` with no `:dir` names one here, under the monitor, so two loads
+          ;; cannot pick one name
+          params (cond-> params
+                   (and (:durable? params) (str/blank? (str (:dir params))))
+                   (assoc :dir (str (server-dir key))))]
       (when (entry key)
         (throw (ex-info (str (:name src) " is already loaded — unload it first")
                         {:type :already-loaded :key key})))
+      (let [held (:order @state)]
+        (when (>= (count held) max-entries)
+          (throw (ex-info (str "the catalog holds " (count held) " KBs, its most ("
+                               (str/join ", " held) ") — unload one first")
+                          {:type :too-many-kbs :max max-entries :entries held}))))
       ;; The status and progress here are what an entry reads for the moment between being
       ;; registered and its job's id landing on it — `with-job` prefers the job the instant
       ;; there is one.  Not redundant: a caller rendering an entry in that window would
@@ -1408,12 +1465,13 @@
   claims no writer, so the claim registry cannot say it.  (A daemon's export needs no
   such flag: `serve` files `:export` with the writes, under its own monitor.)
 
+  A blank `dir` writes under `write-root`, in a directory `server-dir` names after the
+  entry key.
+
   `!` for what a cancelled one leaves behind: a directory holding part of a dump.  It is
   not a *loadable* dump — `meta.edn` is written last and is what `classify` keys on — but
   it is bytes on disk that nothing here will clean up."
   [key dir opts]
-  (when (str/blank? (str dir))
-    (throw (ex-info "an export needs a destination directory" {:type :no-destination})))
   ;; the one-at-a-time check and the submit are one step under the monitor: the export
   ;; claims no writer, so the registry's own claim cannot refuse a second one, and two
   ;; requests arriving together would otherwise each read `exporting?` false and both start
@@ -1443,7 +1501,8 @@
                              " still writing is a dump of no single state.  Wait for the"
                              " load to finish, or cancel it, then export")
                         {:type :still-loading :key key})))
-      (let [run-in (:run-in opts (fn [work] (work)))
+      (let [dir    (if (str/blank? (str dir)) (server-dir (str key "-export")) dir)
+            run-in (:run-in opts (fn [work] (work)))
             opts   (dissoc opts :run-in)
             id (jobs/submit
                 {:label      (str "Export " (:name e))

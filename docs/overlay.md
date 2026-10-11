@@ -40,7 +40,9 @@ both arrive as opts the refusal comes before either store opens.
 
 `opts` names the fork's *own* storage, as an ordinary opts map — so the two variants are
 spelled with the backends that already exist rather than with names of their own: an
-in-RAM overlay is the ephemeral hypothesis, a disk one is durable and remountable.
+in-RAM overlay is the ephemeral hypothesis, a disk one is durable and remountable. An
+ephemeral fork's own half opens on an engine space no caller can name, so its `close!`
+drops that space ([storage.md](storage.md)); naming a `:space` keeps it for a remount.
 
 A fork assembled from opts alone spells it out instead — which is how a durable fork is
 remounted, in a later process, over the base it was taken against:
@@ -91,6 +93,12 @@ underneath, and only its roots / term / rule / exception families delegate to an
 backend. A KV decorator over it would fork those and silently leave the trie behind, so
 `fork` refuses it by name. The forkable index axes are `:memory`, `:dense` and `:disk-log`.
 
+**A taxonomy probe forks the families alone.** `tax/detached-copy` posts a probe's
+supporters into `mount/fork-families`: a `KvIndexStore` whose writes land in a private
+in-memory layer over the index's family backend, read through the frozen mount. That
+backend is the one `kv-backend-of` names, or a columnar index's `:roots`, which holds
+every family but the trie. An index with neither refuses with `:unforkable-index`.
+
 **The TMS is not storage.** Belief lives behind its own protocol (`vaelii.impl.jtms`,
 with `dense-jtms` as a second implementation) over state derived from the records. A fork
 therefore gets its *own* network, and the engine already has the operation that computes one
@@ -118,7 +126,7 @@ durable as the fork is and a remount needs no separate recovery step.
 
 **`kv-count` answers the merged cardinality**, never the overlay's. The count-aware trie
 is a selectivity structure — `plan/order` costs every conjunct off `count-at`, divides by
-the fan-out at a position off `count-children`, and `prover-types/est-bindings` reads the
+the fan-out at a position off `reads/stored-count-children`, and `prover-types/est-bindings` reads the
 predicate extent's count — so a base-blind count would not be a wrong answer, it would be a silently
 wrong *plan* for every query touching inherited content. `kv-intersect` merges for the
 same reason: `sentexes-with-args` intersects the predicate-scoped argument roots, and it
@@ -139,7 +147,7 @@ materialized into a Clojure set first, counting through the merge cost ~13 ms pe
 a 100,000-handle root — a selectivity read, per conjunct, on a key the fork had never
 written to. `lein perf --only overlay-selectivity` is the gate. `kv-member?` is the same
 observation at member granularity: it probes both sides rather than merging them, which is
-what keeps the `exception-rule?` gate O(1) across the `KvBackend` protocol.
+what keeps the `reads/watched-rule?` gate O(1) across the `KvBackend` protocol.
 
 So the two roads cost differently and must answer alike, and that is what
 `overlay_test`'s `count-children-answers-the-same-on-both-roads-through-the-merge` holds:

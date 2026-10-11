@@ -100,7 +100,7 @@
   (testing "the argument constraints' subject props"
     (is (= '{arg :declares-arg-isa, genlArg :declares-arg-genl,
              quotedArg :declares-quoted-arg, interArg :declares-inter-arg-isa,
-             args :declares-args-isa, argsGenl :declares-args-genl,
+             argArg :declares-arg-arg, args :declares-args-isa, argsGenl :declares-args-genl,
              argAndRest :declares-arg-and-rest-isa,
              argAndRestGenl :declares-arg-and-rest-genl,
              interArgs :declares-inter-args-isa,
@@ -164,7 +164,7 @@
   ;; rule's `(commutativeInArgAndRest P 1)` conclusion being what the re-spelling fires on.
   (is (= (into '#{genl genlCx disjoint disjoint_metatype sibling_disjoint
                   covering separating partition
-                  arity arityMin arg genlArg interArg arg1 arg2 arg3
+                  arity arityMin arg argArg genlArg interArg arg1 arg2 arg3
                   commutative commutativeInArgs commutativeInArgAndRest
                   irreflexive anti_symmetric functional functionalInArg asymmetric
                   anti_transitive}
@@ -203,8 +203,8 @@
         (is (= :bad-table-entry (:type data)))
         (is (= :family-roster (:mismatch data)))
         (is (= 'provers/meta-constraint-functors (:roster data)))
-        (is (= '#{quotedArg arg genlArg interArg args argsGenl argAndRest argAndRestGenl
-                  interArgs interArgAndRest}
+        (is (= '#{quotedArg arg argArg genlArg interArg args argsGenl argAndRest
+                  argAndRestGenl interArgs interArgAndRest}
                (:declared data))
             "and the throw names both sets, so the reader sees which half is missing")))
     (testing "and the other direction — a roster naming a spelling nothing declares"

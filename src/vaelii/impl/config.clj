@@ -57,7 +57,9 @@
   of them read: `VAELII_API_TOKEN` and `VAELII_ALLOWED_HOSTS` are a secret and a host
   list, neither of which has a domain to hold them to, and the ceiling
   `VAELII_MAX_BODY_BYTES` refuses at `guard/max-body-bytes` for the reason
-  `assertive-arg-types?` refuses at load — it is the root value of a var."
+  `assertive-arg-types?` refuses at load — it is the root value of a var.
+  `VAELII_SANDBOX_KEY`, the key the browser tags its sandbox cookies with, is a secret
+  read at `vaelii.browser.sandbox`, with no domain either."
   (:require [clojure.string :as str]))
 
 (def truthy
@@ -434,6 +436,27 @@
   []
   (prop-long "VAELII_MAX_QUERY_MS" 30000 0 nil))
 
+(defn request-paths?
+  "May a served request name a path for the server to read or write
+  (`VAELII_REQUEST_PATHS`, default off)?  Off, a wire `:kb-diff` side names a KB the
+  server serves and a string naming none is refused, a wire `:export` is refused
+  (`vaelii.host.serve`), and the browser's `/kbs/load` and `/kbs/export` refuse a `dir`."
+  []
+  (prop-bool "VAELII_REQUEST_PATHS" false))
+
+(defn sandbox-max
+  "How many browser sandboxes a KB holds at once (`VAELII_SANDBOX_MAX`, default 256).
+  Opening one more resets the sandbox the roster ranks lowest (`vaelii.browser.sandbox`).
+  Read at each admission."
+  []
+  (prop-long "VAELII_SANDBOX_MAX" 256 1 nil))
+
+(defn sandbox-idle-minutes
+  "How many minutes a browser sandbox may go unused before an admission resets it ahead
+  of every used one (`VAELII_SANDBOX_IDLE_MINUTES`, default 1440, one day)."
+  []
+  (prop-long "VAELII_SANDBOX_IDLE_MINUTES" 1440 1 nil))
+
 (defn max-query-depth
   "The rule-expansion ceiling the daemon holds every bounded read to
   (`VAELII_MAX_QUERY_DEPTH`, default 256; 0 lifts it).  A request may name a smaller
@@ -536,6 +559,9 @@
    {:names ["VAELII_ASP_TIME_LIMIT"]                :reader #'asp-time-limit               :read-at :worker}
    {:names ["VAELII_MAX_QUERY_MS"]                  :reader #'max-query-ms                 :read-at :open}
    {:names ["VAELII_MAX_QUERY_DEPTH"]               :reader #'max-query-depth              :read-at :open}
+   {:names ["VAELII_REQUEST_PATHS"]                 :reader #'request-paths?               :read-at :open}
+   {:names ["VAELII_SANDBOX_MAX"]                   :reader #'sandbox-max                  :read-at :worker}
+   {:names ["VAELII_SANDBOX_IDLE_MINUTES"]          :reader #'sandbox-idle-minutes         :read-at :worker}
    {:names ["VAELII_CLASSIFY_MAX_CLUSTER_MEMBERS"] :reader #'classify-max-cluster-members :read-at :worker}
    {:names ["VAELII_CLASSIFY_RESOLUTION_BUDGET"]   :reader #'classify-resolution-budget   :read-at :worker}
    {:names ["VAELII_CLASSIFY_MAX_JOINT_OPTIMA"]    :reader #'classify-max-joint-optima    :read-at :worker}])

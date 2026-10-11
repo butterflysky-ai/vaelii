@@ -1003,7 +1003,7 @@
         month '(CxCalFn CxMonad (DatetimeFn "2000-01"))
         calendar-op
         (fn [f] (fn [kb]
-                  (v/assert kb '(context_denoting_function CxCalFn) 'CxUniverse)
+                  (v/assert kb '(result CxCalFn context) 'CxUniverse)
                   (v/assert kb '(unreifiable_function DatetimeFn) 'CxUniverse)
                   (f kb)))
         ops [(calendar-op #(v/assert % '(contextArgSubrelation CxCalFn 2 subintervalOf)
@@ -2309,7 +2309,7 @@
   ;; that made the cut depend on handle-assignment order: the same three facts and two
   ;; edges, asserted in a different order, merged in one ordering and not another --
   ;; an outright order-independence violation, not only a completeness gap.  The fix
-  ;; (`context-edge-reader-ancestors`) scopes the walk to what the edge itself connects, so
+  ;; (`tax/context-move`'s `:seen`) scopes the walk to what the edge itself connects, so
   ;; an unrelated marked predicate's own noise -- however much of it, and whichever
   ;; side of the merge's own ops it lands on -- must never change whether this merge
   ;; completes.  The budget is bound well below the noise's size so an unscoped walk
@@ -2909,6 +2909,84 @@
     (is (= (second never) (second split)) "the context the edge brings under it reads the fact as written"))
   (tu/clear-kb! (tu/test-kb)))
 
+;; A default `(symmetric swRel)` and a known-true `(swRel Bea Ada)` in CxSwA, and a
+;; known-true denial of the mark in CxSwLow below it.  The sorted row takes the fact's
+;; class, so CxSwA reads it as a KB with no denial does, and CxSwLow reads the fact as
+;; written.
+
+(defn- a-defeat-below-a-split-fact
+  "A default `(not (swRel Ada Bea))` beside the KB above: CxSwA reads the known-true
+  sorted row over it, with or without the denial, and CxSwLow reads the fact as written
+  beside the negation.  The mark retracted, or a rule's conclusion whose premise is
+  retracted, leaves what a KB that never stated it reads.  Over `cap` of the orderings, or
+  all of them."
+  [cap]
+  (let [h     (atom nil)
+        wire  [#(v/assert % '(genlCx CxSwA CxUniverse) 'CxUniverse {:strength :monotonic})
+               #(v/assert % '(genlCx CxSwLow CxSwA) 'CxUniverse {:strength :monotonic})]
+        facts [#(v/assert % '(swRel Bea Ada) 'CxSwA {:strength :monotonic})
+               #(v/assert % '(not (swRel Ada Bea)) 'CxSwA)]
+        mark  #(reset! h (v/assert % '(symmetric swRel) 'CxSwA))
+        rule  [#(v/assert % '(implies (sw_marked ?p) (symmetric ?p)) 'CxSwA {:direction :forward})
+               #(reset! h (v/assert % '(sw_marked swRel) 'CxSwA))]
+        deny  #(v/assert % '(not (symmetric swRel)) 'CxSwLow {:strength :monotonic})
+        read1 (fn [kb reader]
+                (mapv #(v/ask? kb % reader)
+                      '[(swRel Bea Ada) (swRel Ada Bea) (not (swRel Ada Bea))]))
+        read2 (fn [kb] (mapv #(read1 kb %) '[CxSwA CxSwLow]))
+        gone  (fn [kb] (v/retract! kb @h) (read2 kb))
+        run   (fn ([label ops] (one-outcome! label (into wire ops) read2 cap))
+                ([label ops observe] (one-outcome! label (into wire ops) observe cap)))
+        never (run "never stated" facts)
+        held  (run "held" (conj facts mark))
+        split (run "denied below" (conj facts mark deny))]
+    (is (= [true true false] (first held)) "the known-true fold beats the default negation")
+    (is (= (first held) (first split)) "the context above the denial reads as with no denial")
+    (is (= (second never) (second split)) "the context below it reads each spelling as written")
+    (is (= split (run "derived, denied below" (-> facts (into rule) (conj deny)))))
+    (is (= never (run "retracted" (conj facts mark deny) gone)))
+    (is (= never (run "derived, premise retracted" (-> facts (into rule) (conj deny)) gone))))
+  (tu/clear-kb! (tu/test-kb)))
+
+(deftest a-defeat-below-a-split-fact-moves-no-class-above-it
+  ;; a sample of each scenario's 120 or 720 orderings; the ^:slow twin walks every one
+  (a-defeat-below-a-split-fact ordering-sample))
+
+(deftest ^:slow every-ordering-of-a-defeat-below-a-split-fact-moves-no-class-above-it
+  (a-defeat-below-a-split-fact nil))
+
+(defn- a-firing-over-a-split-fact
+  "A known-true rule `swRel -> swLinked`, a default `(swLinked Ada Bea)` and a default
+  `(not (swLinked Ada Bea))` beside the KB above.  The firing over the sorted row is
+  known-true, so CxSwA reads `(swLinked Ada Bea)` over its negation with or without the
+  denial.  CxSwLow reads no sorted row, so its two default `swLinked` facts are a
+  dilemma there.  Over `cap` of the orderings, or all of them."
+  [cap]
+  (let [wire  #(do (v/assert % '(genlCx CxSwA CxUniverse) 'CxUniverse {:strength :monotonic})
+                   (v/assert % '(genlCx CxSwLow CxSwA) 'CxUniverse {:strength :monotonic}))
+        facts [#(v/assert % '(implies (swRel ?x ?y) (swLinked ?x ?y)) 'CxSwA
+                          {:direction :forward :strength :monotonic})
+               #(v/assert % '(swRel Bea Ada) 'CxSwA {:strength :monotonic})
+               #(v/assert % '(swLinked Ada Bea) 'CxSwA)
+               #(v/assert % '(not (swLinked Ada Bea)) 'CxSwA)
+               #(v/assert % '(symmetric swRel) 'CxSwA)]
+        deny  #(v/assert % '(not (symmetric swRel)) 'CxSwLow {:strength :monotonic})
+        read1 (fn [kb reader]
+                (mapv #(v/ask? kb % reader)
+                      '[(swRel Ada Bea) (swLinked Ada Bea) (not (swLinked Ada Bea))]))
+        read2 (fn [kb] (mapv #(read1 kb %) '[CxSwA CxSwLow]))
+        run   (fn [label ops] (one-outcome! label (into [wire] ops) read2 cap))]
+    (is (= [[true true false] [true true false]] (run "held" facts)))
+    (is (= [[true true false] [false true true]] (run "denied below" (conj facts deny)))))
+  (tu/clear-kb! (tu/test-kb)))
+
+(deftest a-firing-over-a-split-fact-takes-its-class-per-reader
+  ;; a sample of each scenario's 720 or 5040 orderings; the ^:slow twin walks every one
+  (a-firing-over-a-split-fact ordering-sample))
+
+(deftest ^:slow every-ordering-of-a-firing-over-a-split-fact-takes-its-class-per-reader
+  (a-firing-over-a-split-fact nil))
+
 ;; ---- the forward chaining depth bound -------------------------------------
 ;;
 ;; A run's `:max-depth` refuses a firing whose conclusion would sit deeper than it, and
@@ -3364,7 +3442,7 @@
   ;; two seeds of the `^:slow` sweep, so `:default` runs the harness; both read a
   ;; supporter of each relation through the roster for most of their writes.  The stream
   ;; moves the roster by writes that move no edge, which the `:filter-active` memo and the
-  ;; closures under a map scope read through the visibility generation alone.
+  ;; closures under a map scope see only through the change clock.
   (is (nil? (tx-stream-mismatch 2 40)))
   (is (nil? (tx-stream-mismatch 11 40)))
   (tu/clear-kb! (tu/test-kb)))
@@ -3372,6 +3450,111 @@
 (deftest ^:slow the-taxonomy-s-scoped-reads-answer-what-a-fresh-memo-answers-over-random-streams
   (doseq [seed (range 12 36)]
     (is (nil? (tx-stream-mismatch seed 60)) (str "seed " seed)))
+  (tu/clear-kb! (tu/test-kb)))
+
+;; ---- every scoped read under every reading answers what a fresh read answers ---
+
+(def ^:private tx-readings
+  "Every reading a scoped taxonomy read is asked under, `[tax/*network-belief* tax/*search*]`."
+  [[false nil] [false :belief] [false :visibility] [true nil] [true :belief] [true :visibility]])
+
+(def ^:private tx-rules
+  "Three rules concluding a `genl` edge in `CxWoA`: one from a membership a defeat or an
+  except can hide, one from a fact a denial can defeat, and one guarded by a blocker."
+  '[(set/forwardRule (implies (wo_kc ?x) (genl wo_ka wo_ke)))
+    (set/forwardRule (implies (woBreedOf ?b ?s) (genl ?b ?s)))
+    (set/forwardRule (implies (and (woKindOf ?b ?s) (unknown (woblk ?b))) (genl ?b ?s)))])
+
+(defn- tx-setup!
+  "`wo-setup!`, `tx-rules` in `CxWoA`, and an arity for the `functional` mark a second
+  `genlCx` firing rests on."
+  [kb]
+  (let [m {:strength :monotonic}]
+    (wo-setup! kb)
+    (v/assert kb '(arity woFn 2) 'CxUniverse m)
+    (doseq [r tx-rules] (v/assert kb r 'CxWoA m))))
+
+(defn- tx-op-moving
+  "One write of `tx-op`'s stream, or of the writes that move a scoped read while no edge
+  and no roster entry moves: a second justification joining and leaving a `genl` edge a
+  defeat or an except hides (`(wo_kc WoA)` beside `(wo_kc WoB)`), the same for a `genlCx`
+  edge an except hides, a denial placing a defeat of a derived edge's antecedent, and a
+  guard defeat of a derived edge with a defeat of its blocker."
+  [^java.util.Random rng]
+  (let [m {:strength :monotonic}]
+    (if (pos? (.nextInt rng 3))
+      (tx-op rng)
+      (case (.nextInt rng 19)
+        0  [:assert '(wo_kc WoA) 'CxWoA {}]
+        1  [:retract '(wo_kc WoA) 'CxWoA]
+        2  [:assert '(wo_kc WoB) 'CxWoA {}]
+        3  [:assert '(wo_kb WoB) 'CxWoA m]
+        4  [:retract '(wo_kb WoB) 'CxWoA]
+        5  [:except '(wo_kc WoB) 'CxWoAA 'CxWoA]
+        6  [:assert '(set/forwardRule (implies (irreflexive woSelf) (genlCx CxWoAA CxWoB))) 'CxUniverse m]
+        7  [:assert '(set/forwardRule (implies (functional woFn) (genlCx CxWoAA CxWoB))) 'CxUniverse m]
+        8  [:assert '(functional woFn) 'CxUniverse m]
+        9  [:retract '(functional woFn) 'CxUniverse]
+        10 [:except '(irreflexive woSelf) 'CxUniverse 'CxWoAA]
+        11 [:assert '(woBreedOf wo_ke wo_ka) 'CxWoA {}]
+        12 [:assert '(not (woBreedOf wo_ke wo_ka)) (nth '[CxWoB CxWoA] (.nextInt rng 2)) m]
+        13 [:retract '(not (woBreedOf wo_ke wo_ka)) (nth '[CxWoB CxWoA] (.nextInt rng 2))]
+        14 [:assert '(woKindOf wo_kd wo_ka) 'CxWoA {}]
+        15 [:assert '(woblk wo_kd) 'CxWoB {}]
+        16 [:retract '(woblk wo_kd) 'CxWoB]
+        17 [:assert '(not (woblk wo_kd)) 'CxWoAA m]
+        18 [:retract '(not (woblk wo_kd)) 'CxWoAA]))))
+
+(defn- tx-reads-under
+  "`tx-reads` under `reading`, with `genl?` for each pair of `tx-types`, the direct
+  neighbours and the separable cuts of each type, at each context."
+  [tx [net? search]]
+  (binding [tax/*network-belief* net? tax/*search* search]
+    (assoc (tx-reads tx)
+           :genl?     (into {} (for [c wo-contexts a tx-types b tx-types] [[c a b] (tax/genl? tx a b c)]))
+           :direct    (into {} (for [c wo-contexts a tx-types]
+                                 [[c a] [(tax/direct-genls tx a c) (tax/direct-specs tx a c)]]))
+           :separable (into {} (for [c wo-contexts a tx-types] [[c a] (#'tax/separable-genls-at tx a c)])))))
+
+(defn- tx-readings-mismatch
+  "The first `[step op reading read]` after which a read of `tx-reads-under` through the
+  KB's taxonomy differs from the same read under the same reading through a detached copy
+  (`tax/detached-copy`), over `steps` writes of `seed`'s `tx-op-moving` stream.  After each
+  write the six readings are read through the KB's taxonomy in an order the seed shuffles,
+  so a memo one reading fills is offered to the readings after it."
+  [seed steps]
+  (let [kb  (tu/fresh)
+        rng (java.util.Random. (long seed))]
+    (tx-setup! kb)
+    (loop [step 0]
+      (when (< step steps)
+        (let [[kind s c opts :as op] (tx-op-moving rng)]
+          (try (case kind
+                 :assert  (v/assert kb s c opts)
+                 :retract (some->> (v/handle-of kb s c) (v/retract! kb))
+                 :except  (when (v/handle-of kb s c) (tx-except kb s c opts)))
+               (catch clojure.lang.ExceptionInfo _ nil))
+          (let [tx    (reasoning/taxonomy kb)
+                order (let [l (java.util.ArrayList. ^java.util.Collection tx-readings)]
+                        (java.util.Collections/shuffle l rng)
+                        (vec l))
+                memo  (into {} (map (fn [rd] [rd (tx-reads-under tx rd)])) order)
+                diff  (first (for [rd tx-readings
+                                   :let [fresh (tx-reads-under (tax/detached-copy tx) rd)]
+                                   k (keys fresh)
+                                   :when (not= (get-in memo [rd k]) (get fresh k))]
+                               [step op rd k]))]
+            (or diff (recur (inc step)))))))))
+
+(deftest every-scoped-read-under-every-reading-answers-what-a-fresh-read-answers-over-a-random-stream
+  ;; two seeds of the `^:slow` sweep below, so `:default` runs the harness
+  (is (nil? (tx-readings-mismatch 2 40)))
+  (is (nil? (tx-readings-mismatch 11 40)))
+  (tu/clear-kb! (tu/test-kb)))
+
+(deftest ^:slow every-scoped-read-under-every-reading-answers-what-a-fresh-read-answers-over-random-streams
+  (doseq [seed (range 12 36)]
+    (is (nil? (tx-readings-mismatch seed 60)) (str "seed " seed)))
   (tu/clear-kb! (tu/test-kb)))
 
 ;; ---- the candidate journal answers what a recompute answers ------------------
@@ -3477,7 +3660,7 @@
               _  (jo-apply! kb op)
               [c at' moved] (decide/moves kb at)
               cands' (if moved
-                       (reduce #(if (decide/candidate? c %2) (conj %1 %2) (disj %1 %2)) cands moved)
+                       (reduce #(if (decide/candidate? kb c %2) (conj %1 %2) (disj %1 %2)) cands moved)
                        (set (decide/candidate-handles kb)))
               bad    (cond
                        (not= cands' (set (decide/candidate-handles kb)))                 :candidates
@@ -3514,7 +3697,7 @@
           content  (fn [kb h] (let [s (v/sentex kb h)] [(:sentence s) (:context s)]))
           observe  (fn [kb]
                      (let [bs (reads/as-stored-opposed-bodies (:index kb))]
-                       {:candidates (into #{} (comp (mapcat #(reads/as-stored-opposed-members (:index kb) %))
+                       {:candidates (into #{} (comp (mapcat #(reads/as-stored-opposed-members-global (:index kb) %))
                                                     (map #(content kb %)))
                                           bs)
                         :bodies     bs

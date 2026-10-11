@@ -422,7 +422,7 @@
     "(sort-by :id justifications)"
     "(sort-by :id (into [] (take ego-scan) (v/sentexes-matching kb pattern '?ctx)))"
     "(sort-by :id (vals @(:nodes sess)))"
-    "(sort-by (juxt comment-first (comp print-key :context) :id) sentexes)"
+    "(sort-by-once (juxt comment-first (comp print-key :context) :id) sentexes)"
     "(sort (:handles entry))"
     "(vec (sort id))"})
 

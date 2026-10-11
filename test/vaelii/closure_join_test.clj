@@ -152,3 +152,149 @@
       (testing "the far pair names the edges of the path"
         (let [h (v/handle-of kb (list qualifies CxLow U) U)]
           (is (contains? (set (tree-seq coll? seq (v/why kb h))) low)))))))
+
+;; ---- a disjoint antecedent reads the separations ---------------------------
+
+(defn- separated-rule
+  "*A pair of separated types qualifies* — both ends of the `disjoint` literal bound by
+  the first antecedent."
+  [pairOf qualifies]
+  (list 'set/forwardRule
+        (list 'implies (list 'and (list pairOf '?a '?b) (list 'disjoint '?a '?b))
+              (list qualifies '?a '?b))))
+
+(tu/deftest-kb a-disjoint-antecedent-matches-every-separation-a-query-answers
+  (doseq [[label separate]
+          {"a partition"                    (fn [w a b _] [(list 'partition w a b)])
+           "a separating roster"            (fn [w a b _] [(list 'separating w a b)])
+           "a disjoint_metatype"            (fn [_ a b m] [(list 'disjoint_metatype m)
+                                                           (list m a) (list m b)])
+           "a sibling_disjoint parent"      (fn [w a b _] [(list 'sibling_disjoint w)
+                                                           (list 'genl a w) (list 'genl b w)])
+           "a disjoint over two supertypes" (fn [w a b m] [(list 'genl a w) (list 'genl b m)
+                                                           (list 'disjoint w m)])}]
+    (testing label
+      (tu/with-terms [pairOf qualifies whole qa qb kind]
+        (doseq [s (separate whole qa qb kind)] (v/assert kb s U))
+        (v/assert kb (separated-rule pairOf qualifies) U)
+        (v/assert kb (list pairOf qa qb) U)
+        (is (holds? kb (list 'disjoint qa qb) U) "the query answers the pair")
+        (is (holds? kb (list qualifies qa qb) U) "and the forward join agrees")))))
+
+(tu/deftest-kb a-type-below-two-parts-of-a-partition-fires-the-issue-rule
+  (tu/with-terms [whole qa qb qc emptied]
+    (v/assert kb (list 'partition whole qa qb) U {:strength :monotonic})
+    (v/assert kb (list 'genl qc qa) U)
+    (v/assert kb (list 'genl qc qb) U)
+    (v/assert kb (list 'set/forwardRule
+                       (list 'implies (list 'and (list 'genl '?c '?a) (list 'genl '?c '?b)
+                                            (list 'disjoint '?a '?b))
+                             (list emptied '?c)))
+              U)
+    (is (holds? kb (list emptied qc) U))))
+
+(tu/deftest-kb a-join-that-binds-one-end-reads-every-type-separated-from-it
+  (tu/with-terms [picked qualifies whole qa qb pug]
+    (v/assert kb (list 'partition whole qa qb) U)
+    (v/assert kb (list 'genl pug qb) U)
+    (v/assert kb (list 'set/forwardRule
+                       (list 'implies (list 'and (list picked '?a) (list 'disjoint '?a '?b))
+                             (list qualifies '?a '?b)))
+              U)
+    (v/assert kb (list picked qa) U)
+    (is (= (set (map '?y (v/query kb (list 'disjoint qa '?y) U)))
+           (set (map '?y (v/query kb (list qualifies qa '?y) U)))
+           #{qb pug}))))
+
+(tu/deftest-kb a-separation-firing-rests-on-the-roster-and-the-edges-it-climbed
+  (tu/with-terms [pairOf qualifies whole qa qb pug]
+    (let [roster (v/assert kb (list 'partition whole qa qb) U)
+          edge   (v/assert kb (list 'genl pug qa) U)]
+      (v/assert kb (separated-rule pairOf qualifies) U)
+      (v/assert kb (list pairOf pug qb) U)
+      (is (holds? kb (list qualifies pug qb) U))
+      (let [named (set (tree-seq coll? seq (v/why kb (v/handle-of kb (list qualifies pug qb) U))))]
+        (is (contains? named roster))
+        (is (contains? named edge)))
+      (testing "the edge going takes the conclusion"
+        (v/retract! kb edge)
+        (is (nil? (v/handle-of kb (list qualifies pug qb) U))))
+      (testing "and so does the roster going"
+        (v/assert kb (list pairOf qa qb) U)
+        (is (holds? kb (list qualifies qa qb) U))
+        (v/retract! kb roster)
+        (is (not (holds? kb (list qualifies qa qb) U)))))))
+
+(tu/deftest-kb an-exception-withdraws-a-separation-firing-and-its-retraction-restores-it
+  (tu/with-terms [pairOf qualifies whole qa qb]
+    (v/assert kb (list 'partition whole qa qb) U)
+    (v/assert kb (separated-rule pairOf qualifies) U)
+    (v/assert kb (list pairOf qa qb) U)
+    (is (holds? kb (list qualifies qa qb) U))
+    (let [exc (v/assert kb (list 'siblingDisjointException qa qb) U)]
+      (is (not (holds? kb (list 'disjoint qa qb) U)))
+      (is (not (holds? kb (list qualifies qa qb) U)) "the exempted pair matches nothing")
+      (v/retract! kb exc)
+      (is (holds? kb (list qualifies qa qb) U) "and the separation is back"))))
+
+(def ^:private marks
+  "Two marks that spare a pair one of whose types is a `genl` of the other, each as a fn
+  of the parent or metatype and the two types."
+  {"a sibling_disjoint parent" (fn [m a b] [(list 'sibling_disjoint m)
+                                            (list 'genl a m) (list 'genl b m)])
+   "a disjoint_metatype"       (fn [m a b] [(list 'disjoint_metatype m)
+                                            (list m a) (list m b)])})
+
+(tu/deftest-kb an-edge-between-two-marked-types-leaving-separates-them-in-every-order
+  ;; With the edge never stated, the mark separates the pair and the rule fires.  An edge
+  ;; stated and then retracted leaves the same knowledge, so the rule fires there too,
+  ;; whichever ingredient arrived first.  A defeated edge still relates the two types in
+  ;; the global closure the genl-relatedness guard reads, so there the query answers no
+  ;; separation, and the rule answers what the query answers.
+  (doseq [[label mark] marks
+          order [[:mark :rule :pair :edge] [:edge :mark :pair :rule] [:rule :edge :pair :mark]]
+          leave [:never :retract :defeat]]
+    (testing (str label ", " order ", " leave)
+      (tu/with-terms [pairOf qualifies kind qa qb]
+        (let [edge (atom nil)
+              step {:mark #(doseq [s (mark kind qa qb)] (v/assert kb s U))
+                    :rule #(v/assert kb (separated-rule pairOf qualifies) U)
+                    :pair #(v/assert kb (list pairOf qa qb) U)
+                    :edge #(when-not (= :never leave)
+                             (reset! edge (v/assert kb (list 'genl qa qb) U)))}]
+          (doseq [k order] ((step k)))
+          (case leave
+            :never   nil
+            :retract (v/retract! kb @edge)
+            :defeat  (v/assert kb (list 'not (list 'genl qa qb)) U {:strength :monotonic}))
+          (when-not (= :defeat leave)
+            (is (holds? kb (list 'disjoint qa qb) U)))
+          (is (= (holds? kb (list 'disjoint qa qb) U) (holds? kb (list qualifies qa qb) U))
+              "the forward join answers what the query answers"))))))
+
+(tu/deftest-kb an-edge-arriving-between-two-marked-types-withdraws-the-firing
+  (doseq [[label mark] marks]
+    (testing label
+      (tu/with-terms [pairOf qualifies kind qa qb]
+        (doseq [s (mark kind qa qb)] (v/assert kb s U))
+        (v/assert kb (separated-rule pairOf qualifies) U)
+        (v/assert kb (list pairOf qa qb) U)
+        (is (holds? kb (list qualifies qa qb) U))
+        (v/assert kb (list 'genl qa qb) U)
+        (is (not (holds? kb (list 'disjoint qa qb) U)))
+        (is (not (holds? kb (list qualifies qa qb) U)))))))
+
+(tu/deftest-kb the-separation-join-reads-the-same-whichever-ingredient-arrived-last
+  (let [orders {"rule, pair, edge, roster" [:rule :pair :edge :roster]
+                "roster, rule, pair, edge" [:roster :rule :pair :edge]
+                "roster, edge, pair, rule" [:roster :edge :pair :rule]
+                "rule, roster, edge, pair" [:rule :roster :edge :pair]}]
+    (doseq [[label order] orders]
+      (testing label
+        (tu/with-terms [pairOf qualifies whole qa qb pug]
+          (let [step {:rule   #(v/assert kb (separated-rule pairOf qualifies) U)
+                      :pair   #(v/assert kb (list pairOf pug qb) U)
+                      :edge   #(v/assert kb (list 'genl pug qa) U)
+                      :roster #(v/assert kb (list 'partition whole qa qb) U)}]
+            (doseq [k order] ((step k)))
+            (is (holds? kb (list qualifies pug qb) U))))))))

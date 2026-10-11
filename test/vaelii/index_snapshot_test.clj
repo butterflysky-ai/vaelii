@@ -26,7 +26,10 @@
             [vaelii.impl.disk.record-store :as drs]
             [vaelii.impl.kb :as kb]
             [vaelii.impl.protocols :as p]
+            [vaelii.impl.reads :as reads]
             [vaelii.impl.reindex :as reindex]
+            [vaelii.impl.rules :as rules]
+            [vaelii.impl.sentex :as sx]
             [vaelii.impl.tokens :as tok]
             [vaelii.impl.types.snapshot :as snapshot-types]
             [vaelii.test-util :as tu])
@@ -116,9 +119,9 @@
    :number   (count (v/sentexes-matching kb '(bornIn ?x 1970) 'CxUniverse))
    :ancestor (v/ask? kb '(ancestorOf Snap0 Snap1) 'CxUniverse)
    :scoped   (p/sentexes-with-args (:index kb) 'likes {2 'SnapBall})
-   :agnostic (p/sentexes-with-arg  (:index kb) 1 'SnapMuffet)
-   :agn-n    (p/count-with-arg     (:index kb) 1 'SnapMuffet)
-   :terms    (p/term-count (:index kb))
+   :agnostic (reads/as-stored-with-arg-global  (:index kb) 1 'SnapMuffet)
+   :agn-n    (reads/stored-count-with-arg-global     (:index kb) 1 'SnapMuffet)
+   :terms    (reads/stored-term-count-global (:index kb))
    :nodes    (p/count-at (:index kb) [])})
 
 (defn- opening
@@ -212,6 +215,70 @@
                 (is (zero? rebuilds))
                 (is (= want (answers kb3)))))))))))
 
+;; ---- the symbol pool is sized to the image's dictionary -------------------
+
+(defn- record-symbols
+  "Every symbol occurrence in `kb`'s stored records, read off each record's fields as
+  thawed, so a symbol is the instance the record holds."
+  [kb]
+  (let [rs (:records kb)]
+    (into [] (comp (map #(p/get-sentex rs %))
+                   (mapcat #(tree-seq coll? seq (vals (into {} %))))
+                   (filter symbol?))
+          (p/sentex-ids rs))))
+
+(defn- instances
+  "How many distinct objects `syms` holds, by identity."
+  [syms]
+  (count (doto (java.util.Collections/newSetFromMap (java.util.IdentityHashMap.))
+           (.addAll ^java.util.Collection syms))))
+
+(defn- opening-under-a-small-pool
+  "Write `build!`'s store plus a second fact about each `SnapN`, then reopen it with the
+  pool's limit at 16 and both generations holding only fresh names.  The vocabulary is
+  larger than the limit the open starts from, and each `SnapN` recurs about 60 names after
+  its first record, so a 16-entry pool drops it in between.  Calls `(f kb)` inside the small
+  limit."
+  [f]
+  (tu/with-snapshot-platform
+    (with-snapshot-dir
+      (fn [dir]
+        (let [kb (build! (v/open-kb {:records :disk :index :snapshot :dir dir :recover? false}))]
+          (doseq [i (range 60)]
+            (v/assert kb (list 'likes (symbol (str "Snap" i)) 'SnapBall) 'CxUniverse
+                      {:strength :monotonic})))
+        (backend/close-dir! dir)
+        (with-redefs [sx/*symbol-pool-limit* 16]
+          (dotimes [_ 16] (sx/intern-sym (gensym "poolPrime")))
+          (f (first (opening dir))))))))
+
+(deftest a-store-opened-past-the-pool-limit-holds-one-symbol-per-name
+  (opening-under-a-small-pool
+   (fn [kb]
+     (let [syms (record-symbols kb)]
+       (is (< 16 (count (set syms))) "the store names more than the limit the open began at")
+       (is (<= (* 2 (count (set syms))) sx/*symbol-pool-limit*)
+           "the open raised the limit to twice its dictionary")
+       (is (= (count (set syms)) (instances syms)))))))
+
+(deftest names-minted-after-the-open-rotate-without-evicting-the-names-in-use
+  ;; The store is read once per eighth of the limit, as a live KB reads its vocabulary, while
+  ;; ten limits' worth of names are minted beside it.
+  (opening-under-a-small-pool
+   (fn [kb]
+     (let [limit  (long sx/*symbol-pool-limit*)
+           before (into {} (map (juxt str identity)) (record-symbols kb))
+           sizes  (into [] (map (fn [i]
+                                  (sx/intern-sym (symbol (str "poolMinted" i)))
+                                  (when (zero? (mod i (quot limit 8))) (record-symbols kb))
+                                  (#'sx/pool-size)))
+                        (range (* 10 limit)))
+           after  (record-symbols kb)]
+       (is (<= (reduce max sizes) limit) "the minted names stay within the limit")
+       (is (= [] (into [] (comp (remove #(identical? (before (str %)) %)) (map str) (distinct))
+                       after))
+           "and every name the records hold is the instance the open pooled")))))
+
 (deftest a-mapped-index-that-was-never-written-is-not-rewritten
   (tu/with-snapshot-platform
     (testing "closing a read-only session must not pull the cold tail back into heap"
@@ -279,7 +346,7 @@
         (let [[kb2 _] (opening dir)
               idx     (:index kb2)]
           (is (snapshot-types/snapshot-mapped? (:trie idx)) "the trie opened mapped")
-          (p/index-rule idx 987654 '[snapAnte] 'snapConsq 'CxSnapRule)
+          (rules/index-rule idx 987654 '[snapAnte] 'snapConsq 'CxSnapRule)
           (is (snapshot-types/snapshot-mapped? (:trie idx)) "and the rule index left it so — only the roots thawed")
           (is (= :saved (:index (snap/save! dir idx #(drs/slot-fingerprint (:records kb2))))))
           (let [want (answers kb2)]
@@ -289,7 +356,7 @@
               (is (= want (answers kb3)) "the mapped-through sections read back unchanged")
               ;; the rule entry is not derivable from the records (no such sentex), so its
               ;; survival is proof the image carried it rather than a rebuild recreating it
-              (is (= #{987654} (p/rules-by-consequent (:index kb3) 'snapConsq))))))))))
+              (is (= #{987654} (reads/as-stored-rules-by-consequent-global (:index kb3) 'snapConsq))))))))))
 
 ;; ---- staleness: an image about a KB that has moved ----------------------
 

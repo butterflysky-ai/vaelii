@@ -371,6 +371,12 @@
         (doseq [[id] batch] (.remove c id)))))
   nil)
 
+(defn- page
+  "Thaw the record `slot` points at in kind `k`.  Caller holds the kind's read lock and
+  the io guard."
+  [k slot]
+  (some-> (f/read-record-sized (:log k) (:offset slot) (:length slot)) ((:dec k))))
+
 (defn- fetch
   "The record at handle `id` in kind `k`, or nil — from the hot cache, else paged from
   disk (one positional slot read, one positional frame read).  Anything that is not a
@@ -402,11 +408,36 @@
           (with-read (:lock k)
             (let [rec (f/with-io-guard (:fault k) (:log-path k) false
                         (when-let [slot (f/read-slot (:idx k) id)]
-                          (when-not (:tombstone? slot)
-                            (some-> (f/read-record-sized (:log k) (:offset slot) (:length slot))
-                                    ((:dec k))))))]
+                          (when-not (:tombstone? slot) (page k slot))))]
               (when (and c rec) (.put c id rec))
               rec))))))
+
+(defn- premise-mark-read
+  "One handle of a bulk premise mark at strength rank `rank`, decided from its slot:
+  nil when kind `k` holds no record at `id` (unwritten or tombstoned), `::marked` when
+  the slot already records a premise at `rank`, else the record.  The record is paged
+  without `fetch`'s hot-cache put, so a sweep of the premise set leaves the LRU as it
+  found it.  The slot's rank is a cache over the record that a dirty open reconciles
+  (`f/reconcile-slot-flags!`), the same trust `premise-strength` places in it."
+  [k ^long id ^long rank]
+  (usable! k)
+  (with-read (:lock k)
+    (f/with-io-guard (:fault k) (:log-path k) false
+      (when-let [slot (f/read-slot (:idx k) id)]
+        (when-not (:tombstone? slot)
+          (let [flags (long (:flags slot))]
+            (if (and (pos? rank) (f/slot-premise flags) (= rank (f/slot-strength flags)))
+              ::marked
+              (page k slot))))))))
+
+(defn- handle-order
+  "The keys of `id->strength` that this store could have issued as handles, ascending.
+  A non-integer or negative key is dropped: `fetch` reads it as no record."
+  ^longs [id->strength]
+  (let [ids (long-array (filter #(and (integer? %) (not (neg? (long %))))
+                                (keys id->strength)))]
+    (java.util.Arrays/sort ids)
+    ids))
 
 (defn- kill!
   "Tombstone handle `id` in kind `k` and drop it from the live set (a no-op when it
@@ -713,19 +744,25 @@
   ;; `default-batch` for the same reason, and these are the same write underneath it.
   p/BulkAnnotating
   (mark-premise-batch [_ id->strength]
-    ;; The fetch per handle stays — the guard against a phantom premise is that the
-    ;; record exists, and only the record says what strength it already carries.  What
-    ;; batches is the *writing*: the marks that actually change a record become one log
-    ;; write and one idx range instead of a re-store apiece.  Most of them change nothing
-    ;; on an import, because the records were written carrying their strength.
+    ;; Each handle is decided from its slot, in handle order, so the slot reads walk the
+    ;; idx forward and the record reads that remain walk the log forward.  A slot that
+    ;; already records a premise at the wanted rank is a mark already on disk: the handle
+    ;; is rostered and no record is paged.  That is every mark on an import, whose sink
+    ;; wrote each record carrying its strength.  Otherwise the record is paged
+    ;; (`premise-mark-read`), and a record whose `:strength` differs is re-stored; those
+    ;; re-stores are one log write and one idx range per chunk.  A handle with no slot or
+    ;; a tombstone is neither rostered nor stored, which is the guard against a phantom
+    ;; premise.
     (let [k (:sentexes kinds)]
-      (doseq [chunk (partition-all default-batch id->strength)]
-        (let [have (into [] (keep (fn [[id strength]]
-                                    (when-let [sx (fetch k id)] [id sx (or strength :default)])))
+      (doseq [chunk (partition-all default-batch (handle-order id->strength))]
+        (let [have (into [] (keep (fn [id]
+                                    (let [want (or (get id->strength id) :default)]
+                                      (when-let [r (premise-mark-read k id (strength/rank-of want))]
+                                        [id r want]))))
                          chunk)]
-          (store-batch! k (into [] (keep (fn [[id sx want]]
-                                           (when-not (= want (:strength sx))
-                                             [id (assoc sx :strength want) true])))
+          (store-batch! k (into [] (keep (fn [[id r want]]
+                                           (when-not (or (= ::marked r) (= want (:strength r)))
+                                             [id (assoc r :strength want) true])))
                                 have))
           (with-write (:lock k) (roster/live-add-all! premises (map first have))))))
     nil)
@@ -1405,6 +1442,7 @@
 
 (caches/register-derived
  {:id :R10 :label "Hot records" :cache :hot-records :kind :cache :keyed-by :handle
+  :holds-content? false
   :reads [:records]
   :retired-by {:stored :K :removed :K :respelled :K :cleared :W}
   :computed :read :imaged? false

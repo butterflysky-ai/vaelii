@@ -46,12 +46,13 @@
         run -m vaelii.bench.profile corpus <dir>"
   (:require [vaelii.bench.util :as u]
             [vaelii.core :as v]
+            [vaelii.host.starter :as starter]
             [vaelii.impl.foreign :as foreign]
             [vaelii.impl.jtms :as jtms]
             [vaelii.impl.profile :as prof]
             [vaelii.impl.protocols :as p]
+            [vaelii.impl.reads :as reads]
             [vaelii.impl.sentex :as sx]
-            [vaelii.host.starter :as starter]
             [vaelii.impl.types.reasoning :as reasoning]))
 
 (defn- ms [t0] (/ (- (System/nanoTime) t0) 1e6))
@@ -134,7 +135,7 @@
         ;; of symbols beside it.  One streaming pass over the index; nothing retained.
         term-keys (count (sequence (comp (map first) (filter #(= :term-index (first %))))
                                    (p/index-entries ix)))
-        roster    (long (p/term-count ix))
+        roster    (reads/stored-term-count-global ix)
         forms     (reduce + 0 (map long (mapcat vals (vals nesting))))
         floor0    (exact-floor-0 kb ids 200000)]
     (println (format "  %,d sentexes — %,d facts (%,d negative), %,d rules — read in %.0f ms"
@@ -173,12 +174,12 @@
       (println (format "    at *min-indexed-depth* 0        ≤ %,8d  (one more key per content literal at most; %,d literals)"
                        (+ term-keys forms) forms)))
 
-    (println "\n  the leading-variable fan, per predicate: `count-children [pred]` is how many")
+    (println "\n  the leading-variable fan, per predicate: `stored-count-children [pred]` is how many")
     (println "  distinct first arguments a `(pred ?x B)` trie walk would expand at level 1.")
     (println (format "    %-34s %12s %12s %10s" "predicate" "extent" "fan at arg1" "extent/fan"))
     (doseq [pd (take 15 (sort-by #(- (long (p/count-with-functor ix %))) (vec preds)))
             :let [ext (long (p/count-with-functor ix pd))
-                  fan (long (p/count-children ix [pd]))]]
+                  fan (long (reads/stored-count-children ix [pd]))]]
       (println (format "    %-34s %,12d %,12d %10.2f" pd ext fan (/ (double ext) (max 1 fan)))))
     t))
 
@@ -526,11 +527,11 @@
   (let [reader (foreign/reader! :cyc-corpus)
         t0     (System/nanoTime)
         r      ((:load-dir! reader) kb dir
-                {:profile profile
-                 :on-progress (fn [{:keys [done note]}]
-                                (when (zero? (mod (long done) 200000))
-                                  (println (format "    %,10d sentences … %s" done (or note "")))
-                                  (flush)))})]
+                                    {:profile profile
+                                     :on-progress (fn [{:keys [done note]}]
+                                                    (when (zero? (mod (long done) 200000))
+                                                      (println (format "    %,10d sentences … %s" done (or note "")))
+                                                      (flush)))})]
     (println (format "  asserted %,d, refused %,d over %,d contexts in %.0f s"
                      (:asserted r) (:refused r) (:contexts r) (/ (ms t0) 1000)))
     r))

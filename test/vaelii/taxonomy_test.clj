@@ -11,6 +11,121 @@
             [vaelii.impl.reads :as reads]
             [vaelii.impl.taxonomy :as tax]))
 
+(deftest min-genls-and-max-specs-leave-out-a-neighbour-another-stands-between
+  (let [t (tax/create-taxonomy)]
+    (tax/add-genl t 'mammal 'animal 1)
+    (tax/add-genl t 'dog 'mammal 2)
+    (tax/add-genl t 'dog 'animal 3)
+    (tax/add-genl t 'dog 'pet 4)
+    (testing "the one-step adjacency holds the redundant edge"
+      (is (= '#{mammal animal pet} (tax/direct-genls-global t 'dog)))
+      (is (= '#{mammal dog} (tax/direct-specs-global t 'animal))))
+    (testing "the nearest neighbours do not, and two incomparable ones both stay"
+      (is (= '#{mammal pet} (tax/min-genls-global t 'dog)))
+      (is (= '#{mammal} (tax/max-specs-global t 'animal))))
+    (testing "a type that is not a node has none"
+      (is (= #{} (tax/min-genls-global t 'rock)))
+      (is (= #{} (tax/max-specs-global t 'rock))))
+    (testing "removing the nearer edge makes the farther neighbour the nearest"
+      (tax/del-genl! t 'dog 'mammal 2)
+      (is (= '#{animal pet} (tax/min-genls-global t 'dog)))
+      (is (= '#{mammal dog} (tax/max-specs-global t 'animal))))))
+
+(deftest min-types-and-max-types-keep-the-ends-of-the-order-among-the-members
+  (let [t (tax/create-taxonomy)]
+    (tax/add-genl t 'mammal 'animal 1)
+    (tax/add-genl t 'dog 'mammal 2)
+    (tax/add-genl t 'dog 'pet 3)
+    (tax/add-genl t 'rock 'mineral 4)
+    (testing "a chain keeps one end"
+      (is (= '#{dog} (tax/min-types-global t '[dog mammal animal])))
+      (is (= '#{animal} (tax/max-types-global t '[dog mammal animal])))
+      (is (= '#{mammal} (tax/min-types-global t '[animal mammal])))
+      (is (= '#{dog} (tax/min-types-global t '[animal dog])) "with no member between"))
+    (testing "members no path relates all stay"
+      (is (= '#{mammal pet rock} (tax/min-types-global t '[mammal pet rock])))
+      (is (= '#{mammal pet rock} (tax/max-types-global t '[mammal pet rock]))))
+    (testing "a chain beside an unrelated member keeps one end and that member"
+      (is (= '#{dog rock} (tax/min-types-global t '[dog mammal animal rock])))
+      (is (= '#{animal pet rock} (tax/max-types-global t '[dog mammal animal pet rock]))))
+    (testing "a supertype outside the members drops no member"
+      ;; `dog` has the parents `mammal` and `pet`, and neither is a member.  `dog`'s
+      ;; up-closure is smaller than the six members
+      (is (= '#{dog c2 c3 c4 c5 c6} (tax/max-types-global t '[dog c2 c3 c4 c5 c6])))
+      (is (= '#{dog c2 c3 c4 c5 c6} (tax/min-types-global t '[dog c2 c3 c4 c5 c6])))
+      (is (= '#{dog rock} (tax/max-types-global t '[dog rock]))))
+    (testing "a subtype outside the members drops no member"
+      (is (= '#{animal pet mineral} (tax/min-types-global t '[animal pet mineral]))))
+    (testing "a member that is not a node stays, and a repeat is one member"
+      (is (= '#{dog unheard} (tax/min-types-global t '[dog unheard mammal dog]))))
+    (testing "the scoped arities with a nil context read every edge"
+      (is (= '#{dog} (tax/min-types t '[dog mammal animal] nil)))
+      (is (= '#{animal} (tax/max-types t '[dog mammal animal] nil))))
+    (testing "an empty or one-member collection makes no closure read"
+      (with-redefs [tax/closure-of (fn [& _] (throw (ex-info "closure read" {})))]
+        (is (= #{} (tax/min-types-global t [])))
+        (is (= #{} (tax/max-types-global t nil)))
+        (is (= '#{dog} (tax/min-types-global t '[dog])))
+        (is (= '#{dog} (tax/max-types-global t '[dog dog])))
+        (is (thrown? clojure.lang.ExceptionInfo (tax/min-types-global t '[dog mammal])))))))
+
+(deftest extremal-types-keeps-two-members-that-subsume-each-other
+  ;; the closures are given as a map, so the cycle needs no taxonomy that admits one
+  (let [ends  @#'tax/extremal-types
+        above '{a #{a b top} b #{a b top} top #{top} low #{low a b top}}]
+    (is (= '#{a b} (ends above true '[a b])))
+    (is (= '#{a b} (ends above false '[a b])))
+    (is (= '#{a b} (ends above true '[a b top])))
+    (is (= '#{top} (ends above false '[a b top])))
+    (is (= '#{low} (ends above true '[a b low])))
+    (is (= '#{a b} (ends above false '[a b low])))))
+
+(deftest max-specs-keeps-a-child-that-has-a-second-parent-outside-the-neighbours
+  ;; `c1` is also a subtype of `other`, which is no neighbour of `hub`
+  (let [t (tax/create-taxonomy)]
+    (doseq [[i c] (map-indexed vector '[c1 c2 c3 c4 c5])]
+      (tax/add-genl t c 'hub (inc i)))
+    (tax/add-genl t 'c1 'other 10)
+    (is (= '#{c1 c2 c3 c4 c5} (tax/max-specs-global t 'hub)))
+    (is (= '#{c1} (tax/max-specs-global t 'other)))
+    (testing "and going up, a parent with a parent of its own outside the neighbours stays"
+      (doseq [[i p] (map-indexed vector '[p1 p2 p3 p4 p5])]
+        (tax/add-genl t 'leaf p (+ 20 i)))
+      (tax/add-genl t 'p1 'beyond 30)
+      (is (= '#{p1 p2 p3 p4 p5} (tax/min-genls-global t 'leaf))))))
+
+(deftest nearest-of-keeps-mutually-subsuming-neighbours
+  ;; the closures are given as a map, so the cycle needs no taxonomy that admits one
+  (let [ends    @#'tax/extremal-types
+        nearest (fn [above up? node nbrs]
+                  (@#'tax/nearest-of above #(ends above up? %) up? node nbrs))]
+    (testing "two neighbours that subsume each other are both kept, and drop a farther one"
+      (let [above '{n #{n a b top} a #{a b top} b #{a b top} top #{top}}]
+        (is (= '#{a b} (nearest above true 'n '#{a b top})))
+        (is (= '#{a b} (nearest above false 'top '#{a b n})))))
+    (testing "a neighbour that subsumes and is subsumed by the node drops nothing"
+      (let [above '{n #{n twin top} twin #{n twin top} top #{top} low #{low n twin top}}]
+        (is (= '#{twin top} (nearest above true 'n '#{twin top})))
+        (is (= '#{twin low} (nearest above false 'n '#{twin low})))))
+    (testing "the neighbour that subsumes and is subsumed by the node is kept beside the rest"
+      ;; the reduction alone would keep `twin` and drop `top`
+      (let [above '{n #{n twin top} twin #{n twin top} top #{top}}]
+        (is (= '#{twin} (ends above true '#{twin top})))
+        (is (= '#{twin top} (nearest above true 'n '#{twin top})))))
+    (testing "a type that is not a neighbour drops nothing, whichever set is the smaller"
+      ;; `c1` and `p1` have an up-closure smaller than the five neighbours
+      (let [above '{n #{n} c1 #{c1 n x} c2 #{c2 n} c3 #{c3 n} c4 #{c4 n} c5 #{c5 n} x #{x}}]
+        (is (= '#{c1 c2 c3 c4 c5} (nearest above false 'n '#{c1 c2 c3 c4 c5})))
+        (is (= '#{c1 c2} (nearest above false 'n '#{c1 c2}))))
+      (let [above '{n #{n p1 p2 p3 p4 p5 x} p1 #{p1 x} p2 #{p2} p3 #{p3} p4 #{p4} p5 #{p5}
+                    x #{x}}]
+        (is (= '#{p1 p2 p3 p4 p5} (nearest above true 'n '#{p1 p2 p3 p4 p5})))
+        (is (= '#{p1 p2} (nearest above true 'n '#{p1 p2})))))
+    (testing "one neighbour, or none, costs no closure read"
+      (let [above (fn [_] (throw (ex-info "read" {})))]
+        (is (= '#{a} (nearest above true 'n '#{a})))
+        (is (= #{} (nearest above false 'n #{})))))))
+
 (deftest genl-closures
   (let [t (tax/create-taxonomy)]
     (tax/add-genl t 'dog 'animal 1)
@@ -354,8 +469,9 @@
   ;; random edits as the up-closure build, diamonds and cycles, with cycles `:scc` has
   ;; not recorded under `*defer-cycle-scc?*` (the build falls back to cutting the
   ;; closure).  One memo shared across every node's read, in a seeded order so a cut is
-  ;; built before the ancestors it is built from, and a fresh memo per read; the marks
-  ;; are none, a few, or all.
+  ;; built before the ancestors it is built from, a fresh memo per read, and no memo (the
+  ;; walk down from the marks, pruned by the depth potential and unpruned while it is
+  ;; loose); the marks are none, a few, or all.
   (let [nodes (mapv #(symbol (str "c_" %)) (range 14))
         rnd   (java.util.Random. 161803)]
     (doseq [defer? [false true]]
@@ -387,6 +503,9 @@
                                    " marks " (sort among)))
                           (is (= (cut n) (tax/genls-global-among t n among (volatile! {})))
                               (str "fresh memo, defer " defer? " trial " trial " node " n
+                                   " marks " (sort among)))
+                          (is (= (cut n) (tax/genls-global-among t n among))
+                              (str "walked down, defer " defer? " trial " trial " node " n
                                    " marks " (sort among))))))
                     ;; and a union of what a mapping makes of each term: labels of a few
                     ;; values each, as the arity index asks for the lengths bound above
@@ -1426,3 +1545,81 @@
       (tax/add-genl t 'x 'z 3 :c)
       (is (tax/genl-asserted-in? t 'x 'z #{:a :c}))
       (is (= 1 @walks) "and an edge change reads the new path"))))
+
+(deftest a-walk-up-over-the-missed-memo-answers-what-the-closure-answers
+  ;; random graphs of 40 types, some edges closing a cycle, and targets at varied depths:
+  ;; every type asked in a shuffled order over one memo per target set, against the closure
+  (let [rnd (java.util.Random. 4902)
+        hit (atom 0)]
+    (dotimes [trial 20]
+      (let [t  (tax/create-taxonomy)
+            ts (mapv #(symbol (str "mw" %)) (range 40))]
+        (dotimes [h 70]
+          (let [i (.nextInt rnd 40) j (.nextInt rnd 40)]
+            (when (and (not= i j) (or (< i j) (zero? (.nextInt rnd 8))))
+              (tax/add-genl t (ts i) (ts j) h))))
+        (doseq [n [1 3 8]]
+          (let [among  (into #{} (repeatedly n #(ts (.nextInt rnd 40))))
+                missed (volatile! #{})
+                want   (into #{} (filter #(some among (tax/genls-global t %))) ts)]
+            (swap! hit + (count want))
+            (is (= want (into #{} (filter #(tax/genls-global-meets? t % among missed)) (shuffle ts)))
+                (str "trial " trial ", " n " targets"))))))
+    (is (pos? @hit) "some types meet a target")))
+
+(deftest a-witness-walk-past-its-pruning-names-the-path-an-unpruned-walk-names
+  ;; random graphs of 160 types where most types fan out to many parents, so walks pass
+  ;; their first 64 expansions: each witness, pruned to the types between the two ends,
+  ;; against the walk that never prunes, with and without supporter classes
+  (let [rnd   (java.util.Random. 4905)
+        found (atom 0)]
+    (dotimes [trial 6]
+      (let [t  (tax/create-taxonomy)
+            ts (mapv #(symbol (str "pw" %)) (range 160))]
+        (dotimes [h 900]
+          (let [i (.nextInt rnd 160) j (.nextInt rnd 160)]
+            (when (and (not= i j) (or (< i j) (zero? (.nextInt rnd 12))))
+              (tax/add-genl t (ts i) (ts j) h))))
+        (dotimes [_ 30]
+          (let [sub   (ts (.nextInt rnd 40))
+                super (ts (+ 80 (.nextInt rnd 80)))
+                walk  #(tax/with-neighbours (atom {})
+                         (fn [] [(tax/reach-support t :genl sub super nil)
+                                 (tax/reach-support t :genl sub super nil (constantly :default))]))
+                want  (with-redefs [tax/prune-after Long/MAX_VALUE] (walk))]
+            (when (first want) (swap! found inc))
+            (is (= want (walk)) (str "trial " trial " " sub " " super))))))
+    (is (pos? @found) "some pairs have a path")))
+
+(deftest the-uncovered-routes-a-pass-reads-over-held-neighbours-are-those-read-alone
+  ;; random graphs of 60 types, edges stated in four contexts (one with none) under two
+  ;; branches, some edges with two supporters of two classes: the uncovered routes, with
+  ;; and without supporter classes, read inside one reading pass after a witness walk
+  ;; over the same edges, against the same reads outside any pass
+  (let [rnd   (java.util.Random. 4906)
+        found (atom 0)
+        cls   #(if (even? %) :monotonic :default)]
+    (dotimes [trial 8]
+      (let [t   (tax/create-taxonomy)
+            ts  (mapv #(symbol (str "ur" %)) (range 60))
+            cxs [nil 'CxUrA 'CxUrB 'CxUrC]]
+        (tax/add-genlCx t 'CxUrA 'CxUniverse 1)
+        (tax/add-genlCx t 'CxUrB 'CxUniverse 2)
+        (tax/add-genlCx t 'CxUrC 'CxUrA 3)
+        (dotimes [h 220]
+          (let [i (.nextInt rnd 60) j (.nextInt rnd 60)]
+            (when (and (not= i j) (or (< i j) (zero? (.nextInt rnd 10))))
+              (tax/add-genl t (ts i) (ts j) (+ 10 h) (cxs (.nextInt rnd 4)))
+              (when (zero? (.nextInt rnd 4))
+                (tax/add-genl t (ts i) (ts j) (+ 1000 h) (cxs (.nextInt rnd 4)))))))
+        (dotimes [_ 25]
+          (let [sub   (ts (.nextInt rnd 30))
+                super (ts (+ 30 (.nextInt rnd 30)))
+                walk  (fn [] [(tax/reach-supports t :genl sub super nil cls)
+                              (tax/general-reach-supports t :genl sub super nil)])
+                want  (walk)]
+            (when (seq (first want)) (swap! found inc))
+            (is (= want (tax/with-neighbours (atom {})
+                          (fn [] (tax/reach-support t :genl sub super nil cls) (walk))))
+                (str "trial " trial " " sub " " super))))))
+    (is (pos? @found) "some pairs have routes")))

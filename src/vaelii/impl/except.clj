@@ -4,11 +4,13 @@
   "The visibility `except` roster: which handles a believed `except` hides from a
   reading context, with the meta-except cascade; and the read walk that applies the
   placed `defeat`s at a reader.  See docs/exceptions.md and docs/nmtms.md."
-  (:require [vaelii.impl.decide :as decide]
+  (:require [vaelii.impl.caches :as caches]
+            [vaelii.impl.decide :as decide]
             [vaelii.impl.jtms :as jtms]
             [vaelii.impl.naming :as nm]
             [vaelii.impl.protocols :as p]
             [vaelii.impl.reads :as reads]
+            [vaelii.impl.rewrite :as rewrite]
             [vaelii.impl.sentex :as sx]
             [vaelii.impl.taxonomy :as tax]
             [vaelii.impl.types.reasoning :as reasoning]))
@@ -26,7 +28,10 @@
   #{except-handle ...}}`, or nil when none is stated there or `view-context` is a
   variable: the `except` extent in that set, one record read per except.  Both the hot
   boolean reads and diagnostic exception forest use this one index so they cannot
-  disagree about scope."
+  disagree about scope.
+
+  The ancestor set is the unscoped one (`tax/context-up-global`): the except filter
+  cannot be scoped by the filter it derives."
   [kb view-context]
   (let [idx (:index kb)]
     (when-not (or (sx/variable? view-context) (not (reads/stores-any? idx sx/except-functor)))
@@ -146,7 +151,9 @@
   extent, which holds both polarities, so a stored `(not (except …))` in a context of the
   set gives a predicate too.  This is the excepts alone, which a derivation asks
   (`chain/antecedent-hidden?`); a read asks `exc/hidden-fn`.  The predicate reads the
-  excepts naming the asked handle, and the cascade over the excepts naming those."
+  excepts naming the asked handle, and the cascade over the excepts naming those.
+
+  The ancestor set is the unscoped one, for `visible-exception-index`'s reason."
   [kb view-context]
   (let [idx (:index kb)]
     (when-not (or (sx/variable? view-context) (not (reads/stores-any? idx sx/except-functor)))
@@ -201,15 +208,12 @@
   on, transitively, not descending past a premise unless `past-premises?`, and leaving
   out each handle `stop?` names, which the read takes at its label.  A premise's other
   justifications decide its class, not its belief, so only a class read descends past
-  it.  With `limit`, nil once the support holds more than `limit` handles."
-  ([tms h stop?] (support tms h stop? false nil))
-  ([tms h stop? past-premises?] (support tms h stop? past-premises? nil))
-  ([tms h stop? past-premises? limit]
+  it."
+  ([tms h stop?] (support tms h stop? false))
+  ([tms h stop? past-premises?]
    (loop [seen #{}, stack [h]]
-     (cond
-       (and limit (> (count seen) limit)) nil
-       (empty? stack) seen
-       :else
+     (if (empty? stack)
+       seen
        (let [d (peek stack) stack (pop stack)]
          (if (or (contains? seen d) (stop? d))
            (recur seen stack)
@@ -363,14 +367,26 @@
   (`route-answer`)."
   nil)
 
+(defn- open-marked
+  "`[(f) settled?]`: `f`'s value, and whether its computation read no route question open
+  in the search's memo `m` (`caches/*open-mark*`).  The mark of the computation around `f`
+  is lowered as `f` lowered it."
+  [m f]
+  (let [saved (get @m ::low Long/MAX_VALUE)]
+    (vswap! m assoc ::low Long/MAX_VALUE)
+    (let [r (f) low (get @m ::low Long/MAX_VALUE)]
+      (vswap! m assoc ::low (min saved low))
+      [r (= Long/MAX_VALUE low)])))
+
 (defn- route-answer
   "`(f)`, the answer to the second-route question `k`, memoized for one read in the memo of
   the read that opened the search (`*routes*`, else `st`'s).  `f` runs under
-  `tax/*search*`, `:visibility` with `with-excepts?` and `:belief` without, and with no pass
-  cache from outside the search.  A question met again while it is being answered reads
-  false.  An answer that read false off a question still open above it, or that met a
-  defeat the read has open (`marked`), is provisional and is not kept, so an answer kept
-  never depends on which question the read asked first."
+  `tax/*search*`, `:visibility` with `with-excepts?` and `:belief` without.  A question met
+  again while it is being answered reads false.  An answer that read false off a question
+  still open above it, or that met a defeat the read has open (`marked`), is provisional
+  and is not kept, so an answer kept never depends on which question the read asked
+  first.  A cache entry computed inside the search is held by the same rule
+  (`caches/*open-mark*`)."
   [{:keys [memo]} with-excepts? k f]
   (let [m (or *routes* memo)
         v (get @m k ::absent)]
@@ -383,11 +399,9 @@
             n   (count (::open @memo))]
         (vswap! m assoc k [::open d] ::depth d ::low Long/MAX_VALUE)
         (let [[r flow] (marked memo
-                               #(binding [*routes*                        m
-                                          tax/*search*                    (if with-excepts? :visibility :belief)
-                                          tax/*visible-neighbours-cache*  nil
-                                          tax/*closure-pass-cache*        nil
-                                          tax/*separation-frame-cache*    nil]
+                               #(binding [*routes*            m
+                                          tax/*search*        (if with-excepts? :visibility :belief)
+                                          caches/*open-mark*  (partial open-marked m)]
                                   (f)))
               low' (::low @m)
               open (if (< low' d) low' Long/MAX_VALUE)]
@@ -397,9 +411,11 @@
 
 (defn- witness-paths
   "The witness edges among `sentences` (`{handle sentence}`, one justification's
-  antecedents) joined into paths, as `{:rel :a :b :edges}`: the `genl` and `genlCx` edges,
-  and the edges of a relation some `transitiveInArgInverse` among them preserves a claim along.
-  A firing depends on each path's two ends, which a second route can reach."
+  antecedents) joined into paths, as `{:rel :a :b :edges}`: the `genl` edges, and the edges
+  of a relation some `transitiveInArgInverse` among them preserves a claim along.  A firing
+  depends on each path's two ends, which a second route can reach.  A `genlCx` edge is on
+  no path, so a justification resting on one the reader does not see has no second route
+  (docs/contexts.md, \"An except on a `genlCx` edge\")."
   [sentences]
   (let [binary    (fn [s] (when (and (seq? s) (= 2 (count (nm/args s))))
                             [(nm/functor s) (first (nm/args s)) (second (nm/args s))]))
@@ -408,8 +424,7 @@
                         (vals sentences))
         edges     (into [] (keep (fn [[h s]]
                                    (when-let [[f a b] (binary s)]
-                                     (when (or (contains? tax/closure-relations f)
-                                               (contains? preserved f))
+                                     (when (or (= 'genl f) (contains? preserved f))
                                        [h f a b]))))
                         sentences)]
     (into []
@@ -425,13 +440,12 @@
 
 (defn- route-reaches?
   "Does `ctx` reach `b` from `a` over `rel` on the edges it believes, and with
-  `with-excepts?` sees: the scoped `genl` closure, `genlCx` sight, or the installed
-  fact-relation walk (`route-reach`), memoized for one read (`route-answer`)."
+  `with-excepts?` sees: the scoped `genl` closure, or the installed fact-relation walk
+  (`route-reach`), memoized for one read (`route-answer`)."
   [{:keys [kb tax ctx] :as st} with-excepts? rel a b]
   (route-answer st with-excepts? [::route ctx with-excepts? rel a b]
                 #(case rel
                    genl   (tax/genl? tax a b ctx)
-                   genlCx (tax/sees? tax a b)
                    (boolean (when-let [f @route-reach] (f kb rel a b ctx))))))
 
 (defn- firing-stands?
@@ -526,6 +540,70 @@
                             :memo (volatile! {})})]
        (memoize (fn [h] (boolean (and (jtms/in? tms h) (except-hidden-in tms excepted? h st)))))))))
 
+(defn- reaching-targets
+  "The handles of `targets` that a handle `supports?` answers for rests on through any
+  chain, `support`'s reverse: a forward walk over the justifications from each target,
+  stopped at the first such handle.  nil once the walks have visited `budget` handles."
+  [tms targets supports? budget]
+  (loop [ts (seq targets), seen #{}, stack (vec (take 1 ts)), left (long budget), acc []]
+    (let [d (peek stack)]
+      (cond
+        (nil? ts) acc
+        ;; this target's walk is done: a supporter rests on it, or none does
+        (or (nil? d) (supports? d))
+        (let [more (next ts)]
+          (recur more #{} (vec (take 1 more)) left (cond-> acc (some? d) (conj (first ts)))))
+        (contains? seen d) (recur ts seen (pop stack) left acc)
+        (zero? left) nil
+        :else (recur ts (conj seen d)
+                     (into (pop stack) (comp (keep #(jtms/justification tms %)) (map :consequence))
+                           (jtms/dependents tms d))
+                     (dec left) acc)))))
+
+(defn- genlCx-excepts
+  "`[context except-handle]` for each stored `except` naming a handle in the support of a
+  `genlCx` supporter of the view `sups` (`tax/supporter-view`'s keys), and for each stored
+  `except` of one of those, transitively.  While no more `except`s are stored than `sups`
+  counts, the direct ones are read forward from their targets (`reaching-targets`, under
+  the same budget); otherwise from each supporter's support, one probe per handle
+  (`reads/as-stored-naming-by-context`), with no target set built.  The targets are read
+  in every context, as `named-entries` reads them: an `except` hides a supporter from
+  every reader under its context.  Nothing read while no `except` is stored."
+  [kb {n :count :keys [supports? handles]}]
+  (let [idx (:index kb)]
+    (when (reads/stores-any? idx sx/except-functor)
+      (let [tms    (reasoning/tms kb)
+            naming (fn [h] (for [[c hs] (reads/as-stored-naming-by-context idx sx/except-functor h)
+                                 eh hs]
+                             [c eh]))
+            direct (if-some [ts (when (<= (reads/stored-count-with-functor idx sx/except-functor)
+                                          (long n))
+                                  (reaching-targets tms (reads/as-stored-named-global idx sx/except-functor)
+                                                    supports? n))]
+                     (mapcat naming ts)
+                     (mapcat (fn [s] (mapcat naming (support tms s (constantly false) true))) (handles)))]
+        ((fn step [todo seen]
+           (lazy-seq
+            (when-let [[[_ eh :as e] & more] (seq todo)]
+              (if (contains? seen eh)
+                (step more seen)
+                (cons e (step (concat more (naming eh)) (conj seen eh)))))))
+         direct #{})))))
+
+(defn genlCx-except-contexts
+  "The contexts stating an `except` that reaches the support of a `genlCx` supporter of the
+  view `sups` (`genlCx-excepts`), with the contexts stating an `except` of one of those,
+  transitively, as a sorted set: what splits the readers under a moved edge into classes
+  (`tax/context-move`)."
+  [kb sups]
+  (into (sorted-set-by #(compare (str %1) (str %2))) (map first) (genlCx-excepts kb sups)))
+
+(defn genlCx-excepted?
+  "Does a stored `except` reach the support of a `genlCx` supporter of the view `sups`
+  (`genlCx-excepts`): the `genlCx` filter gate (`kb/supporter-reaches?`)."
+  [kb sups]
+  (boolean (seq (genlCx-excepts kb sups))))
+
 (defn closure-excepted-anywhere?
   "Is `handle` hidden from at least one context by the excepts alone
   (`except-closure-hidden-fn`)?  Reads the excepts naming a handle of its support and the
@@ -552,22 +630,23 @@
                      (support (reasoning/tms kb) handle (constantly false)))))))
 
 (defn- named-entries
-  "`[[::defeated targets] [::excepted targets]]`, each entry present when its set is not
-  empty, the first only with `defeats?`: the handles the stored `defeat`s and `except`s
-  name (`reads/as-stored-named`)."
+  "`[[defeat targets] [except targets]]`, each entry keyed by its functor and present when
+  a fact of the functor is stored, the first only with `defeats?`: a delay of the handles
+  the stored `defeat`s and `except`s name (`reads/as-stored-named-global`), so a caller
+  that needs only whether one is stored reads two counts, and one that counts or probes
+  them reads the index by the key."
   [kb defeats?]
-  (let [idx (:index kb)
-        ex  (reads/as-stored-named idx sx/except-functor)
-        ds  (when defeats? (reads/as-stored-named idx sx/defeat-functor))]
+  (let [idx   (:index kb)
+        entry (fn [f] (clojure.lang.MapEntry/create f (delay (reads/as-stored-named-global idx f))))]
     (seq (cond-> []
-           (seq ds) (conj (clojure.lang.MapEntry/create ::defeated ds))
-           (seq ex) (conj (clojure.lang.MapEntry/create ::excepted ex))))))
+           (and defeats? (reads/stores-any? idx sx/defeat-functor)) (conj (entry sx/defeat-functor))
+           (reads/stores-any? idx sx/except-functor) (conj (entry sx/except-functor))))))
 
 (defn supporter-roster
   "What the taxonomy's whole-KB gate callback answers for a reader's belief
   (`tax/install-supporter-visibility!`): nil when no `except` and no `defeat` is stored,
-  else the entries `[::defeated targets]` and `[::excepted targets]`, each the set of
-  handles the stored facts of that functor name.  Two reads on the index."
+  else the entries `[defeat targets]` and `[except targets]`, each a delay of the set of
+  handles the stored facts of that functor name.  Two counts on the index."
   [kb]
   (named-entries kb true))
 
@@ -588,9 +667,9 @@
                       (pos? (reads/stored-count-with-functor idx 'contradicts)))))))
 
 (defn- exemption-reads?
-  "Does a read owe the walk for the placements the reader exempts (`exempt-justifications`):
-  a `(contradicts …)` is stored beside a `siblingDisjointException`, an equality edge or an
-  arity candidate (`decide/arity-held?`)."
+  "Can a placement be exempt at some reader (`exempt-justifications`): a `(contradicts …)`
+  is stored beside a `siblingDisjointException`, an equality edge or an arity candidate
+  (`decide/arity-held?`).  The whole-KB gate of `exempting-at?`."
   [kb]
   (let [tax (reasoning/taxonomy kb)]
     (and (or (tax/sib-exceptions? tax) (seq (tax/equality-edges tax))
@@ -599,15 +678,32 @@
 
 (defn walk-reads?
   "Does a belief-filtered read owe the walk (`defeat-hidden-fn`): `placed-reads?`, or a
-  placement the reader can exempt (`exemption-reads?`)."
+  placement some reader can exempt (`exemption-reads?`)."
   [kb]
   (boolean (or (placed-reads? kb) (exemption-reads? kb))))
+
+(defn- exempting-at?
+  "Can a placement be exempt at a reader with ancestor set `up`: `exemption-reads?`, a
+  `(contradicts …)` stated in a context of `up`, and an exemption source the reader sees,
+  which is a `siblingDisjointException`, an equality relation or, while the arity index
+  holds a candidate (`decide/arity-held?`), a length binding (`sx/arity-binding-functors`)
+  stated in a context of `up`.  An arity placement is stated where its binding is seen,
+  so a reader that sees the placement sees a context stating a binding.  Each extent is
+  read by context (`reads/stores-in?`), so the answer is flat in the placements and
+  sources stated where the reader does not see."
+  [kb up]
+  (let [idx (:index kb)
+        in? #(reads/stores-in? idx % up)]
+    (boolean (and (exemption-reads? kb)
+                  (in? 'contradicts)
+                  (or (in? 'siblingDisjointException)
+                      (some in? rewrite/equality-relations)
+                      (and (decide/arity-held? kb) (some in? sx/arity-binding-functors)))))))
 
 (defn- reader-state
   "What the walk reads at `ctx`, with the one-read memo, or nil when `ctx` is a variable,
   the read takes the network reading (`tax/*network-belief*`), or no defeat is stored, no
-  except is in force at `ctx` beside a placed `contradicts` (`placed-reads?`) and no
-  placement can be exempt at a reader (`exemption-reads?`).
+  except is in force at `ctx` and no placement can be exempt at `ctx` (`exempting-at?`).
   `:closable?` is true when only a defeat stated in a context `ctx` sees can hide a
   handle there: no except is stated in one and no placement can be exempt (`region-at`).
   The ancestor set is the unscoped one (`tax/context-up-global`), as `excepts-seen`'s is:
@@ -616,18 +712,18 @@
   (let [idx   (:index kb)
         ndefs (reads/stored-count-at idx [sx/defeat-functor])]
     (when-not (or tax/*network-belief* (sx/variable? ctx) (not (walk-reads? kb)))
-      (let [excepted?  (except-hidden-fn kb ctx)
-            exempting? (exemption-reads? kb)]
+      (let [tax        (reasoning/taxonomy kb)
+            up         (tax/context-up-global tax ctx)
+            excepted?  (except-hidden-fn kb ctx)
+            exempting? (exempting-at? kb up)]
         (when (or (pos? ndefs) excepted? exempting?)
-          (let [tax (reasoning/taxonomy kb)
-                up  (tax/context-up-global tax ctx)]
-            {:kb kb :ctx ctx :tms (reasoning/tms kb) :recs (:records kb) :tax tax :up up
-             :idx idx :ndefs ndefs
-             :excepted? excepted?
-             :exempting? exempting?
-             :closable? (not (or excepted? exempting?))
-             :conflicts? (pos? (reads/stored-count-with-functor (:index kb) 'contradicts))
-             :memo (volatile! {})}))))))
+          {:kb kb :ctx ctx :tms (reasoning/tms kb) :recs (:records kb) :tax tax :up up
+           :idx idx
+           :excepted? excepted?
+           :exempting? exempting?
+           :closable? (not (or excepted? exempting?))
+           :conflicts? (pos? (reads/stored-count-with-functor (:index kb) 'contradicts))
+           :memo (volatile! {})})))))
 
 (defn- sees-defeat?
   "Is a defeat stated in a context of the reader's ancestor set: the contexts `defeat`'s
@@ -643,17 +739,76 @@
         r)
       v)))
 
+(defn- mark-key?
+  "Is taxonomy key `k` a permuting or `reifiable_function` mark's: `[:prop :symmetric p]`,
+  `[:commuting p g]` or `[:prop :reifiable f]`?"
+  [k]
+  (case (nth k 0 nil)
+    :prop      (contains? #{:symmetric :reifiable} (nth k 1 nil))
+    :commuting true
+    false))
+
+(defn- in-mark-support?
+  "Is `t` in the support of a mark statement (`support`, read upward): `t` or a handle
+  above it installs a mark key (`mark-key?`, `reads/as-stored-installed-keys`), each step
+  up a justification that rests on the handle below and concludes a handle that is not a
+  premise, since `support` does not descend past one."
+  [tms idx t]
+  (loop [seen #{}, stack [t]]
+    (if-let [x (peek stack)]
+      (let [stack (pop stack)]
+        (cond
+          (contains? seen x) (recur seen stack)
+          (some mark-key? (reads/as-stored-installed-keys idx x)) true
+          :else (recur (conj seen x)
+                       (into stack (comp (keep #(jtms/justification tms %))
+                                         (filter #(some #{x} (jtms/rests-on %)))
+                                         (map :consequence)
+                                         (remove #(jtms/premise? tms %)))
+                             (jtms/dependents tms x)))))
+      false)))
+
+(defn- mark-hazard?
+  "Does a defeat stated in a context the reader sees name a handle in the support of a
+  statement of a permuting or `reifiable_function` mark (`mark-key?`)?  A defeat hides a
+  `:monotonic` handle only through such a mark: a `respell` justification rests on its
+  marks and takes its class from the written row alone (`jtms/class-antecedents`).  Read
+  once per read and kept in its memo, from the smaller side by index counts: the defeats
+  stated in contexts of the reader's ancestor set, each target walked up its dependents
+  (`in-mark-support?`), or the mark statements, each walked down its support with an index
+  read per handle.  The marks are read from every context, since a mark the reader does
+  not see still sorts the rows it reads (`tax/has-prop?`)."
+  [{:keys [tms tax idx recs up memo] :as st}]
+  (let [v (get @memo ::mark-hazard ::absent)]
+    (if (identical? ::absent v)
+      (let [t  @tax
+            r  (boolean
+                (and (sees-defeat? st)
+                     (if (<= (reads/stored-count-with-functor-in idx sx/defeat-functor up)
+                             (+ (count (get-in t [:props :symmetric])) (count (:commuting t))
+                                (count (get-in t [:props :reifiable]))))
+                       (some #(some->> (defeat-target* (:sentence (p/get-sentex recs %)))
+                                       (in-mark-support? tms idx))
+                             (reads/as-stored-with-functor-in idx sx/defeat-functor up))
+                       (some (fn [k]
+                               (some (fn [m] (some #(reads/as-stored-naming idx sx/defeat-functor % up)
+                                                   (support tms m (constantly false))))
+                                     (keys (tax/supporters tax k))))
+                             (concat (map #(vector :prop :symmetric %) (get-in t [:props :symmetric]))
+                                     (for [[p gs] (:commuting t), g gs] [:commuting p g])
+                                     (map #(vector :prop :reifiable %) (get-in t [:props :reifiable])))))))]
+        (vswap! memo assoc ::mark-hazard r)
+        r)
+      v)))
+
 (defn- region-at
   "The support of `h` the walk reads at the reader (`support` with `stop?`), or nil when
   nothing in it can be hidden there: the reader's state is `:closable?` and no defeat is
-  stated in a context it sees (`sees-defeat?`).  The extent is read only once the support
-  holds more handles than the KB stores defeats (`:ndefs`, the trie's `[defeat]` count),
-  so a read costs the smaller of the two and grows with neither the standing defeats
-  outside a small support nor a deep support beside a few defeats."
-  [{:keys [tms ndefs closable?] :as st} h stop?]
-  (if closable?
-    (or (support tms h stop? false ndefs)
-        (when (sees-defeat? st) (support tms h stop?)))
+  stated in a context it sees (`sees-defeat?`, read before any support handle).  A read
+  there costs the defeat extent's contexts the reader sees, flat in the depth of the
+  support and in the defeats stated elsewhere."
+  [{:keys [tms closable?] :as st} h stop?]
+  (when (or (not closable?) (sees-defeat? st))
     (support tms h stop?)))
 
 (defn- by-content
@@ -688,15 +843,37 @@
                (for [j js, [h ms antes] ctrs :when (contains? antes (set (:antecedents j)))]
                  [j ms h])))))
 
+;; `verdict-at` reads which defeats of a mark are in force (`mark-defeated`), and
+;; `in-force?` reads the verdict at the reader over a defeat's members: the two recur into
+;; each other through a mark's own defeat.
+(declare in-force?)
+
+(defn- mark-defeated
+  "The handles of `region`, a support, that a defeat in force at the reader names and that
+  lie in the support of a mark a `respell` justification of `region` rests on
+  (`jtms/respell-informant`, every antecedent but the first)."
+  [{:keys [tms idx up] :as st} region]
+  (let [marks (into #{} (comp (mapcat #(jtms/supports tms %)) (keep #(jtms/justification tms %))
+                              (filter #(= jtms/respell-informant (:informant %)))
+                              (mapcat #(rest (:antecedents %))))
+                    region)]
+    (into #{} (filter (fn [t] (some #(in-force? st %) (reads/as-stored-naming idx sx/defeat-functor t up))))
+          (into #{} (mapcat #(support tms % (constantly false))) marks))))
+
 (defn- verdict-at
   "`decide/verdict` over `members` with the classes the reader reads: the network's, or,
-  where an except in force at the reader reaches the members' support, the classes the
-  support carries with those targets forced OUT (`jtms/classes-in-region`).  nil when such
-  an except hides a member."
-  [{:keys [tms recs tax excepted?]} members]
+  where an except in force at the reader reaches the members' support, or a defeat in
+  force there reaches a mark a `respell` justification in it rests on (`mark-defeated`),
+  the classes the support carries with those targets forced OUT
+  (`jtms/classes-in-region`).  nil when such a target hides a member."
+  [{:keys [tms recs tax excepted?] :as st} members]
   (let [roster? #(boolean (some->> (p/get-sentex recs %) :sentence (decide/roster-literal? tax)))
-        region  (when excepted? (into #{} (mapcat #(support tms % (constantly false) true)) members))
-        ex      (when excepted? (into #{} (filter excepted?) region))]
+        marks?  (mark-hazard? st)
+        region  (when (or excepted? marks?)
+                  (into #{} (mapcat #(support tms % (constantly false) true)) members))
+        ex      (cond-> #{}
+                  excepted? (into (filter excepted?) region)
+                  marks?    (into (mark-defeated st region)))]
     (if (empty? ex)
       (decide/verdict #(or (jtms/defeat-class tms %) :default) roster? members)
       (let [in (jtms/region-in tms region region #{} ex belief-only-antecedent #{})]
@@ -707,7 +884,8 @@
 ;; `in-force?` reads whether the defeat itself is believed and seen at the reader
 ;; (`believed-in`), and `believed-in` reads which defeats are in force over the support
 ;; it walks: a defeat's own support holds its target, so the two recur into each other.
-(declare believed-in)
+;; `guard-in-force?` reads a guard defeat the same way (`guard-believed?`).
+(declare believed-in guard-believed?)
 
 (defn- unseen-fn
   "`(fn [h])`: does the reader not believe and see the handle `h`, IN in the network
@@ -850,77 +1028,143 @@
       (when-let [l (defeat-target* s)]
         (into #{} (keep (fn [[j ms]] (when (exempt? ms) (:id j)))) (member-sets st x l))))))
 
+(defn guard-owners
+  "The ids of the justifications among `js` the `guard` justification `g` belongs to: of
+  those whose rule and antecedents `g`'s antecedents hold and whose bindings `g` carries
+  (read off `recs`; a `g` with no bindings matches on its antecedents alone), each that
+  no other one of the same rule holds a proper superset of the antecedents of.  A guard
+  justification rests on its firing's antecedents, so a second firing of the rule with
+  equal bindings over a subset of them is not taken for its owner."
+  [recs g js]
+  (let [ga   (set (:antecedents g))
+        gb   (:bindings (p/get-justification recs (:id g)))
+        held (into [] (comp (filter #(every? ga (conj (:antecedents %) (:informant %))))
+                            (filter #(or (empty? gb)
+                                         (= gb (:bindings (p/get-justification recs (:id %))))))
+                            (map (fn [j] [j (set (:antecedents j))])))
+                   js)
+        within? (fn [[j a] [k b]] (and (= (:informant j) (:informant k))
+                                       (< (count a) (count b)) (every? b a)))]
+    (into #{} (keep (fn [ja] (when-not (some #(within? ja %) held) (:id (first ja))))) held)))
+
+(defn- guard-justifications-of
+  "The `guard` justifications of the defeat `d`."
+  [tms d]
+  (into [] (comp (keep #(jtms/justification tms %))
+                 (filter #(= guard-informant (:informant %))))
+        (jtms/supports tms d)))
+
+(defn- guard-seen-fn
+  "`(fn [g])`: is every antecedent of the guard justification `g` of a defeat of `x`, but
+  `x`, believed and seen at the reader?"
+  [st x]
+  (fn [g] (not-any? #(and (not= x %) ((unseen-fn st) %)) (:antecedents g))))
+
 (defn- guard-in-force?
-  "Is the guard defeat at `d` in force at the reader: IN, no except in force hiding it, and
-  `d` itself believed and seen there, its own target exempt (`placed-belief-only`).  A
-  guard defeat met again while it is being read closes a cycle (`in-force-once`)."
-  [{:keys [tms excepted?] :as st} d]
+  "Is the guard defeat at `d`, naming `x`, in force at the reader: IN, no except in force
+  hiding it, `d` itself believed and seen there with its own target exempt
+  (`placed-belief-only`), and one of its `guard` justifications seen there.  The
+  justifications are read inside the defeat's own read and kept in the read's memo for
+  `guard-covered`, so a guard defeat whose blocker rests on a firing another guard
+  defeat removes is met again as a cycle (`in-force-once`), not read without end."
+  [{:keys [tms excepted? memo] :as st} d x]
   (in-force-once st [::guard d]
                  #(boolean (and (jtms/in? tms d)
                                 (not (and excepted? (excepted? d)))
-                                (believed-in st d true)))))
+                                (seq (let [seen (filterv (guard-seen-fn st x)
+                                                         (guard-justifications-of tms d))]
+                                       (vswap! memo assoc [::guard-seen d] seen)
+                                       seen))
+                                (guard-believed? st d x)))))
 
 (defn- guard-covered
-  "The justifications of `x` a guard defeat in force at the reader covers: those whose
-  rule and every antecedent a justification of that defeat names, where every antecedent
-  of that justification but `x` is believed and seen at the reader (docs/naf.md, \"A guard
-  below the placement places a defeat\")."
-  [{:keys [tms idx up] :as st} x]
-  (let [guards (fn [d] (into [] (comp (keep #(jtms/justification tms %))
-                                      (filter #(= guard-informant (:informant %)))
-                                      (map #(set (:antecedents %))))
-                             (jtms/supports tms d)))
-        seen?  (fn [as] (not-any? #(and (not= x %) ((unseen-fn st) %)) as))
-        gjs    (into [] (mapcat (fn [d] (let [gs (guards d)]
-                                          (when (and (seq gs) (guard-in-force? st d))
-                                            (filter seen? gs)))))
-                     (reads/as-stored-naming idx sx/defeat-functor x up))]
+  "The justifications of `x` a guard defeat in force at the reader covers: those a
+  justification of that defeat belongs to (`guard-owners`), where every antecedent of that
+  justification but `x` is believed and seen at the reader (docs/naf.md, \"A guard below
+  the placement places a defeat\")."
+  [{:keys [tms idx up memo recs] :as st} x]
+  (let [gjs (into [] (mapcat (fn [d] (when (guard-in-force? st d x)
+                                       (get @memo [::guard-seen d]))))
+                  (reads/as-stored-naming idx sx/defeat-functor x up))]
     (when (seq gjs)
-      (into #{}
-            (comp (keep #(jtms/justification tms %))
-                  (filter (fn [j] (let [core (conj (set (:antecedents j)) (:informant j))]
-                                    (some #(every? % core) gjs))))
-                  (map :id))
-            (jtms/supports tms x)))))
+      (let [js (into [] (keep #(jtms/justification tms %)) (jtms/supports tms x))]
+        (into #{} (mapcat #(guard-owners recs % js)) gjs)))))
+
+(defn- believed-set
+  "The handles of `h`'s support the reader believes, or ::all when the walk hides none of
+  them, and the handle whose guard coverage was not read: `[in own]`.  Each justification
+  a guard defeat covers there is dropped (`guard-covered`), each `nogood` justification of
+  a placement the reader exempts is dropped (`exempt-justifications`), each of the
+  justification ids `invalid` is dropped, and each target hidden at the reader in `h`'s
+  support is forced OUT — a defeat in force naming it, a placed conflict the reader
+  decides against it (`conflicts-naming`), and, with `with-excepts?`, an except in force
+  naming it (`jtms/region-in` over the support).  A justification that rests on a forced
+  witness edge reads it at its label where the reader reaches the path's ends another way
+  (`rerouted`).  With no except stated in a context the reader sees and no defeat it sees
+  reaching a permuting mark (`mark-hazard?`), a `:monotonic` handle is taken at its label,
+  since a defeat is in force only over a `:default` target, only an except lowers a class,
+  and only a `respell` justification rests on a handle that caps no class; and the
+  support is not walked when nothing in it can be hidden there (`region-at`).  The guard
+  coverage of `own` is not read when only `h`'s `guard` justifications rest on it in the
+  support (`guard-believed?`)."
+  [{:keys [tms excepted? exempting? up idx] :as st} h with-excepts? invalid own]
+  (if-let [region (region-at st h (if excepted?
+                                    (constantly false)
+                                    #(and (= :monotonic (jtms/defeat-class tms %))
+                                          (not (mark-hazard? st)))))]
+    (let [own     (when (and own (contains? region own)
+                             (every? (fn [jid]
+                                       (let [j (jtms/justification tms jid)]
+                                         (or (nil? j) (not (contains? region (:consequence j)))
+                                             (and (= h (:consequence j))
+                                                  (= guard-informant (:informant j))))))
+                                     (jtms/dependents tms own)))
+                    own)
+          ;; every defeat naming `x` is read, so the cycle a read meets is the same
+          ;; whichever defeat the index lists first
+          by-def  (into #{} (filter (fn [x] (reduce (fn [hit d] (or (in-force? st d) hit))
+                                                    false
+                                                    (reads/as-stored-naming idx sx/defeat-functor x up))))
+                        region)
+          by-conf (into {} (keep (fn [x] (when-let [cs (seq (conflicts-naming st x))] [x (set cs)])))
+                        region)
+          other   (if (and with-excepts? excepted?) (into #{} (filter excepted?) region) #{})
+          by-cov  (into {} (keep (fn [x] (when-not (= x own)
+                                           (when-let [js (not-empty (guard-covered st x))] [x js]))))
+                        region)
+          invalid (cond-> (into invalid (mapcat val) by-cov)
+                    exempting? (into (mapcat #(exempt-justifications st %)) region))
+          forced  (-> by-def (into (keys by-conf)) (into other))]
+      [(if (and (empty? forced) (empty? invalid))
+         ::all
+         (let [belief (with-routes (placed-belief-only st (into by-def (keys by-cov)) by-conf other)
+                        (when (seq forced) (rerouted st region forced with-excepts?)))]
+           (jtms/region-in tms region region #{} forced belief invalid)))
+       own])
+    [::all nil]))
 
 (defn- believed-in
   "Does the reader believe the handle `h` (`with-excepts?` false), or believe and see it
-  (true): IN once each justification a guard defeat covers there is dropped
-  (`guard-covered`), each `nogood` justification of a placement the reader exempts is
-  dropped (`exempt-justifications`), each of the justification ids `invalid` is dropped,
-  and each target hidden at the reader in `h`'s support is forced OUT — a defeat in force
-  naming it, a placed conflict the reader decides against it (`conflicts-naming`), and,
-  with `with-excepts?`, an except in force naming it (`jtms/region-in` over the support).
-  A justification that rests on a forced witness edge reads it at its label where the
-  reader reaches the path's ends another way (`rerouted`).  With no except stated in a
-  context the reader sees, a `:monotonic` handle is taken at its label, since a defeat is
-  in force only over a `:default` target and only an except lowers a class; and the
-  support is not walked when nothing in it can be hidden there (`region-at`)."
+  (true): `h` is among the support handles `believed-set` reads as believed there."
   ([st h with-excepts?] (believed-in st h with-excepts? #{}))
-  ([{:keys [tms excepted? exempting? up idx] :as st} h with-excepts? invalid]
-   (if-let [region (region-at st h (if excepted?
-                                     (constantly false)
-                                     #(= :monotonic (jtms/defeat-class tms %))))]
-     (let [;; every defeat naming `x` is read, so the cycle a read meets is the same
-           ;; whichever defeat the index lists first
-           by-def  (into #{} (filter (fn [x] (reduce (fn [hit d] (or (in-force? st d) hit))
-                                                     false
-                                                     (reads/as-stored-naming idx sx/defeat-functor x up))))
-                         region)
-           by-conf (into {} (keep (fn [x] (when-let [cs (seq (conflicts-naming st x))] [x (set cs)])))
-                         region)
-           other   (if (and with-excepts? excepted?) (into #{} (filter excepted?) region) #{})
-           by-cov  (into {} (keep (fn [x] (when-let [js (not-empty (guard-covered st x))] [x js])))
-                         region)
-           invalid (cond-> (into invalid (mapcat val) by-cov)
-                     exempting? (into (mapcat #(exempt-justifications st %)) region))
-           forced  (-> by-def (into (keys by-conf)) (into other))]
-       (if (and (empty? forced) (empty? invalid))
-         true
-         (let [belief (with-routes (placed-belief-only st (into by-def (keys by-cov)) by-conf other)
-                        (when (seq forced) (rerouted st region forced with-excepts?)))]
-           (contains? (jtms/region-in tms region region #{} forced belief invalid) h))))
-     true)))
+  ([st h with-excepts? invalid]
+   (let [[in] (believed-set st h with-excepts? invalid nil)]
+     (or (= ::all in) (contains? in h)))))
+
+(defn- guard-believed?
+  "Is the guard defeat `d`, naming `x`, believed and seen at the reader with `x` exempt
+  (`believed-in`)?  The read first leaves out `x`'s guard coverage, which reads every
+  guard defeat of `x` and each of those reads this again, so a reader seeing n guard
+  defeats of `x` would read them in every order.  The answer stands where only `d`'s
+  `guard` justifications rest on `x` in `d`'s support and that read believes `x` and the
+  network does: a `guard` justification reads `x` IN whether a guard covers it (at its
+  label, `placed-belief-only`) or not, so the coverage cannot change it.  Otherwise
+  `x`'s coverage is read."
+  [{:keys [tms] :as st} d x]
+  (let [[in own] (believed-set st d true #{} x)]
+    (if (or (= ::all in) (not own) (and (contains? in x) (jtms/in? tms x)))
+      (or (= ::all in) (contains? in d))
+      (believed-in st d true))))
 
 (defn defeat-hidden-fn
   "A predicate `(fn [handle])` answering whether `ctx` reads `handle`, IN in the network, as

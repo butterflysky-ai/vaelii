@@ -207,7 +207,9 @@
   **One rule for both servers**, because both have write routes and neither
   authenticates by default: the daemon's `POST /op` is the KB's only writer, and the
   browser's `/edit` writes belief while `/kbs/export` and `/kbs/load` write the host
-  filesystem at a path the request names.  Naming an address also drops the `Host`
+  filesystem.  A request names the path on the host only under `VAELII_REQUEST_PATHS`: off,
+  `/kbs/export` and `/kbs/load` write under the catalog's `write-root`, and both servers'
+  `/op :export` and `:kb-diff` refuse a path (`:path-not-served`).  Naming an address also drops the `Host`
   allowlist (`allowed-hosts`), so without this the exposed configuration would be the
   one with the fewest checks — which is the whole argument, and it is the same argument
   on either server.

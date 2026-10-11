@@ -31,6 +31,8 @@ causal / temporal / goal reasoning via predicate metadata and a goal-achievement
 | understand why the KB believes something | [nmtms.md](nmtms.md) | [preview.md](preview.md), [feed.md](feed.md) |
 | check that the settle computed the right belief | [reference.md](reference.md) | [nmtms.md](nmtms.md), [defenses.md](defenses.md) |
 | understand why a subsystem is designed the way it is | [defenses.md](defenses.md) | [nmtms.md](nmtms.md) |
+| add vocabulary or knowledge to a KB | [oe-principles.md](oe-principles.md) | [oe-defenses.md](oe-defenses.md) |
+| understand why the ontology is shaped the way it is | [oe-defenses.md](oe-defenses.md) | [taxonomy.md](taxonomy.md) |
 | resolve a contradiction | [nmtms.md](nmtms.md) | [solving.md](solving.md), [asp.md](asp.md), [labeling.md](labeling.md) |
 | keep a KB across restarts | [storage.md](storage.md) | [overlay.md](overlay.md) |
 | know what a word in these docs means | [glossary.md](glossary.md) | |
@@ -104,6 +106,8 @@ rather than a compatibility claim.
 - [belief.md](belief.md) — modal belief projection: `(believes Agent P)` answered by proving `P` in the agent's own context, `modal_predicate` / `register-modal-predicate` to open the same machinery to `knows` / `desires` / `intends`, why contradictory agents coexist without a contradiction, and the opacity of the proposition — whose merges may rewrite a term inside a belief.
 - [nmtms.md](nmtms.md) — the non-monotonic TMS: assumption strengths, soft prioritized contradictions, the `Solver` protocol.
 - [defenses.md](defenses.md) — the design defenses: why a non-obvious decision across the engine is shaped the way it is and why the alternative to avoid is worse, collected out of the subsystem docs so each states the mechanism and links the argument.
+- [oe-principles.md](oe-principles.md) — the ontological engineering principles: working rules, each with an audit step, for adding vocabulary and knowledge to a KB.
+- [oe-defenses.md](oe-defenses.md) — the ontology defenses: why a piece of the shipped ontology is shaped the way it is, and why the representation a reader would reach for instead is worse.
 - [preview.md](preview.md) — `preview`: the belief a batch would add and take away, read off and then rolled back at the same handles.
 - [equality.md](equality.md) — `rewriteOf` / `sameAs` / `equals` over one belief-following partition, and the `different` that keeps the unique-name assumption.
 - [equational.md](equational.md) — symbolic (schematic) equational reasoning: oriented term rewriting by a Knuth-Bendix order, normalizing store and query to one belief-following normal form.

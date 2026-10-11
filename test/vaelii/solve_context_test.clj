@@ -689,7 +689,7 @@
             before  (fetches)]
         (dotimes [_ 200] (v/assert kb (list noise (tu/tmp-ind)) 'CxUniverse))
         (is (= before (fetches)) "200 more facts in the base, no more fetches")
-        (is (= before (count (reads/as-stored-rules-in (:index kb) :solve nil))))))))
+        (is (= before (count (reads/as-stored-rules-in-global (:index kb) :solve))))))))
 
 ;; ---- 4. do/classify: gather brave/cautious over the labelings -----------
 

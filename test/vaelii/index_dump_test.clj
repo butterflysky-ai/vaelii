@@ -234,19 +234,19 @@
                           [pat (p/lookup index pat)]))
      :counts   (into {} (for [pfx pfxs] [pfx (p/count-at index pfx)]))
      :children (into {} (for [pfx pfxs] [pfx (set (p/children index pfx))]))
-     :ctx      (into {} (for [c ctxs] [c [(p/sentexes-in-context index c)
-                                          (p/count-in-context index c)]]))
+     :ctx      (into {} (for [c ctxs] [c [(reads/as-stored-in-context index c)
+                                          (reads/stored-count-in-context index c)]]))
      :functor  (into {} (for [pr preds] [pr [(p/sentexes-with-functor index pr)
                                              (p/count-with-functor index pr)]]))
-     :arg      (into {} (for [[pos t] args] [[pos t] [(p/sentexes-with-arg index pos t)
-                                                      (p/count-with-arg index pos t)]]))
-     :rules    (into {} (for [pr preds] [pr [(p/rules-by-antecedent index pr)
-                                             (p/rules-by-consequent index pr)]]))
-     :except   [(p/exception-rules index)
-                (into {} (for [pr preds] [pr (p/rules-with-exception-on index pr)]))
-                (into {} (for [h (tu/sentex-ids kb)] [h (p/exception-rule? index h)]))]
-     :terms    [(p/terms index) (p/term-count index)
-                (into {} (for [t terms] [t (p/sentexes-with-term index t)]))]
+     :arg      (into {} (for [[pos t] args] [[pos t] [(reads/as-stored-with-arg-global index pos t)
+                                                      (reads/stored-count-with-arg-global index pos t)]]))
+     :rules    (into {} (for [pr preds] [pr [(reads/as-stored-rules-by-antecedent-global index pr)
+                                             (reads/as-stored-rules-by-consequent-global index pr)]]))
+     :except   [(reads/watched-rules index)
+                (into {} (for [pr preds] [pr (reads/watched-rules-on index pr)]))
+                (into {} (for [h (tu/sentex-ids kb)] [h (reads/watched-rule? index h)]))]
+     :terms    [(reads/stored-terms-global index) (reads/stored-term-count-global index)
+                (into {} (for [t terms] [t (reads/as-stored-with-term index t)]))]
      :entries  (entries-of kb)}))
 
 (defn- answers
@@ -262,7 +262,7 @@
    :terms        (count (v/terms kb))
    :mints        (let [idx (:index kb)]
                    (into #{} (for [x (reads/as-stored-mint-terms idx)
-                                   h (reads/as-stored-mints-about idx x)]
+                                   h (reads/as-stored-mints-about-global idx x)]
                                [(:sentence (v/sentex kb h)) (:context (v/sentex kb h))])))})
 
 (defn- import-into

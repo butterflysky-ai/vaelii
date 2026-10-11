@@ -34,13 +34,18 @@ An exception belongs on the rule it excepts:
 
 `exceptWhen` **blocks**. When the exception holds for a binding, the rule does not
 conclude for that binding — there is no conclusion to defeat and nothing to
-arbitrate. Under forward chaining the conclusion is never created; under backward
-chaining the argument is constructed and then reported as excepted, so `why-not`
-can say *"rule R applies via `(bird Opus)`, but its exception `(flightless_bird
-Opus)` holds"* instead of recomputing a contradiction it never recorded.
+arbitrate. Under forward chaining the conclusion is never created when the exception
+holds through `:monotonic` facts alone. When every fact it holds through can be hidden by
+a placed defeat (a `:default` blocker), the conclusion is stored with a guard defeat
+resting on the blocker, and a reader that does not believe the blocker believes the
+conclusion (design ruling 25, [naf.md](naf.md#evaluated-in-the-placement-context-not-the-join)).
+Under backward chaining the argument is constructed and then reported as excepted, so
+`why-not` can say *"rule R applies via `(bird Opus)`, but its exception
+`(flightless_bird Opus)` holds"* instead of recomputing a contradiction it never
+recorded.
 
 `why-not` therefore needs an arity that takes a **sentence and a context**, not
-just a handle. A blocked conclusion is never created, so it has no handle to ask
+just a handle. A refused conclusion is never created, so it has no handle to ask
 about — the question is only askable of a proposition. It answers `{:reason
 :excepted :rule <handle> :exception <ground sentence> :via <antecedent handles>}`,
 which is the argument the backward chainer built before discarding it.
@@ -329,10 +334,11 @@ posted on ordinary fact arrival: an **unsatisfiable network** (`chain/entailment
 posted by `special/recheck-on-qualitative` for every rule joining on a calculus the
 sentence moves, [qcn.md](qcn.md), and by `special/composed-exception-rules` for every
 rule whose block literal the calculus answers, "Five channels" below) and a **more
-specific contrary claim** (`chain/inheritance-withdrawn?`, posted by
+specific `:monotonic` contrary claim** (`chain/inheritance-withdrawn?`, posted by
 `special/recheck-preserving-firings` for every
 rule with an antecedent on a preserved predicate the sentence moves,
-[inherit.md](inherit.md)). The sentence is no narrowing trigger for either: a constraint
+[inherit.md](inherit.md); a `:default` one places a defeat instead). The sentence is no
+narrowing trigger for either: a constraint
 moves entailments network-wide, and a claim or a reach edge shares no argument with the
 goals it moves, and `:all` would re-decide every firing the rule has made on every
 arrival, quadratic over a load. Each posts a **marker** instead, with its own test
@@ -361,7 +367,10 @@ arrival, quadratic over a load. Each posts a **marker** instead, with its own te
   fact on a relation moves only a goal whose reach crosses it, and a walk from the goal's
   term reaches the fact's first end whether or not the fact stands, so some argument of
   the goal is an end of the fact or a term one licenses along it
-  (`inherit/moved-goal-test`, read at `'?ctx`). A firing is a candidate when a goal it
+  (`inherit/moved-goal-test`, read at `'?ctx`). A membership moves a goal on a predicate a
+  separation holds apart from its type, at the membership's own argument, and a separation
+  or a `genl` edge under a separated type moves every goal of a predicate whose
+  separations it moves (`inherit/separation-moved`). A firing is a candidate when a goal it
   bound on a declared predicate passes, read under both spellings when the KB has merged
   anything. A declaration, `transitive`, `asymmetric`, a permuting mark and a `genl` edge
   into a declared predicate have no test and keep every firing.
@@ -441,7 +450,7 @@ elsewhere rather than forgotten:
 | an `(unknown S)` antecedent — or a closed-extent negative one — blocks | yes | likewise, and the same evaluator |
 | a post-join literal had no answer | no | an aggregate is a *value* that moved, and a queued aggregate rule is re-joined whatever the blocked set did (`settle/rejoin-on-arrival-rules`) |
 | the settle blocks a placed firing, and the sweep deletes it | yes, by `chain/record-swept-firing!` | the conclusion is gone from the store, so the record is what a trigger lifting the block re-derives it from, as for a firing refused at its placement |
-| a visibility `except` hides an antecedent | no | an `except` arriving or leaving queues every rule that could fire on the hidden fact (`special/recheck-except`), and queues it with **`:all`** — so it takes the coarse re-join and the refusal is re-derived there. An entry would be one nothing reads |
+| a visibility `except` hides an antecedent | no | an `except` arriving or leaving, or a `genlCx` edge moving which contexts see it, re-joins from its target's consequence closure and the antecedents of the justifications resting on it (`special/drain-except-moves!`), and the refusal is re-derived there. An entry would be one nothing reads |
 
 The record holds three more kinds of entry, none of them a refusal by an exception. Each
 is kept because the thing that refused it was an **absence** that later content can fill:
@@ -502,11 +511,11 @@ it mints, is therefore released in one pass in either handle order. `lein perf`'
 `mint-release-after-genl-move` bounds the settle after a `genl` edge per waiting
 declaration.
 
-Both unrecorded reasons are covered by a **coarse re-join** rather than by nothing, and
-that is what makes the record an efficiency structure rather than a completeness one.
-The same holds past the cap below. A reader tempted to narrow `recheck-except`'s
-fire-on-H rule set should note that it is what covers the fourth row: narrowing it to a
-sentence-specific trigger would turn this table's last line into a real gap.
+Both unrecorded reasons are covered by a **re-join** rather than by nothing, and that is
+what makes the record an efficiency structure rather than a completeness one. The same
+holds past the cap below. The `except` row's re-join starts from the target's consequence
+closure and the antecedents resting on it; a re-join from less than that turns the
+table's last line into a real gap.
 
 Four properties hold of the record, and each is the form a work list has rather than
 the shape an answer has:
@@ -706,6 +715,10 @@ exception is about another, so the sentence could not narrow the right firings a
   `largerThan` with neither endpoint anywhere near it.
   `special/recheck-preserving-along` queues every rule whose exception mentions a
   predicate declared `(transitiveInArg P n R)` whenever `R`'s extent moves.
+  A membership of a type a separation holds apart from a unary `P` denies `P`'s goal at
+  its argument, so it and a separation that moves which types those are flip an exception
+  on `P` as well; `special/recheck-separated-exceptions` queues the rules whose exception
+  mentions such a `P`.
   [inherit.md](inherit.md) has the whole argument. (From `P`'s *own* side the index is
   already right — the fact is on the exception's predicate — and what has to give way
   there is the argument-agreement filter above.)
@@ -842,11 +855,19 @@ nothing over the wire to ask.
 
 ## Garbage collection, not defeat
 
-Blocking has no defeated state to keep a datum stored for. A defeated datum keeps its
-support and stays stored so it can revive; a blocked justification is simply invalid,
-the conclusion is unsupported, and the dependency-directed sweep **deletes** it along
-with everything solely resting on it. That is the garbage collection, and it is the
-retraction path that already exists.
+A block through `:monotonic` facts has no defeated state to keep a datum stored for. A
+defeated datum keeps its support and stays stored so it can revive; a blocked
+justification is simply invalid, the conclusion is unsupported, and the
+dependency-directed sweep **deletes** it along with everything solely resting on it. That
+is the garbage collection, and it is the retraction path that already exists. Only an
+except can hide a `:monotonic` blocker, and an except of a blocker re-chains the rule
+(`special/recheck-except`).
+
+A block through a `:default` blocker is a defeat: the blocker can lose a nogood, and a
+reader where it loses believes the conclusion. So the firing is stored and its guard
+`defeat` placed at its placement, resting on the blocker, and the read walk decides
+belief per reader ([naf.md](naf.md)). The store grows by one firing and one defeat per
+firing a `:default` blocker blocks.
 
 The trade is deliberate. Reviving costs a re-derivation rather than flipping a bit:
 retract the exception and the conclusion is chained again, not restored. Recompute

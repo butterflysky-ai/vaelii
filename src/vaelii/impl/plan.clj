@@ -191,6 +191,13 @@
   bind keeps its place among the generators.  Like the other two, the switch below
   leaves this in force.
 
+  A fourth class is the `:est-override`'s to name: a literal the override costs at
+  `unbounded` is computed from its bindings (`provers/deferred-est`), a registered
+  evaluatable or a prover that cannot enumerate an open argument.  The ranking places
+  such a literal after its binders by that cost.  With the ranking off, the literal waits
+  until every variable it holds is bound, and runs right after the generator that binds
+  the last of them; one the generators never bind runs after them all.
+
   ## Determinism
 
   Every number in the decision is derived from the conjunction and the KB's counts,
@@ -222,13 +229,14 @@
   switch: it removes the ranking and leaves the order legal."
   true)
 
-(def ^:private unbounded
+(def unbounded
   "The estimate for a literal the index cannot bound at all.  A large finite number
   rather than `Long/MAX_VALUE`, because the subtype fan-out *sums* estimates and a
-  saturating sentinel would overflow into a negative cost."
+  saturating sentinel would overflow into a negative cost.  An `:est-override` reporting
+  it marks a computed literal that waits for its binders (`provers/deferred-est`)."
   1000000000)
 
-(defn- closed?
+(defn- settled-when-run?
   "Is this term settled by the time the literal runs — either literally ground, or a
   variable already in `bound`?  Distinct from `sx/ground-term?`, the test for a trie
   prefix token: a bound variable *will* have a value, but the planner does not know
@@ -407,14 +415,14 @@
   ;; divides by, and this estimator no longer charges one (see `prefix-estimate`).
   ([kb goal bound {:keys [count-at count-with-arg count-with-functor context]
                    :or   {count-at           reads/stored-count-at
-                          count-with-arg     reads/stored-count-with-arg
+                          count-with-arg     reads/stored-count-with-arg-global
                           count-with-functor reads/stored-count-with-functor}}]
    (let [ix (:index kb)]
      (cond
        (not (sequential? goal)) 1
 
        ;; A literal with nothing left open is a test: it matches at most once.
-       (closed? goal bound) 1
+       (settled-when-run? goal bound) 1
 
        ;; A negative literal keys under [:false <body>], so no prefix built from its
        ;; own tokens reaches it and `count-at` would answer 0 — a *lower* bound, which
@@ -619,7 +627,7 @@
   [kb goal {:keys [count-at count-children count-with-arg count-with-functor context]
             :or   {count-at           reads/stored-count-at
                    count-children     reads/stored-count-children
-                   count-with-arg     reads/stored-count-with-arg
+                   count-with-arg     reads/stored-count-with-arg-global
                    count-with-functor reads/stored-count-with-functor}}]
   (let [ix   (:index kb)
         ;; A deferred literal is computed from bindings, not looked up: it produces no
@@ -921,6 +929,22 @@
         (recur (rest remaining) (into bound (sx/form-variables l)) pending (conj acc pick))
         (into acc pending)))))
 
+(defn- thread-computed
+  "The generators `pairs`, in execution order, with each literal `computed?` names moved
+  to right after the generator that binds the last of its variables.  Those the
+  generators never bind follow them all, in their written order."
+  [pairs computed? bound]
+  (loop [remaining pairs, bound bound, pending [], acc []]
+    (let [ready? (fn [[_ l]] (every? bound (sx/form-variables l)))]
+      (if-let [pick (first (filter ready? pending))]
+        (recur remaining (into bound (sx/form-variables (second pick)))
+               (filterv #(not= pick %) pending) (conj acc pick))
+        (if-let [[_ l :as pick] (first remaining)]
+          (if (and (computed? l) (not (ready? pick)))
+            (recur (rest remaining) bound (conj pending pick) acc)
+            (recur (rest remaining) (into bound (sx/form-variables l)) pending (conj acc pick)))
+          (into acc pending))))))
+
 (defn- lits [pairs] (mapv second pairs))
 
 (defn- memo-opts
@@ -931,7 +955,7 @@
   [context]
   {:count-at           (memoizing reads/stored-count-at)
    :count-children     (memoizing reads/stored-count-children)
-   :count-with-arg     (memoizing reads/stored-count-with-arg)
+   :count-with-arg     (memoizing reads/stored-count-with-arg-global)
    :count-with-functor (memoizing reads/stored-count-with-functor)
    :context            context})
 
@@ -959,9 +983,13 @@
         ;; and a switch that did leave one there would be changing the answer set.
         (if (or (not *enabled*) (< (count gens) 2))
           ;; Nothing to choose between — or nothing allowed to — so the generators
-          ;; keep the order they were written in, and the deferred literals are still
-          ;; pulled forward past the recursive one.
-          (let [gens   (thread-waits gens waits (set bound) end-vars)
+          ;; keep the order they were written in, a literal the override costs at
+          ;; `unbounded` still waits for its binders, and the deferred literals are
+          ;; still pulled forward past the recursive one.
+          (let [computed? (fn [l] (when-let [e (when est-override (est-override l bound))]
+                                    (<= unbounded e)))
+                gens   (thread-computed (thread-waits gens waits (set bound) end-vars)
+                                        computed? (set bound))
                 bound' (into bound (mapcat (comp sx/form-variables second) gens))
                 early  (ready defs bound')]
             {:pairs (vec (concat gens early recs (drop-i defs early))) :info {}})

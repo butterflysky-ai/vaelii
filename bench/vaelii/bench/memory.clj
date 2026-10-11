@@ -21,10 +21,12 @@
   Uses space 10 in the in-memory registry — no server, no
   external dependency."
   (:require [vaelii.bench.util :as u :refer [zipf-sample]]
-            [vaelii.impl.resolution :as res]
             [vaelii.impl.kb :as kb]
             [vaelii.impl.plan :as plan]
             [vaelii.impl.protocols :as p]
+            [vaelii.impl.reads :as reads]
+            [vaelii.impl.resolution :as res]
+            [vaelii.impl.rules :as rules]
             [vaelii.impl.sentex :as sx]))
 
 ;; ---- generation (the reference load bench's fact shape) -----------------
@@ -64,7 +66,7 @@
       (let [antes (distinct (repeatedly (inc (.nextInt rng 3))
                                         #(nth preds (zipf-sample pred-cum rng))))
             conc  (nth preds (zipf-sample pred-cum rng))]
-        (p/index-rule ix (+ 1000000000 i) antes conc (quote CxBench))))
+        (rules/index-rule ix (+ 1000000000 i) antes conc (quote CxBench))))
     {:secs (/ (- (System/nanoTime) t0) 1e9)}))
 
 ;; ---- measurement --------------------------------------------------------
@@ -114,9 +116,9 @@
               #(p/sentexes-with-functor ix hot-pred))
 
      (latency "find-sentexes hotInd" iters
-              #(p/sentexes-with-term ix hot-ind))
+              #(reads/as-stored-with-term ix hot-ind))
      (latency "find-sentexes rareInd" iters
-              #(p/sentexes-with-term ix rare-ind))
+              #(reads/as-stored-with-term ix rare-ind))
      (latency "intersect hotInd ∩ hotInd2" iters
               #(p/sentexes-with-terms ix [hot-ind hot2]))
      (latency "intersect hotInd ∩ rareInd" iters
@@ -126,9 +128,9 @@
               #(p/lookup ix (path kb (list hot-pred '?o (list 'qtyFn '?n 'unit0)))))
 
      (latency "rules-by-antecedent hotPred" iters
-              #(p/rules-by-antecedent ix hot-pred))
+              #(reads/as-stored-rules-by-antecedent-global ix hot-pred))
      (latency "rules-by-antecedent rarePred" iters
-              #(p/rules-by-antecedent ix rare-pred))
+              #(reads/as-stored-rules-by-antecedent-global ix rare-pred))
 
      (latency "planner order (3-literal join)" iters
               #(do (plan/order kb [(list hot-pred '?x '?y)

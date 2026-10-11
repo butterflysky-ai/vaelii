@@ -32,9 +32,12 @@ is the instrument that answers it from outside.
 
 `:reads` is the one that answers "does this family pay for itself", and it answers it with
 a zero when it does not. The trie counts as **two** families there — `:trie-lookup` for a
-retrieval walk and `:trie-counts` for `count-at` / `children` / `count-children` — because
+retrieval walk and `:trie-counts` for `count-at` / `children` / `reads/stored-count-children` — because
 those are the query planner's selectivity probes rather than a fetch, and a run can be
-dominated by either. `:fan` is what turns a fan-out from an anecdote into a number: a walk
+dominated by either. A family read through the `family-*` methods is tallied by the
+`vaelii.impl.reads` entry point that makes it, one entry per logical read under the
+family's keyword, since the method itself serves every family; the named reads (`lookup`,
+`count-at`, `sentexes-with-args`, …) tally on the implementer. `:fan` is what turns a fan-out from an anecdote into a number: a walk
 that narrows visits one node per level, and a walk stuck behind a variable visits that
 level's whole child set.
 

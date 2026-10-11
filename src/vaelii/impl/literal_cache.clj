@@ -181,6 +181,12 @@
           (do (store! @acc) nil))))
      xs)))
 
+(defn- marked-seq
+  "`xs`, each step of its realization run through `step`."
+  [step xs]
+  (lazy-seq (when-let [c (step #(seq xs))]
+              (cons (first c) (marked-seq step (rest c))))))
+
 (defn lookup
   "The cached value of `k` in the per-KB `cache` atom, or `compute`'s answer on the way
   into it.  A nil `cache` computes every time.
@@ -196,7 +202,11 @@
 
   The correctness argument is `observe/note-change`'s, unrestated: any mutation moves
   the clock, so a hit is served only across a stretch in which the engine performed no
-  mutation at all — which is the stretch a query spends reading."
+  mutation at all — which is the stretch a query spends reading.
+
+  Inside a second-route search each step of the realization runs under
+  `caches/*open-mark*`, and an answer one of whose steps read a route question still open
+  is provisional and is not stored (`marked-seq`)."
   [cache k compute]
   (if (nil? cache)
     (compute)
@@ -205,17 +215,20 @@
           t   (caches/tally-of cache :R1)]
       (if (and hit (== now (long (:clock hit))))
         (do (caches/hit t) (:value hit))
-        (let [start (System/nanoTime)]
+        (let [start   (System/nanoTime)
+              mark    caches/*open-mark*
+              settled (volatile! true)
+              step    (fn [f] (let [[v ok?] (mark f)] (when-not ok? (vreset! settled false)) v))]
           (caches/miss t)
           (storing (fn [v]
                      (caches/spent t start)
                      (when (and hit (caches/tallying?))
                        (caches/compared t (= (:value hit) v)))
-                     (when (== (observe/change-clock) now)
+                     (when (and @settled (== (observe/change-clock) now))
                        (swap! cache caches/assoc-bounded
                               (caches/limit-of :literal-matches cache-limit)
                               k {:clock now :value v})))
-                   (compute)))))))
+                   (if mark (marked-seq step (step compute)) (compute))))))))
 
 (defn stats
   "`{:size :limit :hits :misses :clock}` — entries held for `kb`, the bound they are
@@ -256,6 +269,7 @@
 
 (caches/register-derived
  {:id :R1 :label "Literal matches" :cache :literal-matches :kind :cache :keyed-by :literal
+  :holds-content? false
   :reads [:index :M1 :T1]
   :retired-by (assoc (caches/on-every :G*) :caches-cleared :W)
   :computed :read :imaged? false :at [[:matches]]

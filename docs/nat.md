@@ -50,6 +50,7 @@ inverted term index like any other fact.
 | `(termOfUnit K E)` | the constant↔expression map: constant `K` denotes NAT expression `E`. The reverse (`K → E`) index; `E → K` is the inverted term index |
 | `(rewriteOf T E)` (compound `E`) | NAT `E` reifies to the existing real term `T` instead of a fresh constant |
 | `(result F T)` / `(genlResult F T)` | F's output types — materialized on mint as `(T K)` / `(genl K T)` |
+| `(resultArg F n)` | F's output is an instance of the type the application's argument `n` names — derived over each `termOfUnit` fact as `(a_n K)` ([argtypes.md](argtypes.md#a-type-another-argument-names-argarg)) |
 | `(functionCorrespondingPredicate F P N)` | F and P state one relationship: `(F a…) = V` exactly when P holds of `a…` with `V` at argument `N` |
 
 `termOfUnit` and `rewriteOf` are **quoting predicates** (`nat/nat-quoting-predicates
@@ -90,10 +91,12 @@ check time, and the two say the same thing about the same function.
 
 A function's kind is metadata cached in the taxonomy, so the per-sentence gate —
 "does the KB declare any function that reifies?" — is a free **in-memory set read**
-(`nat/any-reifiable-functions?` ⇒ `seq` of the `:reifiable` props, else of the
-`:context-denoting` ones), belief-following and needing no mtime cache. A KB that
-declares neither pays two set reads per assert / query and nothing else: the whole
-subsystem is a gated no-op.
+(`nat/any-reifiable-functions?` ⇒ `seq` of the `:reifiable` props), belief-following and
+needing no mtime cache. A KB that declares none pays one set read per assert / query for
+the argument reify. The maintenance a minted constant owes (the orphan sweep, the
+collision merge, the structural `genlCx` producer) reads `nat/any-reified-constants?`,
+which adds one O(1) `termOfUnit` functor count when the set is empty, since a context
+slot mints a `cx/` constant with no declaration ([context-nat.md](context-nat.md)).
 
 ## Write path
 
@@ -214,6 +217,13 @@ type membership and can hold none, a membership being asserted of a name.
 So the argument checks read the *function's* declaration instead. `(arg P n T)` reads
 `(result F T')` — what an application of `F` **is** — and `(genlArg P n T)` reads
 `(genlResult F T')` — what it is a **kind of**. The two are never crossed.
+
+`(resultArg F n)` adds to what an application **is** the type its own argument `n` names,
+so `nat/result-types` takes the application rather than its function: `(resultArg PickFn
+1)` types `(PickFn dog)` a `dog` and `(PickFn cat)` a `cat`. A minted constant takes the
+same type as a derived `(dog K)`, which the argument entailment draws over its
+`termOfUnit` fact in every arrival order
+([argtypes.md](argtypes.md#a-type-another-argument-names-argarg)).
 
 **A term a prover hands back is minted no more than one somebody typed, and is no
 orphan.** `(startOf (YearFn 2000) ?i)` binds `?i` to `(InstantFn 2000 1 1 0 0 0)`, an
@@ -404,6 +414,11 @@ lexicographically-smallest survivor via a further equality, which migrates their
 The retired spelling stays a usable *question*: a goal naming the old term
 goal-rewrites to the new expression and still resolves to `K`.
 
+The invariant holds **per reify namespace**. An expression written in a context slot maps
+to a `cx/` constant beside the `nat/` one its argument-position use maps to, and every
+`E → K` read and the collision grouping take the namespace they want
+([context-nat.md](context-nat.md#one-constant-per-expression-per-namespace)).
+
 A collision can also run the other way — one constant mapped to two expressions — and
 until the repair reaches it, **every reader of the map takes the same one**: the
 content-least (`nat/authoritative-expression`, the choice `dedup-constant` makes on the
@@ -426,7 +441,9 @@ the constant *is*, and counting it as a use would make every placeholder immorta
 `termOfUnit` map plus exactly what `mint-nat!` wrote about it, and `nat/minted-for`
 re-derives that set the way the mint derived it: `(T K)` for each believed `(result F
 T)`, `(genl K T)` for each `(genlResult F T)`, `F` being the function of the expression
-`K` maps to, and the correspondence projection. Everything else naming `K` is somebody's
+`K` maps to, and the correspondence projection. A membership an argument declaration on
+`termOfUnit` or a `resultArg` of `F` derives off the map alone is `K`'s own as well
+(`nat/derived-from-map?`), and leaves when the map does. Everything else naming `K` is somebody's
 assertion whatever its arity — `(prime K)` is a claim about `K` exactly as `(noted Author
 K)` is, and a sweep reading arity alone would retract the claim along with the constant.
 The set is computed behind a **delay**, and the `termOfUnit` clause is what makes that
@@ -580,6 +597,13 @@ comes first (`nat/reconcile-nats!`).
 - **A backward rule's application is not reified.** A proof stores nothing, so its answer
   carries the compound, and a goal naming the constant does not unify with the
   application in the rule's head (Derivation path, above).
+- **A NAT's identity follows the merges `CxUniverse` holds, in every context.** The
+  dedup probe reads `(termOfUnit K E)` in `CxUniverse` under that context's equality
+  partition. With `(sameAs Apple Pomme)` in `CxUniverse`, a reader that does not see
+  `CxUniverse` resolves `(FruitFn Pomme)` to the constant minted for `(FruitFn Apple)`,
+  while the same merge stated in the reader's own context leaves `(FruitFn Pomme)`
+  unresolved there. A `modal_predicate`'s proposition is reified like any other position
+  ([belief.md](belief.md#where-the-barrier-sits-and-what-it-covers)).
 - **A reifiable mark leaving does not re-spell a use whose application resolved to a real
   term.** A `rewriteOf` target, a correspondence value and a placeholder an equality
   retired stand where a KB that never declared the function holds the application.

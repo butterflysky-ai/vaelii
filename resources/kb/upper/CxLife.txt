@@ -12,15 +12,15 @@
          "(alive ?organism) means that ?organism is currently living. True by default of every organism and blocked for one known to be dead, so a KB never told otherwise takes its organisms to be alive — which is the common-sense reading, and the one every story assumes without saying.")
 (unary_predicate alive)
 (arg alive 1 biological)
-(genl alive biological)
+(genl alive organism)
 
 (comment ancestorOf
          "(ancestorOf ?ancestor ?descendant) means that ?ancestor is a parent of ?descendant, or a parent of an ancestor of ?descendant. Both arguments are individual organisms. Declared transitive, so the chain is walked by the closure prover rather than materialized, and the base link is derived from parentOf by a rule — an ancestorOf fact normally follows from kinship rather than being asserted.")
 (binary_predicate ancestorOf)
-(instance_relation_predicate ancestorOf)
+(set/monotonic (instance_relation_predicate ancestorOf))
 (arg ancestorOf 1 organism)
 (arg ancestorOf 2 organism)
-(transitive ancestorOf)
+(set/monotonic (transitive ancestorOf))
 
 (comment asleep
          "(asleep ?animal) means that ?animal is sleeping. Stated rather than derived, and what blocks the awake default; a rule concludes (not (awake ?x)) from it, so the two cannot both be believed of one animal and neither has to be retracted for the other to be told.")
@@ -37,7 +37,7 @@
 (comment birthYearOf
          "(birthYearOf ?organism ?year) means that ?organism was born in ?year — a tree or a bacterium as well as an animal. ?year is a plain integer rather than a term, so its arg is integer: a number is typed by its kind, so the declaration derives no membership and refuses a value of another kind. Declared functional: a second, different year for one organism is a contradiction rather than a second fact, and that is what makes birthYearOf sound enough to derive olderThan from.")
 (binary_predicate birthYearOf)
-(instance_relation_predicate birthYearOf)
+(set/monotonic (instance_relation_predicate birthYearOf))
 (arg birthYearOf 1 organism)
 (arg birthYearOf 2 integer)
 (set/monotonic (functional birthYearOf))
@@ -51,7 +51,7 @@
 (comment childOf
          "(childOf ?child ?parent) means that ?parent is a biological parent of ?child. Declared the inverse of parentOf and never asserted alongside it: (parentOf Ann Tom) answers (childOf Tom Ann) through the inverse prover, and retracting the one withdraws the other.")
 (binary_predicate childOf)
-(instance_relation_predicate childOf)
+(set/monotonic (instance_relation_predicate childOf))
 (arg childOf 1 organism)
 (arg childOf 2 organism)
 
@@ -59,12 +59,12 @@
          "(dead ?organism) means that ?organism has died. Assert it known-true and it both blocks the alive default and defeats what that default licensed. Not the same sentence as (not (alive ?x)): dead says something happened, and a rule derives the negation from it, so the KB ends up holding the positive claim and its consequence rather than only the absence of one.")
 (unary_predicate dead)
 (arg dead 1 biological)
-(genl dead biological)
+(genl dead organism)
 
 (comment eats
          "(eats ?animal ?food) means that ?animal takes ?food as nourishment. Both arguments are individuals — a particular animal and a particular food — and the fact says nothing about when or how often, there being no time argument to say it with. A whole kind's diet is a different sentence: state it of the kind, and declare (transitiveInArgInverse eats 1 genl) if it should reach that kind's members.")
 (binary_predicate eats)
-(instance_relation_predicate eats)
+(set/monotonic (instance_relation_predicate eats))
 (arg eats 1 animal)
 (arg eats 2 food)
 
@@ -78,7 +78,7 @@
 (comment fatherOf
          "(fatherOf ?child ?father) means that ?father is the biological father of ?child. The child comes FIRST, which is what lets FatherFn read off it — a correspondence puts the value last. Declared functional, one biological father to a child, so a second, different father is not a second fact: the two names merge. A rule concludes parentOf from it and never the other way about, since a parent may be either.")
 (binary_predicate fatherOf)
-(instance_relation_predicate fatherOf)
+(set/monotonic (instance_relation_predicate fatherOf))
 (arg fatherOf 1 animal)
 (arg fatherOf 2 animal)
 (set/monotonic (functional fatherOf))
@@ -86,14 +86,14 @@
 (comment grandparentOf
          "(grandparentOf ?grandparent ?grandchild) means that ?grandparent is a parent of a parent of ?grandchild. Derived by a joined rule over two parentOf facts rather than asserted, so it is believed exactly as long as both links are.")
 (binary_predicate grandparentOf)
-(instance_relation_predicate grandparentOf)
+(set/monotonic (instance_relation_predicate grandparentOf))
 (arg grandparentOf 1 organism)
 (arg grandparentOf 2 organism)
 
 (comment capabilityType
          "(capabilityType ?kind ?eventKind) means that a ?kind can be the doer of an event of kind ?eventKind. The type-level reading of hasCapability: (capabilityType bird flying) says the kind flies, where (hasCapability Tweety flying) says one bird does. Two predicates rather than one because they are two claims — a claim about a kind and a claim about a member — and one symbol read at both levels has to declare one position's argument check for both, which is a choice that mistypes whichever half it was not written for. Declared transitiveInArgInverse along genl on the FIRST position, which carries a claim about a kind down to its subkinds: a kind of bird flies with nothing written about it. Declared transitiveInArg along genl on the second, which carries it UP the genl hierarchy of event kinds: flying is a kind of travelling, so a kind that can fly can travel. Paired with hasCapability, and the pairing moves no claim between the two: going from the kind to its members needs a quantifier reading (every bird, or some bird) that nothing here fixes, so the descent is a rule written where the kinds are. The comment below hasCapability says why that pairing is prose rather than a typeToInstancePred sentex.")
 (binary_predicate capabilityType)
-(type_relation_predicate capabilityType)
+(set/monotonic (type_relation_predicate capabilityType))
 (genlArg capabilityType 1 animal)
 (genlArg capabilityType 2 event)
 (set/monotonic (transitiveInArgInverse capabilityType 1 genl))
@@ -117,7 +117,7 @@
 (comment livesIn
          "(livesIn ?animal ?place) means that ?animal makes its home in ?place. Where the animal belongs rather than where it is at this moment, which is what locatedIn says. A default rule carries the one to the other, so an animal that lives somewhere is taken to be there unless something better is known.")
 (binary_predicate livesIn)
-(instance_relation_predicate livesIn)
+(set/monotonic (instance_relation_predicate livesIn))
 (arg livesIn 1 animal)
 (arg livesIn 2 tangible)
 
@@ -137,7 +137,7 @@
 (comment motherOf
          "(motherOf ?child ?mother) means that ?mother is the biological mother of ?child. The child comes first, as in fatherOf, and for the same reason. Functional, and a rule concludes parentOf from it.")
 (binary_predicate motherOf)
-(instance_relation_predicate motherOf)
+(set/monotonic (instance_relation_predicate motherOf))
 (arg motherOf 1 animal)
 (arg motherOf 2 animal)
 (set/monotonic (functional motherOf))
@@ -145,15 +145,15 @@
 (comment olderThan
          "(olderThan ?organism1 ?organism2) means that ?organism1 was born before ?organism2. Derivable rather than only asserted — a rule compares the two birthYearOf values with the evaluable lessThan — so it holds whenever both birth years are known and ordered. Declared transitive, the same instance-level strict order heavierThan and tallerThan are: born-before composes, so two stated comparisons carry the third and a chain is answered off the closure with no birth year written down.")
 (binary_predicate olderThan)
-(instance_relation_predicate olderThan)
+(set/monotonic (instance_relation_predicate olderThan))
 (arg olderThan 1 organism)
 (arg olderThan 2 organism)
-(transitive olderThan)
+(set/monotonic (transitive olderThan))
 
 (comment parentOf
          "(parentOf ?parent ?child) means that ?parent is a biological parent of ?child. Both arguments are individual organisms — a plant or a bacterium has a parent as an animal does — and step- or adoptive parenthood is not this predicate. The primitive of the kinship theory: childOf, siblingOf, grandparentOf and ancestorOf are all read off it rather than asserted beside it.")
 (binary_predicate parentOf)
-(instance_relation_predicate parentOf)
+(set/monotonic (instance_relation_predicate parentOf))
 (arg parentOf 1 organism)
 (arg parentOf 2 organism)
 (inverse parentOf childOf)
@@ -161,18 +161,18 @@
 (comment preysOn
          "(preysOn ?predator ?prey) means that ?predator hunts and eats ?prey. Between two particular animals; what a whole kind preys on is a claim about kinds and not this predicate. Declared asymmetric, so the mirror of a hunt denies it and a KB told both ways round has a contradiction to report rather than a food chain to walk.")
 (binary_predicate preysOn)
-(instance_relation_predicate preysOn)
+(set/monotonic (instance_relation_predicate preysOn))
 (arg preysOn 1 animal)
 (arg preysOn 2 animal)
-(asymmetric preysOn)
+(set/monotonic (asymmetric preysOn))
 
 (comment siblingOf
          "(siblingOf ?organism1 ?organism2) means that ?organism1 and ?organism2 share at least one biological parent, and chosen or elective kinship is not this predicate. Declared symmetric, so one assertion answers both orders and the two spellings store as one sentex. Half-siblings count — nothing here asks that both parents match.")
 (binary_predicate siblingOf)
-(instance_relation_predicate siblingOf)
+(set/monotonic (instance_relation_predicate siblingOf))
 (arg siblingOf 1 organism)
 (arg siblingOf 2 organism)
-(symmetric siblingOf)
+(set/monotonic (symmetric siblingOf))
 
 (comment warm_blooded
          "(warm_blooded ?animal) means that ?animal holds its own body temperature rather than taking the temperature around it. Derived of the mammals and the birds and denied of the three cold-blooded classes, so it is never asserted of any particular animal — which is what makes it a worked example of a claim inherited from a kind rather than stated of a thing.")

@@ -223,6 +223,7 @@
 
 (caches/register-derived
  {:id :K9 :label "Foreign format scan" :kind :cache :keyed-by :value :reads [:source]
+  :holds-content? false
   :retired-by {} :computed :read :imaged? false :var #'discovered
   :value (fn [_] @discovered)
   :note "the reader formats the classpath manifests declare; `rescan` replaces it"})

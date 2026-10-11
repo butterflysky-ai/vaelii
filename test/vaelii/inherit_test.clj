@@ -932,6 +932,55 @@
     (is (empty? (v/sentexes-matching kb (list fitsIn Other) 'CxUniverse))
         "and a fresh firing agrees with it")))
 
+(defn- permutations [xs]
+  (if (empty? xs)
+    [[]]
+    (for [x xs, more (permutations (remove #{x} xs))] (cons x more))))
+
+(tu/deftest-kb a-separated-membership-releases-an-exception-on-an-inherited-membership-in-every-order
+  ;; `(down_kind upper)` reaches `(down_kind lower)`, which holds the exception, until
+  ;; `(plain_kind lower)` and the separation undercut the `:default` reading.  The two
+  ;; arrive in any order around the rule and its premise, and the firing is re-decided.
+  (is (= #{[false true]}
+         (into #{}
+               (for [order (permutations [:sep :member :rule :premise])]
+                 (tu/with-terms [down_kind plain_kind upper lower probe_kind fits Thing]
+                   (v/assert kb (list 'transitiveInArgInverse down_kind 1 'genl) 'CxUniverse)
+                   (v/assert kb (list 'genl lower upper) 'CxUniverse)
+                   (v/assert kb (list down_kind upper) 'CxUniverse)
+                   (doseq [op order]
+                     (case op
+                       :sep     (v/assert kb (list 'disjoint down_kind plain_kind) 'CxUniverse
+                                          {:strength :monotonic})
+                       :member  (v/assert kb (list plain_kind lower) 'CxUniverse)
+                       :rule    (v/assert kb (list 'exceptWhen (list down_kind lower)
+                                                   (list 'set/defaultRule
+                                                         (list 'set/forwardRule
+                                                               (list 'implies (list probe_kind '?x)
+                                                                     (list fits '?x)))))
+                                          'CxUniverse)
+                       :premise (v/assert kb (list probe_kind Thing) 'CxUniverse)))
+                   [(v/ask? kb (list down_kind lower) 'CxUniverse)
+                    (boolean (seq (v/sentexes-matching kb (list fits Thing) 'CxUniverse)))]))))))
+
+(tu/deftest-kb a-separated-membership-undercuts-a-default-reading-where-the-separation-is-seen
+  ;; The separation is stated in CxA alone, so CxUniverse reads `(down_kind lower)` and CxA
+  ;; reads it undercut by `(plain_kind lower)`.
+  (is (= #{[true false]}
+         (into #{}
+               (for [order (permutations [:sep :member :claim])]
+                 (tu/with-terms [down_kind plain_kind upper lower CxA]
+                   (v/assert kb (list 'genlCx CxA 'CxUniverse) 'CxUniverse)
+                   (v/assert kb (list 'transitiveInArgInverse down_kind 1 'genl) 'CxUniverse)
+                   (v/assert kb (list 'genl lower upper) 'CxUniverse)
+                   (doseq [op order]
+                     (case op
+                       :sep    (v/assert kb (list 'disjoint down_kind plain_kind) CxA)
+                       :member (v/assert kb (list plain_kind lower) 'CxUniverse)
+                       :claim  (v/assert kb (list down_kind upper) 'CxUniverse)))
+                   [(v/ask? kb (list down_kind lower) 'CxUniverse)
+                    (v/ask? kb (list down_kind lower) CxA)]))))))
+
 ;; ---- the memo's growth claim, counted -------------------------------------
 ;;
 ;; docs/inherit.md's memo claim is that the reach walk is **linear in the claims**:

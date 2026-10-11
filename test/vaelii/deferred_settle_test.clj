@@ -10,6 +10,7 @@
   (:require [clojure.test :refer [is testing use-fixtures]]
             [vaelii.core :as v]
             [vaelii.impl.protocols :as p]
+            [vaelii.impl.reads :as reads]
             [vaelii.impl.rules :as vr]
             [vaelii.test-util :as tu]))
 
@@ -114,7 +115,7 @@
       (doseq [f facts] (v/assert kb f CxSlow {:chain? false}))
 
       (testing "same stored sentexes — one per fact on each side"
-        (is (= n (p/count-in-context idx CxBulk) (p/count-in-context idx CxSlow))))
+        (is (= n (reads/stored-count-in-context idx CxBulk) (reads/stored-count-in-context idx CxSlow))))
       (testing "same count-with-functor — the predicate extent took both halves"
         (is (= (* 2 n) (v/count-with-functor kb edgeOf)))
         (is (= (* 2 n) (p/count-at idx [edgeOf]))))
@@ -127,9 +128,9 @@
       (testing "same index — each argument root holds both halves' handles"
         (doseq [t inds, pos [1 2]]
           (is (= (count (filter #(= CxBulk (:context (v/sentex kb %)))
-                                (p/sentexes-with-arg idx pos t)))
+                                (reads/as-stored-with-arg-global idx pos t)))
                  (count (filter #(= CxSlow (:context (v/sentex kb %)))
-                                (p/sentexes-with-arg idx pos t)))))))
+                                (reads/as-stored-with-arg-global idx pos t)))))))
       (testing "provenance is the one documented difference: the bulk premise carries none"
         (is (nil? (v/provenance kb (v/handle-of kb (first facts) CxBulk))))
         (is (some? (v/provenance kb (v/handle-of kb (first facts) CxSlow))))))))

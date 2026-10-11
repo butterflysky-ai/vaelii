@@ -870,9 +870,11 @@
             (testing "and it says what it dropped, and what that took with it"
               (is (= 1 (:dropped-meta-sentexes s)))
               (is (= 1 (:orphaned-ids s)) "one dump id now names no record")
-              (is (= 2 (:dropped-justifications s)))
-              (is (= 1 (:dropped-justifications-orphaned s))
-                  "one of the two: the other also names a sentex the dump never carried,
+              ;; the two the splice hangs off the meta-sentex, and the two `guard`
+              ;; justifications of `(flies Opus)`'s defeat, which name the exception
+              (is (= 4 (:dropped-justifications s)))
+              (is (= 3 (:dropped-justifications-orphaned s))
+                  "all but one: the spliced one also names a sentex the dump never carried,
                    and a justification the dump had already lost is not this load's doing"))
             (testing "so nothing in the store rests on a record the store does not hold"
               (is (empty? (dangling-refs target))))

@@ -133,8 +133,8 @@
   — `:ask` and `:ask?` to the clock alone, since nothing in the prover registry expands
   a rule.
 
-  **Seven writes name a bound this table does not hold.** `:assert`, `:assert-many`,
-  `:assert-rule` and `:forward-chain` read `:max-depth` and `:max-derivations`
+  **Eight writes name a bound this table does not hold.** `:assert`, `:try-assert`,
+  `:assert-many`, `:assert-rule` and `:forward-chain` read `:max-depth` and `:max-derivations`
   (`core/assert-opt-keys`, `forward-chain`'s roster), and `:edit`,
   `:edit-with-consequences` and `:preview` read the same two keys off each batch entry's
   opts. Both bound the chaining fixpoint (`chain/default-chain-opts`, 64 and 100,000 when
@@ -269,6 +269,48 @@
                   args)))))
     f))
 
+(def ^:dynamic *served-kbs*
+  "nil, or a fn from a string a request sends to the KB this server serves under that
+  name, or nil when it serves none.  The browser binds it to its catalog around
+  `handle-op` (`vaelii.browser.web/op-post`); the daemon serves one KB and leaves it nil."
+  nil)
+
+(defn- refuse-a-named-path!
+  "Throw `:path-not-served` (403) for `op` unless `config/request-paths?`: a request picks
+  among what the server serves and names no path on the server's host.  `verb` is
+  \"read\" or \"write\", `why` says what the op takes and what the request named, and
+  `what` is what the switch lets a request name."
+  [op verb why what]
+  (when-not (config/request-paths?)
+    (throw (ex-info (str "a request names no path for this server to " verb ": "
+                         (pr-str op) " " why ".  VAELII_REQUEST_PATHS=1 at the server's"
+                         " start lets a request name " what " on the server's host.")
+                    {:type :path-not-served :op op ::status 403}))))
+
+(defn- served-side
+  "The second side of a wire `:kb-diff`: the KB `*served-kbs*` names `b` for, or `b`
+  itself when it is not a string.  A string naming no served KB is refused
+  (`refuse-a-named-path!`) and nothing is read; under `VAELII_REQUEST_PATHS` it reaches
+  `kb-diff`, which reads it as a text KB on the server's host."
+  [b]
+  (or (when-let [served (when (string? b) *served-kbs*)] (served b))
+      (when (string? b)
+        (refuse-a-named-path! :kb-diff "read"
+                              (str "takes a KB this server serves, and " (pr-str b) " names none")
+                              "a text KB"))
+      b))
+
+(defn- served-export!
+  "`v/export!` to `dir`, refused (`refuse-a-named-path!`) before anything is written: the
+  directory would be resolved on the server's host, and a request names none there."
+  ([kb dir] (served-export! kb dir {}))
+  ([kb dir opts]
+   (refuse-a-named-path! :export "write"
+                         (str "writes a dump to a directory on the server's host, and "
+                              (pr-str dir) " names one")
+                         "the directory")
+   (v/export! kb dir opts)))
+
 (def ops
   "The reachable operations, keyed by op keyword.  Reads, writes, and introspection —
   the working set a remote caller needs.  A `vaelii.core` fn that takes a KB is either a
@@ -283,6 +325,7 @@
    {}
    (map (fn [[op f]] [op (bounded op f)]))
    {:assert       (op v/assert)
+    :try-assert   (op v/try-assert)
     :assert-rule  (op v/assert-rule)
     :assert-many  (op v/assert-many)
     :retract      (op v/retract!)
@@ -306,8 +349,9 @@
     ;; back — and the export reports no progress, because `:on-progress` is a function and
     ;; functions do not cross an EDN wire.  Served with the writes so it runs under the
     ;; monitor: the walk fetches record by record, and a dump of a KB something is
-    ;; asserting into is a dump of no single state.
-    :export       (op v/export!)
+    ;; asserting into is a dump of no single state.  The directory is a path on the
+    ;; daemon's host, so it is refused unless `VAELII_REQUEST_PATHS` (`served-export!`)
+    :export       (op served-export!)
     :preview      (op v/preview)
     :sentexes-matching (op v/sentexes-matching)
     :query        (op v/query)
@@ -333,6 +377,8 @@
     :specs        (op v/specs)
     :direct-genls (op v/direct-genls)
     :direct-specs (op v/direct-specs)
+    :min-genls    (op v/min-genls)
+    :max-specs    (op v/max-specs)
     :types        (op v/types)
     :relation?    (op v/relation?)
     :contexts     (op v/contexts)
@@ -503,11 +549,8 @@
     ;; already above and needs no entry of its own for `{:nearest n}`: the table `apply`s
     ;; the var, so a new arity crosses the wire the moment `vaelii.core` grows one
     :describe     (op v/describe)
-    ;; `kb-diff`'s second side is a **path on the daemon's host**, for the reason `:export`'s
-    ;; destination is: the daemon owns the KB, a KB value does not cross an EDN wire, and a
-    ;; text export is a directory the daemon can read.  So the remote reading is "what has
-    ;; the live KB done since this export was taken"
-    :kb-diff      (op v/kb-diff)}))
+    ;; `kb-diff`'s second side names a KB this server serves (`served-side`)
+    :kb-diff      (op (fn [kb b] (v/kb-diff kb (served-side b))))}))
 
 ;; ---- the daemon's own ops: the change feed, held open with a cursor ------
 ;;
@@ -635,6 +678,8 @@
     ;; one kind of mistake, so the four answer alike rather than splitting on which
     ;; property caught it
     :disjoint :functional :asymmetric :anti-transitive
+    ;; `try-assert`'s refusal of a write that would open one of those clashes
+    :definitional-clash
     :unknown-option :bad-handle
     :unknown-handle :bad-level :exception-not-closed :not-stratified :naf-not-closed
     :quantifier-not-local
@@ -674,7 +719,10 @@
     ;; timer instead of asking to wait — and inventing a status for either would break
     ;; the promise that a client discriminates on `:type` with the code as the coarse
     ;; client/server split
-    :unknown-subscription :bad-cursor :too-many-subscriptions :too-many-waiters})
+    :unknown-subscription :bad-cursor :too-many-subscriptions :too-many-waiters
+    ;; a `{:keep? true}` abduction past the kept-context cap: the caller holds the
+    ;; contexts and frees one with `:abduce-discard`, as with a subscription
+    :too-many-kept})
 
 (defn handle-op
   "Run one `{:op :args}` request under the write lock and answer with EDN.

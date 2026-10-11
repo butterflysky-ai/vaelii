@@ -14,8 +14,8 @@
   the same two facts under a *stated* edge merged.  Whether they merged came down to
   whether the year's fact was written before January existed.
 
-  The reconcilers are one call now (`special/reconcile-context-edge`), and all three
-  entry points make it.  What the tests here pin is the *equivalence*: a computed edge and a
+  The reconcilers run from one place, the settle's `special/drain-context-moves!`,
+  whichever of the three entry points stored the edge.  What the tests here pin is the *equivalence*: a computed edge and a
   stated one reach the same beliefs, in every order the ingredients can arrive in.
 
   The mark is stated **in the year context** throughout rather than in CxUniverse.  A
@@ -38,7 +38,7 @@
   "Declare the reify kinds a calendar context needs — but not the ordering, which is the
   arrival every test below places for itself."
   [kb]
-  (v/assert kb '(context_denoting_function CxCalFn) U)
+  (v/assert kb '(result CxCalFn context) U)
   (v/assert kb '(unreifiable_function DatetimeFn) U))
 
 (defn- order-by-subinterval! [kb]

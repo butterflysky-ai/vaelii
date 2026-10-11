@@ -29,6 +29,16 @@
       (v/assert kb (list 'genl mammal animal) 'CxUniverse)
       (is (ill-formed? (list 'genl animal mammal) 'CxUniverse)))))   ; would close mammal→animal→mammal
 
+(tu/deftest-kb a-genl-cycle-is-refused-at-every-strength
+  ;; The cycle check reads reachability and no strength: a cycle condenses into one
+  ;; component every reader shares, so a `:default` edge closes one as a `:monotonic` one does.
+  (doseq [[down up] [[:monotonic :default] [:default :default]
+                     [:default :monotonic] [:monotonic :monotonic]]]
+    (tu/with-terms [mortal organism]
+      (v/assert kb (list 'genl mortal organism) 'CxUniverse {:strength down})
+      (testing [down up]
+        (is (ill-formed? (list 'genl organism mortal) 'CxUniverse {:strength up}))))))
+
 (tu/deftest-kb disjoint-well-formedness
   (let [dog (tu/tmp-type) cat (tu/tmp-type) mammal (tu/tmp-type) muffet (tu/tmp-ind)]
     (testing "well-formed disjoint is accepted"
@@ -66,3 +76,34 @@
     (testing "what is decidable from the sentence is still checked"
       (is (ill-formed? (list 'arg Milli 1 (tu/tmp-ind)) 'CxUniverse))   ; type is an individual
       (is (ill-formed? (list 'arg Milli 0 a_unit) 'CxUniverse)))))      ; position not positive
+
+(tu/deftest-kb a-value-in-a-type-position-is-not-well-formed
+  ;; a value has instances of nothing, so a declaration that places one in the lattice or
+  ;; names one as a type says nothing true; the check reads the sentence alone
+  (tu/with-terms [dog cat relatesTo]
+    (doseq [value ["Bob" 5 2.5 1N 1.5M :bob true \b nil #inst "2020-01-01"
+                   #uuid "00000000-0000-0000-0000-000000000001"]
+            sentence [(list 'genl value dog) (list 'genl dog value)
+                      (list 'disjoint value cat) (list 'disjoint dog value)
+                      (list 'covering dog value cat) (list 'partition value dog cat)
+                      (list 'disjoint_metatype value) (list 'sibling_disjoint value)
+                      (list 'orthogonal value cat) (list 'siblingDisjointException dog value)
+                      (list 'arg relatesTo 1 value) (list 'genlArg relatesTo 1 value)
+                      (list 'quotedArg relatesTo 1 value)
+                      (list 'interArg relatesTo 1 dog 2 value) (list 'interArg relatesTo 1 value 2 cat)
+                      (list 'args relatesTo value) (list 'argAndRest relatesTo 1 value)]]
+      (is (= [:not-well-formed] (mapv :type (v/check kb sentence 'CxUniverse)))
+          (pr-str sentence)))
+    (testing "an instance position takes a value"
+      (v/assert kb (list 'genl dog 'thing) 'CxUniverse)
+      (is (not-any? #{:not-well-formed} (map :type (v/check kb (list dog "Bob") 'CxUniverse)))))))
+
+(tu/deftest-kb a-rule-concluding-a-value-edge-drops-the-firing
+  (tu/with-terms [tagged dog]
+    (v/clear-violations! kb)
+    (v/assert kb (list 'set/forwardRule (list 'implies (list tagged '?x) (list 'genl '?x dog)))
+              'CxUniverse)
+    (v/assert kb (list tagged "Bob") 'CxUniverse)
+    (is (not (v/genl? kb "Bob" dog 'CxUniverse)))
+    (is (= [[:not-well-formed (list 'genl "Bob" dog)]]
+           (mapv (juxt :violation :sentence) (v/violations kb))))))

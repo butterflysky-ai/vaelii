@@ -123,7 +123,7 @@
   most to answer for."
   [kb progress!]
   (let [idx   (:index kb)
-        preds (into [] (filter functor-name?) (reads/stored-terms idx))
+        preds (into [] (filter functor-name?) (reads/stored-terms-global idx))
         total (count preds)]
     ;; before the loop, so a phase with nothing in it still reports itself — a caller
     ;; watching the phases is watching for where a long report is, and \"skipped because
@@ -143,9 +143,9 @@
           (recur (inc i)
                  (if (pos? n) (assoc! extents pred n) extents)
                  (reduce (fn [m h] (assoc! m h (conj (get m h #{}) pred)))
-                         ante (reads/as-stored-rules-by-antecedent idx pred))
+                         ante (reads/as-stored-rules-by-antecedent-global idx pred))
                  (reduce (fn [m h] (assoc! m h pred))
-                         conseq (reads/as-stored-rules-by-consequent idx pred))))))))
+                         conseq (reads/as-stored-rules-by-consequent-global idx pred))))))))
 
 ;; ---- which rules never fire ----------------------------------------------
 
@@ -393,7 +393,9 @@
   That is why the gap is the finding rather than either fraction on its own.
 
   Reachability is **reflexive**, as `genls` is: the root reaches itself, so `:rooted`
-  counts it and `:islands` is exactly the edged types outside the root's ancestor set."
+  counts it and `:islands` is exactly the edged types outside the root's ancestor set.
+
+  The closures are unscoped: the report counts the whole taxonomy and has no reader."
   [kb pass progress!]
   (let [taxo  (reasoning/taxonomy kb)
         ;; Memoized: the reach walk below asks this once per node AND once per ancestor

@@ -100,8 +100,10 @@ require_primary() {
 # Two matrices at once each run at one slot, so a second request does not start a second
 # matrix.  An `--owed` request that finds one running appends its baseline to the queue
 # and returns; the running matrix, as it ends, starts one more over the union of the
-# queued baselines, at the primary's HEAD.  The lock and the queue live in the shared git
-# directory, so every worktree of the repository sees the same ones.
+# queued baselines, at the primary's HEAD.  A running `--owed` matrix that sees the queue
+# non-empty ends at its first verdict (scripts/test-matrix.sh, "ONE VERDICT, THEN MAKE
+# ROOM").  The lock and the queue live in the shared git directory, so every worktree of
+# the repository sees the same ones.
 #
 #   lock    `<pid> <revision> <epoch> <run dir>` of the matrix running now
 #   queue   one `<commit> <selector> <requester>` line per request waiting for the next
@@ -118,6 +120,18 @@ matrix_state_dir() {
   printf '%s/vaelii-matrix\n' "$d"
 }
 
+# lock_break_stale <lock file> <line> removes the lock file when it still holds <line>, the
+# stale lock read before.  The rename to a name of this shell's own is atomic, so of two
+# waiters breaking one stale lock only one moves it.  A file that no longer holds <line>
+# is a lock taken since the read, and goes back with `ln`, which refuses to overwrite a
+# lock taken in between.
+lock_break_stale() {
+  local held="$1.stale.$$"
+  mv "$1" "$held" 2>/dev/null || return 0
+  [[ "$(cat "$held" 2>/dev/null)" == "$2" ]] || ln "$held" "$1" 2>/dev/null
+  rm -f "$held"
+}
+
 # The lock's line when a live matrix holds it, else nothing.  A lock whose pid is gone,
 # or is no longer a test-matrix, is stale and is removed.
 matrix_lock_holder() {
@@ -127,8 +141,8 @@ matrix_lock_holder() {
   pid=${line%% *}
   if [[ -n "$pid" ]] && ps -o command= -p "$pid" 2>/dev/null | grep -q 'test-matrix'; then
     printf '%s\n' "$line"
-  elif [[ "$(cat "$dir/lock" 2>/dev/null)" == "$line" ]]; then
-    rm -f "$dir/lock"       # only the stale line read above, not a lock taken since
+  else
+    lock_break_stale "$dir/lock" "$line"
   fi
 }
 
@@ -201,6 +215,40 @@ matrix_queue_take() {
   printf '%s %s %s\n' "$base" "$sel" "${who:-unknown}"
 }
 
+# ---- the configurations a yield stopped ---------------------------------------------------
+#
+# `yield-stopped` lists, one per line, the configurations an `--owed` run left without a
+# verdict when it yielded to a queued request.  The next `--owed` run that owes one launches
+# it first and does not yield before it has a verdict, so the slowest configuration is not
+# stopped by every yield in turn.  Only the lock holder writes the file.
+
+# matrix_yield_stopped_add <config>…
+matrix_yield_stopped_add() {
+  local dir
+  dir=$(matrix_state_dir) || return 1
+  (( $# > 0 )) || return 0
+  printf '%s\n' "$@" >>"$dir/yield-stopped"
+}
+
+# The listed configurations, one per line, each once.
+matrix_yield_stopped() {
+  local dir
+  dir=$(matrix_state_dir) || return 0
+  [[ -s "$dir/yield-stopped" ]] || return 0
+  sort -u "$dir/yield-stopped"
+}
+
+# matrix_yield_stopped_take <config>… removes those configurations from the list: the run
+# holding the lock owes each of them a verdict now.
+matrix_yield_stopped_take() {
+  local dir rest
+  dir=$(matrix_state_dir) || return 0
+  [[ -s "$dir/yield-stopped" ]] || return 0
+  rest="$dir/yield-stopped.$$"
+  sort -u "$dir/yield-stopped" | grep -vxF -f <(printf '%s\n' "$@") >|"$rest"
+  mv "$rest" "$dir/yield-stopped"
+}
+
 # ---- the cooldown after a red matrix ------------------------------------------------------
 #
 # A red matrix writes `red`: `<epoch> <run dir>`.  For MATRIX_RED_COOLDOWN seconds after
@@ -228,4 +276,147 @@ matrix_red_recent() {
   line=$(cat "$dir/red" 2>/dev/null) || return 0
   (( $(date '+%s') - ${line%% *} < cool )) && printf '%s\n' "$line"
   return 0
+}
+
+# ---- one perf run at a time, and a cap on concurrent gate test stages ----------------------
+#
+# `lein perf` and `lein perf-ab` time code, and a second perf run beside the first loads the
+# cores both are timing: each reads the other's JVMs as its own regression, and the suites
+# other sessions run beside them drop to one slot. So every perf run, `--only` and a gate's
+# perf stage included, from any worktree, holds `perf-lock` in the shared state directory
+# while it measures.
+#
+# A gate's test stage sizes its shard count from the vaelii JVMs already running
+# (`default_slots`), so seven gates started together each run at one shard. So `lein gate`
+# holds one of GATE_MAX_CONCURRENT gate slots (2 by default, `0` for no cap),
+# `gate-lock.1` … `gate-lock.<n>`, for its test stage alone. The test stage starts after the
+# take, so its shard count reads the box as it is at admission. Lint runs while the gate
+# waits, and the gate releases its slot before its perf stage takes `perf-lock`, so no
+# process holds both.
+#
+# A run that finds every slot of its lock held waits, naming the holders once a minute;
+# `PERF_NO_WAIT=1` and `GATE_NO_WAIT=1` exit 75 instead.
+#
+#   perf-lock, gate-lock.<i>  `<pid> <revision> <epoch> <requester> <command…>` of the holder
+
+# lock_holder <lock file> <command regex> prints the lock's line when its pid is alive and
+# that pid's command matches the regex, else nothing. A lock whose pid is gone, or runs
+# another command, is stale and is removed.
+lock_holder() {
+  local line pid
+  line=$(cat "$1" 2>/dev/null) || return 0
+  pid=${line%% *}
+  if [[ -n "$pid" ]] && ps -o command= -p "$pid" 2>/dev/null | grep -qE "$2"; then
+    printf '%s\n' "$line"
+  else
+    lock_break_stale "$1" "$line"
+  fi
+}
+
+# lock_duration <seconds> prints `4m12s`, or `12s` under a minute.
+lock_duration() {
+  if (( $1 >= 60 )); then printf '%dm%02ds\n' $(($1 / 60)) $(($1 % 60)); else printf '%ds\n' "$1"; fi
+}
+
+# lock_describe <line> prints a lock line as `pid <pid> at <revision>, <requester>, held
+# <age>: <command>`.
+lock_describe() {
+  local pid rev epoch who cmd
+  read -r pid rev epoch who cmd <<<"$1"
+  [[ "$epoch" =~ ^[0-9]+$ ]] || epoch=$(date '+%s')
+  printf 'pid %s at %s, %s, held %s: %s\n' "$pid" "$rev" "$who" \
+    "$(lock_duration $(( $(date '+%s') - epoch )))" "$cmd"
+}
+
+# lock_take <name> <slots> <command regex> <no-wait variable> <noun> <command…> takes one
+# slot of a lock for this shell: the file `<name>` when <slots> is 1, else the first free
+# of `<name>.1` … `<name>.<slots>`. It sets LOCK_FILE to the file taken and LOCK_WAITED to
+# the seconds it waited. While every slot is held it waits, naming the holders once a
+# minute, or returns 75 when the variable named <no-wait variable> is non-empty. Each
+# attempt writes the line to a file of this shell's own and hard-links it into place: `ln`
+# refuses an existing target, so the take is atomic and no reader sees a lock file without
+# its line.
+lock_take() {
+  local name="$1" n="$2" re="$3" nowait="$4" noun="$5"; shift 5
+  local dir own f i held state waited=0 files=()
+  LOCK_FILE=''; LOCK_WAITED=0
+  dir=$(matrix_state_dir) || return 0
+  if (( n == 1 )); then files=("$dir/$name"); state="the $noun is held"; else
+    for ((i = 1; i <= n; i++)); do files+=("$dir/$name.$i"); done
+    state="all $n ${noun}s are held"
+  fi
+  own="$dir/$name.take.$$"
+  while :; do
+    printf '%s %s %s %s %s\n' "$$" "$(git rev-parse --short HEAD 2>/dev/null)" \
+      "$(date '+%s')" "$(matrix_requester)" "$*" >|"$own"
+    for f in "${files[@]}"; do
+      lock_holder "$f" "$re" >/dev/null
+      if ln "$own" "$f" 2>/dev/null; then
+        rm -f "$own"; LOCK_FILE=$f; LOCK_WAITED=$waited
+        return 0
+      fi
+    done
+    rm -f "$own"
+    held=$(for f in "${files[@]}"; do lock_holder "$f" "$re"; done)
+    if [[ -n "$held" ]]; then
+      if [[ -n "${!nowait:-}" ]]; then
+        printf '%s:\n' "$state" >&2
+        while IFS= read -r f; do printf '  %s\n' "$(lock_describe "$f")" >&2; done <<<"$held"
+        printf '  %s is set, so this exits 75; unset it to wait (scripts/lib/slots.sh).\n' "$nowait" >&2
+        return 75
+      fi
+      if (( waited % 60 == 0 )); then
+        printf 'waiting (%s so far): %s:\n' "$(lock_duration "$waited")" "$state" >&2
+        while IFS= read -r f; do printf '  %s\n' "$(lock_describe "$f")" >&2; done <<<"$held"
+      fi
+    fi
+    # backgrounded and waited on, so a trapped INT or TERM runs at once
+    sleep 5 & wait $! 2>/dev/null   # 2>/dev/null: the job-done notice under set -m
+    waited=$((waited + 5))
+  done
+}
+
+# lock_release <lock file> removes the file when this shell's pid holds it.
+lock_release() {
+  local line
+  [[ -n "$1" ]] || return 0
+  line=$(cat "$1" 2>/dev/null) || return 0
+  [[ "${line%% *}" == "$$" ]] && rm -f "$1"
+  return 0
+}
+
+# perf_lock_take <command…> takes the perf lock for this shell, waiting while another perf
+# run holds it (or exiting 75 under PERF_NO_WAIT=1), and releases it when the shell exits.
+# A holder that is no longer perf.sh or perf-ab.sh is stale.
+perf_lock_take() {
+  lock_take perf-lock 1 'perf(-ab)?\.sh' PERF_NO_WAIT 'perf lock' "$@" || exit $?
+  [[ -n "$LOCK_FILE" ]] && trap perf_lock_release EXIT
+  return 0
+}
+
+perf_lock_release() {
+  local dir
+  dir=$(matrix_state_dir) || return 0
+  lock_release "$dir/perf-lock"
+}
+
+# gate_slot_take <command…> takes a gate slot for this shell and sets GATE_SLOT to its file
+# and GATE_SLOT_WAITED to the seconds waited; returns 75 under GATE_NO_WAIT=1 when none is
+# free. GATE_MAX_CONCURRENT=0 takes nothing. A holder that is no longer gate.sh is stale.
+# The caller releases with gate_slot_release, on its EXIT trap too.
+gate_slot_take() {
+  local n="${GATE_MAX_CONCURRENT:-2}" rc=0
+  [[ "$n" =~ ^[0-9]+$ ]] || n=2
+  GATE_SLOT=''; GATE_SLOT_WAITED=0
+  (( n > 0 )) || return 0
+  lock_take gate-lock "$n" 'gate\.sh' GATE_NO_WAIT 'gate slot' "$@" || rc=$?
+  GATE_SLOT=$LOCK_FILE
+  # shellcheck disable=SC2034  # gate.sh reads it
+  GATE_SLOT_WAITED=$LOCK_WAITED
+  return "$rc"
+}
+
+gate_slot_release() {
+  lock_release "${GATE_SLOT:-}"
+  GATE_SLOT=''
 }

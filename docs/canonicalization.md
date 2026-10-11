@@ -218,14 +218,15 @@ context:
 - **Several commuting groups.** A reader that believes some of a predicate's groups reads
   a fact sorted by those groups alone. More than one spelling read puts the premise at the
   spelling written, and each other spelling read is a `respell` row.
-- **Class.** A `respell` justification confers the weaker of the as-written row's class
-  and the mark's, as a firing read through the mirror does. A reader above the defeat
-  therefore reads the sorted row at `:default` when the mark is `:default` and only the
-  moved spelling was asserted `:monotonic`, where a KB with no defeat reads it
-  `:monotonic`. This is the one reading in which a defeat placed below a context changes
-  what that context reads, against vantage scoping
-  ([nmtms.md](nmtms.md#a-defeat-is-scoped-to-its-vantage)): the `respell` row is stored
-  in `Cf` because a reader below it does not believe the mark.
+- **Class.** A `respell` justification confers the as-written row's class
+  (`jtms/class-antecedents`). The marks it rests on decide whether it is valid and cap
+  nothing, as a rule informant caps nothing. A reader that believes the mark therefore
+  reads the sorted row, and every firing over it, at the class a KB with no defeat reads,
+  so a defeat below a context moves no class there
+  ([nmtms.md](nmtms.md#a-defeat-is-scoped-to-its-vantage)). A reader that does not believe
+  the mark reads neither the row nor what rests on it alone. Its verdicts read the classes
+  the members' support carries with the mark's defeats in force there forced OUT
+  (`exc/mark-defeated`, [nmtms.md](nmtms.md#why-a-read-runs-no-rounds)).
 - **When it runs.** A `defeat` or an `except` stored, removed or moved in force queues the
   predicates whose mark statements rest on its target (`special/note-mark-reach!`), and a
   write storing a fact on such a predicate queues its row (`integrate/note-premise-spelling!`).
@@ -239,7 +240,9 @@ context:
 `order_independence_test`'s `a-permuting-mark-defeated-below-the-facts-is-read-per-reader`
 pins both readers over sampled arrival orders, and
 `a-defeated-permuting-mark-leaves-each-spelling-as-written` the case where no reader
-believes the mark.
+believes the mark. `a-defeat-below-a-split-fact-moves-no-class-above-it` and
+`a-firing-over-a-split-fact-takes-its-class-per-reader` pin the class each reader reads,
+with a `^:slow` twin of each walking every arrival order.
 
 ## Commuting arguments sorted — the same sort at any arity
 

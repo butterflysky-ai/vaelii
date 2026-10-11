@@ -25,10 +25,11 @@
        (default 25000 facts, ×4, over 400 individuals)."
   (:require [vaelii.bench.postings :as postings]
             [vaelii.core :as v]
+            [vaelii.host.io.generate :as gen]
             [vaelii.impl.disk.backend :as disk]
             [vaelii.impl.disk.index-snapshot :as snap]
-            [vaelii.host.io.generate :as gen]
-            [vaelii.impl.protocols :as p]))
+            [vaelii.impl.protocols :as p]
+            [vaelii.impl.reads :as reads]))
 
 (defn- tmpdir ^String []
   (str (java.nio.file.Files/createTempDirectory
@@ -76,7 +77,7 @@
     (try
       (let [kb    (load! dir facts individuals)
             n     (count (p/sentex-ids (:records kb)))
-            terms (p/term-count (:index kb))
+            terms (reads/stored-term-count-global (:index kb))
             ;; the rebuilt index — every posting on the heap, which is what
             ;; `:disk-columnar` has held since it shipped
             rebuilt (index-heap kb)]

@@ -27,6 +27,7 @@
             [vaelii.impl.overlay.mount :as mount]
             [vaelii.impl.overlay.store :as ostore]
             [vaelii.impl.protocols :as p]
+            [vaelii.impl.reads :as reads]
             [vaelii.kv-backend-test :as kvt]
             [vaelii.test-util :as tu])
   (:import [java.io File]
@@ -391,13 +392,13 @@
       (is (= 1 (v/count-with-functor base 'dog)))
       (is (= n0 (v/count-in-context f 'CxOverlay))
           "the context root too — two records added, two swept, back where it started")
-      (is (= (count (p/sentexes-in-context (:index f) 'CxOverlay))
+      (is (= (count (reads/as-stored-in-context (:index f) 'CxOverlay))
              (v/count-in-context f 'CxOverlay))
           "a count never disagrees with the extent it counts"))
     (v/clear! base)))
 
 (deftest count-children-answers-the-same-on-both-roads-through-the-merge
-  ;; `p/count-children` is the trie's fan-out at a prefix off a *cardinality*, where
+  ;; `reads/stored-count-children` is the trie's fan-out at a prefix off a *cardinality*, where
   ;; `(count (children …))` builds the child set to answer at all — and the planner's cost
   ;; model divides by it once per literal per plan (docs/indexing.md, docs/inference.md).
   ;;
@@ -417,7 +418,7 @@
           ix    (:index f)
           bx    (:index base)
           agree (fn [prefix]
-                  (is (= (count (p/children ix prefix)) (p/count-children ix prefix))
+                  (is (= (count (p/children ix prefix)) (reads/stored-count-children ix prefix))
                       (str "count-children disagrees with the child set it counts at " prefix)))]
       (doseq [o '[Dee Eve]]
         (v/assert f (list 'ownerOf o 'Rex) 'CxOverlay {:strength :monotonic}))
@@ -426,27 +427,27 @@
       (testing "an inherited interior prefix is the base's own answer"
         ;; the fork asserted no `dog`, so nothing was written under this prefix at all
         (agree '[dog])
-        (is (= (p/count-children bx '[dog]) (p/count-children ix '[dog]))))
+        (is (= (reads/stored-count-children bx '[dog]) (reads/stored-count-children ix '[dog]))))
       (testing "a prefix the fork both added children to and removed one from"
         ;; the merged road, and the one that has to take a difference: Ann and Cid
         ;; inherited, Dee and Eve added, Bob tombstoned
         (agree '[ownerOf])
-        (is (= 4 (p/count-children ix '[ownerOf])))
-        (is (= 3 (p/count-children bx '[ownerOf])) "and the base is untouched — Ann, Bob, Cid"))
+        (is (= 4 (reads/stored-count-children ix '[ownerOf])))
+        (is (= 3 (reads/stored-count-children bx '[ownerOf])) "and the base is untouched — Ann, Bob, Cid"))
       (testing "a prefix only the fork has"
         (agree '[likes])
-        (is (= 1 (p/count-children ix '[likes])))
-        (is (zero? (p/count-children bx '[likes])) "the base has never heard of it"))
+        (is (= 1 (reads/stored-count-children ix '[likes])))
+        (is (zero? (reads/stored-count-children bx '[likes])) "the base has never heard of it"))
       (testing "the root, where the fork's new functor widens what the base had"
         (agree [])
-        (is (= (inc (long (p/count-children bx []))) (p/count-children ix []))))
+        (is (= (inc (long (reads/stored-count-children bx []))) (reads/stored-count-children ix []))))
       (testing "a whole sentence is one level above the leaf, and the level below it is the context"
         ;; the trie key ends with the context, so `[ownerOf Dee Rex]` is an interior node
         ;; whose children are the contexts the sentence is stored in — the form a merge
         ;; could most easily get wrong, since the fork's write and the base's live at
         ;; different depths under one predicate
         (agree '[ownerOf Dee Rex])
-        (is (= 1 (p/count-children ix '[ownerOf Dee Rex]))))
+        (is (= 1 (reads/stored-count-children ix '[ownerOf Dee Rex]))))
       (testing "a leaf, an absent prefix and an absent predicate are zero, not a phantom"
         ;; the shapes `index_test` holds the two reads to on a plain backend, asked again
         ;; through the merge — a leaf has a handle under it and no children, and a merge
@@ -456,7 +457,7 @@
                         '[ownerOf Nobody]
                         '[noSuchPredicate]]]
           (agree prefix)
-          (is (zero? (p/count-children ix prefix)) (str prefix)))))
+          (is (zero? (reads/stored-count-children ix prefix)) (str prefix)))))
     (v/clear! base)))
 
 ;; ---- the portable projection ----------------------------------------------
@@ -839,7 +840,7 @@
         forked (fn []
                  (try (let [f (v/open-kb {:backend  :overlay
                                           :base     {:backend :disk-log :dir dir}
-                                          :overlay  (mount/fresh-overlay-opts)
+                                          :overlay  {:backend :memory :space [::fresh-fork (gensym)]}
                                           :recover? false})]
                         (v/clear! f)
                         :mounted)
@@ -1002,6 +1003,28 @@
   (p/clear-records! (mem/memory-record-store (fork-opts n)))
   (p/kv-clear! (mem/memory-kv-backend (fork-opts n)))
   (p/kv-clear! (mount/meta-kv :memory (fork-opts n))))
+
+(deftest closing-an-ephemeral-fork-drops-its-space-and-a-named-one-keeps-it
+  ;; an ephemeral fork's own half lives on a space the engine allocated and handed to no
+  ;; caller, so `close!` drops it; a space the caller named is the remount spelling
+  (let [base   (fresh-base 13)
+        held   #(set (concat (keys @@#'mem/record-spaces) (keys @@#'mem/index-spaces)))
+        before (held)
+        f      (v/fork base)
+        _      (v/assert f '(dog Rex) 'CxOverlay {:strength :monotonic})
+        own    (remove before (held))]
+    (v/close! f)
+    (is (= [true []] [(boolean (seq own)) (vec (remove before (held)))])
+        "the fork held spaces of its own, and close! dropped every one")
+    (is (= '#{(dog Muffet)} (sentences (v/sentexes-matching base '(dog ?x) 'CxOverlay)))
+        "the base is untouched")
+    (clear-fork-space! 14)
+    (let [g (v/fork base (fork-opts 14))]
+      (v/assert g '(dog Rex) 'CxOverlay {:strength :monotonic})
+      (v/close! g)
+      (is (contains? (held) (:space (fork-opts 14))) "a named space outlives the close"))
+    (clear-fork-space! 14)
+    (v/clear! base)))
 
 (defn- fork-over
   "A fork whose base records are `store` — the `:base-stores` road `core/fork` takes,

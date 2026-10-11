@@ -282,6 +282,7 @@
 
 (caches/register-derived
  {:id :Q6 :label "Feed accumulator" :kind :queue :keyed-by :handle :reads [:M2]
+  :holds-content? false
   :retired-by {:settle-exit :Q :recover :Q}
   :computed :settle :imaged? false
   :value (fn [kb] (some-> (:feed kb) deref (select-keys [:region :was-in :delivering?])))

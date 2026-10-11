@@ -18,6 +18,7 @@
             [clojure.test :refer [deftest is testing]]
             [vaelii.core :as v]
             [vaelii.impl.checks :as checks]
+            [vaelii.order-independence-test :as oi]
             [vaelii.test-util :as tu])
   (:import [java.nio.file Files]
            [java.nio.file.attribute FileAttribute]))
@@ -28,15 +29,17 @@
   (when-let [sx (v/sentex kb h)] [(v/sentence-of sx) (:context sx)]))
 
 (defn- reasons
-  "Every justification in `kb` as `[informant conclusion antecedents]`, by content, with
-  the number of justifications each names.  A rule informant reads as its sentence."
+  "Every justification in `kb` as `[informant conclusion antecedents subsumptions]`, by
+  content, with the number of justifications each names.  A rule informant reads as its
+  sentence."
   [kb]
   (frequencies
    (for [h (v/handles kb), j (v/supporting-justifications kb h)]
      (let [inf (:informant j)]
        [(if (integer? inf) (first (content kb inf)) inf)
         (content kb h)
-        (into #{} (map #(content kb %)) (:antecedents j))]))))
+        (into #{} (map #(content kb %)) (:antecedents j))
+        (:subsumptions j)]))))
 
 (defn- shapes
   "`[label base late goal]` over fresh terms: `late` is the shorter route."
@@ -105,6 +108,83 @@
       (is (:believed late-last))
       (is (= late-first late-last)))))
 
+;; ---- two firings over the same facts, the literals swapped --------------------------
+;;
+;; `(kind Xa)` and `(sort Xa)` each reach both literals of `(inspace ?x) ∧ (intime ?x)`, so
+;; four firings conclude `(noted Xa)`: both literals through `kind`, both through `sort`,
+;; and two that pair the two facts with the literals swapped.  The swapped pair share
+;; informant, bindings and facts and differ only in `genl` edges.
+
+(defn- pairing-steps
+  "`[edges facts goal]` over fresh terms; `edges` route each type to both literals."
+  [kind sort inspace intime noted Xa]
+  [[(list 'genl kind inspace) (list 'genl kind intime)
+    (list 'genl sort inspace) (list 'genl sort intime)]
+   [(list kind Xa) (list sort Xa)
+    (list 'set/forwardRule (list 'implies (list 'and (list inspace '?x) (list intime '?x))
+                                 (list noted '?x)))]
+   (list noted Xa)])
+
+(defn- support-of
+  "The justifications of `goal` as `{antecedent-sentences id}`."
+  [kb goal]
+  (into {} (map (fn [j] [(into #{} (map #(first (content kb %))) (:antecedents j)) (:id j)]))
+        (v/supporting-justifications kb (v/handle-of kb goal U))))
+
+(deftest two-firings-that-swap-the-literals-are-both-stored-in-every-order
+  (tu/with-terms [kind sort inspace intime noted Xa]
+    (let [[edges facts goal] (pairing-steps kind sort inspace intime noted Xa)
+          [k s]    (map #(list % Xa) [kind sort])
+          mixed    #{#{k s (list 'genl kind inspace) (list 'genl sort intime)}
+                     #{k s (list 'genl sort inspace) (list 'genl kind intime)}}
+          readings (for [order (oi/permutations facts)]
+                     (tu/with-neutral-kb [kb tu/fresh]
+                       (doseq [x (concat edges order)] (v/assert kb x U {:strength :monotonic}))
+                       [(support-of kb goal) (reasons kb)]))]
+      (is (= 6 (count readings)))
+      (is (every? #(= 4 (count (first %))) readings))
+      (is (every? #(every? (set (keys (first %))) mixed) readings))
+      (is (apply = (map second readings))))))
+
+(deftest a-genlCx-round-trip-leaves-the-justifications-of-swapped-firings-as-they-were
+  ;; the teardown of the edge re-joins the facts under it (`settle-after-teardown!`), which
+  ;; re-derives each firing over `(kind Xa)` and `(sort Xa)`
+  (doseq [flip [identity reverse]]
+    (tu/with-terms [kind sort inspace intime noted Xa Yb CxLeft]
+      (let [[edges [kx sx rule]] (pairing-steps kind sort inspace intime noted Xa)]
+        (tu/with-neutral-kb [kb tu/fresh]
+          (doseq [x (concat [(list 'genl inspace 'thing) (list 'genl intime 'thing)] edges [rule]
+                            (flip [kx sx]))]
+            (v/assert kb x U {:strength :monotonic}))
+          (let [before (tu/justification-ids kb)
+                edge   (v/assert kb (list 'genlCx CxLeft U) U)]
+            (v/assert kb (list kind Yb) CxLeft)
+            (v/retract! kb edge)
+            (v/retract! kb (v/handle-of kb (list kind Yb) CxLeft))
+            (is (= before (tu/justification-ids kb)))))))))
+
+(deftest a-late-shorter-route-replaces-only-the-firing-with-the-same-pairing
+  ;; `kind` reaches `inspace` through `mid` until the direct edge arrives: the firing pairing
+  ;; `(kind Xa)` with `inspace` moves to the direct edge, and the firing pairing `(sort Xa)`
+  ;; with `inspace` keeps its justification
+  (tu/with-terms [kind sort mid inspace intime noted Xa]
+    (let [[edges facts goal] (pairing-steps kind sort inspace intime noted Xa)
+          direct (list 'genl kind inspace)
+          chain  (into [(list 'genl kind mid) (list 'genl mid inspace)] (remove #{direct}) edges)
+          [k s]  (map #(list % Xa) [kind sort])
+          other  #{k s (list 'genl sort inspace) (list 'genl kind intime)}
+          longer #{k s (list 'genl kind mid) (list 'genl mid inspace) (list 'genl sort intime)}]
+      (tu/with-neutral-kb [kb tu/fresh]
+        (doseq [x (concat chain facts)] (v/assert kb x U {:strength :monotonic}))
+        (let [early (support-of kb goal)]
+          (v/assert kb direct U {:strength :monotonic})
+          (let [late (support-of kb goal)]
+            (is (some? (early longer)))
+            (is (some? (early other)))
+            (is (= (early other) (late other)))
+            (is (some? (late #{k s direct (list 'genl sort intime)})))
+            (is (nil? (late longer)))))))))
+
 (defn- round-trip
   "The reasons `load!` leaves in a cleared KB, and those its own text export reloads."
   [load!]
@@ -134,3 +214,23 @@
   (let [[authored reloaded] (round-trip tu/load-starter!)]
     (is (< 600 (reduce + (vals authored))))
     (is (= authored reloaded))))
+
+(deftest two-pairings-over-one-antecedent-set-are-two-justifications
+  ;; `kind` and `sort` reach both literals through one `mid`, so the two firings that swap
+  ;; the literals name the same four edges and the same two facts; the dedup key holds
+  ;; them apart by their subsumptions, and the direct edge arriving last replaces only the
+  ;; firing that pairs `(kind Xa)` with `inspace`
+  (tu/with-terms [kind sort mid inspace intime noted Xa]
+    (let [[_ facts goal] (pairing-steps kind sort inspace intime noted Xa)
+          edges    [(list 'genl kind mid) (list 'genl sort mid)
+                    (list 'genl mid inspace) (list 'genl mid intime)]
+          direct   (list 'genl kind inspace)
+          reading  (fn [steps]
+                     (tu/with-neutral-kb [kb tu/fresh]
+                       (doseq [x steps] (v/assert kb x U {:strength :monotonic}))
+                       [(count (v/supporting-justifications kb (v/handle-of kb goal U)))
+                        (reasons kb)]))
+          readings (map #(reading (concat edges %)) (oi/permutations facts))]
+      (is (every? #(= 4 (first %)) readings))
+      (is (apply = readings))
+      (is (= (reading (concat [direct] edges facts)) (reading (concat edges facts [direct])))))))

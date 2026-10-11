@@ -3,10 +3,9 @@
 (ns vaelii.impl.settle
   "Belief settling: the pass that relabels the TMS and runs the `exceptWhen` re-check
   queue to a joint fixpoint with belief (`pass-work`, `block-work`, `apply-pass!`), the
-  seed readers a pass gathers, `settle-finish` and `settle`.  A pass calls
-  `readings` and `recheck`; what a reader reads of the
-  clashes is `vaelii.impl.clashes`.  The top engine layer, below `vaelii.core`.  See
-  docs/nmtms.md."
+  seed readers a pass gathers, `settle-finish` and `settle`.  A pass calls `recheck`;
+  what a reader reads of the clashes is `vaelii.impl.clashes`.  The top engine layer,
+  below `vaelii.core`.  See docs/nmtms.md."
   (:require [taoensso.trove :as trove]
             [vaelii.impl.chain :as chain]
             [vaelii.impl.checks :as checks]
@@ -321,6 +320,16 @@
           (special/minted-seeds kb (:new mig)))
       [])))
 
+(defn- context-move-seeds
+  "The chaining seeds the pass's `genlCx` moves owe (`special/drain-context-moves!`): the
+  facts they make matchable and the twins and mints their sweeps wrote.  The supersessions
+  the sweeps found are reconciled and the violations reported here."
+  [kb {:keys [seeds mig]}]
+  (when (seq (:superseded mig))
+    (special/refresh-supersessions kb (:superseded mig)))
+  (violations/report kb (:violations mig))
+  (into (vec seeds) (special/minted-seeds kb (:new mig))))
+
 (defn- released-subsumed
   "The mints a record leaving belief or the store no longer lets the KB withhold, as new
   handles to chain from (`special/withheld-releases`).  `withdrawn` is the mints this
@@ -344,12 +353,25 @@
       (violations/report kb (:violations r))
       (special/minted-seeds kb (:new r)))))
 
+(defn- drop-surplus-placements!
+  "Drop the mint justifications `jids` (`special/surplus-placements`, read by
+  `subsumed-blocks`) and delete what the drop sweeps.  Returns `jids` as a vector."
+  [kb jids]
+  (when (seq jids)
+    (let [tms (reasoning/tms kb)]
+      (apply-removals! kb (reduce (fn [acc jid]
+                                    (let [r (jtms/drop-justification! tms jid)]
+                                      (p/delete-justification! (:records kb) jid)
+                                      (merge-with into acc r)))
+                                  nil jids))))
+  (vec jids))
+
 (defn- subsumed-blocks
   "The mint justifications this settle withdraws, and the records they held up:
   `special/subsumed-mint-blocks` over `moved`, the delay of the region's sentexes
   `released-subsumed` reads too."
   [kb moved was-in believed? asked]
-  (or (special/subsumed-mint-blocks kb moved was-in asked believed?)
+  (or (special/subsumed-mint-blocks kb moved was-in asked believed? (not *rebuilding?*))
       {:blocked #{} :withdrawn #{}}))
 
 (defn- defeat-moves
@@ -462,11 +484,44 @@
                                  (into (partners kb x)))))))
               #{} writes))))
 
+(defn- edge-write-seeds
+  "The handles a batch of `genlCx` edge writes can move the belief of at their own
+  contexts, or nil when a write of `writes` is not a `genlCx` edge between two symbols:
+  each one's `special/context-move` names the contexts whose ancestor sets it changes
+  (`:under`) and the contexts it shows or hides (`:moved`, `:raw`).  The seeds are the
+  targets of the defeats and the members of the `contradicts` stored in those contexts,
+  and the nogood candidates stated under the edge, where a placement it gives or takes
+  hides one at its own context (ruling 21)."
+  [kb writes]
+  (let [recs  (:records kb)
+        edge  (fn [[op x]]
+                (let [s (case op
+                          :assert  x
+                          :retract (:sentence (p/get-sentex recs x)))]
+                  (when (and (seq? s) (= 'genlCx (first s)) (= 3 (count s))
+                             (symbol? (second s)) (symbol? (nth s 2)))
+                    [(second s) (nth s 2)])))
+        es    (map edge writes)]
+    (when (and (seq writes) (every? some? es))
+      (let [idx   (:index kb)
+            ms    (map (fn [[a b]] (special/context-move kb a b)) es)
+            under (into #{} (mapcat #(deref (:under %))) ms)
+            ctxs  (into under (mapcat #(concat (:moved %) (:raw %))) ms)
+            named (fn [f] (into [] (comp (keep #(p/get-sentex recs %))
+                                         (mapcat #(rest (:sentence %)))
+                                         (keep sx/handle-id))
+                                (reads/as-stored-with-functor-in idx f ctxs)))]
+        (-> #{}
+            (into (named sx/defeat-functor))
+            (into (named 'contradicts))
+            (into (decide/handles-at (decide/synced kb) under)))))))
+
 (defn belief-before
   "`{handle hidden?}` for every handle what `writes` can move reaches: `kb/moved-reach` of
-  their seeds (`write-seeds`).  For a write no seed set places, or a reach a handle of which
-  moves a placement or queues a watched rule (`special/posts-recheck?`), the reach is that
-  of every standing defeat's target and every placed `contradicts`' members.  The value is
+  their seeds (`write-seeds`, or `edge-write-seeds` for a batch of `genlCx` edges).  For a
+  write no seed set places, or a reach a handle of which moves a placement or queues a
+  watched rule (`special/posts-recheck?`), the reach is that of every standing defeat's
+  target and every placed `contradicts`' members.  The value is
   whether the handle's own context does not believe it now (`exc/own-hidden-fn`); a handle
   the reading does not hold was hidden by no defeat and no conflict."
   [kb writes]
@@ -476,16 +531,18 @@
         reads?     (exc/placed-reads? kb)
         conflicts? (pos? (reads/stored-count-with-functor idx 'contradicts))
         everything #(kb/moved-reach
-                     kb (into (reads/as-stored-named idx sx/defeat-functor)
+                     kb (into (reads/as-stored-named-global idx sx/defeat-functor)
                               (mapcat (fn [c] (keep sx/handle-id (rest (:sentence (p/get-sentex recs c))))))
                               (when conflicts? (reads/as-stored-with-functor idx 'contradicts))))
         ;; a handle that moves no placement nor exemption by leaving, and queues no watched
         ;; rule by moving
         placed?    (fn [s] (and (or (plain-literal? tax s) (contains? '#{contradicts defeat} (nm/functor s)))
                                 (not (special/posts-recheck? kb s))))
-        seeds      (when (or reads? conflicts?) (write-seeds kb writes))
+        edges      (when (or reads? conflicts?) (edge-write-seeds kb writes))
+        seeds      (when (and (nil? edges) (or reads? conflicts?)) (write-seeds kb writes))
         reach      (when (and seeds reads?) (kb/moved-reach kb seeds))
-        reach      (cond (nil? seeds) (when (or reads? conflicts?) (everything))
+        reach      (cond edges        (kb/moved-reach kb edges)
+                         (nil? seeds) (when (or reads? conflicts?) (everything))
                          (not reads?) #{}
                          (and (every? #(or (not= :assert (first %)) (placed? (second %))) writes)
                               (every? #(if-let [sx (p/get-sentex recs %)] (placed? (:sentence sx)) true)
@@ -542,21 +599,28 @@
   (`special/recheck-on-sentence`): a defeat in a target's closure moves in force with the
   target, so its own target and that target's closure are posted too.  The pass drains
   what this queues, and releases a firing the move unblocks from the refusal record
-  (`recheck/released-refusals`).  Reads `region` only while a defeat is stored."
+  (`recheck/released-refusals`).  Reads `region` only while a defeat is stored.  It
+  fetches a record per handle read, or per stored `defeat` where fewer are stored."
   [kb region placed read]
-  (when (reads/stores-any? (:index kb) sx/defeat-functor)
-    (let [recs    (:records kb)
-          fresh   (into [] (remove @read) (concat @region placed))
-          _       (vswap! read into fresh)
-          ds      (into [] (keep #(let [sx (p/get-sentex recs %)]
+  (let [idx (:index kb)
+        nd  (reads/stored-count-at idx [sx/defeat-functor])]
+    (when (pos? nd)
+      (let [recs  (:records kb)
+            fresh (into [] (remove @read) (concat @region placed))
+            _     (vswap! read into fresh)
+            ;; a `recover`'s region is the whole store, and the defeat extent the smaller read
+            cands (if (< nd (count fresh))
+                    (filter (set (reads/as-stored-with-functor idx sx/defeat-functor)) fresh)
+                    fresh)
+            ds    (into [] (keep #(let [sx (p/get-sentex recs %)]
                                     (when (kb/defeat-target (:sentence sx)) sx)))
-                        fresh)]
-      (doseq [sx ds] (special/recheck-defeat-target kb sx))
-      (when (and (seq ds) (seq (reads/watched-rules (:index kb))))
-        (doseq [h (kb/defeat-reach kb (map :id ds) #{})
-                :let [s (p/get-sentex recs h)]
-                :when s]
-          (special/recheck-on-sentence kb (sx/sentence-of s)))))))
+                        cands)]
+        (doseq [sx ds] (special/recheck-defeat-target kb sx))
+        (when (and (seq ds) (seq (reads/watched-rules idx)))
+          (doseq [h (kb/defeat-reach kb (map :id ds) #{})
+                  :let [s (p/get-sentex recs h)]
+                  :when s]
+            (special/recheck-on-sentence kb (sx/sentence-of s))))))))
 
 (defn- revived-seeds
   "The datums `jtms/revived` finds in `region` (the pass's `touched`, as a delay), minus
@@ -613,16 +677,33 @@
     (lost-derivation-seeds kb (special/lost-descended-derivations kb out true))
     []))
 
+(defn- narrow-marker?
+  "Is `t` a withdrawal marker whose re-derivations a settle chains narrowly rather than
+  over the rule's extent: an `except`'s move, chained from the moved target's consequence
+  closure (`special/drain-except-moves!`), or a separation move, re-joined over the types
+  it moved (`separation-rejoins`)?"
+  [t]
+  (boolean (and (map? t) (or (::special/except-closure t) (::special/separation t)))))
+
+(defn- separation-rejoins
+  "`{rule-handle types}` for the rules of the re-check queue `queued` queued with a
+  `{::separation types}` marker, the types of every such marker on one rule merged."
+  [queued]
+  (into {} (keep (fn [[rh ts]]
+                   (when (set? ts)
+                     (when-let [ms (seq (keep ::special/separation ts))]
+                       [rh (into #{} cat ms)]))))
+        queued))
+
 (defn- blanket-recheck-rules
   "The queued rules with no triggering sentence (`:all` or `:all-rejoin`: a taxonomy edge
-  moved, or the rule was just indexed) or with a withdrawal marker other than an
-  `except`'s, whose re-derivations chain from the moved target's consequence closure
-  (`special/drain-except-moves!`).  They take the coarse re-chain, since nothing says
+  moved, or the rule was just indexed) or with a withdrawal marker other than a
+  `narrow-marker?`.  They take the coarse re-chain, since nothing says
   whether the move blocked or released."
   [queued]
   (keep (fn [[rh triggers]]
           (when (or (#{:all :all-rejoin} triggers)
-                    (some #(and (recheck/withdrawal-marker? %) (not (::special/except-closure %)))
+                    (some #(and (recheck/withdrawal-marker? %) (not (narrow-marker? %)))
                           triggers))
             rh))
         queued))
@@ -653,17 +734,16 @@
 
 (defn rechain-owed
   "The rules of the re-check queue `queued` a teardown re-chains over their extent
-  (`rechain-exception-rules`): every one but a rule queued only for an `except`'s move,
-  whose re-derivations chain from the moved target's consequence closure
-  (`special/drain-except-moves!`), and a rule queued only for sentences and except moves
+  (`rechain-exception-rules`): every one but a rule queued only for `narrow-marker?`
+  moves, and a rule queued only for sentences and those moves
   that the settle releases narrowly (`released-narrowly?`): a firing its block refused or
   swept is in the refusal record (`chain/record-swept-firing!`)."
   [kb queued]
   (into [] (keep (fn [[rh ts]]
                    (when-not (and (set? ts) (seq ts)
-                                  (or (every? ::special/except-closure ts)
+                                  (or (every? narrow-marker? ts)
                                       (and (not-any? #(and (recheck/withdrawal-marker? %)
-                                                           (not (::special/except-closure %)))
+                                                           (not (narrow-marker? %)))
                                                      ts)
                                            (released-narrowly? kb rh))))
                      rh)))
@@ -690,8 +770,12 @@
   as an assert pays (docs/nmtms.md, \"A revived datum is a datum the agenda has not
   seen\").  Uses `chain`, not `chain-all`, as `rechain-exception-rules` does."
   [kb seeds]
-  (let [live (filter (fn [h] (and (p/get-sentex (:records kb) h) (jtms/in? (reasoning/tms kb) h)))
-                     seeds)]
+  ;; `distinct`: each genlCx move of a pass seeds the facts its readers see, and on a
+  ;; loaded ontology those are the same facts for every move
+  (let [live (into [] (comp (distinct)
+                            (filter (fn [h] (and (p/get-sentex (:records kb) h)
+                                                 (jtms/in? (reasoning/tms kb) h)))))
+                   seeds)]
     (when (seq live) (chain/chain kb live nil))))
 
 (defn- settle-finish
@@ -710,14 +794,10 @@
         retired  (volatile! [])]     ; the spellings superseded since the last settle
     ;; forces the region only on a timing run (`settle_region_cost_test` counts reads)
     (when (phases/profiling?) (phases/note-region! (count @region)))
-    (if belief-moved?
-      (do (special/reconcile-belief-change kb @region)
-          ;; the reconcile can open or close a cycle (docs/taxonomy.md)
-          (tax/restore-depths (reasoning/taxonomy kb)))
-      ;; a justification added to or dropped from a stored supporter flips no label
-      (when (tax/scoped-reads-held? (reasoning/taxonomy kb))
-        (tax/retire-support-moves! (reasoning/taxonomy kb) @region
-                                   (partial jtms/premise? (reasoning/tms kb)))))
+    (when belief-moved?
+      (special/reconcile-belief-change kb @region)
+      ;; the reconcile can open or close a cycle (docs/taxonomy.md)
+      (tax/restore-depths (reasoning/taxonomy kb)))
     ;; an equality supporter a reconcile found believed again restates its class, as its
     ;; arrival does; `settle` re-seeds the supporter and its twins
     (when-let [hs (tax/take-believed-again! (reasoning/taxonomy kb))]
@@ -819,8 +899,10 @@
 (def ^:private owed
   "The keys of `pass-work` a pass applies whatever the blocked set does: the datums whose
   belief came back, the facts a departed edge owes a re-join, the refusals a constraint
-  no longer convicts, and the mints, lifts and merges owed."
-  [:revived :departed :cfree :mnew])
+  no longer convicts, the mints, lifts and merges owed, and the mint placements a
+  `genlCx` edge displaced (`:dropped`, applied by `pass-work` itself), so the pass after
+  a drop drains what the drop queued."
+  [:revived :departed :cfree :mnew :dropped])
 
 (defn- owes-nothing?
   "Is every key of `ks` empty in the pass work `w`?"
@@ -840,11 +922,15 @@
   ;; pairs they reconcile
   (let [remerge (class-moved-merge-seeds kb region (:merge asked))
         region  (if (seq remerge) (delay (jtms/touched (reasoning/tms kb))) region)
+        ;; the `genlCx` moves since the last pass, each handed to every family it moves
+        ;; (`special/drain-context-moves!`): their re-checks are queued before the drain
+        ;; below, and the placement families read their reach
+        moves   (special/drain-context-moves! kb (:genlcx win) *rebuilding?*)
         ;; the inherited clashes found and placed, before the other families place
-        inh     (phases/with-phase :discovery (chain/place-inherited! kb region))
+        inh     (phases/with-phase :discovery (chain/place-inherited! kb region moves))
         ;; the nogoods whose placement can have moved, placed again; a defeat stored
         ;; there posts its target's re-check before the drain
-        negs    (into inh (when-not *rebuilding?* (chain/place-nogoods! kb region (:negations win))))
+        negs    (into inh (when-not *rebuilding?* (chain/place-nogoods! kb region (:negations win) moves)))
         ;; a defeat stored or relabelled moves its target's belief with no relabel of the
         ;; target, and queues the rules watching it for the drain below
         _       (post-defeat-moves! kb region negs (:defeats win))
@@ -874,6 +960,7 @@
                     (into (released-lifts kb region))
                     (into (revived-mark-seeds kb (into rs back)))
                     (into (except-move-seeds kb))
+                    (into (context-move-seeds kb moves))
                     (into (defeated-derivation-seeds kb out))
                     (into remerge)
                     (into negs))
@@ -891,29 +978,29 @@
         ;; the other direction of the subsumption question: the mints a membership
         ;; arriving this settle has made redundant, whose justifications this pass blocks
         ;; so the sweep collects the records
-        wdrawn  (subsumed-blocks kb rsx was-in believed? (:subsumption asked))]
+        wdrawn  (subsumed-blocks kb rsx was-in believed? (:subsumption asked))
+        ;; the mint placements a `genlCx` edge arriving this settle left below a more
+        ;; general one
+        dropped (drop-surplus-placements! kb (:surplus wdrawn))]
     {:region region :queued queued :revived revived :back back :departed departed
-     :cfree cfree :mnew mnew :wdrawn wdrawn}))
+     :cfree cfree :mnew mnew :wdrawn wdrawn :dropped dropped}))
 
 (defn- guarded-records
-  "The records of the justifications `cands` whose rule is watched (`reads/watched-rule?`):
-  the firings a guard can block."
+  "The records of the rule firings among `cands`: the firings a guard, or a contrary
+  claim of an inherited antecedent, can block."
   [kb cands]
-  (let [idx (:index kb)
-        tms (reasoning/tms kb)]
-    (when (seq (reads/watched-rules idx))
-      (into [] (comp (filter #(when-let [j (jtms/justification tms %)]
-                                (let [inf (:informant j)]
-                                  (and (integer? inf) (reads/watched-rule? idx inf)))))
-                     (keep #(p/get-justification (:records kb) %)))
-            cands))))
+  (let [tms (reasoning/tms kb)]
+    (into [] (comp (filter #(integer? (:informant (jtms/justification tms %))))
+                   (keep #(p/get-justification (:records kb) %)))
+          cands)))
 
 (defn- block-work
   "`w` with what its queued exceptions block: the blocked set as it is (`:was`) and as the
   queue and the withdrawn mints leave it (`:new`), the visibility transitions that owe the
   blanket re-join whether or not anything blocked (`:forced`), the rules an arrival can
   release (`:aggs`), and the refusals the queue released (`:free`, and `:over` for an
-  overflowed rule), and the targets whose guard defeats moved (`:gmoved`)."
+  overflowed rule), the targets whose guard defeats moved (`:gmoved`), and the rules a
+  separation move re-joins over the types it moved (`:sep`)."
   [kb {:keys [queued wdrawn] :as w}]
   (let [was  (jtms/blocked (reasoning/tms kb))
         cands (recheck/exception-candidates kb queued)
@@ -921,18 +1008,19 @@
         ;; the re-decided guarded firings place their guard defeats, before the sweep
         ;; deletes the blocked ones
         gmoved (chain/place-guard-defeats!
-                kb (map (fn [j] [j (not (contains? new (:id j)))]) (guarded-records kb cands)))
+                kb (map (fn [j] [j (not (contains? new (:id j)))]) (guarded-records kb cands))
+                *sweep?*)
         aggs (rejoin-on-arrival-rules kb queued)
         {free :free over :overflow} (recheck/released-refusals kb queued)]
     (assoc w :was was :new new :gmoved gmoved :forced (vec (forced-recheck-rules queued))
-           :aggs aggs :free free :over over)))
+           :aggs aggs :free free :over over :sep (separation-rejoins queued))))
 
 (defn- apply-pass!
   "Block what `w` blocks, sweep what that excepts, and re-chain what the pass owes: the
   released refusals, the revived datums and the mints on one agenda; the departed facts
   silently, as the retraction path's re-join is; and the rules the pass released.
   `asked` takes the mints withdrawn."
-  [kb {:keys [was new wdrawn queued free cfree revived mnew departed aggs over]}
+  [kb {:keys [was new wdrawn queued free cfree revived mnew departed aggs over sep]}
    asked]
   ;; read before the sweep, which deletes justifications — and so are the re-joins the
   ;; withdrawn mints' firings owe (`special/withdrawn-edge-seeds`)
@@ -958,9 +1046,11 @@
       (when wseeds
         (binding [chain/*report-no-placement?* false] (rechain-seeds kb wseeds)))
       ;; only the rules this pass released, never every rule it touched: a rule seed
-      ;; joins over the whole extent
-      (rechain-exception-rules kb (into released (concat (blanket-recheck-rules queued)
-                                                         aggs over swept))))))
+      ;; joins over the whole extent, except a rule a separation move alone queued, which
+      ;; joins over the types it moved
+      (let [full (into (set released) (concat (blanket-recheck-rules queued) aggs over swept))]
+        (binding [chain/*separation-moved* (apply dissoc sep full)]
+          (rechain-exception-rules kb (into full (keys sep))))))))
 
 (defn- settle*
   "Relabel, find the inherited clashes, and re-evaluate the `exceptWhen` exceptions the
@@ -988,16 +1078,17 @@
           ;; withdrew, and the records asked what they trigger (`triggered-seeds`)
           asked  {:subsumption (volatile! #{}) :release (volatile! #{})
                   :merge (volatile! #{}) :withdrawn (volatile! #{}) :trigger (volatile! #{})}
-          ;; the window handles `chain/place-nogoods!` has read, and those whose defeats'
-          ;; watchers the settle posted, across the passes
-          win    {:negations (volatile! #{}) :defeats (volatile! #{})}]
+          ;; the window handles `chain/place-nogoods!` has read, those whose defeats'
+          ;; watchers the settle posted, and the `genlCx` supporter labels the context-move
+          ;; drain read, across the passes
+          win    {:negations (volatile! #{}) :defeats (volatile! #{}) :genlcx (volatile! #{})}]
       (loop [pass 1, moved 0, reseeded #{}, region region]
         (let [w (pass-work kb {:region region :reseeded reseeded :win win :asked asked})]
           (if (and (empty? (:queued w)) (empty? (:blocked (:wdrawn w))) (owes-nothing? w owed))
             (finish-settle kb pass moved (moved? moved))
             (let [w (block-work kb w)]
               (if (and (= (:new w) (:was w))
-                       (owes-nothing? w (into owed [:forced :aggs :free :over :gmoved])))
+                       (owes-nothing? w (into owed [:forced :aggs :free :over :gmoved :sep])))
                 (finish-settle kb pass moved (moved? moved))   ; unproductive pass: converged
                 (do (apply-pass! kb w asked)
                     (if (< pass max-settle-passes)

@@ -21,7 +21,6 @@
             [vaelii.core :as v]
             [vaelii.impl.asp.solve-context :as sc]
             [vaelii.impl.asp.solver :as solver]
-            [vaelii.impl.kv :as kv]
             [vaelii.impl.protocols :as p]
             [vaelii.impl.reads :as reads]
             [vaelii.impl.rules :as rules]
@@ -80,13 +79,12 @@
 
 (deftest a-solve-spelling-joined-onto-a-stored-rule-enters-the-solve-extent
   ;; the solve extent is the rule-extent node `[:solve]`; its count is read off the
-  ;; roots store, since no reader returns the counter itself
+  ;; family method, since no reader returns the counter itself
   (tu/with-neutral-kb [kb tu/fresh]
     (tu/with-terms [p q CxSolve]
       (let [idx      (:index kb)
             solve    (fn [] (reads/as-stored-rules-in idx :solve #{CxSolve}))
-            counter  (fn [] (p/kv-get (kv/roots-backend idx)
-                                      [:rule-extent :count [:solve]]))
+            counter  (fn [] (p/family-count idx :rule-extent [:solve] p/every-context))
             before   (counter)
             r        (list 'implies (list p '?x) (list q '?x))
             h        (v/assert kb r CxSolve)

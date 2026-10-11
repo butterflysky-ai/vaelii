@@ -12,7 +12,14 @@ check fails on two kinds of unregistered state:
   - a field of the `Reasoning` record (`vaelii.impl.types.reasoning`) that no
     `register-derived` form locates with `:at [[:field …]]`;
   - a row id in `scripts/derived-state-features.edn` that no `register-derived` form
-    declares, or one that two features name.
+    declares, or one that two features name;
+  - a `register-derived` form with no `:holds-content? true|false`, or one declaring
+    true that `HOLDS_CONTENT` does not name: such a row holds a sentence the KB holds or
+    would hold outside every store (docs/nmtms.md, "3. Separated state");
+  - a row of kind `:index` or `:cache`, computed at the write or the settle, whose
+    `:reads` do not reach M1 and whose namespace does not implement `IndexStore`, that
+    `OUTSIDE_INDEX` does not name: such a row keeps a belief-free index outside the
+    IndexStore (the same section).
 
 The keys inside a field that holds several rows' entries (`:taxonomy`,
 `:nogood-candidates`) are written from many namespaces under keys that
@@ -81,6 +88,7 @@ NOT_DERIVED: dict[tuple[str, str], str] = {
     ("memory.clj", "record-spaces"): "storage: the in-memory record spaces",
     ("memory.clj", "record-counters"): "storage: the in-memory handle counters",
     ("memory.clj", "index-spaces"): "storage: the in-memory index spaces",
+    ("memory.clj", "engine-space-seq"): "a private space id counter",
     ("naming.clj", "advised"): "a one-time warning set",
     ("observe.clj", "holds"): "the open belief holds by token, the lifecycle of M3",
     ("observe.clj", "neighbour-hits"): "instrumentation: R7's process counters",
@@ -88,7 +96,6 @@ NOT_DERIVED: dict[tuple[str, str], str] = {
     ("observe.clj", "on-add"): "the store observer hooks R9 installs",
     ("observe.clj", "on-remove"): "the store observer hooks R9 installs",
     ("oplog.clj", "dispatch"): "the oplog's replay table",
-    ("overlay/mount.clj", "fork-seq"): "a fork id counter",
     ("profile.clj", "tally"): "instrumentation: the profiler",
     ("rete.clj", "reg-queue"): "the reference queue R9's weak keys are purged through",
     ("settle_phases.clj", "clock"): "instrumentation: the settle phase clock",
@@ -97,12 +104,35 @@ NOT_DERIVED: dict[tuple[str, str], str] = {
     ("types/reasoning.clj", "chain-stats"): "instrumentation: chaining run counts",
 }
 
+# `row id -> what its entries hold`: the rows still holding KB content outside the KB.
+# An entry leaves when its row's content becomes stored sentexes; an entry naming a row
+# that does not declare `:holds-content? true` fails, so the list only shrinks.
+HOLDS_CONTENT: dict[str, str] = {
+    "S5": "refused firings and the `:constraint`, `:lift` and `:mint` entries",
+}
+
+# `row id -> what it indexes`: the rows still holding a belief-free index outside the
+# IndexStore.  Same shrink-only rule as HOLDS_CONTENT.
+OUTSIDE_INDEX: dict[str, str] = {
+    "R9": "the rete matcher's facts by functor and argument, held only under "
+          "`VAELII_RETE=1` or `rete/track!`",
+}
+
+# The row whose entries are the beliefs; a row reading it, directly or through other
+# rows, reads belief.
+BELIEF_ROW = "M1"
+
 STATEFUL_DEF_BODY = re.compile(
     r"^\s*\((?:atom|volatile!|observe/held-atom|held-atom|ref|agent)\b"
     r"|^\s*\((?:java\.util\.concurrent\.[\w.$]+|Atomic\w+|ConcurrentHashMap|WeakHashMap|"
     r"java\.util\.WeakHashMap|java\.util\.LinkedHashMap|LinkedHashMap)\.")
 REGISTER = re.compile(r"\((?:caches/)?register-(?:derived|cache)\b")
 DERIVED = re.compile(r"\((?:caches/)?register-derived\s+\{:id\s+:([A-Z]+\d+)\b")
+HOLDS = re.compile(r":holds-content\?\s+(true|false)\b")
+READS = re.compile(r":reads\s+\[([^\]]*)\]")
+KIND = re.compile(r":kind\s+:([\w-]+)")
+COMPUTED = re.compile(r":computed\s+:([\w-]+)")
+INDEX_STORE_IMPL = re.compile(r"^\s*p/IndexStore\s*$", re.M)
 
 
 def top_level_forms(text: str):
@@ -181,10 +211,14 @@ def main() -> int:
     registered_vars: set[tuple[str, str]] = set()
     located_fields: set[str] = set()
     row_ids: set[str] = set()
+    content_rows: set[str] = set()
+    # row id -> (file:line, reads, kind, computed, owner implements IndexStore)
+    rows: dict[str, tuple[str, list[str], str, str, bool]] = {}
 
     for path in sorted(IMPL.rglob("*.clj")):
         rel = str(path.relative_to(IMPL))
         text = path.read_text()
+        index_store = bool(INDEX_STORE_IMPL.search(text))
         for a, b in top_level_forms(text):
             form = text[a:b]
             line = text.count("\n", 0, a) + 1
@@ -193,7 +227,23 @@ def main() -> int:
                 head, name, body = d
                 if head == "defonce" or STATEFUL_DEF_BODY.search(body):
                     stateful[(rel, name)] = f"{rel}:{line}"
-            row_ids.update(DERIVED.findall(form))
+            for rid in DERIVED.findall(form):
+                row_ids.add(rid)
+                reads, kind, computed = READS.search(form), KIND.search(form), COMPUTED.search(form)
+                rows[rid] = (f"{rel}:{line}",
+                             re.findall(r":([\w-]+)", reads.group(1)) if reads else [],
+                             kind.group(1) if kind else "", computed.group(1) if computed else "",
+                             index_store)
+                h = HOLDS.search(form)
+                if not h:
+                    findings.append(f"{rel}:{line}: row {rid} declares no "
+                                    f"`:holds-content? true|false`")
+                elif h.group(1) == "true":
+                    content_rows.add(rid)
+                    if rid not in HOLDS_CONTENT:
+                        findings.append(f"{rel}:{line}: row {rid} holds KB content outside "
+                                        f"the KB (`:holds-content? true`), and is not in "
+                                        f"HOLDS_CONTENT")
             if REGISTER.search(form):
                 for v in re.findall(r"#'([\w.*+!?<>=/-]+)", form):
                     registered_vars.add((rel, v.split("/")[-1]))
@@ -230,6 +280,27 @@ def main() -> int:
         elif key in registered_vars:
             findings.append(f"NOT_DERIVED names {key[0]} `{key[1]}`, which is registered")
 
+    findings.extend(f"HOLDS_CONTENT names {r}, which no row declaring "
+                    f"`:holds-content? true` is" for r in sorted(HOLDS_CONTENT)
+                    if r not in content_rows)
+
+    def reads_belief(rid: str, seen: frozenset = frozenset()) -> bool:
+        return rid == BELIEF_ROW or (rid in rows and rid not in seen and any(
+            reads_belief(r, seen | {rid}) for r in rows[rid][1]))
+
+    outside: set[str] = set()
+    for rid, (where, reads, kind, computed, index_store) in sorted(rows.items()):
+        if (kind in ("index", "cache") and computed in ("write", "settle")
+                and rid not in content_rows and not index_store
+                and not reads_belief(rid)):
+            outside.add(rid)
+            if rid not in OUTSIDE_INDEX:
+                findings.append(f"{where}: row {rid} keeps a belief-free index at the write "
+                                f"outside the IndexStore, and is not in OUTSIDE_INDEX "
+                                f"(docs/nmtms.md, \"3. Separated state\")")
+    findings.extend(f"OUTSIDE_INDEX names {r}, which is no belief-free index kept outside "
+                    f"the IndexStore" for r in sorted(OUTSIDE_INDEX) if r not in outside)
+
     featured: dict[str, int] = {}
     for vec in re.findall(r":rows\s*\[([^\]]*)\]", re.sub(r";[^\n]*", "", FEATURES.read_text())):
         for r in re.findall(r":([\w-]+)", vec):
@@ -245,7 +316,9 @@ def main() -> int:
     allowed = sum(1 for k in stateful if k in NOT_DERIVED)
     print(f"derived-state: {len(stateful)} stateful defs ({regd} registered, "
           f"{allowed} not derived), {len(fields)} Reasoning fields, "
-          f"{len(row_ids)} rows, {len(featured)} in a feature, "
+          f"{len(row_ids)} rows ({len(content_rows)} holding content, "
+          f"{len(outside)} indexing outside the IndexStore), "
+          f"{len(featured)} in a feature, "
           f"{len(findings)} findings")
     return 1 if findings else 0
 

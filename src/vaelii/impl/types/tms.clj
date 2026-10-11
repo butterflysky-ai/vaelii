@@ -21,6 +21,13 @@
 ;; retracting or defeating a rule withdraws everything it licensed.  The record names the
 ;; rule once, in `informant`; `antecedents` never repeats it (`without-informant`), and
 ;; `rests-on` is the two together.
+;;
+;; `:subsumptions` is an extension key, present on a rule firing that matched a fact to a
+;; literal through `genl` subsumption: the set of `[sub super]` predicate pairs it matched
+;; through (`chain/subsumption-links`).  A firing that matched every literal on its own
+;; key, and every other informant, has none, and pays no slot for it.  Belief does not
+;; read it; the dedup key and the route replacement do (docs/nmtms.md, "Where the layer
+;; stops").
 (defrecord Justification [id informant antecedents consequence bindings strength])
 
 ;; `TmsColumns` is every read and write the network makes of its six fact-scaled

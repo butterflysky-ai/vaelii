@@ -32,11 +32,11 @@
 (def ^:private ^:const F-EXC-P   6)
 (def ^:private ^:const F-ROSTER  7)
 ;; The count tries' nodes, from 8 up: their members are contexts, held as their ids in the
-;; shared dictionary (`ctx-family?`).  `[:argument-root :children [pred pos term]]` rides
+;; shared dictionary (`token-members?`).  `[:argument-root :children [pred pos term]]` rides
 ;; the `(pred, pos)` scope; the other three nodes `[key]` hold `key` in the term field and
 ;; 0 in `pos`.  An argument node's count is not stored: it is the sum of its leaves' sizes
-;; (`node-count`).  The other three counts are vocabulary-scaled, one per predicate or rule
-;; key, and are ordinary counters in the fallback.
+;; (`counted-count`).  The other three counts are vocabulary-scaled, one per predicate or
+;; rule key, and are ordinary counters in the fallback.
 (def ^:private ^:const F-ARG-CTX    8)
 (def ^:private ^:const F-PEXT-CTX   9)
 (def ^:private ^:const F-RULE-A-CTX 10)
@@ -53,7 +53,8 @@
 (def ^:private ^:const F-OPP-IN     16)
 ;; The mint family: the `:mint` trie's leaf `[term ctx]` and its node's children, and the
 ;; `:mint-in` leaf `[ctx]`, a flat posting under the context alone.  The `:mint-in` node's
-;; children and every mint count stay in the fallback, one entry each per context or term.
+;; children and count stay in the fallback, one entry each; a `:mint` node's count is read
+;; off its leaves.
 (def ^:private ^:const F-MINT       17)
 (def ^:private ^:const F-MINT-CTX   18)
 (def ^:private ^:const F-MINT-IN    19)
@@ -61,6 +62,30 @@
 ;; children.
 (def ^:private ^:const F-SELF       20)
 (def ^:private ^:const F-SELF-CTX   21)
+;; The two count tries whose node is several tokens, the taxonomy's supporters (a node is a
+;; taxonomy key such as `[:genl a b]`) and the length bindings (`[pred kind value]`): the
+;; node is interned to the shared dictionary whole, so its leaf rides the context scope
+;; and its children the term field as the one-token nodes do.
+(def ^:private ^:const F-TAX        22)
+(def ^:private ^:const F-TAX-CTX    23)
+(def ^:private ^:const F-ABIND      24)
+(def ^:private ^:const F-ABIND-CTX  25)
+;; The name sets, their members held as ids in the shared dictionary: the keys a handle
+;; installs `[:tax-installs h]`, its term field the handle itself (`raw-term?`); the slot
+;; roster `[:argument-slot pos term]`, its position in `pos`; one family per `[tag name]`
+;; set; and every one-key set `[tag]` under one family, its term the tag.
+(def ^:private ^:const F-TAX-INST   26)
+(def ^:private ^:const F-SLOT       27)
+(def ^:private ^:const F-USLOT      28)
+(def ^:private ^:const F-UKEPT      29)
+(def ^:private ^:const F-UDENIED    30)
+(def ^:private ^:const F-ABKINDS    31)
+(def ^:private ^:const F-SHAPELEN   32)
+(def ^:private ^:const F-SINGLE     33)
+;; The shape trie, whose node `[f n]` is two tokens interned whole as the length bindings'
+;; are: its leaf `[:shape-tuple :handles [f n ctx]]` and its node's children.
+(def ^:private ^:const F-SHAPE      34)
+(def ^:private ^:const F-SHAPE-CTX  35)
 
 (def ^:private roster-key (bit-shift-left (long F-ROSTER) 56))   ; the exception roster, a single posting
 
@@ -175,52 +200,149 @@
 
 (defn- ctx-trie-key
   "`route`'s answer for a key of a count trie whose node is `[key]`: the leaf under
-  `leaf-family`, the node's children under `node-family`, and the count in the fallback."
-  [dict argfam leaf-family node-family k intern?]
+  `leaf-family`, the node's children under `node-family`, and the count — read off the
+  leaves when `counted?`, else a counter in the fallback."
+  [dict argfam leaf-family node-family counted? k intern?]
   (case (nth k 1)
     :handles  (ctx-leaf-key dict argfam leaf-family (nth k 2) intern?)
     :children (fam-key dict node-family 0 (nth (nth k 2) 0) intern?)
+    :count    (if counted? :count :fallback)
     :fallback))
+
+(defn- node-token
+  "The token a several-token node is interned as.  Wrapped, because the shared dictionary
+  keys on Clojure equality and a bare node vector `[pred kind value]` would be one token
+  with a trie path's literal list `(pred kind value)`, so whichever arrived first would
+  decode for both: the wrapper's namespaced head occurs in no sentence."
+  [node]
+  [::node (vec node)])
+
+(defn- node-trie-key
+  "`route`'s answer for a key of a count trie whose node is several tokens, interned whole
+  (`node-token`): the leaf `(conj node ctx)` under `leaf-family` and its context's scope,
+  the node's children under `node-family`, and the count read off the leaves."
+  [dict argfam leaf-family node-family k intern?]
+  (case (nth k 1)
+    :handles  (let [path (vec (nth k 2))]
+                (ctx-leaf-key dict argfam leaf-family [(node-token (pop path)) (peek path)] intern?))
+    :children (fam-key dict node-family 0 (node-token (nth k 2)) intern?)
+    :count    :count
+    :fallback))
+
+(def ^:private routes
+  "Family tag (`kv/index-families`) -> how `route` packs its keys:
+
+  - `[:flat f]` — `[tag name]` under family `f`, a set of handles;
+  - `[:ctx-trie leaf node counted?]` — a count trie whose node is `[key]` (`ctx-trie-key`);
+  - `[:node-trie leaf node]` — a count trie whose node is several tokens
+    (`node-trie-key`);
+  - `[:leaf-only f]` — a count trie whose leaf `[ctx]` packs under `f`, its node and
+    count in the fallback;
+  - `[:arg leaf node]` — the argument trie, its count read off the leaves;
+  - `[:exception f]` — `[tag pred]` under `f`, and the roster key;
+  - `[:names f]` — `[tag name]` under `f`, a set of names;
+  - `[:slot f]` — `[tag pos name]` under `f`, `pos` in the position field, a set of names;
+  - `[:by-handle f]` — `[tag h]` under `f`, the handle in the term field, a set of names;
+  - `[:single f]` — `[tag]` under `f` with the tag as its term, a set of names.
+
+  A name set holds each member as its id in the shared dictionary (`token-members?`).  A
+  family absent from the table, and a `:ctx-trie` count that is not `counted?`, goes to the
+  fallback: the counters, one per predicate, functor, rule key or kind."
+  {:context-root         [:flat F-CTX]
+   :predicate-extent     [:ctx-trie F-PEXT F-PEXT-CTX false]
+   :rule-antecedent      [:ctx-trie F-RULE-A F-RULE-A-CTX false]
+   :rule-consequent      [:ctx-trie F-RULE-C F-RULE-C-CTX false]
+   :rule-extent          [:ctx-trie F-RULE-X F-RULE-X-CTX false]
+   :opposed              [:ctx-trie F-OPP F-OPP-CTX true]
+   :opposed-in           [:flat F-OPP-IN]
+   :mint                 [:ctx-trie F-MINT F-MINT-CTX true]
+   :mint-in              [:leaf-only F-MINT-IN]
+   :self-tuple           [:ctx-trie F-SELF F-SELF-CTX false]
+   :tax-support          [:node-trie F-TAX F-TAX-CTX]
+   :arity-binding        [:node-trie F-ABIND F-ABIND-CTX]
+   :shape-tuple          [:node-trie F-SHAPE F-SHAPE-CTX]
+   :argument-root        [:arg F-ARG F-ARG-CTX]
+   :term-index           [:flat F-TERM]
+   :exception-index      [:exception F-EXC-P]
+   :tax-installs         [:by-handle F-TAX-INST]
+   :argument-slot        [:slot F-SLOT]
+   :unary-slot           [:names F-USLOT]
+   :unary-kept           [:names F-UKEPT]
+   :unary-denied         [:names F-UDENIED]
+   :arity-binding-kinds  [:names F-ABKINDS]
+   :shape-lengths        [:names F-SHAPELEN]
+   :term-roster          [:single F-SINGLE]
+   :unary-multi          [:single F-SINGLE]
+   :unary-kept-types     [:single F-SINGLE]
+   :unary-denied-types   [:single F-SINGLE]
+   :opposed-bodies       [:single F-SINGLE]
+   :mint-terms           [:single F-SINGLE]
+   :rule-antecedent-keys [:single F-SINGLE]
+   :arity-bound          [:single F-SINGLE]})
 
 (defn- route
   "Map a structured index key to its packed long (a `Long`), `:absent` (a read of an
-  unknown term), `:count` (an argument node's count, which is answered from its leaves),
-  or `:fallback` (not an int-routed family — a scalar / counter / unknown)."
+  unknown term), `:count` (a node's count that is answered from its leaves), or
+  `:fallback` (a family `routes` does not pack, a scalar or a counter)."
   [dict argfam k intern?]
   (if-not (vector? k)
     :fallback
-    (case (nth k 0)
-      :context-root (fam-key dict F-CTX  0 (nth k 1) intern?)
-      :predicate-extent (ctx-trie-key dict argfam F-PEXT F-PEXT-CTX k intern?)
-      :rule-antecedent  (ctx-trie-key dict argfam F-RULE-A F-RULE-A-CTX k intern?)
-      :rule-consequent  (ctx-trie-key dict argfam F-RULE-C F-RULE-C-CTX k intern?)
-      :rule-extent      (ctx-trie-key dict argfam F-RULE-X F-RULE-X-CTX k intern?)
-      :opposed          (ctx-trie-key dict argfam F-OPP F-OPP-CTX k intern?)
-      :opposed-in       (fam-key dict F-OPP-IN 0 (nth k 1) intern?)
-      :mint             (ctx-trie-key dict argfam F-MINT F-MINT-CTX k intern?)
-      :mint-in          (if (= :handles (nth k 1))
-                          (fam-key dict F-MINT-IN 0 (nth (nth k 2) 0) intern?)
-                          :fallback)
-      :self-tuple       (ctx-trie-key dict argfam F-SELF F-SELF-CTX k intern?)
-      ;; The `[:argument-slot pos term]` roster stays in the fallback — its members are
-      ;; predicates, not handles.
-      :argument-root (case (nth k 1)
-                       :handles  (arg-key dict argfam F-ARG (nth k 2) intern?)
-                       :children (arg-key dict argfam F-ARG-CTX (nth k 2) intern?)
-                       :count    :count
-                       :fallback)
-      :term-index (fam-key dict F-TERM 0 (nth k 1) intern?)
-      :exception-index (if (= :rules (nth k 1))
-                         roster-key                                         ; already a boxed Long
-                         (fam-key dict F-EXC-P 0 (nth k 1) intern?))
+    (if-let [r (routes (nth k 0))]
+      (case (nth r 0)
+        :flat      (fam-key dict (nth r 1) 0 (nth k 1) intern?)
+        :ctx-trie  (ctx-trie-key dict argfam (nth r 1) (nth r 2) (nth r 3) k intern?)
+        :node-trie (node-trie-key dict argfam (nth r 1) (nth r 2) k intern?)
+        :leaf-only (if (= :handles (nth k 1))
+                     (fam-key dict (nth r 1) 0 (nth (nth k 2) 0) intern?)
+                     :fallback)
+        :arg       (case (nth k 1)
+                     :handles  (arg-key dict argfam (nth r 1) (nth k 2) intern?)
+                     :children (arg-key dict argfam (nth r 2) (nth k 2) intern?)
+                     :count    :count
+                     :fallback)
+        :exception (if (= :rules (nth k 1))
+                     roster-key                                     ; already a boxed Long
+                     (fam-key dict (nth r 1) 0 (nth k 1) intern?))
+        :names     (fam-key dict (nth r 1) 0 (nth k 1) intern?)
+        :slot      (fam-key dict (nth r 1) (nth k 1) (nth k 2) intern?)
+        ;; a handle fits the term field; a probe's non-integer stand-in takes the fallback
+        :by-handle (let [h (nth k 1)]
+                     (if (and (integer? h) (<= 0 (long h) 0xffffffff)) (packed (nth r 1) 0 h) :fallback))
+        :single    (fam-key dict (nth r 1) 0 (nth k 0) intern?))
       :fallback)))
 
-(defn- ctx-family?
-  "Does packed key `pk` hold a node's contexts (token ids) rather than handles?"
+(defn- family-flags
+  "A `boolean-array` indexed by family byte, true at each family `pick` names for a
+  `routes` row."
+  [pick]
+  (let [a (boolean-array 256)]
+    (doseq [r (vals routes), f (pick r)] (aset a (int f) true))
+    a))
+
+(def ^:private token-member-families
+  "True where the family's postings hold token ids rather than handles: the node family
+  of every count trie (its contexts), and every name set."
+  (family-flags (fn [[kind f node]]
+                  (case kind
+                    (:ctx-trie :node-trie :arg) [node]
+                    (:names :slot :by-handle :single) [f]
+                    []))))
+
+(def ^:private counted-node-families
+  "True at the node family of every count trie whose count is read off its leaves."
+  (family-flags (fn [[kind _ node counted?]]
+                  (when (or (#{:node-trie :arg} kind) (and (= :ctx-trie kind) counted?)) [node]))))
+
+(def ^:private raw-term-families
+  "True where the packed key's term field is not a token id, so a snapshot's remap leaves
+  it alone: the exception roster's key, and a handle's installed keys."
+  (doto (boolean-array 256) (aset (int F-ROSTER) true) (aset (int F-TAX-INST) true)))
+
+(defn- token-members?
+  "Does packed key `pk` hold token ids (a node's contexts, a set's names) rather than
+  handles?"
   [^long pk]
-  (let [f (bit-shift-right pk 56)]
-    (or (<= (long F-ARG-CTX) f (long F-RULE-C-CTX)) (== f (long F-RULE-X-CTX))
-        (== f (long F-OPP-CTX)) (== f (long F-MINT-CTX)) (== f (long F-SELF-CTX)))))
+  (aget ^booleans token-member-families (int (bit-shift-right pk 56))))
 
 (defn- unpack
   "The inverse of `route`'s packing: a packed long back to the structured key it stands
@@ -230,12 +352,17 @@
   drop an entry."
   [dict argfam ^long pk]
   (let [family (bit-shift-right pk 56)
-        term   (tok/id-token dict (int (bit-and pk 0xffffffff)))
+        ;; a raw term field is no token id, and decoding it as one could read past the
+        ;; dictionary
+        term   (when-not (aget ^booleans raw-term-families (int family))
+                 (tok/id-token dict (int (bit-and pk 0xffffffff))))
         ;; the scope dictionary is consulted on the way back out, which is what makes this
         ;; the inverse of `route` rather than a partial one: the scope id in `pos` decodes
         ;; to the names the key spells around the term.
         scope  #(tok/id-token argfam (int (bit-and (bit-shift-right pk 32) 0xffffff)))
-        leaf   (fn [tag] [tag :handles [term (nth (scope) 2)]])]
+        leaf   (fn [tag] [tag :handles [term (nth (scope) 2)]])
+        node   #(nth term 1)                             ; a `node-token`'s node
+        nleaf  (fn [tag] [tag :handles (conj (node) (nth (scope) 2))])]
     (case (int family)
       0  [:context-root term]
       1  (leaf :predicate-extent)
@@ -258,7 +385,21 @@
       18 [:mint :children [term]]
       19 [:mint-in :handles [term]]
       20 (leaf :self-tuple)
-      21 [:self-tuple :children [term]])))
+      21 [:self-tuple :children [term]]
+      22 (nleaf :tax-support)
+      23 [:tax-support :children (node)]
+      24 (nleaf :arity-binding)
+      25 [:arity-binding :children (node)]
+      26 [:tax-installs (bit-and pk 0xffffffff)]
+      27 [:argument-slot (bit-and (bit-shift-right pk 32) 0xffffff) term]
+      28 [:unary-slot term]
+      29 [:unary-kept term]
+      30 [:unary-denied term]
+      31 [:arity-binding-kinds term]
+      32 [:shape-lengths term]
+      33 [term]
+      34 (nleaf :shape-tuple)
+      35 [:shape-tuple :children (node)])))
 
 ;; ---- the mapped tail ----------------------------------------------------
 ;; A snapshot's roots are three columns: the packed keys sorted ascending (`mkeys`), the
@@ -300,9 +441,8 @@
       (`argfam-id`).  **Vocabulary-scaled**, bounded by distinct predicates × their
       arities × their contexts, plus one per context.
     - `:fallback` — the backend under everything the routed families do not claim: the
-      term roster and the slot roster, whose members are names rather than handles
-      (`fallback-entries`).  **Vocabulary-scaled**, which is what lets a snapshot write
-      it as one nippy blob.
+      counters keyed by a predicate, functor, rule key or kind (`fallback-entries`).
+      **Vocabulary-scaled**, which is what lets a snapshot write it as one nippy blob.
 
     The heap/mapped split is the caller's to make from the objects — a buffer says
     whether it is direct — so this reports the shape and judges nothing."))
@@ -347,15 +487,9 @@
   [dict ids]
   (into #{} (map #(tok/id-token dict (int %))) ids))
 
-(defn- count-key?
-  "Is `k` an argument node's count, which this backend answers from the node's leaves?"
-  [k]
-  (and (vector? k) (= :argument-root (nth k 0)) (= :count (nth k 1))))
-
-(defn- node-count
+(defn- arg-node-count
   "The count at argument node `[pred pos term]`: the sum of its leaves' sizes, one leaf
-  per context its children posting names.  It is computed rather than stored, so a count
-  cannot disagree with the leaves, and a snapshot carries no column for it."
+  per context its children posting names."
   [this dict argfam m [pred pos term]]
   (let [pair (long (argfam-id dict argfam [pred pos] false))
         tid  (long (tok/token-id dict term))]
@@ -369,12 +503,41 @@
                       (if (neg? sc) n (+ (long n) (long (packed-count this m (packed F-ARG sc tid)))))))
                   0 ids))))))
 
+(defn- ctx-node-count
+  "The count at the node whose term field holds `term`, in a count trie whose leaves ride
+  the context scope: the sum of its leaves' sizes, one per context its children name."
+  [this dict argfam m leaf-family node-family term]
+  (let [tid (long (tok/token-id dict term))]
+    (if (neg? tid)
+      0
+      (let [ids (ctx-ids this m (packed node-family 0 tid))]
+        (if (nil? ids)
+          0
+          (reduce (fn [n id]
+                    (let [c  (tok/id-token dict (int id))
+                          sc (long (argfam-id dict argfam [c 0 c] false))]
+                      (if (neg? sc) n (+ (long n) (long (packed-count this m (packed leaf-family sc tid)))))))
+                  0 ids))))))
+
+(defn- counted-count
+  "The count at `k` when it is a node's count this backend reads off the node's leaves
+  (`route` answers `:count`), else nil.  Computed rather than stored, so a count cannot
+  disagree with the leaves, and a snapshot carries no column for it."
+  [this dict argfam m k]
+  (when (and (vector? k) (= :count (nth k 1 nil)))
+    (when-let [[kind leaf node counted?] (routes (nth k 0))]
+      (case kind
+        :arg       (arg-node-count this dict argfam m (nth k 2))
+        :node-trie (ctx-node-count this dict argfam m leaf node (node-token (nth k 2)))
+        :ctx-trie  (when counted? (ctx-node-count this dict argfam m leaf node (nth (nth k 2) 0)))
+        nil))))
+
 (defn- members
   "The set at `k`, from whichever place the routed families live in."
   [this dict argfam ^Long2ObjectOpenHashMap m fallback k]
   (let [r (route dict argfam k false)]
     (cond
-      (instance? Long r) (if (ctx-family? r)
+      (instance? Long r) (if (token-members? r)
                            (ctx-members dict (ctx-ids this m r))
                            (packed-members this m r))
       (= :fallback r)    (p/kv-members fallback k)
@@ -389,11 +552,38 @@
   [this dict argfam ^Long2ObjectOpenHashMap m fallback k]
   (let [r (route dict argfam k false)]
     (cond
-      (instance? Long r) (if (ctx-family? r)
+      (instance? Long r) (if (token-members? r)
                            (some->> (ctx-ids this m r) (ctx-members dict))
                            (packed-posting this m r))
       (= :fallback r)    (p/kv-members fallback k)
       :else              nil)))                                  ; :absent, :count
+
+;; The writes to a packed key `r`, which `route` has already answered: the methods below
+;; and `kv-batch` share them, so a batch routes each op once.  A node's children and a
+;; name set hold each member as its id in the shared dictionary, interned on the add and
+;; the put and looked up on the remove.  Each write thaws a mapped tail first.
+
+(defn- put-packed! [this dict ^Long2ObjectOpenHashMap m r v]
+  (-thaw-roots! this)
+  (.put m (long r) (reduce postings/padd! (postings/int-postings)
+                           (if (token-members? r) (map #(tok/intern-token! dict %) v) v))))
+
+(defn- delete-packed! [this ^Long2ObjectOpenHashMap m r]
+  (-thaw-roots! this)
+  (.remove m (long r)))
+
+(defn- add-packed! [this dict ^Long2ObjectOpenHashMap m r mem]
+  (-thaw-roots! this)
+  (let [pk (long r)
+        p  (or (.get m pk) (let [p (postings/int-postings)] (.put m pk p) p))]
+    (postings/padd! p (if (token-members? pk) (tok/intern-token! dict mem) mem))))
+
+(defn- remove-packed! [this dict ^Long2ObjectOpenHashMap m r mem]
+  (let [mem (if (token-members? r) (tok/token-id dict mem) mem)]
+    (-thaw-roots! this)
+    (when-let [p (when-not (neg? (long mem)) (.get m (long r)))]
+      (postings/prem! p mem)
+      (when (zero? (postings/pcard p)) (.remove m (long r))))))
 
 (deftype DenseRoots [dict argfam ^Long2ObjectOpenHashMap m fallback
                      ^:unsynchronized-mutable mkeys      ; LongBuffer | nil
@@ -451,14 +641,14 @@
   (snapshot-mapped? [_] (some? mkeys))
 
   ;; The routed families as heap arrays, keys sorted and their term ids taken through
-  ;; `:remap` (an `int[]` from this dictionary's ids to the durable ones).  The roster key
-  ;; holds no term, so it is passed through unmapped.  The columns are read off the live
+  ;; `:remap` (an `int[]` from this dictionary's ids to the durable ones).  A raw term
+  ;; field (`raw-term-families`) is no token id, so it is passed through unmapped.  The columns are read off the live
   ;; representation, so a mapped backend thaws first.
   (snapshot-read [this {remap :remap}]
     (-thaw-roots! this)
     (let [^ints rm remap
           re  (fn ^long [^long pk]
-                (if (= (long F-ROSTER) (bit-shift-right pk 56))
+                (if (aget ^booleans raw-term-families (int (bit-shift-right pk 56)))
                   pk                                      ; no term in it to remap
                   (bit-or (bit-and pk (bit-not 0xffffffff))
                           (long (aget rm (int (bit-and pk 0xffffffff)))))))
@@ -480,9 +670,9 @@
               (let [pk       (aget order i)
                     ^ints ph (postings/pints (.get back pk))
                     base     (aget offs i)]
-                (if (ctx-family? pk)
-                  ;; a node's members are context ids, taken through the same remap as
-                  ;; the keys' term halves and re-sorted, since a mapped probe
+                (if (token-members? pk)
+                  ;; a node's contexts and a set's names are token ids, taken through the
+                  ;; same remap as the keys' term halves and re-sorted, since a mapped probe
                   ;; binary-searches the run
                   (let [^ints rs (int-array (alength ph))]
                     (dotimes [e (alength ph)] (aset rs e (aget rm (aget ph e))))
@@ -503,16 +693,16 @@
   ;; `kv-get` reads the fallback alone, and that is the contract rather than an omission:
   ;; a routed family holds a posting, never a scalar, so `kv-get` on one is nil — which is
   ;; what `dense_routing_test` reads to tell a routed key from a fallback key.  Counters
-  ;; are scalars and route nowhere, so the two increments follow it down.  An argument
-  ;; node's count is the exception: it is `node-count`, read off the leaves, so an
-  ;; increment or decrement stores nothing and replies with the count the leaf write
-  ;; before it in the batch left (`kv/node-adds` orders them so).
+  ;; are scalars and route nowhere, so the two increments follow it down.  A node count read
+  ;; off the leaves is the exception (`counted-count`): an increment or decrement stores
+  ;; nothing and replies with the count the leaf write before it in the batch left
+  ;; (`kv/node-adds` orders them so).
   (kv-get  [this k]
-    (if (count-key? k) (node-count this dict argfam m (nth k 2)) (p/kv-get fallback k)))
+    (if-some [n (counted-count this dict argfam m k)] n (p/kv-get fallback k)))
   (kv-increment [this k]
-    (if (count-key? k) (node-count this dict argfam m (nth k 2)) (p/kv-increment fallback k)))
+    (if-some [n (counted-count this dict argfam m k)] n (p/kv-increment fallback k)))
   (kv-decrement [this k]
-    (if (count-key? k) (node-count this dict argfam m (nth k 2)) (p/kv-decrement fallback k)))
+    (if-some [n (counted-count this dict argfam m k)] n (p/kv-decrement fallback k)))
 
   ;; A whole-posting put and a delete are the two ops the index's own writes never issue
   ;; on a root family — `index-sentex` adds and removes members — so only `kv_backend_test`
@@ -522,39 +712,26 @@
   (kv-put [this k v]
     (let [r (route dict argfam k true)]                          ; intern ⇒ never :absent
       (cond
-        (instance? Long r)
-        (do (-thaw-roots! this)
-            (.put m (long r) (reduce postings/padd! (postings/int-postings)
-                                     (if (ctx-family? r) (map #(tok/intern-token! dict %) v) v))))
-        (= :count r) nil                                         ; read off the leaves
-        :else (p/kv-put fallback k v)))
+        (instance? Long r) (put-packed! this dict m r v)
+        (= :count r)       nil                                   ; read off the leaves
+        :else              (p/kv-put fallback k v)))
     nil)
   (kv-delete [this k]
     (let [r (route dict argfam k false)]
       (cond
-        (instance? Long r) (do (-thaw-roots! this) (.remove m (long r)))
+        (instance? Long r) (delete-packed! this m r)
         (= :fallback r)    (p/kv-delete fallback k)))           ; :absent, :count ⇒ nothing to drop
     nil)
-
-  ;; A node's children posting holds each context as its id in the shared dictionary,
-  ;; interned on the add and looked up on the remove and the probe.
   (kv-add-to-set [this k mem]
     (let [r (route dict argfam k true)]                                 ; intern ⇒ never :absent
       (if (instance? Long r)
-        (let [_  (-thaw-roots! this)                             ; a write leaves the mapped tail
-              pk (long r)
-              p  (or (.get m pk) (let [p (postings/int-postings)] (.put m pk p) p))]
-          (postings/padd! p (if (ctx-family? pk) (tok/intern-token! dict mem) mem)))
+        (add-packed! this dict m r mem)
         (p/kv-add-to-set fallback k mem)))
     nil)
   (kv-remove-from-set [this k mem]
     (let [r (route dict argfam k false)]
       (cond
-        (instance? Long r) (let [mem (if (ctx-family? r) (tok/token-id dict mem) mem)]
-                             (-thaw-roots! this)
-                             (when-let [p (when-not (neg? (long mem)) (.get m (long r)))]
-                               (postings/prem! p mem)
-                               (when (zero? (postings/pcard p)) (.remove m (long r)))))
+        (instance? Long r) (remove-packed! this dict m r mem)
         (= :fallback r)    (p/kv-remove-from-set fallback k mem)))          ; :absent ⇒ nothing to remove
     nil)
   (kv-members [this k] (members this dict argfam m fallback k))
@@ -562,7 +739,7 @@
   ;; has no posting, so `:absent` is a false rather than a lookup
   (kv-member? [this k mem]
     (let [r   (route dict argfam k false)
-          mem (if (and (instance? Long r) (ctx-family? r)) (tok/token-id dict mem) mem)]
+          mem (if (and (instance? Long r) (token-members? r)) (tok/token-id dict mem) mem)]
       (cond
         (and (instance? Long r) (neg? (long mem))) false            ; a context never interned
         (instance? Long r) (if (snapshot-types/snapshot-mapped? this)
@@ -593,10 +770,10 @@
         (= :fallback r)    (p/kv-count fallback k)
         :else              0)))
   ;; The narrowing runs in the postings' own representation (`postings/intersect-postings`),
-  ;; which is what `sentexes-with-args` and `sentexes-with-terms` bottom out in.  A
-  ;; fallback key holds a set of something other than handles, so a list containing one
+  ;; which is what `sentexes-with-args` and `sentexes-with-terms` bottom out in.  A name
+  ;; set or a fallback key holds something other than handles, so a list containing one
   ;; falls back to folding sets — it cannot arise from an index read, only from a caller
-  ;; naming a key this backend does not route.
+  ;; intersecting keys that hold no handles.
   (kv-intersect [this ks]
     (if (empty? ks)
       #{}
@@ -607,49 +784,73 @@
                                  (sort-by count
                                           (map #(if (set? %) % (postings/postings-set %)) ps)))
           :else          (postings/intersect-postings ps)))))
+  ;; Each op is routed once.  A packed op applies in place, in order; the fallback's ops
+  ;; are gathered and handed to it as one batch at the end, which the in-memory fallback
+  ;; folds through one transient (`vaelii.impl.memory`), where an op at a time would copy
+  ;; a path through its map per op.  The two halves touch disjoint keys and no reply of
+  ;; one reads the other — a counted node's count reads the leaves, a fallback counter
+  ;; the fallback — so the replies are the ops' in order.
   (kv-batch [this ops]
-    (mapv (fn [[op k a]]
-            (case op
-              :put  (do (p/kv-put  this k a) nil)
-              :delete  (do (p/kv-delete  this k) nil)
-              :increment (p/kv-increment this k)
-              :decrement (p/kv-decrement this k)
-              :add-to-set (do (p/kv-add-to-set this k a) nil)
-              :remove-from-set (do (p/kv-remove-from-set this k a) nil)
-              ;; the one refusal every adapter spells — see `vaelii.impl.dense-kv`
-              (p/unknown-op! op)))
-          ops))
+    (let [ops (vec ops)
+          n   (count ops)
+          out (object-array n)
+          fb  (java.util.ArrayList.)
+          at  (java.util.ArrayList.)
+          defer! (fn [i o] (.add fb o) (.add at i))]
+      (dotimes [i n]
+        (let [[op k a :as o] (nth ops i)]
+          (case op
+            (:increment :decrement)
+            (if-some [c (counted-count this dict argfam m k)] (aset out i c) (defer! i o))
+            (:put :delete :add-to-set :remove-from-set)
+            (let [r (route dict argfam k (or (identical? op :put) (identical? op :add-to-set)))]
+              (cond
+                (instance? Long r) (case op
+                                     :put             (put-packed! this dict m r a)
+                                     :delete          (delete-packed! this m r)
+                                     :add-to-set      (add-packed! this dict m r a)
+                                     :remove-from-set (remove-packed! this dict m r a))
+                (= :fallback r)    (defer! i o)))                ; :absent, :count ⇒ nothing
+            ;; the one refusal every adapter spells — see `vaelii.impl.dense-kv`
+            (p/unknown-op! op))))
+      (when (pos? (.size fb))
+        (let [rs (p/kv-batch fallback (vec fb))]
+          (dotimes [j (.size at)] (aset out (int (.get at j)) (nth rs j)))))
+      (vec out)))
   ;; The portable projection has to undo *both* of this backend's compressions: the
   ;; interned key (through `unpack`, against the shared dictionary) and the `IntPostings`
   ;; value.  The two sides are enumerated together because a key routed to the fallback
   ;; is as much an index entry as a packed one.
-  ;; A node's children decode from ids to contexts, and each argument node's count, which
-  ;; is not stored, is emitted beside its children so the projection is the flat map's.
+  ;; A node's children and a set's names decode from ids to tokens, and a node count read
+  ;; off the leaves, which is not stored, is emitted beside its children so the
+  ;; projection is the flat map's.
   (kv-entries [this]
     (concat (mapcat (fn [pk]
                       (let [pk  (long pk)
                             k   (unpack dict argfam pk)]
                         (cond
-                          (= (long F-ARG-CTX) (bit-shift-right pk 56))
-                          [[k (ctx-members dict (ctx-ids this m pk))]
-                           [[:argument-root :count (nth k 2)] (node-count this dict argfam m (nth k 2))]]
-                          (ctx-family? pk) [[k (ctx-members dict (ctx-ids this m pk))]]
+                          (aget ^booleans counted-node-families (int (bit-shift-right pk 56)))
+                          (let [ck (assoc k 1 :count)]
+                            [[k (ctx-members dict (ctx-ids this m pk))]
+                             [ck (counted-count this dict argfam m ck)]])
+                          (token-members? pk) [[k (ctx-members dict (ctx-ids this m pk))]]
                           :else            [[k (packed-members this m pk)]])))
                     (if (snapshot-types/snapshot-mapped? this)
                       (map (fn [i] (.get ^LongBuffer mkeys (int i))) (range mn))
                       (iterator-seq (.iterator (.keySet m)))))
             (p/kv-entries fallback)))
-  ;; a node's count entry is dropped: the count is read off the leaves the load installs
+  ;; a node's count entry is dropped: the count is read off the leaves the load installs.
+  ;; The fallback's entries load as one `kv-load`.
   (kv-load [this entries]
     (-thaw-roots! this)
-    (doseq [[k v] entries]
-      (let [r (route dict argfam k true)]                                ; intern ⇒ never :absent
-        (cond
-          (instance? Long r)
-          (.put m (long r) (reduce postings/padd! (postings/int-postings)
-                                   (if (ctx-family? r) (map #(tok/intern-token! dict %) v) v)))
-          (= :count r) nil
-          :else (p/kv-put fallback k v))))
+    (p/kv-load fallback
+               (into [] (keep (fn [[k v :as e]]
+                                (let [r (route dict argfam k true)]      ; intern ⇒ never :absent
+                                  (cond
+                                    (instance? Long r) (do (put-packed! this dict m r v) nil)
+                                    (= :count r)       nil
+                                    :else              e))))
+                     entries))
     nil)
 
   (kv-clear! [_]

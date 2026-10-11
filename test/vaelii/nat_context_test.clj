@@ -86,10 +86,11 @@
   (tu/with-terms [MtFn Story1 likes Tom Ann]
     (v/assert kb (list 'reifiable_function MtFn) 'CxUniverse)
     (let [k (mint kb (list MtFn Story1))]
-      (testing "a raw NAT compound in the context slot is a shape error — the slot is a
-                bare symbol and is never reified (only sentences are)"
-        (is (= :shape
-               (refusal #(v/assert kb (list likes Tom Ann) (list MtFn Story1))))))
+      (testing "a NAT compound in the context slot reifies to a cx/ constant, never to the
+                nat/ constant the argument position minted"
+        (let [c (:context (v/sentex kb (v/assert kb (list likes Tom Ann) (list MtFn Story1))))]
+          (is (nat/reified-context-symbol? c))
+          (is (not= k c))))
       (testing "the minted constant as the context slot is refused by naming (strict)"
         (is (= :naming
                (refusal #(v/assert kb (list likes Tom Ann) k)))))

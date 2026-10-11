@@ -5,9 +5,14 @@
   scratch stores (db 15 = records, 14 = index) and clear them around each test."
   (:require [clojure.test :refer [deftest is testing use-fixtures]]
             [vaelii.core :as v]
+            [vaelii.impl.kb]
+            [vaelii.impl.kv :as kv]
+            [vaelii.impl.overlay.mount :as mount]
             [vaelii.impl.protocols :as p]
+            [vaelii.impl.reads :as reads]
             [vaelii.impl.rules :as rules]
             [vaelii.impl.sentex :as sx]
+            [vaelii.impl.types.dense-roots]
             [vaelii.test-util :as tu]))
 
 (use-fixtures :each (tu/neutral-fresh tu/fresh))
@@ -24,8 +29,8 @@
       (is (= 2 (p/count-at (:index kb) [bornIn tom])))
       (is (= 1 (p/count-at (:index kb) [bornIn tom paris]))))
     (testing "and the width at a level is its own read, agreeing with the child set"
-      ;; `count-children` is what the query planner's cost model divides by, and it is
-      ;; asked once per literal per plan — so it answers off a cardinality rather than
+      ;; `reads/stored-count-children` is what the query planner's cost model divides by,
+      ;; and it is asked once per literal per plan — so it answers off a cardinality rather than
       ;; by building the children (`perf`'s `plan-scaling` is the gate on that).  The
       ;; two must not drift: a width that disagreed with the set it counts would make
       ;; the planner divide by a number the matcher never sees.
@@ -39,13 +44,13 @@
                                                                  ; not in that context
                         [bornIn (tu/tmp-ind)]                    ; absent: no node at all
                         [(tu/tmp-pred)]]]
-          (is (= (count (p/children ix prefix)) (p/count-children ix prefix))
+          (is (= (count (p/children ix prefix)) (reads/stored-count-children ix prefix))
               (pr-str prefix)))
-        (is (= 2 (p/count-children ix [bornIn])))             ; tom and bob
-        (is (= 2 (p/count-children ix [bornIn tom])))         ; paris and rome
-        (is (= 1 (p/count-children ix [bornIn tom paris])))   ; the one context it is in
-        (is (zero? (p/count-children ix [bornIn tom paris 'CxNaturalWorld])))
-        (is (zero? (p/count-children ix [bornIn (tu/tmp-ind)])))))))
+        (is (= 2 (reads/stored-count-children ix [bornIn])))             ; tom and bob
+        (is (= 2 (reads/stored-count-children ix [bornIn tom])))         ; paris and rome
+        (is (= 1 (reads/stored-count-children ix [bornIn tom paris])))   ; the one context it is in
+        (is (zero? (reads/stored-count-children ix [bornIn tom paris 'CxNaturalWorld])))
+        (is (zero? (reads/stored-count-children ix [bornIn (tu/tmp-ind)])))))))
 
 (tu/deftest-kb query-by-context-and-pattern
   (let [bornIn (tu/tmp-pred) tom (tu/tmp-ind) bob (tu/tmp-ind) paris (tu/tmp-ind)]
@@ -114,6 +119,92 @@
       (let [ante (tu/tmp-pred) conseq (tu/tmp-pred)]
         (v/assert-rule kb [(list ante '?x)] (list conseq '?x) 'CxUniverse {:direction :forward})
         (is (= 0 (v/count-with-functor kb conseq)))))))
+
+(tu/deftest-kb the-arity-bindings-follow-the-stored-binding-facts
+  ;; each spelling of a binding posts its `[kind value]` under its predicate, by context;
+  ;; a kind leaves with its last fact and a predicate with its last kind
+  (tu/with-terms [fooOf barOf CxA CxB]
+    (let [idx   (:index kb)
+          M     {:strength :monotonic}
+          kinds #(reads/as-stored-arity-binding-kinds idx %)
+          bound #(into #{} (filter #{fooOf barOf}) (reads/as-stored-arity-bound idx))
+          b1 (v/assert kb (list 'binary_predicate fooOf) CxA M)
+          b2 (v/assert kb (list 'arity fooOf 2) CxB M)
+          m  (v/assert kb (list 'arityMin barOf 2) CxA M)
+          va (v/assert kb (list 'variable_arity barOf) CxA M)]
+      (v/assert kb (list 'not (list 'arity barOf 3)) CxA M)
+      (is (= #{[:exact 2]} (kinds fooOf)) "two spellings of one length are one kind")
+      (is (= #{[:min 2] [:var nil]} (kinds barOf)) "a negation binds nothing")
+      (is (= #{fooOf barOf} (bound)))
+      (is (= #{[b1 :exact 2 CxA] [b2 :exact 2 CxB]}
+             (set (reads/as-stored-arity-bindings-global idx fooOf))))
+      (is (= [[b2 :exact 2 CxB]] (reads/as-stored-arity-bindings idx fooOf #{CxB}))
+          "a read keeps the contexts it is given")
+      (v/retract! kb b1)
+      (is (= #{[:exact 2]} (kinds fooOf)) "the kind stays while a fact states it")
+      (v/retract! kb b2)
+      (is (= #{} (kinds fooOf)))
+      (is (= #{barOf} (bound)) "the predicate leaves with its last kind")
+      (v/retract! kb va)
+      (is (= #{[:min 2]} (kinds barOf)))
+      (v/retract! kb m)
+      (is (= #{} (bound))))))
+
+(tu/deftest-kb the-kept-terms-by-type-follow-the-unary-roster
+  ;; `[:unary-kept t]` lists a term under each predicate of its unary roster while the
+  ;; roster lists two or more, in either polarity; one predicate in two contexts is one
+  (tu/with-terms [dog cat pet Rex Tom CxA CxB]
+    (let [idx  (:index kb)
+          ts   #{dog cat pet}
+          kept (fn [] (into {} (keep (fn [t] (let [xs (reads/as-stored-unary-kept-terms idx t)]
+                                               (when (seq xs) [t xs]))))
+                            ts))
+          listed #(into #{} (filter ts) (reads/as-stored-unary-kept-types idx))
+          a    (fn [s c] (v/assert kb s c))
+          rd   (a (list dog Rex) CxA)
+          _    (is (= {} (kept)) "one predicate keeps no term")
+          rc   (a (list cat Rex) CxA)
+          _    (is (= {dog #{Rex} cat #{Rex}} (kept)))
+          rp   (a (list pet Rex) CxB)
+          rd2  (a (list dog Rex) CxB)
+          _    (is (= {dog #{Rex} cat #{Rex} pet #{Rex}} (kept)))
+          tn   (a (list 'not (list cat Tom)) CxA)
+          td   (a (list dog Tom) CxA)]
+      (is (= {dog #{Rex Tom} cat #{Rex Tom} pet #{Rex}} (kept)) "a denial lists its type")
+      (is (= ts (listed)))
+      (v/retract! kb rc)
+      (is (= {dog #{Rex Tom} cat #{Tom} pet #{Rex}} (kept)) "a third predicate leaving takes one entry")
+      (v/retract! kb rp)
+      (is (= {dog #{Tom} cat #{Tom}} (kept)) "the second leaving takes the term out under both")
+      (is (= #{dog cat} (listed)))
+      (doseq [h [rd rd2 tn td]] (v/retract! kb h))
+      (is (= {} (kept)))
+      (is (= #{} (listed))))))
+
+(tu/deftest-kb the-denied-terms-by-type-follow-the-stored-denials
+  ;; `[:unary-denied t]` lists a term while a `(not (t term))` is stored in any context
+  (tu/with-terms [dog cat Rex Tom CxA CxB]
+    (let [idx    (:index kb)
+          ts     #{dog cat}
+          denied (fn [] (into {} (keep (fn [t] (let [xs (reads/as-stored-unary-denied-terms idx t)]
+                                                 (when (seq xs) [t xs]))))
+                              ts))
+          listed #(into #{} (filter ts) (reads/as-stored-unary-denied-types idx))
+          a      (fn [s c] (v/assert kb s c))
+          da     (a (list 'not (list dog Rex)) CxA)
+          db     (a (list 'not (list dog Rex)) CxB)
+          tc     (a (list 'not (list cat Tom)) CxA)
+          td     (a (list dog Tom) CxA)]
+      (is (= {dog #{Rex} cat #{Tom}} (denied)) "a membership lists nothing")
+      (is (= ts (listed)))
+      (v/retract! kb da)
+      (is (= {dog #{Rex} cat #{Tom}} (denied)) "a denial in another context keeps the term")
+      (v/retract! kb db)
+      (is (= {cat #{Tom}} (denied)))
+      (is (= #{cat} (listed)))
+      (doseq [h [tc td]] (v/retract! kb h))
+      (is (= {} (denied)))
+      (is (= #{} (listed))))))
 
 (tu/deftest-kb the-argument-root-discriminates-by-position
   (let [bornIn (tu/tmp-pred) likes (tu/tmp-pred)
@@ -194,8 +285,8 @@
         (is (rules/forward-sentex? s))
         (is (rules/backward-sentex? s)))
       (testing "and the rule index carries predicates only — no direction mirror"
-        (is (contains? (p/rules-by-antecedent (:index kb) p) h))
-        (is (contains? (p/rules-by-consequent (:index kb) q) h))))))
+        (is (contains? (reads/as-stored-rules-by-antecedent-global (:index kb) p) h))
+        (is (contains? (reads/as-stored-rules-by-consequent-global (:index kb) q) h))))))
 
 (tu/deftest-kb a-re-asserted-wrapper-resolves-the-record-slot
   ;; One sentex, because direction is not in the identity key — the second assert
@@ -213,8 +304,8 @@
     (let [fwd (v/assert-rule kb [(list p '?a)] (list q '?a)
                              'CxUniverse {:direction :forward-only})]
       (testing "a forward-only rule is still findable by what it concludes"
-        (is (contains? (p/rules-by-consequent (:index kb) q) fwd))
-        (is (contains? (p/rules-by-antecedent (:index kb) p) fwd)))
+        (is (contains? (reads/as-stored-rules-by-consequent-global (:index kb) q) fwd))
+        (is (contains? (reads/as-stored-rules-by-antecedent-global (:index kb) p) fwd)))
       (testing "and its direction is on its own record, not inferred from the index"
         (let [s (v/sentex kb fwd)]
           (is (= #{:forward} (:engines s)))
@@ -251,56 +342,56 @@
 (tu/deftest-kb an-exception-is-posted-under-every-predicate-it-mentions
   (tu/with-terms [flightless_bird adult]
     (let [idx (:index kb) h 4001]
-      (p/index-exception idx h [flightless_bird adult])
+      (rules/index-exception idx h [flightless_bird adult])
       (testing "the rule is findable from each predicate its exception mentions"
-        (is (contains? (p/rules-with-exception-on idx flightless_bird) h))
-        (is (contains? (p/rules-with-exception-on idx adult) h)))
+        (is (contains? (reads/watched-rules-on idx flightless_bird) h))
+        (is (contains? (reads/watched-rules-on idx adult) h)))
       (testing "and lands in the roster the taxonomy trigger enumerates"
-        (is (contains? (p/exception-rules idx) h))))))
+        (is (contains? (reads/watched-rules idx) h))))))
 
 (tu/deftest-kb the-roster-accumulates-across-rules
   (tu/with-terms [penguin ostrich]
     (let [idx (:index kb) h1 4002 h2 4003]
-      (p/index-exception idx h1 [penguin])
-      (p/index-exception idx h2 [ostrich])
-      (is (= #{h1 h2} (p/exception-rules idx)))
+      (rules/index-exception idx h1 [penguin])
+      (rules/index-exception idx h2 [ostrich])
+      (is (= #{h1 h2} (reads/watched-rules idx)))
       (testing "handles keep their type through nippy — ints, not strings"
-        (is (every? integer? (p/exception-rules idx)))))))
+        (is (every? integer? (reads/watched-rules idx)))))))
 
 (tu/deftest-kb unindexing-clears-every-predicate-key-and-the-roster
   (tu/with-terms [flightless_bird adult]
     (let [idx (:index kb) h 4004]
-      (p/index-exception idx h [flightless_bird adult])
-      (p/unindex-exception! idx h [flightless_bird adult])
-      (is (empty? (p/rules-with-exception-on idx flightless_bird)))
-      (is (empty? (p/rules-with-exception-on idx adult)))
-      (is (empty? (p/exception-rules idx))))))
+      (rules/index-exception idx h [flightless_bird adult])
+      (rules/unindex-exception! idx h [flightless_bird adult])
+      (is (empty? (reads/watched-rules-on idx flightless_bird)))
+      (is (empty? (reads/watched-rules-on idx adult)))
+      (is (empty? (reads/watched-rules idx))))))
 
 (tu/deftest-kb a-predicate-no-exception-mentions-is-empty
   (tu/with-terms [penguin sickChild]
     (let [idx (:index kb)]
       (testing "an index with nothing registered answers empty, not nil"
-        (is (= #{} (p/rules-with-exception-on idx penguin)))
-        (is (= #{} (p/exception-rules idx))))
-      (p/index-exception idx 4005 [penguin])
+        (is (= #{} (reads/watched-rules-on idx penguin)))
+        (is (= #{} (reads/watched-rules idx))))
+      (rules/index-exception idx 4005 [penguin])
       (testing "and a predicate no exception mentions stays empty"
-        (is (= #{} (p/rules-with-exception-on idx sickChild)))))))
+        (is (= #{} (reads/watched-rules-on idx sickChild)))))))
 
 (tu/deftest-kb two-rules-can-share-an-exception-predicate
   ;; the set-membership case: unindexing one must not DEL the shared key and take
   ;; the other rule's registration with it.
   (tu/with-terms [penguin adult]
     (let [idx (:index kb) h1 4006 h2 4007]
-      (p/index-exception idx h1 [penguin adult])
-      (p/index-exception idx h2 [penguin])
+      (rules/index-exception idx h1 [penguin adult])
+      (rules/index-exception idx h2 [penguin])
       (testing "both are found under the shared predicate"
-        (is (= #{h1 h2} (p/rules-with-exception-on idx penguin))))
-      (p/unindex-exception! idx h1 [penguin adult])
+        (is (= #{h1 h2} (reads/watched-rules-on idx penguin))))
+      (rules/unindex-exception! idx h1 [penguin adult])
       (testing "removing one leaves the other reachable"
-        (is (= #{h2} (p/rules-with-exception-on idx penguin)))
-        (is (= #{h2} (p/exception-rules idx))))
+        (is (= #{h2} (reads/watched-rules-on idx penguin)))
+        (is (= #{h2} (reads/watched-rules idx))))
       (testing "and the predicate only the removed rule mentioned is now empty"
-        (is (empty? (p/rules-with-exception-on idx adult)))))))
+        (is (empty? (reads/watched-rules-on idx adult)))))))
 
 (tu/deftest-kb unindex-cleans-up
   (let [bornIn (tu/tmp-pred) tom (tu/tmp-ind) paris (tu/tmp-ind)
@@ -310,3 +401,199 @@
     (p/unindex-sentex! (:index kb) s h)
     (is (= 0 (p/count-at (:index kb) [])))
     (is (empty? (v/sentexes-matching kb (list bornIn tom paris) 'CxNaturalWorld)))))
+
+;; ---- the family registry ------------------------------------------------
+
+(deftest every-key-the-starter-writes-names-a-registry-row-with-a-class
+  ;; Its own memory KB, whatever backend the suite runs on: the registry is the key
+  ;; shapes `KvIndexStore` writes, and `index-entries` on the memory store is that map.
+  (let [kb   (doto (v/open-kb {:backend :memory :space [::families] :recover? false})
+               (tu/clear-kb!)
+               (tu/load-starter!))
+        tags (into #{} (map (comp first key)) (p/index-entries (:index kb)))]
+    (is (< 10 (count tags)))
+    (is (empty? (remove kv/index-families tags)) "a family the registry lacks")
+    (doseq [[tag row] kv/index-families]
+      (is (#{:access-path :scan-recoverable :sole-witness} (:class row)) (str tag))
+      (is (map? (:class-evidence row)) (str tag))
+      (when-let [r (:root row)] (is (contains? kv/index-families r) (str tag " root " r)))
+      (doseq [t (get-in row [:class-evidence :oracle])]
+        (is (requiring-resolve t) (str tag "'s oracle " t))))
+    (is (every? #(seq (get-in kv/index-families [% :class-evidence :oracle]))
+                (keep (fn [[tag row]] (when (= :access-path (:class row)) tag)) kv/index-families)))
+    (is (empty? (remove kv/index-families (keys @#'vaelii.impl.types.dense-roots/routes)))
+        "the columnar roots route a family the registry lacks")
+    (tu/clear-kb! kb)))
+
+;; ---- the family methods ---------------------------------------------------
+
+(defmacro ^:private delegating-index
+  "A `reify` of every `IndexStore` method, each forwarding to `target`: an implementer
+  that reaches the index through the protocol alone."
+  [target]
+  (let [t (gensym "target")]
+    `(let [~t ~target]
+       (reify p/IndexStore
+         ~@(for [{:keys [name arglists]} (vals (:sigs p/IndexStore))
+                 args arglists
+                 :let [params (into ['_] (map #(gensym (str %))) (rest args))]]
+             `(~name ~params (~(symbol "vaelii.impl.protocols" (str name)) ~t ~@(rest params))))))))
+
+(defn- family-reading
+  "What the starter KB in `kb` answers for the taxonomy, the mints and the supporters."
+  [kb]
+  (let [ix    (:index kb)
+        recs  (:records kb)
+        edges (keep #(let [s (:sentence (p/get-sentex recs %))]
+                       (when (and (seq? s) (= 3 (count s))) (vec (rest s))))
+                    (reads/as-stored-with-functor ix 'genl))]
+    {:edges      (count edges)
+     :genls      (into {} (map (fn [[a _]] [a (v/genls kb a)])) edges)
+     :mint-terms (reads/as-stored-mint-terms ix)
+     :supporters (into {} (map (fn [[a b]] [[a b] (set (keys (reads/as-stored-supporters-global ix [:genl a b])))]))
+                       edges)}))
+
+(deftest an-index-store-reached-through-the-protocol-answers-the-families
+  ;; Two memory KBs of their own, whatever backend the suite runs on: one over the
+  ;; `KvIndexStore` the memory arm builds, one over a `reify` delegating every protocol
+  ;; method to it, so no code can reach the store past the protocol.
+  (let [arms    @#'vaelii.impl.kb/index-arms
+        open    (fn [space wrap]
+                  (with-redefs-fn {#'vaelii.impl.kb/index-arms
+                                   (update arms :memory (fn [arm] (fn [o s] (wrap (arm o s)))))}
+                    #(doto (v/open-kb {:backend :memory :space space :recover? false})
+                       (tu/clear-kb!))))
+        plain   (open [::plain] identity)
+        wrapped (open [::wrapped] #(delegating-index %))]
+    (try
+      ;; The starter dump holds mints only under the entailing reading, so the dump both KBs
+      ;; import adds one declared fact asserted under it, and the mint-terms row is
+      ;; non-empty in every sweep.  The pair is asserted before the import: an assert into
+      ;; `wrapped` runs a taxonomy probe, which refuses its store.
+      (let [dump (tu/with-terms [rel big_thing Ann Bob]
+                   (#'tu/build-dump "vaelii-index-families-"
+                                    (assoc tu/starter-build-space :space [::dump])
+                                    (fn [kb]
+                                      (tu/load-starter! kb)
+                                      (tu/with-entailing
+                                        (v/assert kb (list 'arg rel 1 big_thing) 'CxCore)
+                                        (v/assert kb (list rel Ann Bob) 'CxCore)))))]
+        (doseq [kb [plain wrapped]] (v/import! kb dump {:belief? true})))
+      (let [want (family-reading plain)]
+        (is (pos? (:edges want)))
+        (is (seq (:mint-terms want)))
+        (is (= want (family-reading wrapped)))
+        (is (= :unforkable-index
+               (try (mount/fork-families (:index wrapped)) nil
+                    (catch clojure.lang.ExceptionInfo e (:type (ex-data e)))))
+            "a taxonomy probe refuses a store keeping no family backend"))
+      (finally (tu/clear-kb! plain) (tu/clear-kb! wrapped)))))
+
+(tu/deftest-kb the-family-methods-answer-each-shape-alike-on-every-backend
+  ;; Each configuration the matrix selects (the nine backends and the overlay) runs this
+  ;; table against the same literal answers, so the configurations agree on it.
+  (tu/with-terms [rel Tom Ann CxA CxB]
+    (let [ix (:index kb)
+          E  p/every-context
+          h1 (v/assert kb (list rel Tom Ann) CxA)
+          h2 (v/assert kb (list rel Tom Tom) CxB)
+          h3 (v/assert kb (list rel Ann Tom) CxA)
+          as (fn [x] (if (coll? x) (set x) x))]
+      (doseq [[read want]
+              [[[:family-count :trie [rel] E] 3]
+               [[:family-count :trie [rel Tom] E] 2]
+               [[:family-count :trie [rel Tom Ann] #{CxA CxB}] 1]
+               [[:family-children :trie [rel] E] #{Tom Ann}]
+               [[:family-child-count :trie [rel]] 2]
+               [[:family-leaf :trie [rel Tom Ann CxA]] #{h1}]
+               [[:family-member? :trie [rel Tom Ann CxA] h1] true]
+               [[:family-handles :trie [rel Tom Ann] #{CxA CxB}] #{h1}]
+               [[:family-count :predicate-extent [rel] E] 3]
+               [[:family-count :predicate-extent [rel] #{CxA}] 2]
+               [[:family-children :predicate-extent [rel] E] #{CxA CxB}]
+               [[:family-children :predicate-extent [rel] #{CxB}] #{CxB}]
+               [[:family-child-count :predicate-extent [rel]] 2]
+               [[:family-leaf :predicate-extent [rel CxA]] #{h1 h3}]
+               [[:family-member? :predicate-extent [rel CxB] h2] true]
+               [[:family-handles :predicate-extent [rel] #{CxA}] #{h1 h3}]
+               [[:family-handles :predicate-extent [rel] E] #{h1 h2 h3}]
+               [[:family-count :argument-root [rel 1 Tom] E] 2]
+               [[:family-handles :argument-root [rel 2 Tom] E] #{h2 h3}]
+               [[:family-handles :self-tuple [rel] E] #{h2}]
+               [[:family-leaf :argument-slot [1 Tom]] #{rel}]
+               [[:family-member? :argument-slot [2 Ann] rel] true]
+               [[:family-child-count :argument-slot [1 Tom]] 1]
+               [[:family-count :argument-slot [1 Tom] E] 1]
+               [[:family-leaf :context-root [CxA]] #{h1 h3}]
+               [[:family-handles :context-root [] #{CxA CxB}] #{h1 h2 h3}]
+               [[:family-count :context-root [] #{CxA CxB}] 3]
+               [[:family-count :shape-tuple [rel 2] E] 3]
+               [[:family-handles :shape-tuple [rel 2] #{CxB}] #{h2}]
+               [[:family-leaf :shape-lengths [rel]] #{2}]
+               [[:family-leaf :term-index [Ann]] #{h1 h3}]
+               [[:family-member? :term-roster [] Ann] true]]]
+        (is (= want (as (apply (ns-resolve 'vaelii.impl.protocols (symbol (name (first read))))
+                               ix (rest read))))
+            (pr-str read)))
+      (doseq [m [#(p/family-count ix :predicate-extent [rel] nil)
+                 #(p/family-children ix :trie [rel] nil)
+                 #(p/family-handles ix :argument-root [rel 1 Tom] nil)]]
+        (is (= :bad-args (try (m) nil (catch clojure.lang.ExceptionInfo e (:type (ex-data e)))))
+            "nil is never every context"))
+      (is (= [true true false false]
+             (map #(set? (apply p/family-children ix %))
+                  [[:trie [rel] E] [:predicate-extent [rel] E]
+                   [:trie [rel] #{CxA}] [:predicate-extent [rel] #{CxA}]]))
+          "every context answers a set, a context set a vector")
+      (is (= :bad-args
+             (try (p/family-apply! ix [[:retire :context-root [p/any-context] h1]]) nil
+                  (catch clojure.lang.ExceptionInfo e (:type (ex-data e)))))
+          "a flat set's retire names its context"))))
+
+(defn- family-state
+  "What a `:mint` leaf under `t` in `c` and its node and root roster, and the `:tax-installs`
+  set of `h`, hold."
+  [ix t c h]
+  {:leaf     (p/family-leaf ix :mint [t c])
+   :count    (p/family-count ix :mint [t] p/every-context)
+   :children (set (p/family-children ix :mint [t] p/every-context))
+   :root     (p/family-member? ix :mint-terms [] t)
+   :installs (into #{} (map #(if (= t %) :t %)) (p/family-leaf ix :tax-installs [h]))})
+
+(tu/deftest-kb a-family-batch-equals-its-ops-applied-one-at-a-time
+  ;; Every pair and triple of post, retire and a retire from any context of one handle on
+  ;; one count-trie leaf and one flat set, from three starting states, applied as one batch
+  ;; to one leaf and one call at a time to another; handles past any record's, removed after.
+  (let [ix    (:index kb)
+        c     (tu/tmp-ctx)
+        h     2000000001
+        other 2000000002
+        steps [:post :retire :retire-any]
+        seqs  (concat (for [a steps b steps] [a b]) (for [a steps b steps d steps] [a b d]))
+        ops   (fn [t inst step]
+                (case step
+                  :post       [[:post :mint [t c] h] [:post :tax-installs [inst] t]]
+                  :retire     [[:retire :mint [t c] h] [:retire :tax-installs [inst] t]]
+                  :retire-any [[:retire :mint [t p/any-context] h] [:retire :tax-installs [inst] t]]))
+        n     (atom 0)]
+    (doseq [start [[] [:post] [:other]]
+            sq    seqs]
+      (let [i      (swap! n + 2)
+            [ta tb] [(tu/tmp-ind) (tu/tmp-ind)]
+            [ia ib] [(+ 2000000100 i) (+ 2000000101 i)]
+            init   (fn [t inst] (case (first start)
+                                  :post  (p/family-apply! ix (ops t inst :post))
+                                  :other (p/family-apply! ix [[:post :mint [t c] other]])
+                                  nil))
+            _      (init ta ia)
+            _      (init tb ib)
+            batch  (p/family-apply! ix (into [] (mapcat #(ops ta ia %)) sq))
+            single (into [] (mapcat #(p/family-apply! ix (ops tb ib %))) sq)]
+        (is (= single batch) (pr-str start sq))
+        (is (= (family-state ix tb c ib) (family-state ix ta c ia)) (pr-str start sq))
+        (doseq [[t inst] [[ta ia] [tb ib]]]
+          (p/family-apply! ix [[:retire :mint [t c] h] [:retire :mint [t c] other]
+                               [:retire :tax-installs [inst] t]])
+          (is (= {:leaf #{} :count 0 :children #{} :root false :installs #{}}
+                 (family-state ix t c inst))
+              "nothing is left filed"))))))

@@ -1,6 +1,8 @@
 ;; CxSocial — theory over the social relations: what acquaintance follows from,
-;; and how employment relates to membership. Sees the shared upper ontology via
-;; CxUniverse; CxWell sees it.
+;; how employment relates to membership, and the general relationship and
+;; dwelling vocabulary over two persons. Sees the shared upper ontology via
+;; CxUniverse; CxWell sees it. CxSocialExtension, an opt-in extension below it,
+;; states the relationship and plural-identity vocabulary narrower than this.
 ;;
 ;; Every rule here runs one way only. `knows` is deliberately not symmetric — a great
 ;; many people know someone who does not know them — so friendship and marriage, which
@@ -19,3 +21,99 @@
 ;; Employment is one way of belonging to a body of people; belonging is not a way of
 ;; being employed by it, so there is no converse rule.
 (set/forwardRule (implies (and (worksFor ?x ?o)) (memberOf ?x ?o)))
+
+;; ---- relationships: family, romance, work ---------------------------------
+;; relativeOf, coworkerOf and roommateOf each specialize knows, the way friendOf
+;; and marriedTo do above; romanticPartnerOf specializes friendOf. No edge
+;; relates marriedTo to romanticPartnerOf: friendOf and marriedTo reach knows
+;; by separate rules above because this theory does not claim every marriage
+;; is a friendship, and a marriedTo-under-romanticPartnerOf-under-friendOf
+;; chain would carry marriedTo there too, leaving the marriedTo rule covered
+;; by the friendOf rule
+;; (ontology_test/no-shipped-rule-is-covered-by-another). originatorOf is read
+;; by the rule below from parentOf, guarded to two persons: the shipped
+;; parentOf relates any two organisms, and originatorOf relates two persons
+;; specifically.
+
+(comment relativeOf
+         "(relativeOf ?x ?y) means ?x and ?y are family: related by birth or by choice.")
+(set/monotonic (instance_relation_predicate relativeOf))
+(set/monotonic (symmetric relativeOf))
+(arg relativeOf 1 person)
+(arg relativeOf 2 person)
+(genl relativeOf knows)
+
+(comment romanticPartnerOf
+         "(romanticPartnerOf ?x ?y) means ?x and ?y are in a romantic relationship: dating, life partnership, or any other romantic connection.")
+(set/monotonic (instance_relation_predicate romanticPartnerOf))
+(set/monotonic (symmetric romanticPartnerOf))
+(arg romanticPartnerOf 1 person)
+(arg romanticPartnerOf 2 person)
+(genl romanticPartnerOf friendOf)
+
+(comment coworkerOf "(coworkerOf ?x ?y) means ?x and ?y work together.")
+(set/monotonic (instance_relation_predicate coworkerOf))
+(set/monotonic (symmetric coworkerOf))
+(arg coworkerOf 1 person)
+(arg coworkerOf 2 person)
+(genl coworkerOf knows)
+
+(comment roommateOf
+         "(roommateOf ?x ?y) means ?x and ?y live together. Does not imply romantic involvement.")
+(set/monotonic (instance_relation_predicate roommateOf))
+(set/monotonic (symmetric roommateOf))
+(arg roommateOf 1 person)
+(arg roommateOf 2 person)
+(genl roommateOf knows)
+
+(comment originatorOf
+         "(originatorOf ?originator ?originated) means ?originator brought ?originated into being. Read by the rule below from parentOf when both are persons.")
+(set/monotonic (instance_relation_predicate originatorOf))
+(set/monotonic (asymmetric originatorOf))
+(arg originatorOf 1 person)
+(arg originatorOf 2 person)
+(genl originatorOf relativeOf)
+
+;; Backward: read on demand (query), not materialized over every parentOf pair the
+;; moment one end's personhood is known.
+(set/backwardRule
+  (implies (and (parentOf ?p ?c) (person ?p) (person ?c))
+           (originatorOf ?p ?c)))
+
+(comment relationshipLabel
+         "(relationshipLabel ?namer ?named ?label) means ?namer calls their relationship with ?named by ?label. Perspectival: the label ?named would give the same relationship need not be the same string.")
+(ternary_predicate relationshipLabel)
+(arg relationshipLabel 1 person)
+(arg relationshipLabel 2 person)
+(quotedArg relationshipLabel 3 string)
+
+;; ---- dwellings --------------------------------------------------------------
+;; A dwelling is a residential unit: a house, an apartment, a room, not a city or a
+;; country. An apartment and a room are parts of a building and not buildings, so a
+;; dwelling is a container, CxAbstract's, and container's disjoints carry it clear of
+;; organism, substance and person. A detached house is a dwelling and a building at
+;; once, and a motorhome a dwelling and a vehicle (the orthogonals below). dwellsIn is a
+;; spec of livesIn restricted to a human and a dwelling specifically; two different
+;; people who dwell in the same one are roommates by the rule below.
+
+(comment dwelling
+         "A residential unit: a house, an apartment, a room. Not a city or a country.")
+(genl dwelling container)
+(disjoint dwelling clothing)
+(disjoint dwelling furniture)
+(disjoint dwelling tool)
+;; A detached house is a dwelling and a building, and a motorhome a dwelling and a vehicle.
+;; Demolition ends the house as both, and scrapping ends the motorhome as both.
+(orthogonal dwelling building)
+(orthogonal dwelling vehicle)
+
+(comment dwellsIn
+         "(dwellsIn ?person ?dwelling) means ?person lives in ?dwelling specifically. Derives roommateOf for two different people who dwell in the same one.")
+(set/monotonic (instance_relation_predicate dwellsIn))
+(arg dwellsIn 1 human)
+(arg dwellsIn 2 dwelling)
+(genl dwellsIn livesIn)
+
+(set/forwardRule
+  (implies (and (dwellsIn ?x ?d) (dwellsIn ?y ?d) (different ?x ?y))
+           (roommateOf ?x ?y)))

@@ -24,6 +24,7 @@
   (:require [clojure.set :as set]
             [clojure.test :refer [deftest is testing]]
             [vaelii.impl.caches :as caches]
+            [vaelii.impl.observe :as observe]
             [vaelii.impl.taxonomy :as tax]))
 
 (def ^:private lattice-handles
@@ -78,17 +79,17 @@
       (is (nil? (tax/visible-ctxs t :genl 'CxW))
           "W sees CxE now, so it sees every asserting context again"))))
 
-(deftest the-filtered-descendant-sets-hold-the-contexts-read-since-the-visibility-moved
-  ;; `context-down` memoizes one filtered set per context under the visibility
-  ;; generation, and a move of that generation starts the map again
+(deftest the-filtered-descendant-sets-hold-the-contexts-read-since-the-change-clock-moved
+  ;; `context-down` memoizes one filtered set per context and reading under the change
+  ;; clock, and a move of the clock starts the map again
   (let [t     (lattice)
         by-ctx #(get-in @(:closure-memo @t) [:genlCx :down-vis :by-ctx])]
     (tax/install-supporter-visibility! t (constantly (seq {:excepted #{903}})) (fn [_ _] true))
     (doseq [c '[CxU CxA CxB CxW CxE]] (tax/context-down t c))
     (is (= 5 (count (by-ctx))) "the premise: one set per context read")
-    (tax/note-supporter-visibility-change! t)
+    (observe/note-change)
     (tax/context-down t 'CxA)
-    (is (= '[CxA] (keys (by-ctx))))))
+    (is (= '[[CxA false nil]] (keys (by-ctx))))))
 
 ;; ---- the scoped closures --------------------------------------------------
 
@@ -131,22 +132,6 @@
       (is (not (tax/genl? t 'dog 'animal 'CxB))))
     (testing "reflexive from anywhere"
       (is (tax/genl? t 'dog 'dog 'CxO)))))
-
-(deftest a-pass-walks-each-genl?-pair-once-per-reader
-  (let [t (lattice)]
-    (tax/add-genl t 'dog 'animal 1 'CxA)
-    (testing "off a pass it is `genl?`"
-      (is (tax/genl?-per-pass t 'dog 'animal 'CxA))
-      (is (not (tax/genl?-per-pass t 'dog 'animal 'CxO))))
-    (binding [tax/*closure-pass-cache* (atom {})]
-      (testing "on a pass the answer is kept per reader, a false one too"
-        (is (tax/genl?-per-pass t 'dog 'animal 'CxA))
-        (is (not (tax/genl?-per-pass t 'dog 'animal 'CxO)))
-        (is (= {[:genl? 'dog 'animal 'CxA] true, [:genl? 'dog 'animal 'CxO] false}
-               @tax/*closure-pass-cache*)))
-      (testing "a kept answer is the one read back"
-        (swap! tax/*closure-pass-cache* assoc [:genl? 'dog 'animal 'CxO] true)
-        (is (tax/genl?-per-pass t 'dog 'animal 'CxO))))))
 
 (deftest a-scoped-read-answers-a-cycle-the-way-the-closure-it-walks-does
   ;; `wff` refuses a cyclic `genl` edge, and belief assembles one anyway: defeat an edge,
@@ -423,11 +408,7 @@
               (let [x (nth nodes (.nextInt rnd (count nodes)))
                     y (nth nodes (.nextInt rnd (count nodes)))]
                 (is (= (contains? (get (:up ref) x #{x}) y)
-                       (tax/genl? t x y reader)
-                       (tax/genl?-per-pass t x y reader)
-                       (binding [tax/*closure-pass-cache* (atom {})]
-                         (tax/genl?-per-pass t x y reader)
-                         (tax/genl?-per-pass t x y reader)))
+                       (tax/genl? t x y reader))
                     (str "genl? " x " " y " from " reader))))))))))
 
 (deftest scoped-reads-agree-with-the-filtered-reference-over-cyclic-relations
@@ -465,22 +446,19 @@
           ;; prunings engage, without it the relation is loose and they are dropped —
           ;; the reads must agree either way
           :else (tax/restore-depths t)))
-      ;; one pass per round, held over every reader: its memo is keyed on the reader
-      (binding [tax/*closure-pass-cache* (atom {})]
-        (doseq [reader readers, _ (range 2)]
-          (let [ref (reference-scoped t reader)
-                up  #(get (:up ref) % #{%})]
-            (doseq [x nodes]
-              (is (= (up x) (tax/genls t x reader)) (str "genls of " x " from " reader))
-              (is (= (get (:down ref) x #{x}) (tax/specs t x reader))
-                  (str "specs of " x " from " reader))
-              (doseq [y nodes]
-                (is (= (contains? (up x) y) (tax/genl? t x y reader)
-                       (tax/genl?-per-pass t x y reader))
-                    (str "genl? " x " " y " from " reader))
-                (is (= (contains? (up x) y)
-                       (some? (tax/reach-support t :genl x y reader)))
-                    (str "reach-support " x " " y " from " reader))))))))))
+      (doseq [reader readers, _ (range 2)]
+        (let [ref (reference-scoped t reader)
+              up  #(get (:up ref) % #{%})]
+          (doseq [x nodes]
+            (is (= (up x) (tax/genls t x reader)) (str "genls of " x " from " reader))
+            (is (= (get (:down ref) x #{x}) (tax/specs t x reader))
+                (str "specs of " x " from " reader))
+            (doseq [y nodes]
+              (is (= (contains? (up x) y) (tax/genl? t x y reader))
+                  (str "genl? " x " " y " from " reader))
+              (is (= (contains? (up x) y)
+                     (some? (tax/reach-support t :genl x y reader)))
+                  (str "reach-support " x " " y " from " reader)))))))))
 
 ;; ---- the scoped equality partition ------------------------------------------
 ;; `scoped-class` is the equality analogue, and it is not a filter of the global

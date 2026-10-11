@@ -182,16 +182,37 @@
         inf (:informant j)]
     (if (integer? inf) (f acc inf) acc)))
 
+(def respell-informant
+  "The informant of a justification storing a spelling a reader reads of a fact, from the
+  row holding the fact as written and the marks that sort it (`chain/respell-rows!`).  Its
+  first antecedent is the row and the rest are the marks: every one must be IN for the
+  justification to be valid, and only the row caps the class it confers
+  (`class-antecedents`), so a spelling holds at the class of the fact it spells."
+  'respell)
+
+(defn class-antecedents
+  "The antecedents of justification `j` whose classes cap the class it confers: all of
+  them, except under `respell-informant`, where only the first does."
+  [j]
+  (let [as (:antecedents j)]
+    (if (and (= respell-informant (:informant j)) (next as))
+      [(first as)]
+      as)))
+
 (defn ->just
   "Construct a Justification, defaulting `strength` to :monotonic — a bare monotone
   justification adds no defeasibility of its own, so `conferred-class` caps it at its
   weakest antecedent.  A rule-handle informant is taken out of `antecedents`
-  (`without-informant`)."
+  (`without-informant`).  `subsumptions` is a rule firing's set of `[sub super]` pairs,
+  stored under `:subsumptions` when it is not empty."
   ([id informant antecedents consequence bindings]
-   (->just id informant antecedents consequence bindings :monotonic))
+   (->just id informant antecedents consequence bindings :monotonic nil))
   ([id informant antecedents consequence bindings strength]
-   (tms-types/->Justification id informant (without-informant informant antecedents) consequence
-                              bindings (or strength :monotonic))))
+   (->just id informant antecedents consequence bindings strength nil))
+  ([id informant antecedents consequence bindings strength subsumptions]
+   (cond-> (tms-types/->Justification id informant (without-informant informant antecedents)
+                                      consequence bindings (or strength :monotonic))
+     (seq subsumptions) (assoc :subsumptions subsumptions))))
 
 (defn graph-just
   "The part of a justification the **network** is made of — everything except the
@@ -209,10 +230,11 @@
   It also **normalizes** — antecedents to a vector without the informant, strength
   defaulted — so that however a caller spells a justification, the two
   representations store a value equal to each other's.  `:bindings` is nil rather
-  than dropped, keeping the record shape fixed for every reader."
+  than dropped, keeping the record shape fixed for every reader.  `:subsumptions` stays,
+  for the dedup key (`just-key`)."
   [j]
-  (tms-types/->Justification (:id j) (:informant j) (without-informant (:informant j) (:antecedents j))
-                             (:consequence j) nil (or (:strength j) :monotonic)))
+  (->just (:id j) (:informant j) (:antecedents j) (:consequence j) nil (:strength j)
+          (:subsumptions j)))
 
 ;; ---- derivation depth ---------------------------------------------------
 ;;
@@ -370,7 +392,7 @@
   [j classes]
   (reduce (fn [c a] (strength/min c (get classes a :default)))
           (or (:strength j) :monotonic)
-          (:antecedents j)))
+          (class-antecedents j)))
 
 (defn- node-class
   "The defeat-class of an IN datum: the strongest support it has — its premise
@@ -1283,14 +1305,16 @@
 (defn- unbox ^Object [x] (if (int? x) (long x) x))
 
 (defn- just-key
-  "The content `has-justification?` deduplicates on — the informant plus the
-  antecedents **as a set**, `same-antecedents?`'s judgement (order and duplicates
-  immaterial) frozen into one hashable value.  A rule-handle informant is dropped from
-  the set: a stored record never lists it there, and a firing's handle list does."
-  [informant antecedents]
+  "The content `has-justification?` deduplicates on — the informant, the antecedents
+  **as a set**, `same-antecedents?`'s judgement (order and duplicates immaterial) frozen
+  into one hashable value, and the subsumptions.  A rule-handle informant is dropped
+  from the set: a stored record never lists it there, and a firing's handle list does.
+  Two firings that pair the same facts with different literals can rest on one
+  antecedent set, and the subsumptions keep them two (`late_route_test`)."
+  [informant antecedents subsumptions]
   (let [inf (unbox informant)
         s   (set antecedents)]
-    [inf (if (integer? inf) (disj s inf) s)]))
+    [inf (if (integer? inf) (disj s inf) s) (not-empty subsumptions)]))
 
 (defn- dedup-keys
   "The cached key set for `consequence`, built from its supports on the first ask."
@@ -1300,33 +1324,37 @@
         (let [s (java.util.HashSet.)]
           (doseq [jid (-supports tms consequence)]
             (when-let [j (-justification tms jid)]
-              (.add s (just-key (:informant j) (:antecedents j)))))
+              (.add s (just-key (:informant j) (:antecedents j) (:subsumptions j)))))
           (.put cache ck s)
           s))))
 
 (defn justification-key
-  "The dedup key of a justification from `informant` over `antecedents` — `just-key`,
-  for a caller that asks `has-justification?` and then adds the justification, and so
-  would otherwise build the same set twice."
-  [informant antecedents]
-  (just-key informant antecedents))
+  "The dedup key of a justification from `informant` over `antecedents` with
+  `subsumptions`, a set or nil — `just-key`, for a caller that asks
+  `has-justification?` and then adds the justification, and so would otherwise build the
+  same set twice."
+  ([informant antecedents] (just-key informant antecedents nil))
+  ([informant antecedents subsumptions] (just-key informant antecedents subsumptions)))
 
 (defn has-justification?
   "Is there already a support for `consequence` from `informant` over exactly these
-  antecedents (as a set)?  Guards against duplicate justifications.  Answered from
-  the dedup index when one is bound for this TMS — the same judgement, one hash
-  probe — and by the supports scan otherwise.  `k`, when given, is
-  `justification-key` of the same informant and antecedents."
+  antecedents (as a set), with the same subsumptions?  Guards against duplicate
+  justifications.  Answered from the dedup index when one is bound for this TMS — the
+  same judgement, one hash probe — and by the supports scan otherwise.  `k`, when given,
+  is `justification-key` of the same informant and antecedents, and carries the
+  subsumptions; without it the question is about a justification with none."
   ([tms informant antecedents consequence]
    (has-justification? tms informant antecedents consequence nil))
   ([tms informant antecedents consequence k]
    (if-let [^java.util.Map cache (dedup-cache-for tms)]
-     (.contains (dedup-keys tms cache consequence) (or k (just-key informant antecedents)))
-     (let [antes (without-informant informant antecedents)]
+     (.contains (dedup-keys tms cache consequence) (or k (just-key informant antecedents nil)))
+     (let [antes (without-informant informant antecedents)
+           subs  (when k (nth k 2))]
        (boolean
         (some (fn [jid]
                 (let [j (-justification tms jid)]
                   (and (= informant (:informant j))
+                       (= subs (:subsumptions j))
                        (same-antecedents? antes (:antecedents j)))))
               (-supports tms consequence)))))))
 
@@ -1360,7 +1388,7 @@
    ;; which now includes this justification, so absence needs nothing)
    (when-let [^java.util.Map cache (dedup-cache-for tms)]
      (when-let [^java.util.HashSet ks (.get cache (unbox (:consequence just)))]
-       (.add ks (or k (just-key (:informant just) (:antecedents just))))))
+       (.add ks (or k (just-key (:informant just) (:antecedents just) (:subsumptions just))))))
    just))
 
 (defn restrength-informant
@@ -1583,7 +1611,7 @@
                                                   (not (forced? tms :void (:id j))))]
                                    (reduce (fn [c a] (strength/min c (class-of classes a)))
                                            (or (:strength j) :monotonic)
-                                           (:antecedents j)))]
+                                           (class-antecedents j)))]
                         (reduce strength/max :default (remove nil? (cons prem strs)))))]
     (loop [classes (zipmap members (repeat :default))]
       (let [next (reduce (fn [m d] (assoc m d (node-class classes d))) classes members)]
@@ -1666,6 +1694,7 @@
 
 (caches/register-derived
  {:id :M1 :label "Labels" :kind :index :keyed-by :handle :reads [:justifications]
+  :holds-content? false
   :retired-by {:relabelled :K :roster :K :recover :R :image-install :R}
   :computed :write :imaged? :network :at [[:tms]]
   :value (fn [kb] (let [s (snapshot (tms-of kb))]
@@ -1676,6 +1705,7 @@
 
 (caches/register-derived
  {:id :M2 :label "Touched window" :kind :journal :keyed-by :handle :reads [:M1]
+  :holds-content? false
   :retired-by {:relabelled :K :roster :K :settle-exit :W :recover :W}
   :computed :write :imaged? false :at [[:tms]]
   :value (fn [kb] (select-keys (snapshot (tms-of kb))
@@ -1684,6 +1714,7 @@
 
 (caches/register-derived
  {:id :M3 :label "Belief hold" :kind :index :keyed-by :global :reads [:M1]
+  :holds-content? false
   :retired-by {:held :K}
   :computed :settle :imaged? false :at [[:tms]]
   :value (fn [kb] (held (tms-of kb)))
@@ -1691,6 +1722,7 @@
 
 (caches/register-derived
  {:id :M4 :label "Justification dedup" :cache :justification-dedup :kind :pass
+  :holds-content? false
   :keyed-by :handle :reads [:justifications]
   :retired-by {:relabelled :W} :computed :pass :imaged? false :var #'*dedup-cache*
   :note "the justification keys each conclusion holds, bound for one chaining run; `retract!`, `sweep!` and `drop-justification!` clear it"})

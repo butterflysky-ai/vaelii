@@ -1105,6 +1105,86 @@
             (is (some? (cached s2 :sentexes 1)) "which means it did page the record — the fallback")
             (finally (drs/close! s2))))))))
 
+;; ---- the bulk premise mark ----------------------------------------------
+;; `mark-premise-batch` decides each handle from its slot and pages a record only for a
+;; mark the slot's rank does not already record.
+
+(defn- record-reads
+  "Call `(f)` and return the log frames it paged, counted at `f/read-record-sized`."
+  [f]
+  (let [n    (atom 0)
+        read f/read-record-sized]
+    (with-redefs [f/read-record-sized (fn [raf ^long off ^long len] (swap! n inc) (read raf off len))]
+      (f))
+    @n))
+
+(defn- sink-premises!
+  "Write `n` premises through a bulk sink, alternating :default and :monotonic, and
+  return `{handle strength}`."
+  [s n]
+  (with-open [^java.io.Closeable snk (cap/sentex-sink s {})]
+    (into {} (map (fn [i]
+                    (let [want (if (even? i) :default :monotonic)]
+                      [(p/write-record! snk {:sentence (list 'p i) :context 'C :strength want})
+                       want])))
+          (range n))))
+
+(deftest a-bulk-premise-mark-the-slots-already-record-pages-no-record
+  (with-tmp
+    (fn [dir]
+      (let [s (drs/open-record-store dir {:cache-capacity 0})]
+        (try
+          (let [marks (sink-premises! s 50)]
+            (is (= 0 (record-reads #(p/mark-premise-batch s marks))))
+            (is (= (set (keys marks)) (set (p/premise-ids s))))
+            (is (= marks (into {} (map (fn [id] [id (p/premise-strength s id)])) (keys marks)))))
+          (finally (drs/close! s)))))))
+
+(deftest a-bulk-premise-mark-that-changes-a-strength-writes-the-record-and-the-slot
+  (with-tmp
+    (fn [dir]
+      (let [s (drs/open-record-store dir)
+            a (p/put-sentex s {:sentence '(dog Muffet) :context 'C :strength :default})
+            b (p/put-sentex s {:sentence '(cat Tom) :context 'C :strength :default})]
+        (drs/close! s)
+        (strip-strength-flags! dir [b])                 ; b's slot records no rank
+        (let [s2 (drs/open-record-store dir)]
+          (try (p/mark-premise-batch s2 {a :monotonic b :monotonic})
+               (finally (drs/close! s2))))
+        (let [s3 (drs/open-record-store dir)]
+          (try
+            (is (= [:monotonic :monotonic] (mapv #(:strength (p/get-sentex s3 %)) [a b])))
+            (is (= #{a b} (set (p/premise-ids s3))))
+            (finally (drs/close! s3))))
+        (is (= (repeat 2 (f/premise-flags true 2)) (map #(slot-flags dir %) [a b])))))))
+
+(deftest a-bulk-premise-mark-skips-an-unwritten-and-a-killed-handle
+  (with-tmp
+    (fn [dir]
+      (let [s (drs/open-record-store dir)]
+        (try
+          (let [a (p/put-sentex s {:sentence '(dog Muffet) :context 'C})
+                b (p/put-sentex s {:sentence '(cat Tom) :context 'C})]
+            (p/delete-sentex! s a)
+            (p/mark-premise-batch s {a :default, b :default, 999 :default, :informant :default})
+            (is (= #{b} (set (p/premise-ids s))))
+            (is (= #{b} (set (p/sentex-ids s))) "nothing was stored at a or at 999"))
+          (finally (drs/close! s)))))))
+
+(deftest a-bulk-premise-mark-reads-the-slots-in-handle-order
+  (with-tmp
+    (fn [dir]
+      (let [s (drs/open-record-store dir)]
+        (try
+          (let [marks (sink-premises! s 40)
+                seen  (atom [])
+                slot  f/read-slot]
+            (is (not= (sort (keys marks)) (keys marks)) "the hash map iterates out of order")
+            (with-redefs [f/read-slot (fn [raf ^long id] (swap! seen conj id) (slot raf id))]
+              (p/mark-premise-batch s marks))
+            (is (= (sort (keys marks)) @seen)))
+          (finally (drs/close! s)))))))
+
 ;; ---- tokenized bodies, end to end ---------------------------------------
 ;; The store-level half of what `disk_codec_test` checks on the codec: a tokenized frame
 ;; is only sound if the dictionary that decodes it is durable, so what matters here is a

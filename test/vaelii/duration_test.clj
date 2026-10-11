@@ -1,15 +1,7 @@
 ;; SPDX-License-Identifier: SSPL-1.0
 ;; Copyright © 2026 Vaelii LLC and the Vaelii contributors.
 (ns vaelii.duration-test
-  "Interval duration arithmetic (`vaelii.impl.duration`): `totalDuration` and
-  `overlapDuration`, computed from the stored `(length I M)` facts, the unit table, and —
-  for the overlap — the qualitative Allen relations still possible between two intervals.
-
-  The prover never stores anything and never enumerates: both goals are a computation
-  with at most one answer, bound into a variable or checked against a ground measure.
-  The tests check that the answer claims no more precision than its inputs carry — a sum of exact
-  lengths renders as a point, a bounded overlap renders as an interval, and a pair whose
-  lengths are of different dimensions is refused rather than added up."
+  "`totalDuration` and `overlapDuration` (`vaelii.impl.duration`). See docs/duration.md."
   (:require [clojure.test :refer [deftest is testing use-fixtures]]
             [vaelii.core :as v]
             [vaelii.impl.duration :as dur]
@@ -17,11 +9,6 @@
             [vaelii.test-util :as tu])
   (:import [vaelii.impl.duration DurationProver]))
 
-;; a fresh KB per test: the CxCore grammar, CxMeasure (the measure structural NATs and
-;; the dimensionOf / conversionFactor table the magnitudes normalize through),
-;; CxTime (the interval relations plus length / totalDuration / overlapDuration),
-;; and the prover registered — it is opt-in, so registering it is what turns stored
-;; lengths into arithmetic.
 (use-fixtures :each (tu/neutral-fresh
                      #(doto (tu/fresh)
                         (tu/load-core-with! '[[CxMeasure "upper"] [CxTime "upper"]])
@@ -52,10 +39,9 @@
     (testing "two hours and half an hour make 9000 seconds, in the dimension's base unit"
       (is (= '(QuantityFn 9000 Second)
              (bound kb (list 'totalDuration (list 'list A B) '?d)))))
-    (testing "an integral magnitude renders as an integer, so the bound answer is `=` to
-              the obvious way of writing it"
+    (testing "an integral magnitude renders as an integer"
       (is (integer? (nth (bound kb (list 'totalDuration (list 'list A B) '?d)) 1))))
-    (testing "and the components' own order does not change it"
+    (testing "the components' order"
       (is (= (bound kb (list 'totalDuration (list 'list A B) '?d))
              (bound kb (list 'totalDuration (list 'list B A) '?d)))))))
 
@@ -66,8 +52,7 @@
     (v/assert kb (list 'length B '(QuantityFn 30 Minute)) C)
     (testing "the rendered answer checks"
       (is (v/ask? kb (list 'totalDuration (list 'list A B) '(QuantityFn 9000 Second)) C)))
-    (testing "so does the same duration in any other unit of the dimension — the check
-              normalizes, where the bind had to pick one unit to render in"
+    (testing "so does the same duration in another unit of the dimension"
       (is (v/ask? kb (list 'totalDuration (list 'list A B) '(QuantityFn 2.5 Hour)) C))
       (is (v/ask? kb (list 'totalDuration (list 'list A B) '(QuantityFn 150 Minute)) C)))
     (testing "a wrong total does not"
@@ -88,8 +73,7 @@
   (tu/with-terms [A B]
     (v/assert kb (list 'length A '(QuantityIntervalFn 1 2 Hour)) C)
     (v/assert kb (list 'length B '(QuantityFn 30 Minute)) C)
-    (testing "an interval measure plus a point is an interval measure — the bounds add
-              separately, and the render reports what is not known"
+    (testing "the bounds add separately"
       (is (= '(QuantityIntervalFn 5400 9000 Second)
              (bound kb (list 'totalDuration (list 'list A B) '?d)))))
     (testing "and the check form compares both bounds"
@@ -104,7 +88,7 @@
   (tu/with-terms [A B]
     (v/assert kb (list 'length A '(QuantityFn 2 Hour)) C)
     (v/assert kb (list 'length B '(QuantityFn 5 Metre)) C)
-    (testing "two hours plus five metres is not a number, so there is no answer at all"
+    (testing "two hours plus five metres"
       (is (empty? (v/ask kb (list 'totalDuration (list 'list A B) '?d) C)))
       (is (not (v/ask? kb (list 'totalDuration (list 'list A B) '(QuantityFn 7200 Second)) C))))
     (testing "each on its own still totals"
@@ -115,9 +99,13 @@
   (load-time-units kb)
   (tu/with-terms [A B]
     (v/assert kb (list 'length A '(QuantityFn 2 Hour)) C)
-    (testing "an open-world gap is not zero — B might last any time at all"
+    (testing "B has no stated length"
       (is (empty? (v/ask kb (list 'totalDuration (list 'list A B) '?d) C))))
-    (testing "and two stated lengths that disagree are a contradiction, not a choice"
+    (testing "B's only length is not a structural measure"
+      (tu/with-terms [TwoHours]
+        (v/assert kb (list 'length B TwoHours) C)
+        (is (empty? (v/ask kb (list 'totalDuration (list 'list A B) '?d) C)))))
+    (testing "B has two stated lengths that differ"
       (v/assert kb (list 'length B '(QuantityFn 30 Minute)) C)
       (is (seq (v/ask kb (list 'totalDuration (list 'list A B) '?d) C)))
       (v/assert kb (list 'length B '(QuantityFn 45 Minute)) C)
@@ -130,10 +118,10 @@
     (v/assert kb (list 'length A '(QuantityFn 2 Hour)) C)
     (v/assert kb (list 'length A '(QuantityFn 120 Minute)) CxInner)
     (v/assert kb (list 'length B '(QuantityFn 30 Minute)) C)
-    (testing "duplicates collapse once normalized, whether restated or reworded, so a
-              redundant fact does not read as a disagreement"
-      (is (= '(QuantityFn 9000 Second)
-             (bound kb (list 'totalDuration (list 'list A B) '?d)))))))
+    ;; asked in CxInner, which sees both of A's lengths
+    (is (= '(QuantityFn 9000 Second)
+           (get (tu/sole-answer (v/ask kb (list 'totalDuration (list 'list A B) '?d) CxInner))
+                '?d)))))
 
 (tu/deftest-kb the-lengths-are-read-under-belief-and-visibility
   (load-time-units kb)
@@ -178,48 +166,29 @@
 
 ;; ---- overlapDuration -----------------------------------------------------
 
-(tu/deftest-kb intervals-that-cannot-meet-overlap-for-no-time
+(tu/deftest-kb the-overlap-is-read-off-the-possible-relations
   (load-time-units kb)
-  (tu/with-terms [A B]
-    (v/assert kb (list 'length A '(QuantityFn 2 Hour)) C)
-    (v/assert kb (list 'length B '(QuantityFn 30 Minute)) C)
-    (v/assert kb (list 'before A B) C)
-    (is (= '(QuantityFn 0 Second) (bound kb (list 'overlapDuration A B '?d))))
-    (is (v/ask? kb (list 'overlapDuration A B '(QuantityFn 0 Hour)) C)
-        "zero is zero in any unit of the dimension")
-    (is (not (v/ask? kb (list 'overlapDuration A B '(QuantityFn 1 Second)) C)))))
-
-(tu/deftest-kb a-contained-interval-overlaps-for-its-whole-length
-  (load-time-units kb)
-  (tu/with-terms [A B]
-    (v/assert kb (list 'length A '(QuantityFn 30 Minute)) C)
-    (v/assert kb (list 'length B '(QuantityFn 2 Hour)) C)
-    (v/assert kb (list 'during A B) C)
-    (testing "A lies wholly inside B, so all thirty minutes of it are shared"
-      (is (= '(QuantityFn 1800 Second) (bound kb (list 'overlapDuration A B '?d))))
-      (is (= '(QuantityFn 1800 Second) (bound kb (list 'overlapDuration B A '?d)))
-          "and the overlap is symmetric — the converse relation nests the other way"))))
-
-(tu/deftest-kb a-partial-overlap-is-bounded-not-known
-  (load-time-units kb)
-  (tu/with-terms [A B]
-    (v/assert kb (list 'length A '(QuantityFn 2 Hour)) C)
-    (v/assert kb (list 'length B '(QuantityFn 30 Minute)) C)
-    (v/assert kb (list 'overlaps A B) C)
-    (testing "the qualitative relation says they share a middle but not how much of one"
-      (is (= '(QuantityIntervalFn 0 1800 Second) (bound kb (list 'overlapDuration A B '?d))))
-      (is (v/ask? kb (list 'overlapDuration A B '(QuantityIntervalFn 0 30 Minute)) C)))
-    (testing "so no point measure is claimed"
-      (is (not (v/ask? kb (list 'overlapDuration A B '(QuantityFn 1800 Second)) C)))
-      (is (not (v/ask? kb (list 'overlapDuration A B '(QuantityFn 0 Second)) C))))))
+  (doseq [[rel bind holds fails]
+          [['before   '(QuantityFn 0 Second)    ['(QuantityFn 0 Hour)]  ['(QuantityFn 1 Second)]]
+           ['contains '(QuantityFn 1800 Second) ['(QuantityFn 30 Minute)] ['(QuantityFn 2 Hour)]]
+           ['overlaps '(QuantityIntervalFn 0 1800 Second) ['(QuantityIntervalFn 0 30 Minute)]
+            ['(QuantityFn 1800 Second) '(QuantityFn 0 Second)]]]]
+    (tu/with-terms [A B]
+      (v/assert kb (list 'length A '(QuantityFn 2 Hour)) C)
+      (v/assert kb (list 'length B '(QuantityFn 30 Minute)) C)
+      (v/assert kb (list rel A B) C)
+      (testing (str rel)
+        (is (= bind (bound kb (list 'overlapDuration A B '?d))))
+        (is (= bind (bound kb (list 'overlapDuration B A '?d))))
+        (doseq [m holds] (is (v/ask? kb (list 'overlapDuration A B m) C) (pr-str m)))
+        (doseq [m fails] (is (not (v/ask? kb (list 'overlapDuration A B m) C)) (pr-str m)))))))
 
 (tu/deftest-kb an-unconstrained-pair-gets-the-widest-answer
   (load-time-units kb)
   (tu/with-terms [A B]
     (v/assert kb (list 'length A '(QuantityFn 2 Hour)) C)
     (v/assert kb (list 'length B '(QuantityFn 30 Minute)) C)
-    (testing "nothing qualitative is stated, so all thirteen relations remain and the
-              overlap is anything up to the shorter interval"
+    (testing "all thirteen relations possible"
       (is (= '(QuantityIntervalFn 0 1800 Second) (bound kb (list 'overlapDuration A B '?d)))))
     (testing "learning they are disjoint collapses it to zero"
       (v/assert kb (list 'meets A B) C)
@@ -232,9 +201,7 @@
     (v/assert kb (list 'length D '(QuantityFn 3 Hour)) C)
     (v/assert kb (list 'during A B) C)
     (v/assert kb (list 'during B D) C)
-    (testing "during∘during pins A inside D though nobody said so, so the overlap is all
-              of A — the arithmetic reads the tightened network, not the stored facts"
-      (is (= '(QuantityFn 1800 Second) (bound kb (list 'overlapDuration A D '?d)))))))
+    (is (= '(QuantityFn 1800 Second) (bound kb (list 'overlapDuration A D '?d))))))
 
 (tu/deftest-kb an-inconsistent-network-has-no-overlap-at-all
   (load-time-units kb)
@@ -243,8 +210,7 @@
     (v/assert kb (list 'length B '(QuantityFn 30 Minute)) C)
     (v/assert kb (list 'before A B) C)
     (v/assert kb (list 'after A B) C)
-    (testing "before and after cannot both hold, and an unsatisfiable theory is not
-              mined for a number"
+    (testing "before and after cannot both hold"
       (is (empty? (v/ask kb (list 'overlapDuration A B '?d) C)))
       (is (not (v/ask? kb (list 'overlapDuration A B '(QuantityFn 0 Second)) C))))
     (testing "retracting one gives the answer back"
@@ -264,9 +230,6 @@
       (is (empty? (v/ask kb (list 'overlapDuration A B '?d) C))))))
 
 ;; ---- sharpened by the metric network -------------------------------------
-;; The qualitative relation set cannot say how much of a partial overlap is shared, so it
-;; falls back to `[0, min(len1, len2)]`.  When `vaelii.impl.stp` bounds both intervals'
-;; endpoints numerically there is a real answer, and the two sound bounds are intersected.
 
 (defn- bridge-interval
   "Give interval `i` the two bounding instants `s` and `e`."
@@ -275,8 +238,6 @@
   (v/assert kb (list 'endOf i e) C))
 
 (tu/deftest-kb endpoint-facts-alone-change-nothing
-  ;; the compatibility boundary: naming an interval's endpoints is not a metric constraint,
-  ;; so the answer is the qualitative one to the digit
   (load-time-units kb)
   (tu/with-terms [A B As Ae Bs Be]
     (v/assert kb (list 'length A '(QuantityFn 2 Hour)) C)
@@ -303,15 +264,13 @@
     (v/assert kb (list 'temporalDistance As Ae '(QuantityFn 2 Hour)) C)
     (v/assert kb (list 'temporalDistance Bs Be '(QuantityFn 30 Minute)) C)
     (v/assert kb (list 'temporalDistance As Bs '(QuantityFn 105 Minute)) C)
-    (testing "A runs two hours from its start and B begins an hour and three quarters in, so
-              they share the last fifteen minutes of A — and that is a point, not a range"
+    (testing "B begins 105 minutes into A's two hours, so they share fifteen minutes"
       (is (= '(QuantityFn 900 Second) (bound kb (list 'overlapDuration A B '?d))))
       (is (v/ask? kb (list 'overlapDuration A B '(QuantityFn 15 Minute)) C))
       (is (not (v/ask? kb (list 'overlapDuration A B '(QuantityFn 1800 Second)) C))))
     (testing "and the sharpened overlap is symmetric, like the qualitative one"
       (is (= '(QuantityFn 900 Second) (bound kb (list 'overlapDuration B A '?d)))))
-    (testing "no qualitative fact was needed — the network is silent about the Allen
-              relation and the endpoints answered anyway"
+    (testing "with no Allen relation stated"
       (is (empty? (v/sentexes-matching kb (list 'overlaps A B) C))))))
 
 (tu/deftest-kb a-sharpened-bound-that-is-still-a-range-says-so
@@ -326,8 +285,7 @@
     (v/assert kb (list 'temporalDistance As Ae '(QuantityFn 2 Hour)) C)
     (v/assert kb (list 'temporalDistance Bs Be '(QuantityFn 1 Hour)) C)
     (v/assert kb (list 'temporalDistance As Bs '(QuantityIntervalFn 1.5 2.5 Hour)) C)
-    (testing "B starts between an hour and a half and two and a half hours in, so it may
-              overlap by half an hour or not at all — halving the ceiling without pinning it"
+    (testing "B starts 1.5 to 2.5 hours into A, so the overlap is up to half an hour"
       (is (= '(QuantityIntervalFn 0 1800 Second) (bound kb (list 'overlapDuration A B '?d))))
       (is (not (v/ask? kb (list 'overlapDuration A B '(QuantityFn 1800 Second)) C))))))
 
@@ -341,13 +299,11 @@
     (v/assert kb (list 'temporalDistance As Ae '(QuantityFn 2 Hour)) C)
     (v/assert kb (list 'temporalDistance Bs Be '(QuantityFn 30 Minute)) C)
     (v/assert kb (list 'temporalDistance As Bs '(QuantityFn 30 Minute)) C)
-    (testing "the metric network puts B wholly inside A, and the qualitative one agrees
-              once it is told so — the two meet at the same figure"
+    (testing "the gaps put B inside A, with and without the stated `during`"
       (is (= '(QuantityFn 1800 Second) (bound kb (list 'overlapDuration A B '?d))))
       (v/assert kb (list 'during B A) C)
       (is (= '(QuantityFn 1800 Second) (bound kb (list 'overlapDuration A B '?d)))))
-    (testing "a qualitative fact contradicting the metric one leaves no overlap both can
-              agree on, and there is no number to report"
+    (testing "a stated `before` against gaps that put D inside A"
       (tu/with-terms [D Ds De]
         (v/assert kb (list 'length D '(QuantityFn 30 Minute)) C)
         (bridge-interval kb D Ds De)
@@ -366,40 +322,66 @@
     (bridge-interval kb B Bs Be)
     (v/assert kb (list 'temporalDistance As Ae '(QuantityFn 5 Metre)) C)
     (v/assert kb (list 'temporalDistance As Bs '(QuantityFn 1 Metre)) C)
-    (testing "gaps measured in metres are not durations, so they cannot narrow one — the
-              qualitative answer stands untouched"
+    (testing "gaps in metres"
       (is (= '(QuantityIntervalFn 0 1800 Second)
              (bound kb (list 'overlapDuration A B '?d)))))))
 
+(tu/deftest-kb a-pinned-window-without-both-lengths-answers-nothing
+  (load-time-units kb)
+  (tu/with-terms [A B As Ae Bs Be]
+    (v/assert kb (list 'length A '(QuantityFn 2 Hour)) C)
+    (bridge-interval kb A As Ae)
+    (bridge-interval kb B Bs Be)
+    (v/assert kb (list 'temporalDistance As Ae '(QuantityFn 2 Hour)) C)
+    (v/assert kb (list 'temporalDistance Bs Be '(QuantityFn 30 Minute)) C)
+    (v/assert kb (list 'temporalDistance As Bs '(QuantityFn 105 Minute)) C)
+    (is (empty? (v/ask kb (list 'overlapDuration A B '?d) C)))
+    (v/assert kb (list 'length B '(QuantityFn 30 Minute)) C)
+    (is (= '(QuantityFn 900 Second) (bound kb (list 'overlapDuration A B '?d))))))
+
+(tu/deftest-kb bounds-crossing-within-the-tolerance-collapse-to-a-point
+  ;; A's 0.3 s length against a window of 0.4 − 0.1 = 0.30000000000000004 s
+  (load-time-units kb)
+  (tu/with-terms [A B As Ae Bs Be]
+    (v/assert kb (list 'length A '(QuantityFn 0.3 Second)) C)
+    (v/assert kb (list 'length B '(QuantityFn 1 Second)) C)
+    (bridge-interval kb A As Ae)
+    (bridge-interval kb B Bs Be)
+    (v/assert kb (list 'temporalDistance Bs As '(QuantityFn 0.1 Second)) C)
+    (v/assert kb (list 'temporalDistance Bs Ae '(QuantityFn 0.4 Second)) C)
+    (v/assert kb (list 'temporalDistance Bs Be '(QuantityFn 1 Second)) C)
+    (is (= '(QuantityFn 0.3 Second) (bound kb (list 'overlapDuration A B '?d))))))
+
 ;; ---- the structure of the goal -----------------------------------------------
 
-(tu/deftest-kb the-list-of-components-is-one-argument
-  ;; the declared arity is what a stored sentence is held to, so it has to agree with the
-  ;; shape the prover reads: `(totalDuration (list …) D)` is binary, the components being
-  ;; a single term, and CxTime declares it so
+(tu/deftest-kb neither-duration-is-assertible
   (load-time-units kb)
   (tu/with-terms [A B]
     (v/assert kb (list 'length A '(QuantityFn 2 Hour)) C)
     (v/assert kb (list 'length B '(QuantityFn 30 Minute)) C)
-    (testing "a sentence in the form the prover answers passes the arity check"
-      (is (v/assert kb (list 'totalDuration (list 'list A B) '(QuantityFn 9000 Second)) C)))
-    (testing "and spreading the components out does not — that would be arity three, an
-              arity nogood the reader takes OUT"
-      (is (tu/stored-in-clash? kb (list 'totalDuration A B '(QuantityFn 9000 Second)) C)))
-    (testing "overlapDuration is the ternary one"
-      (is (v/assert kb (list 'overlapDuration A B '(QuantityFn 0 Second)) C)))))
+    ;; The `(list I1 I2 …)` of components is one argument, so `totalDuration` is binary.
+    (doseq [[s arity-class] [[(list 'totalDuration (list 'list A B) '(QuantityFn 9000 Second))
+                              'binary_predicate]
+                             [(list 'overlapDuration A B '(QuantityFn 0 Second))
+                              'ternary_predicate]]]
+      (is (v/ask? kb (list arity-class (first s)) C) (str (first s) " is a " arity-class))
+      (let [e (try (v/assert kb s C) nil (catch clojure.lang.ExceptionInfo e e))]
+        (is (= :not-well-formed (:type (ex-data e))) (pr-str s))
+        (is (empty? (v/sentexes-with-functor kb (first s))))))
+    (testing "the computed answer is unchanged"
+      (is (v/ask? kb (list 'totalDuration (list 'list A B) '(QuantityFn 9000 Second)) C)))))
 
 (tu/deftest-kb a-goal-the-prover-cannot-read-is-not-claimed
   (load-time-units kb)
-  (tu/with-terms [A B]
+  (tu/with-terms [A]
+    ;; one length in the KB, so an open component read as a pattern would match it
     (v/assert kb (list 'length A '(QuantityFn 2 Hour)) C)
-    (v/assert kb (list 'length B '(QuantityFn 30 Minute)) C)
     (testing "the components must be a (list …), not a bare interval"
       (is (empty? (v/ask kb (list 'totalDuration A '?d) C))))
-    (testing "an open component is not enumerated — this computes, it does not search"
+    (testing "an open component is not enumerated"
       (is (empty? (v/ask kb (list 'totalDuration (list 'list A '?x) '?d) C)))
       (is (empty? (v/ask kb (list 'overlapDuration A '?x '?d) C))))
-    (testing "and an empty component list totals nothing, rather than zero of no unit"
+    (testing "an empty component list"
       (is (empty? (v/ask kb (list 'totalDuration (list 'list) '?d) C))))))
 
 ;; ---- registration --------------------------------------------------------
@@ -423,10 +405,7 @@
       (is (= '(QuantityFn 9000 Second) (bound kb (list 'totalDuration (list 'list A B) '?d)))))))
 
 (tu/deftest-kb a-non-finite-magnitude-is-refused-not-stored
-  ;; ##Inf and ##NaN are number?s, so an infinite bound stored cleanly — and then
-  ;; every duration and metric goal in the context threw a raw NumberFormatException
-  ;; out of the magnitude arithmetic.  Both entry points refuse it before storage; a
-  ;; variable magnitude stays legal, since a rule antecedent binds it.
+  ;; ##Inf and ##NaN are number?s; `assert` and `check` refuse either as a magnitude
   (tu/with-terms [lengthOf IvA CxDur]
     (doseq [s [(list lengthOf IvA (list 'QuantityIntervalFn 0 ##Inf 'Second))
                (list lengthOf IvA (list 'QuantityFn ##NaN 'Second))]]
@@ -439,10 +418,6 @@
                                 (list 'quantified_interval '?i) CxDur))))))
 
 (tu/deftest-kb a-total-in-the-right-dimension-but-wrong-base-unit-does-not-check
-  ;; A unit that declares its dimension but no `conversionFactor` is its own base, so it
-  ;; converts only to itself.  A total computed in Seconds must not read equal to the
-  ;; same magnitude stated in that unit — five fortnights are not five seconds, though
-  ;; both are Durations.
   (load-time-units kb)
   (tu/with-terms [A B]
     (v/assert kb (list 'length A '(QuantityFn 3 Second)) C)

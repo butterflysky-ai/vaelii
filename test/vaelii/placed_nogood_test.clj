@@ -111,7 +111,7 @@
                             antes)
                       [(list 'genlCx CxD CxA) (list 'genlCx CxD CxB)]))))
       (testing "the defeat is in the index by its target"
-        (is (= #{l} (reads/as-stored-named (:index kb) 'defeat)))))))
+        (is (= #{l} (reads/as-stored-named-global (:index kb) 'defeat)))))))
 
 (tu/deftest-kb a-dilemma-and-a-conflict-place-a-contradicts-and-no-defeat
   (tu/with-terms [cat dog Rex Tom excludesType CxA]
@@ -138,7 +138,7 @@
                 :g (v/assert kb (list excludesType dog cat) 'CxUniverse)}]
         (place! kb #{(:l hs) (:w hs)} #{(:g hs)})
         (v/retract! kb (pick hs))
-        [(placed kb) (reads/as-stored-named (:index kb) 'defeat)]))))
+        [(placed kb) (reads/as-stored-named-global (:index kb) 'defeat)]))))
 
 (tu/deftest-kb retracting-a-member-or-a-ground-takes-the-placed-sentexes-out
   (doseq [k [:l :w :g]]
@@ -249,7 +249,8 @@
         g (v/assert kb (list excludesType dog cat) 'CxUniverse)]
     (place! kb #{l w} #{g})
     {:l l :w w :g g
-     :d (:id (sole (v/sentexes-with-functor kb 'defeat)))
+     :d (:id (sole (filter #(= (list 'defeat (list 'sentexHandle l)) (:sentence %))
+                           (v/sentexes-with-functor kb 'defeat))))
      :c (:id (sole (v/sentexes-with-functor kb 'contradicts)))}))
 
 (tu/deftest-kb a-placed-defeat-hides-its-target-below-the-placement-and-not-above
@@ -695,7 +696,8 @@
 (defn- breed-cycle
   "The reading of the defeat-dependency cycle after the writes `ops`, in order:
   `[L1 L2 G1 G2]` believed at CxA, each asked alone, then L1 and L2 hidden at CxA in one
-  read asking L1 first, and in one read asking L2 first.
+  read asking L1 first, and in one read asking L2 first.  When `ops` holds `:ex`, `:r`
+  and `:s` are the same three readings at CxR and CxS.
 
   ```
   CxA  (disjoint dog cat) M   (disjoint bird fish) M   (poodle Rex) M   (sparrow Tweety) M
@@ -704,34 +706,48 @@
        L2 = (fish Tweety) :default                                              (:l2)
        R1 = (fish ?x) & (dog_breed ?t) => (genl ?t dog)                         (:r1)
        R2 = (cat ?x) & (bird_breed ?t) => (genl ?t bird)                        (:r2)
+  CxR under CxA   (except G), G the ground of the defeat whose loser is first,
+                  written at its position or once G is stored                   (:ex)
+  CxS under CxA, beside CxR
   G1 = (genl poodle dog) from R1 over L2;  G2 = (genl sparrow bird) from R2 over L1
   D1 defeats L1 and rests on G1;  D2 defeats L2 and rests on G2
   ```"
   [ops]
   (tu/with-neutral-kb [kb tu/fresh]
-    (tu/with-terms [cat dog fish bird poodle sparrow dog_breed bird_breed Rex Tweety CxA]
-      (v/assert kb (list 'genlCx CxA 'CxUniverse) 'CxUniverse)
+    (tu/with-terms [cat dog fish bird poodle sparrow dog_breed bird_breed Rex Tweety CxA CxR CxS]
+      (doseq [[c up] [[CxA 'CxUniverse] [CxR CxA] [CxS CxA]]]
+        (v/assert kb (list 'genlCx c up) 'CxUniverse))
       (doseq [s [(list 'disjoint dog cat) (list 'disjoint bird fish) (list poodle Rex)
                  (list sparrow Tweety) (list dog_breed poodle) (list bird_breed sparrow)]]
         (v/assert kb s CxA {:strength :monotonic}))
-      (let [rule (fn [lit breed sup]
-                   (list 'set/forwardRule
-                         (list 'implies (list 'and (list lit '?x) (list breed '?t)) (list 'genl '?t sup))))
-            hs   (into {} (map (fn [op]
-                                 [op (case op
-                                       :l1 (v/assert kb (list cat Rex) CxA)
-                                       :l2 (v/assert kb (list fish Tweety) CxA)
-                                       :r1 (v/assert kb (rule fish dog_breed dog) CxA {:strength :monotonic})
-                                       :r2 (v/assert kb (rule cat bird_breed bird) CxA {:strength :monotonic}))]))
-                       ops)
-            l1   (:l1 hs) l2 (:l2 hs)
-            g1   (v/handle-of kb (list 'genl poodle dog) CxA)
-            g2   (v/handle-of kb (list 'genl sparrow bird) CxA)
-            read (fn [hs] (let [hid (exc/defeat-hidden-fn kb CxA false)] (mapv #(boolean (hid %)) hs)))]
-        {:first  (if (neg? (nm/compare-form [(list cat Rex) CxA] [(list fish Tweety) CxA])) :l1 :l2)
-         :alone  (mapv #(v/believed? kb % CxA) [l1 l2 g1 g2])
-         :l1-l2  (read [l1 l2])
-         :l2-l1  (vec (rseq (read [l2 l1])))}))))
+      (let [first (if (neg? (nm/compare-form [(list cat Rex) CxA] [(list fish Tweety) CxA])) :l1 :l2)
+            rule  (fn [lit breed sup]
+                    (list 'set/forwardRule
+                          (list 'implies (list 'and (list lit '?x) (list breed '?t)) (list 'genl '?t sup))))
+            g1s   (list 'genl poodle dog)
+            g2s   (list 'genl sparrow bird)
+            write (fn [op]
+                    (case op
+                      :l1 (v/assert kb (list cat Rex) CxA)
+                      :l2 (v/assert kb (list fish Tweety) CxA)
+                      :r1 (v/assert kb (rule fish dog_breed dog) CxA {:strength :monotonic})
+                      :r2 (v/assert kb (rule cat bird_breed bird) CxA {:strength :monotonic})
+                      :ex nil))
+            except (fn [hs]
+                     (let [g (v/handle-of kb (if (= :l1 first) g1s g2s) CxA)]
+                       (if (and g (contains? hs :ex) (nil? (:ex hs)))
+                         (assoc hs :ex (v/assert kb (list 'except (list 'sentexHandle g)) CxR))
+                         hs)))
+            hs    (reduce (fn [hs op] (except (assoc hs op (write op)))) {} ops)
+            l1    (:l1 hs) l2 (:l2 hs)
+            g1    (v/handle-of kb g1s CxA)
+            g2    (v/handle-of kb g2s CxA)
+            read  (fn [ctx hs] (let [hid (exc/defeat-hidden-fn kb ctx false)] (mapv #(boolean (hid %)) hs)))
+            at    (fn [ctx] {:alone (mapv #(v/believed? kb % ctx) [l1 l2 g1 g2])
+                             :l1-l2 (read ctx [l1 l2])
+                             :l2-l1 (vec (rseq (read ctx [l2 l1])))})]
+        (cond-> (assoc (at CxA) :first first)
+          (:ex hs) (assoc :r (at CxR) :s (at CxS)))))))
 
 (tu/deftest-kb a-defeat-dependency-cycle-is-broken-in-content-order
   ;; Each defeat rests, through a rule-derived :default type edge, on the other's loser
@@ -746,19 +762,42 @@
               :l2-l1 hidden}}
            readings))))
 
+(defn- excepted-cycle-readings
+  "The except at CxR hides the first defeat's ground there, so that defeat is out of force
+  at CxR for a reason outside the cycle, while the second defeat's ground and verdict
+  stand: CxR reads the second in force.  CxA and CxS see no except and read ruling 18's
+  answer."
+  [orders]
+  (let [readings (into #{} (map breed-cycle) orders)
+        {:keys [first]} (clojure.core/first readings)
+        ruling   (if (= :l1 first)
+                   {:alone [false true true false] :l1-l2 [true false] :l2-l1 [true false]}
+                   {:alone [true false false true] :l1-l2 [false true] :l2-l1 [false true]})
+        excepted (if (= :l1 first)
+                   {:alone [true false false true] :l1-l2 [false true] :l2-l1 [false true]}
+                   {:alone [false true true false] :l1-l2 [true false] :l2-l1 [true false]})]
+    (is (= #{(assoc ruling :first first :r excepted :s ruling)} readings))))
+
+(tu/deftest-kb ^:slow a-cycle-whose-first-defeat-is-out-of-force-at-a-reader-puts-the-second-in-force-there
+  (excepted-cycle-readings (permutations [:l1 :l2 :r1 :r2 :ex])))
+
+(tu/deftest-kb sampled-orders-put-the-second-defeat-of-a-cycle-in-force-where-the-first-is-excepted
+  ;; The sampled twin: every twelfth of the 120 orders.
+  (excepted-cycle-readings (take-nth 12 (permutations [:l1 :l2 :r1 :r2 :ex]))))
+
 (defn- ground-cycle
   "`{:first … :read [W G L]}`: which of G and L is first in content order, and W, G and L
-  believed at CxB, after the writes `ops`, in order.  The ground G of the membership
-  nogood over W and L is derived by a rule guarded by L (`:guard`, with `arm` `:unknown`
-  or `:except`), or by a rule over L (`:self`).
+  believed at L's context, after the writes `ops`, in order.  The ground G of the
+  membership nogood over W and L is derived by a rule guarded by L (`:guard` and `:own`,
+  with `arm` `:unknown` or `:except`), or by a rule over L (`:self`).
 
   ```
   CxA  (disjoint dog cat) M   W = (poodle Rex) M   (dog_breed poodle) M        (:w, :breed)
        :guard  (dog_breed ?t) & (poodle ?x) => (genl ?t dog), guarded by (cat ?x)  (:rule)
        :self   (dog_breed ?t) & (cat ?x) => (genl ?t dog)                          (:rule)
-  CxB under CxA   L = (cat Rex) :default                                           (:l)
-  G = (genl poodle dog).  D defeats L at CxB and rests on G; under :guard the guard
-  defeat of G at CxB rests on L, and under :self G rests on L.
+  CxB under CxA   L = (cat Rex) :default, in CxA under :own                        (:l)
+  G = (genl poodle dog).  D defeats L at L's context and rests on G; under :guard and
+  :own the guard defeat of G at L's context rests on L, and under :self G rests on L.
   ```"
   [shape arm ops]
   (tu/with-neutral-kb [kb tu/fresh]
@@ -767,7 +806,8 @@
       (v/assert kb (list 'genlCx CxB CxA) 'CxUniverse)
       (v/assert kb (list 'disjoint dog cat) CxA {:strength :monotonic})
       (let [conc (list 'genl '?t dog)
-            rule (case [shape arm]
+            lctx (if (= :own shape) CxA CxB)
+            rule (case [(if (= :own shape) :guard shape) arm]
                    [:self nil]       (list 'set/forwardRule
                                            (list 'implies (list 'and (list dog_breed '?t) (list cat '?x)) conc))
                    [:guard :unknown] (list 'set/forwardRule
@@ -783,11 +823,11 @@
                                        :w     (v/assert kb (list poodle Rex) CxA {:strength :monotonic})
                                        :breed (v/assert kb (list dog_breed poodle) CxA {:strength :monotonic})
                                        :rule  (v/assert kb rule CxA {:strength :monotonic})
-                                       :l     (v/assert kb (list cat Rex) CxB))]))
+                                       :l     (v/assert kb (list cat Rex) lctx))]))
                        ops)
             g    (v/handle-of kb (list 'genl poodle dog) CxA)]
-        {:first (if (neg? (nm/compare-form [(list 'genl poodle dog) CxA] [(list cat Rex) CxB])) :g :l)
-         :read  (mapv #(boolean (and % (v/believed? kb % CxB))) [(:w hs) g (:l hs)])}))))
+        {:first (if (neg? (nm/compare-form [(list 'genl poodle dog) CxA] [(list cat Rex) lctx])) :g :l)
+         :read  (mapv #(boolean (and % (v/believed? kb % lctx))) [(:w hs) g (:l hs)])}))))
 
 (tu/deftest-kb a-guard-defeat-and-a-nogood-defeat-resting-on-each-other-are-broken-in-content-order
   ;; The guard defeat of G rests on its blocker L, and the defeat of L rests on G.  The one
@@ -795,6 +835,18 @@
   (doseq [arm [:unknown :except]]
     (testing (name arm)
       (let [readings (into #{} (map #(ground-cycle :guard arm %)) (permutations [:w :breed :rule :l]))
+            first    (:first (clojure.core/first readings))]
+        (is (= #{{:first first :read (if (= :g first) [true false true] [true true false])}}
+               readings))))))
+
+(tu/deftest-kb a-guard-at-the-firings-own-placement-and-a-nogood-defeat-resting-on-each-other-are-broken-in-content-order
+  ;; L is stated where G is placed, so the guard holds at G's own placement.  L is
+  ;; `:default`, so G is stored with a guard defeat at CxA resting on L (design ruling
+  ;; 25), and the walk breaks the cycle in content order in every arrival order, as it
+  ;; does for the two-context shape.
+  (doseq [arm [:unknown :except]]
+    (testing (name arm)
+      (let [readings (into #{} (map #(ground-cycle :own arm %)) (permutations [:w :breed :rule :l]))
             first    (:first (clojure.core/first readings))]
         (is (= #{{:first first :read (if (= :g first) [true false true] [true true false])}}
                readings))))))

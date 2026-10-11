@@ -1,7 +1,7 @@
 ;; SPDX-License-Identifier: SSPL-1.0
 ;; Copyright © 2026 Vaelii LLC and the Vaelii contributors.
 (ns vaelii.matrix-queue-test
-  "The matrix's shared state in `scripts/lib/slots.sh`, and the refusal
+  "The matrix's shared state and the gate slots in `scripts/lib/slots.sh`, and the refusal
   `scripts/test-matrix.sh` gives during the cooldown after a red run.
 
   Each test runs the shell in a scratch git repository of its own, so the lock, the
@@ -23,7 +23,8 @@
   id, cooldown or git directory cannot reach the scratch repository."
   (apply dissoc (into {} (System/getenv))
          "EDIT_SESSION" "MATRIX_RED_COOLDOWN" "MATRIX_REQUESTED_BY" "MATRIX_OWED_MAX"
-         "TEST_MATRIX_OUT" "GIT_DIR" "GIT_WORK_TREE" "GIT_INDEX_FILE"))
+         "MATRIX_YIELD" "MATRIX_JOBS" "TEST_MATRIX_OUT" "GIT_DIR" "GIT_WORK_TREE"
+         "GIT_INDEX_FILE" "GATE_MAX_CONCURRENT" "GATE_NO_WAIT" "PERF_NO_WAIT"))
 
 (defn- run [^File dir extra & args]
   (apply shell/sh (concat args [:dir dir :env (merge env extra)])))
@@ -77,6 +78,55 @@
     (fn [dir]
       (is (= "session:s1" (slots dir {"EDIT_SESSION" "s1"} "matrix_requester")))
       (is (= "user:someone" (slots dir {"USER" "someone"} "matrix_requester"))))))
+
+(deftest a-stale-lock-is-broken-only-while-it-holds-the-line-read
+  (with-repo
+    (fn [dir]
+      (let [lock (fn [] (slots dir "cat \"$(matrix_state_dir)/lock\" 2>/dev/null || true"))]
+        (slots dir "printf 'stale\\n' >|\"$(matrix_state_dir)/lock\"")
+        (slots dir "lock_break_stale \"$(matrix_state_dir)/lock\" stale")
+        (is (= "" (lock)) "the stale line is removed")
+        (slots dir "printf 'live\\n' >|\"$(matrix_state_dir)/lock\"")
+        (slots dir "lock_break_stale \"$(matrix_state_dir)/lock\" stale")
+        (is (= "live" (lock)) "a lock taken since the read stays")
+        (is (= "" (slots dir "ls \"$(matrix_state_dir)\" | grep -F .stale. || true"))
+            "no renamed copy is left behind")))))
+
+(deftest a-gate-slot-is-taken-only-while-one-is-free-or-stale
+  (with-repo
+    (fn [dir]
+      ;; `gate_slot_take` reads a slot as held while its pid is alive and runs gate.sh. The
+      ;; shell starts that holder itself as `$h`, so this test forks no JVM (multi_jvm_test).
+      (let [take-slot (fn [slot-2]
+                        (run dir {"GATE_NO_WAIT" "1"} tu/bash "-c"
+                             (str ". " (tu/posix-path checkout) "/scripts/lib/slots.sh"
+                                  " && { (exec -a gate.sh sleep 300) & h=$!; trap 'kill $h' EXIT; }"
+                                  " && d=$(matrix_state_dir)"
+                                  " && printf '%s\\n' \"$h abc 0 user:a lein gate\" >|\"$d/gate-lock.1\""
+                                  " && printf '%s\\n' \"" slot-2 "\" >|\"$d/gate-lock.2\""
+                                  " && gate_slot_take lein gate && basename \"$GATE_SLOT\"")))]
+        (let [{:keys [exit err]} (take-slot "$h abc 0 user:b lein gate")]
+          (is (= 75 exit) "GATE_NO_WAIT exits 75 while both slots are held")
+          (is (and (str/includes? err "user:a") (str/includes? err "user:b"))
+              "the refusal names every holder"))
+        ;; above macOS's and Linux's default pid ceilings, so no process holds it
+        (let [{:keys [exit out]} (take-slot "9999999 abc 0 user:c lein gate")]
+          (is (= 0 exit))
+          (is (= "gate-lock.2" (str/trim out)) "a dead holder's slot is broken and taken"))
+        (is (= "" (slots dir {"GATE_MAX_CONCURRENT" "0" "GATE_NO_WAIT" "1"}
+                         "gate_slot_take lein gate && printf %s \"$GATE_SLOT\""))
+            "a cap of 0 takes no slot")))))
+
+(deftest the-configurations-a-yield-stopped-are-listed-until-a-run-takes-them
+  (with-repo
+    (fn [dir]
+      (slots dir "matrix_yield_stopped_add rete disk-log")
+      (slots dir "matrix_yield_stopped_add rete")
+      (is (= "disk-log\nrete" (slots dir "matrix_yield_stopped")) "each listed once")
+      (slots dir "matrix_yield_stopped_take rete memory")
+      (is (= "disk-log" (slots dir "matrix_yield_stopped")) "a take removes what it names")
+      (slots dir "matrix_yield_stopped_take disk-log")
+      (is (= "" (slots dir "matrix_yield_stopped"))))))
 
 (deftest the-cooldown-holds-from-a-red-until-it-expires-or-a-green
   (with-repo
@@ -134,3 +184,67 @@
           (testing "a configuration that failed without naming a test points at its log"
             (is (str/includes? out "overlay — no failing test named")))
           (is (not (.exists (io/file dir ".git/vaelii-matrix/lock"))) "no lock was taken"))))))
+
+(def ^:private fake-lein
+  "A `lein` whose first call exits `$FAKE_FIRST` at once, whose second and third sleep
+  until killed, and whose later calls pass.  `mkdir` numbers the calls atomically."
+  (str "#!/usr/bin/env bash\n"
+       "k=1; until mkdir \"$FAKE/s$k\" 2>/dev/null; do k=$((k + 1)); done\n"
+       "(( k == 1 )) && exit \"${FAKE_FIRST:-0}\"\n"
+       "(( k <= 3 )) && exec sleep 300\n"
+       "exit 0\n"))
+
+(defn- run-owed-behind-a-request
+  "In a fresh repository whose last commit owes the three disk configurations, queue a
+  request and run `--owed` over a fake `lein`; the run's result and the repository."
+  [^File dir first-exit]
+  (copy-scripts! dir)
+  (spit (io/file dir ".gitignore") "scripts/\nlogs/\ntestbench/\nfake/\n")
+  (io/make-parents (io/file dir "src/vaelii/impl/disk/x.clj"))
+  (spit (io/file dir "src/vaelii/impl/disk/x.clj") "x\n")
+  (git! dir "add" ".")
+  (git! dir "commit" "-q" "-m" "three")
+  (let [fake (io/file dir "fake")
+        lein (io/file fake "bin/lein")
+        base (git! dir "rev-parse" "HEAD~1")]
+    (io/make-parents lein)
+    (spit lein fake-lein)
+    (.setExecutable lein true)
+    (slots dir (str "matrix_queue_add " base " :default session:waiting"))
+    (run dir {"FAKE" (tu/posix-path fake) "FAKE_FIRST" (str first-exit) "MATRIX_JOBS" "3"
+              "PATH" (str (tu/posix-path (io/file fake "bin")) ":" (get env "PATH"))}
+         tu/bash "scripts/test-matrix.sh" "--no-tty" (str "--owed=" base))))
+
+(defn- summaries [^File dir]
+  ;; `run-*` only: `latest` links to one of them
+  (->> (.listFiles (io/file dir "logs/test-matrix"))
+       (filter #(str/starts-with? (.getName ^File %) "run-"))
+       (keep #(let [f (io/file % "summary.tsv")] (when (.exists f) (slurp f))))))
+
+(deftest ^:slow an-owed-run-behind-a-queued-request-ends-at-its-first-verdict
+  (testing "a green first verdict yields: the rest stop, and the next matrix runs them"
+    (with-repo
+      (fn [^File dir]
+        (let [{:keys [exit out]} (run-owed-behind-a-request dir 0)
+              ;; the yield starts the next matrix detached; wait for it to release the lock
+              done? #(and (= 2 (count (summaries dir)))
+                          (not (.exists (io/file dir ".git/vaelii-matrix/lock"))))
+              _     (loop [n 0] (when (and (not (done?)) (< n 300)) (Thread/sleep 200) (recur (inc n))))
+              rows  (summaries dir)]
+          (is (= 75 exit) "a yield exits 75, the queued status")
+          (is (str/includes? out "yielded to a queued request"))
+          (is (= [0 2] (sort (map #(count (re-seq #"\tstopped\t" %)) rows)))
+              "the yielding run stopped two, and the next matrix stopped none")
+          (is (= "" (slots dir "matrix_yield_stopped"))
+              "the next matrix took the two stopped configurations off `yield-stopped`")
+          (is (= 0 (:exit (run dir {} tu/bash "scripts/test-matrix.sh" "--no-tty"
+                               "--covered=HEAD~1..HEAD")))
+              "the next matrix covers every configuration the yielding run stopped")))))
+  (testing "a red first verdict halts the run and drops the queue"
+    (with-repo
+      (fn [^File dir]
+        (let [{:keys [exit]} (run-owed-behind-a-request dir 1)]
+          (is (= 1 exit))
+          (is (= 1 (count (summaries dir))) "no next matrix starts")
+          (is (= 2 (count (re-seq #"\tstopped\t" (first (summaries dir))))))
+          (is (not= "" (slots dir "matrix_red_recent")) "the cooldown holds"))))))

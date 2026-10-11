@@ -21,13 +21,7 @@ prover that reads a KB into a network and reads answers back out:
 
 They share no predicate, and no network ever sees another's facts. Topology, orientation
 and distance are the three standard questions of qualitative spatial reasoning; relative
-direction is orientation asked from inside the scene rather than off a map, which is the
-form a story takes.
-
-The engine, the reader, the entailment reading, the four goal shapes, the memoized pass
-and the cost/completeness declarations are all documented in [qcn.md](qcn.md) and are the
-same for all four. This page is the four algebras. A fifth, Allen's interval algebra over
-the same engine, is [time.md](time.md).
+direction is orientation asked from inside the scene rather than off a map.
 
 ## RCC-8 (`vaelii.impl.space`)
 
@@ -75,8 +69,8 @@ node list and `:consistent?` verdict.
 
 ## Cardinal direction (`vaelii.impl.orientation`)
 
-The second algebra says which way one place lies from another, on the map's own axes. Its
-nine base relations are again jointly exhaustive and pairwise disjoint, and each is a pair of
+Cardinal direction says which way one place lies from another, on the map's own axes. Its
+nine base relations are jointly exhaustive and pairwise disjoint, and each is a pair of
 **independent one-dimensional point relations** — east-west on x, north-south on y, each
 `:lt` / `:eq` / `:gt`:
 
@@ -88,16 +82,14 @@ nine base relations are again jointly exhaustive and pairwise disjoint, and each
 | `:se` | `[:gt :lt]` | `southeastOf` | | `:nw` | `[:lt :gt]` | `northwestOf` |
 | `:eq` | `[:eq :eq]` | `sameLocationAs` | | | | |
 
-That decomposition is the whole trick, and it is why **there is no 9×9 table**:
-composition is *computed*, not transcribed. Composing two directions means composing
+**There is no 9×9 table**: `vaelii.impl.projection` *computes* composition by composing
 each axis separately through the three-relation point algebra and taking the product of
 the two results. North-then-east is `:eq;:gt` = `:gt` on x and `:gt;:eq` = `:gt` on y,
-which reads back as northeast. Because the nine directions are exactly the nine `[x y]`
-combinations, that read-back is total — every pair the axes can compose to names a
-direction — so composition is total and never empty, and a table nobody wrote down
-cannot disagree with itself. The two disagreeing point compositions (`:lt;:gt` and
-`:gt;:lt`) are where information is lost: north-then-south leaves `#{:n :eq :s}`, and two
-opposite diagonals lose both axes at once and compose to all nine.
+which reads back as northeast. The nine directions are exactly the nine `[x y]`
+combinations, so every pair the axes compose to names a direction and composition is
+never empty ([qcn.md](qcn.md) gives the bijection check). The two disagreeing point
+compositions (`:lt;:gt` and `:gt;:lt`) lose information: north-then-south leaves
+`#{:n :eq :s}`, and two opposite diagonals lose both axes at once and compose to all nine.
 
 Four **derived** predicates each constrain one axis and leave the other open:
 
@@ -113,9 +105,8 @@ The converse falls out of the projection too: flip both axes, so `converse(:ne) 
 and `:eq` is its own converse.
 
 Every read is the same one, taken with `:cardinal` in place of `:rcc8` —
-`core/qualitative-network`, `core/possible-relations`, `core/qualitative-scenario` — and
-the prover mirrors its RCC-8 counterpart line for line, since it is the same record
-carrying a different calculus. So `(northeastOf A B)` and `(northeastOf B D)`
+`core/qualitative-network`, `core/possible-relations`, `core/qualitative-scenario`. So
+`(northeastOf A B)` and `(northeastOf B D)`
 entail `(northeastOf A D)`, and with it the weaker `(northwardOf A D)` and
 `(eastwardOf A D)`; asserting `(northwardOf A B)` and `(eastwardOf A B)` intersects two
 single-axis constraints into `#{:ne}` and entails the `(northeastOf A B)` neither one
@@ -123,9 +114,8 @@ states.
 
 ## Relative direction (`vaelii.impl.relative`)
 
-The compass says where a place is on the map. This says where a thing is from where you
-stand — the mouse on the lion's left, the crow in front of the fox — which is the only
-form a story ever states.
+The compass says where a place is on the map. Relative direction says where a thing is
+from where you stand: the mouse on the lion's left, the crow in front of the fox.
 
 ### The frame of reference is the context
 
@@ -143,16 +133,16 @@ each context's network answers its own way, and neither contaminates the other. 
 declares a viewpoint, because the context is the viewpoint; where a frame has to be argued
 about rather than assumed, the frame is a context and the argument is `genlCx`.
 
-So the calculus is binary, it composes exactly as the cardinal directions do, and it needs
-**no change at all** to the shared glue in [qcn.md](qcn.md).
+So the calculus is binary, it composes as the cardinal directions do, and it runs on the
+shared glue in [qcn.md](qcn.md) unchanged.
 
-A context that sees *both* of two incompatible frames inherits both facts and its network
-goes inconsistent, which is the right answer: merging two frames without translating
-between them is an error, and it is reported rather than averaged away.
+A context that sees *both* of two incompatible frames inherits both facts, and its network
+goes inconsistent: merging two frames without translating between them is an error, and
+the network reports it rather than averaging it away.
 
 ### The nine relations
 
-Again jointly exhaustive and pairwise disjoint, and again each is a pair of **independent
+The nine are jointly exhaustive and pairwise disjoint, and each is a pair of **independent
 one-dimensional point relations** — left-right and front-back, coordinates growing
 rightwards and frontwards, each `:lt` / `:eq` / `:gt`:
 
@@ -164,11 +154,10 @@ rightwards and frontwards, each `:lt` / `:eq` / `:gt`:
 | `:behind-left`| `[:lt :lt]` | `behindLeftOf`  | | `:behind-right` | `[:gt :lt]` | `behindRightOf`  |
 | `:eq`         | `[:eq :eq]` | `sameRelativePositionAs` | | | | |
 
-**Composition is computed, not transcribed**, by the same projection trick as the compass:
-compose each axis through the three-relation point algebra and take the product. Left then
+Composition and converse are computed by the same projection as the compass's. Left then
 in-front is `:lt;:eq` = `:lt` on one axis and `:eq;:gt` = `:gt` on the other, which reads
-back as front-left. The read-back is total, so composition never empties. The converse
-flips both axes, so `converse(:front-left) = :behind-right` and `:eq` is its own converse.
+back as front-left. The converse flips both axes, so `converse(:front-left) =
+:behind-right` and `:eq` is its own converse.
 
 Four **derived** predicates each constrain one axis and leave the other open:
 
@@ -179,24 +168,23 @@ Four **derived** predicates each constrain one axis and leave the other open:
 | `frontwardOf` | front, front-left, front-right |
 | `rearwardOf`  | behind, behind-left, behind-right |
 
-None contains `:eq`, so none holds of a thing and itself. They are what a single axis
-disagreeing buys you: `(frontLeftOf A B)` with `(behindLeftOf B D)` pins the left-right
-axis and loses the front-back one, leaving three relations, no base one entailed, and
-`(leftwardOf A D)` entailed.
+None contains `:eq`, so none holds of a thing and itself. A derived predicate is what
+survives a chain that disagrees on one axis: `(frontLeftOf A B)` with `(behindLeftOf B D)`
+pins the left-right axis and loses the front-back one, leaving three relations, no base
+one entailed, and `(leftwardOf A D)` entailed.
 
 `sameRelativePositionAs` is a third spelling of coincidence beside the compass's
-`sameLocationAs` and the distance chain's `coLocatedWith`, and deliberately so: a predicate
-belongs to exactly one calculus, each network reads only its own vocabulary, and the three
-are three different claims — same compass position, same offset in a frame, zero distance
-apart.
+`sameLocationAs` and the distance chain's `coLocatedWith`. A predicate belongs to exactly
+one calculus, each network reads only its own vocabulary, and the three are three different
+claims: same compass position, same offset in a frame, zero distance apart.
 
-The same reads again under `:relative`, and each takes the context whose frame it is
-asking about — which is the whole of what makes a relative direction well posed.
+The same reads again under `:relative`, and each takes the context whose frame it asks
+about.
 
 ## Qualitative distance (`vaelii.impl.distance`)
 
-The third standard question, and the only one of the four whose relations are an **ordered
-chain**: seven classes, each denoting a half-open interval `(lo, hi]` of the non-negative
+Distance is the only one of the four algebras whose relations are an **ordered chain**:
+seven classes, each denoting a half-open interval `(lo, hi]` of the non-negative
 reals, tiling `[0, ∞)` so that exactly one holds of any two things.
 
 | Keyword | Interval | Stored predicate |
@@ -211,11 +199,11 @@ reals, tiling `[0, ∞)` so that exactly one holds of any two things.
 
 The bounds are the **one** transcribed thing in the namespace, and they are a *scale*
 rather than a unit: multiplying every finite bound by one factor changes no entry of the
-composition table, so what the numbers fix is the ratio between neighbouring classes, not
-a length in metres. `:co` runs from `-∞` so that, distance being non-negative, it denotes
-exactly zero — which makes it the algebra's identity with no special case in the
-arithmetic. `:very-far` is unbounded above for the same kind of reason: the chain has to
-end, and no finite bound is known for its last band, so the end is open.
+composition table (`distance_test/scaling-the-bounds-leaves-the-composition-table-unchanged`),
+so the numbers fix the ratio between neighbouring classes, not a length in metres. `:co`
+runs from `-∞` so that, distance being non-negative, it denotes exactly zero, which makes
+it the algebra's identity with no special case in the arithmetic. `:very-far` is unbounded
+above because no finite bound is known for the last class.
 
 **Composition is computed from the bounds by the triangle inequality**, not transcribed.
 If `d(A,B) ∈ (l1, h1]` and `d(B,C) ∈ (l2, h2]` then
@@ -225,13 +213,14 @@ max(l1 - h2, l2 - h1)  <  d(A,C)  <=  h1 + h2
 ```
 
 and the composed set is every class whose own interval meets that range. That range is
-exactly the set of distances the geometry admits, so composition is **exact** — no looser
-than the truth and no tighter. A different chain of bounds gives a different, still-correct
-table, which is what a transcribed table could never promise.
+exactly the set of distances the geometry admits, so composition is **exact**, no looser
+than the truth and no tighter (`distance_test/the-composition-table-matches-the-triangle-inequality`
+checks every cell against sampled real distances). A different chain of bounds gives a
+different table that is exact for those bounds.
 
 **Distance is symmetric**, so the converse of every class set is itself and `converse` is
-the identity function. That is the one place this algebra differs structurally from the
-other five, whose converse permutes their relations. The symmetry lives in the algebra and
+the identity function, where the converse of each of the other five algebras is not the
+identity. The symmetry lives in the algebra and
 deliberately *not* in a `(symmetric P)` declaration: that metadata would hand these
 predicates to the generic symmetric-relation prover as well, where the entailment prover
 means to claim them alone.
@@ -249,7 +238,7 @@ itself.
 
 ### How weakly this composes
 
-Plainly: **weakly**. Two mid-range classes usually compose to several — `close ∘ close` is
+Two mid-range classes usually compose to several — `close ∘ close` is
 `{co, very-close, close, near}` — because a class is an interval and the triangle
 inequality relates intervals loosely. Only a chain through the zero class pins a distance
 down: `(coLocatedWith A B)` with `(closeTo B D)` entails `(closeTo A D)` exactly, and
@@ -259,16 +248,14 @@ So the use of the calculus is **refutation and consistency-checking** rather tha
 entailment. Two things very close to a third *cannot* be very far from each other, and
 asserting that they are makes the context's network unsatisfiable and reportable. A
 derived range is what usually survives: the same very-close chain entails
-`(withinNearDistanceOf A D)` while entailing no class at all. Sold as an entailment engine
-this would disappoint; sold as a way to rule arrangements out, it pays for itself.
+`(withinNearDistanceOf A D)` while entailing no class at all.
 
-Exactness is per **pair** of classes, and that is as far as it reaches: composing a
-*result* onward loses the correlation between the two legs that produced it, so this is
-the one algebra here whose composition does not associate — `(a∘b)∘c` and `a∘(b∘c)` can
-differ, both over-approximating the truth. Nothing downstream is affected, because path
-consistency needs composition to *contain* the truth rather than to associate; it is why
-`qcn_algebra_test` holds the relation-algebra laws over all six algebras and leaves
-associativity out of them.
+Exactness is per **pair** of classes: composing a *result* onward loses the correlation
+between the two legs that produced it, so this is the one algebra here whose composition
+does not associate — `(moderate∘close)∘close` and `moderate∘(close∘close)` differ, both
+over-approximating the truth (`distance_test/composition-is-computed-from-the-bounds`).
+Path consistency needs composition to *contain* the truth rather than to associate, so
+`qcn_algebra_test` leaves associativity out of the laws it holds ([qcn.md](qcn.md)).
 
 The same reads again under `:distance`, and a `core/possible-relations` set with several
 members is the normal case on a chain this coarse rather than a sign of a thin KB.
@@ -288,16 +275,18 @@ places, and the things a frame or a distance is about are all **ordinary individ
 every argument position is declared `(arg … spatial)`, the type a location in some
 space — physical or mathematical — makes something an instance of. None of the four
 calculi needs time, so they relate regions of a plane, squares of an abstract board or a
-line such as y=x as readily as fields and rooms. `tangible` sits under it, so every
+line such as y=x as readily as fields and rooms. `tangible` sits under `spatial`, so every
 animal, made thing and substance qualifies without a further declaration, while a region or
-a frame of reference — which occupy space without being made of anything — is declared
-into it directly. The context keeps two spaces apart, as it keeps two frames of
+a frame of reference, which occupies space without being made of anything, is declared
+`spatial` directly. The context keeps two spaces apart, as it keeps two frames of
 reference apart: a prover's network is built per context, so facts about an abstract
 plane and facts about the world, stated in two contexts neither of which sees the other,
-never meet. A spatial relation between two predicates is refused rather than
-stored.
+never meet. A spatial relation between two predicates is refused `:arg-type` under the
+constraint-only reading. Under the entailing reading, the default, it is stored, and the
+predicate's `:monotonic` memberships defeat the `spatial` memberships it entails
+([argtypes.md](argtypes.md#an-argument-constraint-only-adds-support)). `space_test/the-four-calculi-share-no-predicate-and-type-every-argument-spatial`
+pins the fifty declarations and their argument types.
 
-Each prover is **opt-in**: register it by name with `vaelii.core/add-reasoner`
-(`:rcc8`, `:cardinal`, `:relative`, `:distance`), and until then a KB stores and
-retrieves the facts of that calculus as ordinary facts without paying for a network. The
-vocabulary ships either way.
+Each prover is **opt-in**: `vaelii.core/add-reasoner` registers it by name (`:rcc8`,
+`:cardinal`, `:relative`, `:distance`), and until then a KB stores and retrieves the facts
+of that calculus as ordinary facts ([qcn.md](qcn.md)). The vocabulary ships either way.

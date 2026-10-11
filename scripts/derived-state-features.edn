@@ -16,7 +16,7 @@
  {:feature "region relabel"         :removability :core   :rows []}
  {:feature "strength classes"       :removability :core   :rows []}
  {:feature "genl / genlCx closures" :removability :core   :rows [:T1 :T2 :T5 :T7 :T10 :T11 :J4 :J5]}
- {:feature "context scoping"        :removability :core   :rows [:T9]}
+ {:feature "context scoping"        :removability :core   :rows []}
  {:feature "recheck queue"          :removability :free   :rows [:Q1]}
  {:feature "forward chaining"       :removability :free   :rows [:M4 :R8 :R9 :R11]}
  {:feature "generators"             :removability :free   :rows []}

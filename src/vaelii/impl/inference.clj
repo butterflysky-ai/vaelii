@@ -914,11 +914,15 @@
     {:answers                 <vector of binding maps, `solutions`' own>
      :truncated?              <bool>    the depth bound stopped a rewrite the search
                                         would otherwise have taken — so the answers may
-                                        be incomplete, where `false` guarantees they are
-                                        every answer this KB entails within the bound
+                                        be incomplete, where `false` with an empty
+                                        `:unenumerated` guarantees they are every
+                                        answer this KB entails within the bound
      :time-to-first-answer-ms <double|nil>   nil when there are no answers
      :total-time-ms           <double>
-     :stats                   <tree-stats>}
+     :stats                   <tree-stats>
+     :unenumerated            <vector>  the transitive predicates a goal asked with
+                                        both arguments open, whose derived pairs the
+                                        answers may omit (`provers/*unenumerated*`)}
 
   Truncation is **conservative**: `true` means at least one branch was stopped at the
   bound, not that an answer was certainly lost — a converging rule graph reaches one
@@ -939,15 +943,18 @@
         opts (cond-> (assoc opts :track-truncation? true)
                (and pick (not= :portfolio pick)) (assoc :strategy pick))
         sess (session kb goals context opts)
-        start (System/nanoTime)]
-    (loop [s (seq (search-seq sess)), acc (transient []), first-ns nil]
-      (if s
-        (recur (next s) (conj! acc (first s)) (or first-ns (- (System/nanoTime) start)))
-        {:answers                 (persistent! acc)
-         :truncated?              (boolean (some-> (:truncated sess) deref))
-         :time-to-first-answer-ms (when first-ns (/ (double first-ns) 1e6))
-         :total-time-ms           (/ (double (- (System/nanoTime) start)) 1e6)
-         :stats                   (tree-stats sess)}))))
+        start (System/nanoTime)
+        [report unenumerated]
+        (provers/with-unenumerated
+          #(loop [s (seq (search-seq sess)), acc (transient []), first-ns nil]
+             (if s
+               (recur (next s) (conj! acc (first s)) (or first-ns (- (System/nanoTime) start)))
+               {:answers                 (persistent! acc)
+                :truncated?              (boolean (some-> (:truncated sess) deref))
+                :time-to-first-answer-ms (when first-ns (/ (double first-ns) 1e6))
+                :total-time-ms           (/ (double (- (System/nanoTime) start)) 1e6)
+                :stats                   (tree-stats sess)})))]
+    (assoc report :unenumerated unenumerated)))
 
 ;; ---- the search as data, for a debugger ----------------------------------
 
@@ -1003,11 +1010,13 @@
   nothing else.  The caller should pass the same `:leaf-solver`/`:est-override` `query`
   does, or this searches a different leaf than `query` would.
 
-  Returns `{:goals :context :strategy :status :bounded? :answers :nodes :stats}`.
-  `:status` is `:complete` (the frontier emptied), `:bounded` (the node budget), or
-  `:timeout` (the clock).  `:answers` are `query`'s answers under `:proof? true`, each
-  tagged with `:node` — the id of the node it came off, so an answer is reachable to the
-  subtree that produced it.  `:nodes` is every node as `node-data`, in allocation order.
+  Returns `{:goals :context :strategy :status :bounded? :answers :nodes :stats
+  :unenumerated}`. `:status` is `:complete` (the frontier emptied), `:bounded` (the node
+  budget), or `:timeout` (the clock).  `:answers` are `query`'s answers under `:proof?
+  true`, each tagged with `:node` — the id of the node it came off, so an answer is
+  reachable to the subtree that produced it.  `:nodes` is every node as `node-data`, in
+  allocation order.  `:unenumerated` is `search-report`'s: a run that empties its frontier
+  may still omit the derived pairs of a predicate named there.
 
   Read-only by construction: a query in this engine writes nothing (`portfolio-solutions`)."
   ([kb goals context] (search-tree kb goals context {}))
@@ -1016,28 +1025,33 @@
          strat    (:strategy sess)
          queue    (:queue sess)
          budget   (long (or node-budget default-node-budget))
-         deadline (when max-ms (+ (System/currentTimeMillis) (long max-ms)))]
-     (loop [answers [], results {}, expanded 0]
-       (let [entry (first @queue)]
-         (cond
-           (nil? entry)
-           (finish-tree kb sess strat goals answers results :complete)
+         deadline (when max-ms (+ (System/currentTimeMillis) (long max-ms)))
+         [tree unenumerated]
+         (provers/with-unenumerated
+           (fn []
+             (loop [answers [], results {}, expanded 0]
+               (let [entry (first @queue)]
+                 (cond
+                   (nil? entry)
+                   (finish-tree kb sess strat goals answers results :complete)
 
-           (>= expanded budget)
-           (finish-tree kb sess strat goals answers results :bounded)
+                   (>= expanded budget)
+                   (finish-tree kb sess strat goals answers results :bounded)
 
-           (and deadline (>= (System/currentTimeMillis) (long deadline)))
-           (finish-tree kb sess strat goals answers results :timeout)
+                   (and deadline (>= (System/currentTimeMillis) (long deadline)))
+                   (finish-tree kb sess strat goals answers results :timeout)
 
-           :else
-           ;; a frontier entry is `[estimate content id]`, and the tree is keyed by node
-           (let [nid  (long (nth entry 2))
-                 sols (step! sess)]
-             (if (nil? sols)
-               (finish-tree kb sess strat goals answers results :complete)
-               (recur (into answers (map #(assoc % :node nid)) sols)
-                      (cond-> results (seq sols) (assoc nid sols))
-                      (inc expanded))))))))))
+                   :else
+                   ;; a frontier entry is `[estimate content id]`, and the tree is keyed
+                   ;; by node
+                   (let [nid  (long (nth entry 2))
+                         sols (step! sess)]
+                     (if (nil? sols)
+                       (finish-tree kb sess strat goals answers results :complete)
+                       (recur (into answers (map #(assoc % :node nid)) sols)
+                              (cond-> results (seq sols) (assoc nid sols))
+                              (inc expanded)))))))))]
+     (assoc tree :unenumerated unenumerated))))
 
 (def default-compare-tacticians
   "The tacticians `compare-tacticians` runs when the caller names no subset: the shipped

@@ -19,6 +19,7 @@
             [vaelii.impl.kv :as kv]
             [vaelii.impl.profile :as prof]
             [vaelii.impl.protocols :as p]
+            [vaelii.impl.reads :as reads]
             [vaelii.impl.resolution :as res]
             [vaelii.impl.sentex :as sx]
             [vaelii.test-util :as tu]))
@@ -224,8 +225,8 @@
         (is (= 1 (:asserts row)))
         (is (= (inc (count (sx/path sx))) (:levels row))
             "one trie level per path token, plus the root")
-        (is (= (+ (count (kv/root-keys sx)) (* 2 (inc (count (kv/arg-slots sx))))) (:roots row))
-            "the root postings, plus a count and a child edge per count-trie node: the predicate extent's and each argument's")
+        (is (= (+ (count (kv/root-keys sx)) (* 2 (+ 2 (count (kv/arg-slots sx))))) (:roots row))
+            "the root postings, plus a count and a child edge per count-trie node: the predicate extent's, the shape's and each argument's")
         (is (= (count (kv/sentex-terms sx)) (:terms row)))))))
 
 (deftest the-retraction-tally-is-its-own-tally
@@ -241,7 +242,7 @@
         (is (= 1 (:retracts row)))
         (is (= (inc (count (sx/path sx))) (:levels row))
             "one decrement per path token, plus the root")
-        (is (= (+ (count (kv/root-keys sx)) (* 2 (inc (count (kv/arg-slots sx))))) (:roots row))
+        (is (= (+ (count (kv/root-keys sx)) (* 2 (+ 2 (count (kv/arg-slots sx))))) (:roots row))
             "the root postings, plus the count and the child edge of each emptied count-trie node")
         (is (= (count (kv/sentex-terms sx)) (:terms row)))
         (testing "and it is separate from the assert tally, not that one with a sign on it"
@@ -270,6 +271,8 @@
 ;; ---- the read tally -----------------------------------------------------
 
 (deftest the-read-tally-names-the-family-that-answered
+  ;; a read composed over the family methods is tallied at its `reads` entry point, and a
+  ;; named method by the store that answers it
   (tu/with-neutral-kb [kb tu/fresh]
     (let [p   (tu/tmp-pred) a (tu/tmp-ind) b (tu/tmp-ind) ctx (tu/tmp-ctx)]
       (v/assert kb (list 'genlCx ctx 'CxUniverse) 'CxUniverse)
@@ -277,14 +280,14 @@
       (v/assert kb (list p a b) ctx)
       (let [ix (:index kb)]
         (is (= {:predicate-extent 1} (:reads (collected #(p/count-with-functor ix p)))))
-        (is (= {:context-root 1} (:reads (collected #(p/count-in-context ix ctx)))))
-        (is (= {:term-roster 1}  (:reads (collected #(p/term-count ix)))))
-        (is (= {:trie-counts 1}  (:reads (collected #(p/count-children ix [p])))))
-        (is (= {:rule-index 1}   (:reads (collected #(p/rules-by-consequent ix p)))))
-        (is (= {:term-index 1}   (:reads (collected #(p/sentexes-with-term ix a)))))
+        (is (= {:context-root 1} (:reads (collected #(reads/stored-count-in-context ix ctx)))))
+        (is (= {:term-roster 1}  (:reads (collected #(reads/stored-term-count-global ix)))))
+        (is (= {:trie-counts 1}  (:reads (collected #(reads/stored-count-children ix [p])))))
+        (is (= {:rule-index 1}   (:reads (collected #(reads/as-stored-rules-by-consequent-global ix p)))))
+        (is (= {:term-index 1}   (:reads (collected #(reads/as-stored-with-term ix a)))))
         (testing "a predicate-agnostic argument read touches two families and says so"
           (is (= {:argument-slot 1 :argument-root 1}
-                 (:reads (collected #(p/sentexes-with-arg ix 1 a))))))
+                 (:reads (collected #(reads/as-stored-with-arg-global ix 1 a))))))
         (testing "a whole trie walk is one read of the trie, whatever it cost"
           (let [snap (collected #(p/lookup ix (sx/path (sx/sentex (list p a b) ctx))))]
             (is (= 1 (get-in snap [:reads :trie-lookup])))

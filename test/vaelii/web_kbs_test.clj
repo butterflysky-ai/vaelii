@@ -6,6 +6,7 @@
   page at it, with no restart."
   (:require [clojure.edn :as edn]
             [clojure.java.io :as io]
+            [clojure.string :as str]
             [clojure.test :refer [deftest is testing use-fixtures]]
             [vaelii.browser.access :as access]
             [vaelii.browser.catalog :as catalog]
@@ -286,6 +287,24 @@
                   :body (ByteArrayInputStream. (.getBytes (pr-str form) "UTF-8"))})]
     (assoc r :edn (edn/read-string (:body r)))))
 
+(deftest an-op-kb-diff-names-a-catalog-entry-and-loads-nothing
+  (tu/with-terms [dog Rex CxDiffEntry]
+    (let [other (tu/isolated-fresh)]
+      (try
+        (core-context/load-into other)
+        (v/assert other (list dog Rex) CxDiffEntry)
+        (catalog/register! "other" "Other KB" other)
+        (let [entries (count (catalog/entries))
+              r       (op {:op :kb-diff :args ["other"]})]
+          (testing "the active entry diffs against the entry the key names"
+            (is (= 200 (:status r)))
+            (is (some #(= (list dog Rex) (:sentence %)) (:added (:result (:edn r))))))
+          (is (= entries (count (catalog/entries))) "and the catalog holds no new entry"))
+        (testing "a key naming no entry is a path, and a path is refused"
+          (is (= [403 :path-not-served]
+                 ((juxt :status (comp :type :edn)) (op {:op :kb-diff :args ["no-such"]})))))
+        (finally (tu/clear-kb! other))))))
+
 (defn- late-kb!
   "A memory KB registered as entry \"late\" with a release to perform, and active."
   []
@@ -391,48 +410,65 @@
     (while (and (catalog/exporting?) (< (System/currentTimeMillis) deadline))
       (Thread/sleep 20))))
 
-(deftest the-page-exports-the-active-kb-and-offers-what-it-wrote
+(deftest the-page-exports-the-active-kb-under-the-write-root-and-offers-what-it-wrote
   (let [root (io/file (System/getProperty "java.io.tmpdir")
                       (str "vaelii-web-export-" (System/nanoTime)))
-        dump (io/file root "browser-dump")
         prop (System/getProperty "vaelii.kb.path")]
     (try
       (.mkdirs root)
       (System/setProperty "vaelii.kb.path" (.getAbsolutePath root))
-      (testing "the control names the KB it would write and the three knobs the writer takes"
+      (testing "the control names the KB it would write, where, and the knobs the writer takes"
         (let [body (:body (GET "/kbs"))]
           (is (re-find #"id=\"kb-export\"" body))
           (is (re-find #"hx-post=\"/kbs/export\"" body))
-          (is (re-find #"name=\"dir\"" body))
+          (is (not (re-find #"name=\"dir\"" body)) "a request names no destination")
+          (is (str/includes? body (.getAbsolutePath root)))
           (is (re-find #"name=\"variant\"" body))
           (is (re-find #"records\+index" body))
           (is (re-find #"Base KB" body))))
-      (let [r (POST "/kbs/export" {"dir" (.getPath dump) "compression" "none"})]
+      (let [r (POST "/kbs/export" {"compression" "none"})]
         (is (= 200 (:status r)))
         (exported)
-        (testing "the job's report is the panel's, and it says where the dump went"
-          (let [body (:body (GET "/kbs/export/rows"))]
-            (is (re-find #"id=\"kb-export\"" body))
-            (is (re-find #"tag-done" body))
-            (is (re-find (re-pattern (java.util.regex.Pattern/quote (.getAbsolutePath dump)))
-                         body))
-            (is (re-find #"sentexes" body))))
-        (testing "the poll stops on its own once nothing is running"
-          (is (not (re-find #"hx-trigger=\"every" (:body (GET "/kbs/export/rows"))))))
-        (testing "and the loop is closed: what was written is offered as a source, said so
-                  on the page rather than left for the reader to discover"
-          (is (= :dump (catalog/classify dump)))
-          (is (some #(= "browser-dump" (:name %)) (catalog/sources)))
-          (is (re-find #"Offered below" (:body (GET "/kbs"))))
-          (is (re-find #"browser-dump" (:body (GET "/kbs"))))))
-      (testing "a refusal is a state the page shows, in the writer's own words"
-        (let [r (POST "/kbs/export" {"dir" (.getPath dump)})]
-          (exported)
+        (let [[dump :as written] (vec (.listFiles root))]
+          (is (= 1 (count written)) "one directory, under the write root")
+          (testing "the job's report is the panel's, and it says where the dump went"
+            (let [body (:body (GET "/kbs/export/rows"))]
+              (is (re-find #"tag-done" body))
+              (is (str/includes? body (.getAbsolutePath ^java.io.File dump)))
+              (is (re-find #"sentexes" body))))
+          (testing "the poll stops on its own once nothing is running"
+            (is (not (re-find #"hx-trigger=\"every" (:body (GET "/kbs/export/rows"))))))
+          (testing "and the loop is closed: what was written is offered as a source"
+            (is (= :dump (catalog/classify dump)))
+            (is (some #(= (.getName ^java.io.File dump) (:name %)) (catalog/sources)))
+            (is (re-find #"Offered below" (:body (GET "/kbs")))))))
+      (testing "a request naming a destination is refused on the page and writes nothing"
+        (let [named (io/file root "named")
+              r     (POST "/kbs/export" {"dir" (.getPath named)})]
           (is (= 200 (:status r)))
-          (is (re-find #"is not empty" (:body (GET "/kbs/export/rows"))))))
+          (is (re-find #"names no directory" (:body r)))
+          (is (not (.exists named)))
+          (is (false? (catalog/exporting?)))))
+      (testing "VAELII_REQUEST_PATHS lets a request name one, and the writer's refusal shows"
+        (with-redefs [catalog/request-paths? (constantly true)]
+          (is (re-find #"name=\"dir\"" (:body (GET "/kbs"))))
+          (let [taken (first (.listFiles root))]
+            (POST "/kbs/export" {"dir" (.getPath ^java.io.File taken)})
+            (exported)
+            (is (re-find #"is not empty" (:body (GET "/kbs/export/rows")))))))
       (finally
         (if prop (System/setProperty "vaelii.kb.path" prop) (System/clearProperty "vaelii.kb.path"))
         (doseq [f (reverse (file-seq root))] (.delete ^java.io.File f))))))
+
+(deftest a-load-naming-a-directory-is-refused-and-starts-nothing
+  (let [dir (io/file (System/getProperty "java.io.tmpdir")
+                     (str "vaelii-web-load-" (System/nanoTime)))
+        n   (count (catalog/entries))
+        r   (POST "/kbs/load" {"id" "core" "dir" (.getPath dir)})]
+    (is (= 200 (:status r)))
+    (is (re-find #"names no directory" (:body r)))
+    (is (= n (count (catalog/entries))))
+    (is (not (.exists dir)))))
 
 (deftest a-loaded-dump-is-a-card-the-page-draws
   ;; an import's summary accounts for its refused frames as a map, where the card's
@@ -459,10 +495,10 @@
                             {"host" "localhost:3000" "origin" "http://evil.example"})))))
     (testing (str uri " is not reachable by navigation")
       (is (= 405 (:status (GET uri))))))
-  (testing "a destination nobody named writes nothing, and says so on the page"
-    (let [r (POST "/kbs/export" {"dir" ""})]
+  (testing "a named destination writes nothing, and says so on the page"
+    (let [r (POST "/kbs/export" {"dir" "/tmp/vaelii-nowhere"})]
       (is (= 200 (:status r)))
-      (is (re-find #"destination" (:body r)))
+      (is (re-find #"names no directory" (:body r)))
       (is (false? (catalog/exporting?))))))
 
 ;; ---- what it costs to hold ----------------------------------------------

@@ -518,7 +518,9 @@
         (is (nat/reified-nat-symbol? k))
         (is (seq (v/sentexes-matching kb (list brightAs k Sun) 'CxUniverse)))
         (is (false? (nat/orphan? kb k))))
-      (v/edit! kb {:add [[(list overcast Sunny) 'CxUniverse]]})
+      ;; known-true, so the block sweeps: a `:default` blocker stores the conclusion with a
+      ;; defeat, and the constant keeps that use
+      (v/edit! kb {:add [[(list overcast Sunny) 'CxUniverse {:strength :monotonic}]]})
       (testing "the exception blocks the rule and the settle sweeps the conclusion"
         (is (empty? (v/sentexes-matching kb (list brightAs k Sun) 'CxUniverse))))
       (testing "and the constant it was the last use of goes with it"
@@ -616,6 +618,20 @@
       (testing "the minted constant is a subtype of the result type"
         (is (nat/reified-nat-symbol? k))
         (is (v/genl? kb k super))))))
+
+(tu/deftest-kb result-arg-types-an-application-that-is-never-minted
+  (tu/with-terms [PickFn needsKind kind other Ann]
+    (v/assert kb (list 'unreifiable_function PickFn) 'CxUniverse)
+    (v/assert kb (list 'resultArg PickFn 1) 'CxUniverse)
+    (v/assert kb (list 'genl kind 'thing) 'CxUniverse)
+    (v/assert kb (list 'genl other 'thing) 'CxUniverse)
+    (v/assert kb (list 'arg needsKind 2 kind) 'CxUniverse)
+    (is (some? (v/assert kb (list needsKind Ann (list PickFn kind)) 'CxUniverse))
+        "an application naming the demanded type is admitted")
+    (is (= :arg-type
+           (try (v/assert kb (list needsKind Ann (list PickFn other)) 'CxUniverse) nil
+                (catch clojure.lang.ExceptionInfo e (:type (ex-data e)))))
+        "and one naming a type outside it is refused")))
 
 (tu/deftest-kb rewriteof-reifies-a-nat-to-an-existing-real-term
   (tu/with-terms [CapitalFn France Paris]

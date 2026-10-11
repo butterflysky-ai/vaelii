@@ -52,6 +52,9 @@ should. The file map is [namespaces.md](namespaces.md). Entry points are `lein r
                                                ; polycanonicalized (docs/canonicalization.md)
                                                ; opts: {:strength :monotonic|:default :chain? bool :max-depth n}
                                                ; `assert-opt-keys` is the roster; a key off it is refused
+(try-assert kb sentence context opts)          ; `assert`, refusing a write that would open a
+                                               ; definitional clash (`:definitional-clash`);
+                                               ; depends on arrival order ("Refusing a clash")
 (assert-rule kb antecedents consequent context opts)  ; opts as `assert` (:direction included)
                                                ; (:forward | :backward | :inert | :both, default :backward;
                                                ; a generator defaults :forward) — the programmatic
@@ -224,10 +227,13 @@ default-chain-opts                              ; the bounds a chain run takes w
                                                ; roster is `query-opt-keys`; a key off it is refused.
                                                ; query? stops the search at the first answer
 (query-status kb goal context opts)            ; query's answers PLUS a report -> {:answers :count :status
-                                               ; :truncated? :depth :time-to-first-answer-ms :total-time-ms
-                                               ; :stats}.  :truncated? tells a too-shallow :max-depth (the
-                                               ; bound cut a rewrite) from a genuinely empty answer; it is
-                                               ; conservative (a cyclic set is truncated at every depth).
+                                               ; :truncated? :unenumerated :depth :time-to-first-answer-ms
+                                               ; :total-time-ms :stats}.  :truncated? tells a too-shallow
+                                               ; :max-depth (the bound cut a rewrite) from a genuinely empty
+                                               ; answer; it is conservative (a cyclic set is truncated at
+                                               ; every depth).  :unenumerated names each transitive P a
+                                               ; (P ?x ?y) goal answered by its extent, not its closure;
+                                               ; :status is :complete, :truncated or :incomplete.
                                                ; One concrete context — a fanned context is refused
 (prove kb goal context opts)                   ; recur DFS backward chaining -> [solutions].  With no
                                                ; opts the UNBOUNDED one: terminates on the data,
@@ -267,7 +273,7 @@ default-chain-opts                              ; the bounds a chain run takes w
                                                ; it sits there (docs/inference.md)
 (search-tree kb goal context {:max-depth n})    ; the run that plan predicts: the search TREE as data
                                                ; -> {:goals :context :strategy :status :bounded? :answers
-                                               ; :nodes :stats}, every node
+                                               ; :nodes :stats :unenumerated}, every node
                                                ; the frontier reached with its itemized estimate and the
                                                ; rewrite that produced it.  Needs a depth; bounded by a
                                                ; node budget + :max-ms (docs/inference.md, docs/web.md)
@@ -410,19 +416,27 @@ default-chain-opts                              ; the bounds a chain run takes w
                                                ; shared instance are read from (default CxUniverse)
                                                ; a shared subtype not provably empty, read
                                                ; from the global closures, also reads :orthogonal
-(disjointness-audit kb [context])              ; subsumption-status over every unordered type pair,
-                                               ; the genl nodes less each `relation?` at context —
-                                               ; {:types :pairs :by-status :pairs-data}; the
-                                               ; :unknown pairs flag a candidate missing `disjoint`
-                                               ; or `orthogonal`; an :orthogonal entry carries
-                                               ; :witness (:declared :shared-instance :shared-spec
-                                               ; :unwitnessed-spec) and :via, the instance or
-                                               ; subtype found
+(disjointness-audit kb [context])              ; subsumption-status over every unordered pair of
+                                               ; the genl nodes visible from context (default
+                                               ; CxWell, the starter spindle's collector), less
+                                               ; each `relation?` there — {:types :pairs :by-status
+                                               ; :pairs-data}; a type an opt-in theory alone
+                                               ; declares is outside the sweep at the default
+                                               ; vantage; the :unknown pairs flag a candidate
+                                               ; missing `disjoint` or `orthogonal`; an :orthogonal
+                                               ; entry carries :witness (:declared :shared-instance
+                                               ; :shared-spec :unwitnessed-spec) and :via, the
+                                               ; instance or subtype found
 ;; the taxonomy, read (thin delegations to vaelii.impl.taxonomy — reads only, since
 ;; edges and metadata are maintained by assert / retract! from the sentexes stating them)
+;; with no context, genls / specs / direct-* / genl? / disjoint? / has-prop? / inverse-of
+;; read the KB-wide answer: every edge and declaration held, including one a defeat or
+;; an except hides from every reader; a reader's answer takes its context
 (genls kb t [context]) / (specs kb t [context])         ; genl up/down closure (scoped with a context)
 (direct-genls kb t [context]) / (direct-specs kb t [context]) ; one genl step up/down, not reflexive;
                                                         ; a cover roster's installed edges count
+(min-genls kb t [context]) / (max-specs kb t [context]) ; the direct parents / children no other one
+                                                        ; stands between: a redundant stated edge is left out
 (genl? kb sub super [context])                          ; subtype test, scoped the same way
 (types kb) / (contexts kb)                              ; the nodes of each hierarchy
 (relation? kb term [context])                           ; a stored arity of 2+ or variable_arity:
@@ -436,8 +450,8 @@ default-chain-opts                              ; the bounds a chain run takes w
                                                         ; :forced-decontextualized
                                                         ; :forced-monotonic :abducible
                                                         ; :closed-extent :modal :target-following
-                                                        ; :reifiable :unreifiable :quoting
-                                                        ; :context-denoting, and the six :declares-*
+                                                        ; :reifiable :unreifiable :quoting,
+                                                        ; and the six :declares-*
                                                         ; that name a predicate as the SUBJECT of an
                                                         ; argument constraint (:declares-arg-isa
                                                         ; :declares-arg-genl :declares-quoted-arg
@@ -586,8 +600,11 @@ assertable-strengths                            ; #{:monotonic :default}, the se
 (why-not kb handle)                             ; stored but OUT: :defeated (+ what contradicts it)
                                                 ; / :withdrawn (+ the defeats it rests on)
                                                 ; / :superseded (+ the restatement that displaced it)
+                                                ; / :inert (a denial of a roster literal)
+                                                ; / :forced-conclusion (+ the rule and its
+                                                ;   antecedent predicates off the roster)
                                                 ; / :unsupported (+ the missing antecedents) / :not-stored
-(why-not kb sentence context)                   ; the same five, plus the two only this arity
+(why-not kb sentence context)                   ; the same reasons, plus the two only this arity
                                                 ; can reach: :excepted (+ the exceptWhen that blocks
                                                 ; it) and :closed-extent (a closed_extent_predicate
                                                 ; grant says the extent is complete and this is not
@@ -677,7 +694,7 @@ expansion each will do**.  Pick by what you are asking, not by habit:
 | Reach for | When you want | Machinery | Returns |
 |-----------|---------------|-----------|---------|
 | **`query` / `query?`** | **the default** — one entry point, one dial: how deep to expand rules | no `:max-depth` and the registry answers alone; a `:max-depth` and the node engine expands rules that deep.  Either way a **conjunctive** join (vector goal) | binding maps `{?x v}` |
-| `query-status` | to tell a **too-shallow `:max-depth`** from an unprovable goal — the answers plus whether the bound cut the search, and the run's timings | the same search `query` runs, driven with truncation tracking on (`inference/search-report`); one concrete context | a report map — `:answers` `:truncated?` `:status` `:time-to-first-answer-ms` `:total-time-ms` `:stats` |
+| `query-status` | to tell a **too-shallow `:max-depth`** from an unprovable goal — the answers plus whether the bound cut the search, and the run's timings | the same search `query` runs, driven with truncation tracking on (`inference/search-report`); one concrete context | a report map — `:answers` `:truncated?` `:unenumerated` `:status` `:time-to-first-answer-ms` `:total-time-ms` `:stats` |
 | `ask` / `ask?` | an answer from what the KB stores or has cached, at a cost that does not depend on the rule graph | the prover registry (facts, transitivity, disjointness, inverse/symmetric metadata, evaluable arithmetic, NAF, arg) — **no rule expansion** | binding maps `{?x v}` |
 | `sentexes-matching` | *stored, believed* literals matching a pattern — retrieval, not reasoning | belief-filtered index read; no inference, no subtype expansion | **sentex maps** |
 | `prove` / `provable?` | backward chaining with **no depth to pick**: it terminates on the data | the recursive chainer, with the registry answering each literal it does not rewrite, so it finds at least what `ask` finds; a **conjunctive** join (vector goal) | a vector of binding maps, **one per derivation** — equal maps repeat, so `distinct` for an answer set |
@@ -940,6 +957,54 @@ imperative.  And it does not chain, so a refusal raised while the sentence's rul
 `:pattern-too-costly` from an `exceptWhen` query — is reported by `assert` alone, which
 then takes back what the call wrote (above).
 
+## Refusing a clash
+
+`try-assert` takes `assert`'s arguments and returns its handle, and refuses a sentence
+that would open a definitional clash with believed content visible from the context.
+`assert` stores such a sentence and the settle places the nogood
+([nmtms.md](nmtms.md#1-order-independence)).
+
+```clojure
+(v/assert kb '(disjoint dog cat) 'CxUniverse {:strength :monotonic})
+(v/assert kb '(dog Rex) 'CxUniverse)
+(v/try-assert kb '(cat Rex) 'CxUniverse)
+;; throws {:type :definitional-clash :violation :disjoint :sentence (cat Rex)
+;;         :entailed-from nil
+;;         :clashes-with [{:handle 812 :sentence (dog Rex) :context CxUniverse}]
+;;         :detail {:types [cat dog]}}
+```
+
+The refusal reads four things, and the call stores nothing when one of them clashes:
+
+- the sentence against believed content: a `:disjoint`, `:functional`, `:asymmetric`,
+  `:anti-transitive` or `:cover` clash, from the checks `assert` runs;
+- each membership the sentence's argument declarations mint
+  ([argtypes.md](argtypes.md)), against believed content, with the written sentence in
+  `:entailed-from`;
+- for a `(forced_decontextualized_predicate P)` declaration, each `(P …)` premise the
+  declaration moves into CxUniverse
+  ([contexts.md](contexts.md#forced_decontextualized_predicate-a-canonical-home-in-cxuniverse)),
+  against believed content there. A refused move leaves the premise where it was stored;
+- the sentence and those mints against each other. A member that is part of the write
+  appears in `:clashes-with` without a `:handle`.
+
+`:violation` names the clash kind and `:detail` holds that kind's own keys. Every other
+refusal is `assert`'s, under its own `:type`. The refusal does not depend on strength: a `:monotonic` write that would defeat
+a `:default` member is refused too.
+
+The check reads the written sentence and the mints placed in its own context, so five
+clashes still land and are placed by the settle: a clash a rule concludes when it fires; a
+mint placed in a context below the sentence's, which a declaration the sentence's context
+does not see draws ([argtypes.md](argtypes.md#where-a-mint-is-placed)); a declaration or
+`genl` edge that turns stored content into a clash, such as a `disjoint` over two types
+with a shared instance; a rebuttal `(not S)` of a believed `S`; and a clash with content
+that is stored and not believed. `check` reports what `assert` refuses, and does not report the
+clashes `try-assert` adds.
+
+**This is the one write entry point that depends on arrival order.** With `(dog Rex)`
+stored, `(cat Rex)` is refused, and with `(cat Rex)` stored, `(dog Rex)` is refused, so the
+KB holds whichever membership arrived first.
+
 ## Previewing the consequences
 
 `check` answers whether a batch would be *admitted*.  **`preview`** answers what it
@@ -1038,7 +1103,9 @@ comparison of stored records alone cannot see, and the one a defeated default ma
 Premises and derived sentexes are compared alike, told apart by `:premise?` on every row: a
 conclusion that stopped following is a difference between two KBs even though nobody wrote
 it either time.  Either side may be a **string** naming a text KB, read with `load-text!`
-into an in-RAM KB of its own, which is what `lein cli diff <a> <b>` is.
+into an in-RAM KB of its own, which is what `lein cli diff <a> <b>` is; `kb-diff` closes
+that KB before it returns.  Over the wire a string side names a KB the server serves, and
+a path is refused ([operations.md](operations.md)).
 
 What it does not compare, stated so nobody reads more into an empty answer: **justifications**
 (which rule concluded a derived sentex, and from what), **provenance** (creator, timestamps,
@@ -1242,15 +1309,24 @@ sees it); its members are `resources/kb/upper/` (`CxAbstract` = the kinds hangin
 skeleton CxCore holds, body parts and substances, `partOf`/`locatedIn`/`madeOf`, and the
 two **type-level** relations `largerThan`/`partType`; `CxOrganism` = the biological
 taxonomy + disjointness; `CxLife` = organism relations and states; `CxSociety` = social
-relations; `CxMeasure` = the theory of measurement; `CxSpace` = RCC-8 region relations
-and cardinal directions; `CxTime` = Allen's interval relations, the point algebra, the
+relations; `CxMeasure` = the theory of measurement; `CxReflection` = the
+expression lattice and the use/mention vocabulary; `CxSpace` = the four spatial calculi of
+[space.md](space.md); `CxTime` = Allen's interval relations, the point algebra, the
 calendar constructors and the event/fluent vocabulary); its collector is **CxUniverse**,
 free for lifted universal facts.
 
 The **middle spindle** is headed by that same CxUniverse; its members are `kb/middle/`
 (`CxKinship`, `CxMereology`, `CxBiology`, `CxChange`, `CxSocial` — the rules;
 `CxAnatomy` and `CxSize` — claims about kinds); its collector is **CxWell**, which
-transitively sees the whole ontology.
+transitively sees the whole ontology but four opt-in theories.
+`CxNormalPhysicalConditions`, the states of matter at room temperature,
+`CxComputing`, the relations over software tools, media resources and DNS names
+with the kinds they are typed over, and `CxPerception`, the perception relations,
+also sit in `kb/middle/` and see CxUniverse, and CxWell does not see any of them:
+a context opts in by placing itself under one. `CxSocialExtension` sits beside them and sees `CxSocial` instead,
+carrying `CxSocial`'s own relations to a context placed under it;
+`<Theory>Extension` names a theory that extends an existing starter theory with
+vocabulary most contexts under the base theory have no occasion to see.
 
 The upper spindle's members say what things **are**, always true, like `genl`; the
 middle spindle's members say how they **interrelate**, where several overlapping accounts can coexist.
@@ -1259,9 +1335,9 @@ CxCore-only KB is a head with no spindle under it, and a user adds a member to e
 spindle.
 The middle theories are the defeasible defaults that state their own exception with
 `exceptWhen` (birds fly except penguins; animals breathe air except fish; organisms
-are alive until they are dead and awake until they are asleep — four rules of one shape,
-differing in whether the exception names a species, a whole class, or a state that
-changes) and the rules with **connected conjunctive antecedents** (antecedents sharing
+are alive until they are dead and awake until they are asleep; a metal is solid at room
+temperature except mercury — five rules of one shape, differing in whether the exception
+names a species, a whole class, a kind of stuff, or a state that changes) and the rules with **connected conjunctive antecedents** (antecedents sharing
 a variable so they join — grandparentOf, part-location, owns-parts).
 
 **A binary predicate says which level it relates at, unless its two ends disagree.**

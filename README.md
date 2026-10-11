@@ -26,8 +26,8 @@ with forward/backward inference and JTMS truth maintenance.
 
 ## Quick start
 
-As a dependency — Leiningen `[com.vaelii/vaelii "0.24.0"]`, or deps.edn
-`com.vaelii/vaelii {:mvn/version "0.24.0"}` — from [Clojars](https://clojars.org/com.vaelii/vaelii).
+As a dependency — Leiningen `[com.vaelii/vaelii "0.25.0"]`, or deps.edn
+`com.vaelii/vaelii {:mvn/version "0.25.0"}` — from [Clojars](https://clojars.org/com.vaelii/vaelii).
 To work on it instead:
 
 ```sh
@@ -92,22 +92,26 @@ Transitivity is not done with rules. The `genl` closure over types and the `genl
 closure over contexts are cached and recomputed when an edge changes, as is the equality
 partition behind `rewriteOf` / `sameAs` / `equals`.
 
-Four properties hold across the engine:
+Five properties hold across the engine:
 
 - **Order independence** — the same knowledge in any order yields the same beliefs. Belief
-  is computed from current state rather than accumulated, and every tie-break keys on
-  content, never on a handle.
+  is a function of current state, however the engine maintains it, and every tie-break keys
+  on content, never on a handle. The property is about belief over the stored knowledge:
+  `try-assert` refuses a clashing write, so arrival order decides what it stores.
 - **Locality** — no operation recomputes the whole graph; a relabel is scoped to the
   affected region with the rest held fixed.
 - **Context scoping** — a read sees what its context sees, up the `genlCx` ancestor set:
   facts, rules, taxonomy edges and definitional checks alike.
-- **Belief filtering** — a stored sentex is not a believed one. Matching, the taxonomy
-  closures and the cached relations all follow belief. The index holds only what is
-  stored, so both readings of a posting are named — `reads/as-stored-…` beside
-  `reads/believed-…` — and a raw index read outside the implementers fails lint.
+- **Belief filtering** — a stored sentex is not a believed one. Matching, closures and
+  cached relations answer from belief, and a raw index read goes through
+  `reads/believed-…` or `reads/as-stored-…`, which name the reading the caller gets.
+- **Separated state** — knowledge lives in the KB, belief-free indexes live in the
+  IndexStore, and belief and every structure that reads it live outside both. The
+  IndexStore holds only what is stored. A cache filled at a read may sit anywhere, and
+  declares the writes that retire it like every other structure.
 
-A subsystem that holds one of the four short states where and why on its own page, and
-[defenses.md](docs/defenses.md#where-the-four-properties-stop) lists every such place.
+A subsystem that holds one of the five short states where and why on its own page, and
+[defenses.md](docs/defenses.md#where-the-five-properties-stop) lists every such place.
 
 Assert known-true content with `{:strength :monotonic}`. The default is `:default`, which
 is most of a common-sense KB, and a default is defeasible at the edges.

@@ -1,0 +1,33 @@
+;; CxNormalPhysicalConditions — the states of matter of stuff at ordinary room temperature
+;; and pressure. Sees the shared upper ontology via CxUniverse. CxWell does not see it,
+;; so the everyday contexts below CxWell assume no temperature and serve a story set on
+;; Mars as well as one set in a kitchen. A context opts in by placing itself under this
+;; one, and a context under both CxWell and this one reads the everyday theories at room
+;; temperature.
+;;
+;; CxAbstract places solid, liquid, gas and plasma under substance and separates them,
+;; and says nothing about which substance is in which state. A substance's state depends
+;; on its temperature and pressure, so the state belongs to a theory that fixes the
+;; conditions. This theory fixes the ordinary ones: a room, a kitchen, a street on a mild
+;; day. A theory of another temperature states its own states beside this one.
+
+(genlCx CxNormalPhysicalConditions CxUniverse)
+
+;; ---- the solids ---------------------------------------------------------
+;; Stone, wood and glass are solid at room temperature. Glass is an amorphous solid: a
+;; pane does not flow.
+(genl stone solid)
+(genl wood solid)
+(genl glass_stuff solid)
+
+;; ---- the liquid metal ---------------------------------------------------
+(genl mercury liquid)
+
+;; ---- a metal is solid, by default ---------------------------------------
+;; A default rule with its exception rather than a genl edge per known metal: a metal
+;; newly found, hypothesized or made up comes out solid unless the KB says otherwise.
+;; Mercury is the stated exception. The rule concludes no solid membership for a portion
+;; of mercury, so the portion's liquid membership meets no solid one and nothing clashes.
+;; See docs/exceptions.md.
+(exceptWhen (mercury ?x)
+  (set/defaultRule (set/forwardRule (implies (and (metal ?x)) (solid ?x)))))

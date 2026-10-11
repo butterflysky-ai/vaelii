@@ -147,13 +147,37 @@
           lifted (subs (str cx) (count "CxSandbox"))]
       (is (not (str/includes? (str cx) t)))
       (is (some? (sandbox/context-for lifted)) "the lifted suffix is a well-formed token")
-      (is (not= cx (sandbox/context-for lifted))
-          "and a cookie carrying it names another sandbox"))))
+      (is (not= cx (sandbox/context-for lifted)) "naming another sandbox")
+      (is (nil? (sandbox/context-of {:headers {"cookie" (str "vaelii-sandbox=" lifted)}}))
+          "and a cookie carrying it, with no tag, names none"))))
+
+(deftest a-cookie-names-a-sandbox-only-with-the-tag-the-server-gave-it
+  (let [t     (sandbox/mint-token)
+        named (fn [v] (sandbox/context-of {:headers {"cookie" (str "vaelii-sandbox=" v)}}))]
+    (doseq [v [t (str t ".") (str t "." (sandbox/mint-token)) (str (sandbox/mint-token) "." t)]]
+      (is (nil? (named v)) v))))
 
 ;; ---- the browser ---------------------------------------------------------
 
 (defn- cookie-of [resp]
   (some-> (get-in resp [:headers "Set-Cookie"]) (str/split #";") first))
+
+(defn- session
+  "A browser session's cookie and the sandbox name its assert form offers."
+  [app]
+  (let [r (app {:request-method :get :uri "/assert" :headers {}})]
+    {:cookie (cookie-of r)
+     :ctx    (second (re-find #"value=\"(CxSandbox[0-9a-f]+)\"" (:body r)))}))
+
+(tu/deftest-kb the-browser-replaces-a-cookie-it-did-not-mint
+  (let [app    (web/app kb)
+        chosen "0123456789abcdef0123456789abcdef"
+        r      (app {:request-method :get :uri "/assert"
+                     :headers {"cookie" (str "vaelii-sandbox=" chosen)}})]
+    (is (str/starts-with? (str (get-in r [:headers "Set-Cookie"])) "vaelii-sandbox=")
+        "a fresh token is minted in its place")
+    (is (not (str/includes? (:body r) (str (sandbox/context-for chosen))))
+        "and the form does not offer the sandbox the client chose")))
 
 (tu/deftest-kb the-browser-mints-a-session-and-creates-nothing-by-looking
   (let [app    (web/app kb)
@@ -164,7 +188,13 @@
         (is (str/starts-with? c "vaelii-sandbox="))
         (is (str/includes? c "HttpOnly"))
         (is (str/includes? c "SameSite=Lax"))
-        (is (not (str/includes? c "Max-Age")) "a sitting, not a subscription")))
+        (is (not (str/includes? c "Max-Age")) "a sitting, not a subscription")
+        (is (not (str/includes? c "Secure")) "over plain HTTP")
+        (is (str/includes? (get-in (app {:request-method :get :uri "/assert" :scheme :https
+                                         :headers {}})
+                                   [:headers "Set-Cookie"])
+                           "; Secure")
+            "and Secure over HTTPS")))
     (testing "and the KB is untouched — looking is not writing"
       (is (= before (tu/sentex-ids kb))))
     (testing "the context field is pre-filled with the sandbox, so the safe thing is the
@@ -175,7 +205,7 @@
             r2 (app {:request-method :get :uri "/assert" :headers {"cookie" c}})]
         (is (nil? (get-in r2 [:headers "Set-Cookie"])) "no re-mint")
         (is (str/includes? (:body r2)
-                           (str (sandbox/context-for (str/replace c "vaelii-sandbox=" "")))))))))
+                           (str (sandbox/context-of {:headers {"cookie" c}}))))))))
 
 (tu/deftest-kb writing-through-the-form-creates-the-sandbox-and-reset-empties-it
   (let [app    (web/app kb)
@@ -251,3 +281,119 @@
       (finally
         (sandbox/reset! kb (symbol (:ctx a)))
         (sandbox/reset! kb (symbol (:ctx b)))))))
+
+;; ---- the roster ------------------------------------------------------------
+
+(def ^:private minute 60000)
+(def ^:private day (* 24 60 minute))
+(def ^:private t0 (* 1000 minute))
+
+(defn- admit
+  "`roster` after the browser's admission of fresh sandbox `ctx` at `t` under `cap`, and
+  its one write."
+  [roster ctx t cap]
+  (let [[r _] (#'sandbox/room roster cap t day)]
+    (#'sandbox/wrote (#'sandbox/enter r ctx 0 t) ctx 2 t)))
+
+(defn- used-for
+  "`roster` with `ctx` entered at `from` and written once a minute for `n` minutes."
+  [roster ctx from n]
+  (reduce (fn [r i] (#'sandbox/wrote r ctx (* 3 (inc i)) (+ from (* i minute))))
+          (#'sandbox/enter roster ctx 0 from)
+          (range n)))
+
+(defn- flood
+  "`roster` after `n` fresh one-write sandboxes are admitted at `t` under `cap`."
+  [roster n t cap]
+  (reduce (fn [r i] (admit r (symbol (str "CxSandboxFlood" i)) (+ t i) cap)) roster (range n)))
+
+(deftest a-sandbox-used-for-twenty-minutes-survives-a-flood-of-fresh-ones
+  (let [cap 4
+        r   (used-for @#'sandbox/empty-roster 'CxSandboxLong t0 21)
+        out (flood r (* 3 cap) (+ t0 (* 20 minute) 1000) cap)]
+    (is (contains? (:entries out) 'CxSandboxLong))
+    (is (= cap (count (:entries out))))
+    (is (zero? (:level out)) "a fresh sandbox is worth 0, so evicting one ages nothing")))
+
+(deftest a-sandbox-idle-past-the-horizon-is-reset-first
+  (let [cap 4
+        r   (used-for @#'sandbox/empty-roster 'CxSandboxLong t0 21)
+        [_ gone] (#'sandbox/room (flood r (dec cap) (+ t0 (* 20 minute)) cap)
+                                 cap (+ t0 (* 21 minute) day) day)]
+    (is (= ['CxSandboxLong] gone) "whatever its history")))
+
+(deftest of-two-equal-histories-the-more-recently-used-is-kept
+  (let [r (-> @#'sandbox/empty-roster
+              (used-for 'CxSandboxEarly t0 5)
+              (used-for 'CxSandboxLate t0 5)
+              (#'sandbox/used 'CxSandboxEarly (+ t0 (* 6 minute)))
+              (#'sandbox/used 'CxSandboxLate (+ t0 (* 6 minute) 1)))
+        [_ gone] (#'sandbox/room r 2 (+ t0 (* 7 minute)) day)]
+    (is (= (get-in r [:entries 'CxSandboxEarly :h]) (get-in r [:entries 'CxSandboxLate :h])))
+    (is (= ['CxSandboxEarly] gone))))
+
+(deftest an-eviction-raises-the-level-so-an-unused-sandbox-falls-behind
+  (let [r (-> @#'sandbox/empty-roster
+              (used-for 'CxSandboxA t0 10)
+              (used-for 'CxSandboxB t0 10))
+        [r' gone] (#'sandbox/room r 2 (+ t0 (* 11 minute)) day)
+        h-before (get-in r [:entries 'CxSandboxB :h])]
+    (is (= ['CxSandboxA] gone))
+    (is (= (get-in r [:entries 'CxSandboxA :h]) (:level r')))
+    (testing "a sandbox used after the eviction restarts from the raised level, so it now
+              outranks one of equal history that was not used since"
+      (let [r'' (used-for r' 'CxSandboxC (+ t0 (* 11 minute)) 10)]
+        (is (< h-before (get-in r'' [:entries 'CxSandboxC :h])))
+        (is (= ['CxSandboxB] (second (#'sandbox/room r'' 2 (+ t0 (* 21 minute)) day))))))))
+
+(tu/deftest-kb a-rebuilt-roster-holds-every-live-sandbox-as-fresh
+  (let [a (fresh-sandbox) b (fresh-sandbox)]
+    (sandbox/open kb a)
+    (sandbox/open kb b)
+    (try
+      (v/assert kb '(organism SandboxRebuilt) a)
+      (let [r (#'sandbox/rebuilt kb t0)]
+        (is (every? (:entries r) [a b]))
+        (is (= (v/count-in-context kb a) (get-in r [:entries a :size])))
+        (is (every? zero? (map :h (vals (select-keys (:entries r) [a b]))))
+            "activity is not in the KB, so a restart forgets it"))
+      (finally (sandbox/reset! kb a) (sandbox/reset! kb b)))))
+
+(defn- live-sandboxes [kb]
+  (set (filter #(str/starts-with? (name %) "CxSandbox") (v/contexts kb))))
+
+(tu/deftest-kb a-flood-of-fresh-sessions-leaves-at-most-the-cap
+  (with-redefs [sandbox/max-sandboxes (constantly 3)]
+    (let [app      (web/app kb)
+          before   (live-sandboxes kb)
+          sessions (vec (repeatedly 8 #(session app)))
+          write    (fn [{:keys [cookie ctx]} text]
+                     (app {:request-method :post :uri "/assert"
+                           :params {"text" text "ctx" ctx}
+                           :headers {"cookie" cookie "host" "localhost:3000"}}))]
+      (try
+        (write (first sessions) "(organism SandboxFloodRufus)")
+        (let [derived (v/handle-of kb '(mortal SandboxFloodRufus) (symbol (:ctx (first sessions))))]
+          (is (nat-int? derived) "the shipped rule concluded into the first sandbox")
+          (doseq [s (rest sessions)] (write s "(organism SandboxFloodTibbles)"))
+          (is (= 3 (count (remove before (live-sandboxes kb)))))
+          (testing "the first sandbox, fresh and least recently used, was reset through the
+                    ordinary retraction, so what the rules derived in it went too"
+            (is (not (sandbox/live? kb (symbol (:ctx (first sessions))))))
+            (is (nil? (v/sentex kb derived)))))
+        (finally (doseq [s sessions] (sandbox/reset! kb (symbol (:ctx s)))))))))
+
+(tu/deftest-kb a-form-past-the-sandbox-ceiling-is-refused
+  (with-redefs [sandbox/max-sentexes 2]
+    (let [app (web/app kb)
+          {:keys [cookie ctx]} (session app)
+          before (tu/sentex-ids kb)
+          b (:body (app {:request-method :post :uri "/assert"
+                         :params {"text" "(organism SandboxCeilA)\n(organism SandboxCeilB)\n(organism SandboxCeilC)"
+                                  "ctx" ctx}
+                         :headers {"cookie" cookie "host" "localhost:3000"}}))]
+      (try
+        (is (not (str/includes? b "Stored")))
+        (is (str/includes? b "past its ceiling of 2"))
+        (is (= before (tu/sentex-ids kb)) "and no sandbox was opened for it")
+        (finally (sandbox/reset! kb (symbol ctx)))))))

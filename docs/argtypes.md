@@ -1,7 +1,7 @@
 # Assertive argument types: `arg` as an entailment
 
-- **Covers:** how, by default, an argument constraint — `arg`, `genlArg`, `interArg`, the
-  covering and the homogeneity forms — derives the type it names as a derived, justified,
+- **Covers:** how, by default, an argument constraint — `arg`, `argArg`, `genlArg`,
+  `interArg`, the covering and the homogeneity forms — derives the type it names as a derived, justified,
   retractable sentex and refuses nothing on a membership; the pass that records those
   derivations over a store loaded without them.
 - **Not here:** `arg` / `genlArg` read as a constraint that rejects a wrongly-typed
@@ -59,9 +59,9 @@ failed. The boundary of the inner reading:
   its inputs are read. The same holds for the argument of a quoting predicate
   (`termOfUnit`, `rewriteOf`) and of a `quoting_function`. A quoting function's own
   declarations are still read over its application; only what it quotes is left alone.
-  `quotedArg` itself stays open-world about a compound argument's kind: no shape
-  classifier exists, so a compound in a `(quotedArg P n string)` position is neither a
-  string nor convicted of not being one.
+  `quotedArg` itself stays open-world about a compound argument's kind: it does not read
+  the shape kinds ([what a quoted form is](#what-a-quoted-form-is)), so a compound in a
+  `(quotedArg P n string)` position is neither a string nor convicted of not being one.
 - **Reifiable and unreifiable alike.** `assert` mints a ground reifiable application into
   a constant before the checks run, and the constant carries the result types, not the
   inputs, so the inputs are read over the sentence as written, before the mint; a refused
@@ -79,8 +79,8 @@ An `arg` declaration on a unary predicate and a `genl` edge above it can say the
 thing, and which of the two is right turns on where the parent sits relative to the type
 the declaration names.
 
-`fixed_arity` carries `(arg fixed_arity 1 relation)` and `(genl fixed_arity relation)`
-names that same type. The edge concludes `(relation 5)` from `(fixed_arity 5)` and
+`fixed_arity` carries `(arg fixed_arity 1 relation)`, and the `(genl fixed_arity relation)`
+edge that `(partition relation fixed_arity variable_arity)` installs names that same type. The edge concludes `(relation 5)` from `(fixed_arity 5)` and
 nothing is disjoint from `relation` for a number, so the declaration's value conviction
 is the only refusal there is; drop it and `(fixed_arity 5)` is accepted. `variable_arity`
 and the function marks are in the same position and keep theirs.
@@ -221,10 +221,6 @@ symbol: `arg`, `genlArg`, `interArg`, the covering forms and the homogeneity for
 declaration written in the asking context or inherited by it, and for a declared type the
 hierarchy does not hold yet, which derives nothing until it does.
 
-A mint is stored in the fact's own context, so a declaration stated in a context below
-the fact's draws no stored mint: with `(P a b)` in CxTop and `(arg P 1 T)` in CxMid below
-it, no `(T a)` is stored, and `ask?` answers it at CxMid and below by a backward proof.
-
 A membership the declared type does not reach is a second membership beside the derived
 one, not evidence against the sentence. `(achieves Ann Bee)` under `(arg accomplishes 2
 tt)` and `(genl achieves accomplishes)` derives `(tt Bee)`; with `(genl tt assoc)` and an
@@ -278,6 +274,7 @@ The **check computes it; the post-store slot materializes it.**
 | `checks/constraint-entailments` | reads the declarations, returns `{:assert :because :position :kind}` maps — **writes nothing** |
 | `checks/entailment-check` | walks the cascade of prospective mints at the entry point and refuses the first the KB could not admit — **writes nothing** |
 | `special/deduce-arg-types` | materializes them, beside `deduce-lifts`, in `assert-entry/assert-one` and `chain/place-conclusion` |
+| `special/deduce-below` | the declarations stated below the fact's context, at the placements of each pair |
 | `special/entail-existing` | the retroactive direction: a declaration arriving over facts already stored |
 | `special/entail-under-edge`, `special/entail-under-context-edge` | a `genl` or `genlCx` edge arriving over a fact and a declaration already stored |
 | `special/triggered-mints` | a trigger membership of `interArg` or a homogeneity form arriving over a fact and a declaration already stored |
@@ -303,7 +300,8 @@ per-fact cost.
 
 `special/entail-arg-type` follows `deduce-lift` almost line for line:
 
-* `kb/find-or-create-sentex` for the implied `(T arg)` in the asserting context;
+* `kb/find-or-create-sentex` for the implied `(T arg)` at each placement of the fact and
+  the declaration ([Where a mint is placed](#where-a-mint-is-placed));
 * `derived-sentex-added` when it is new, so it reaches the closures and posts its
   exception re-check trigger exactly as a rule conclusion does;
 * `jtms/->just` with antecedents **`[source-handle decl-handle & route-edge-handles]`**
@@ -351,7 +349,8 @@ present when it arrives, so `arg` has to as well — and with the descension and
 context hierarchy the ingredients are four rather than two, so there are four entry
 points:
 
-* **fact meets declaration** — `deduce-arg-types`, on `assert` *and* on
+* **fact meets declaration** — `deduce-arg-types` for the declarations the fact's context
+  sees and `deduce-below` for those stated below it, on `assert` *and* on
   `place-conclusion`, because what a declaration says is a claim about the predicate and
   not about how a sentence arrived;
 * **declaration meets facts** — `entail-existing`, walking the predicate extents of the
@@ -361,12 +360,13 @@ points:
   edge's sub-predicate. It is the taxonomy twin of `entail-existing`, and there for the
   reason `subsumption-seeds` beside it is: the arriving datum is the *edge*, and nothing
   else on the assert path re-examines the facts it just brought under a declaration;
-* **context edge meets both** — `entail-under-context-edge`, from
-  `special/reconcile-context-edge`, re-deriving the facts stored in the arriving
+* **context edge meets both** — `entail-under-context-edge`, from the settle's drain of
+  the `genlCx` moves ([contexts.md](contexts.md#one-context-move)), re-deriving the facts stored in the arriving
   `(genlCx sub super)` edge's `sub` and every context under it, since the edge makes the
-  declarations above `super` visible to them. It reads the smaller of that extent and the
-  extent of the declared predicates, by index counts, which `lein perf`'s
-  `genlcx-edge-beside-declared-facts` holds.
+  declarations above `super` visible to them, and the facts and declarations the edge
+  gives a new common descendant ([Where a mint is placed](#where-a-mint-is-placed)). It
+  reads the smaller of that extent and the extent of the declared predicates, by index
+  counts, which `lein perf`'s `genlcx-edge-beside-declared-facts` holds.
 
 Every order of {declaration, fact} reaches the identical KB, and so does every order of
 {declaration, fact, edge}. That is the gate:
@@ -410,7 +410,9 @@ n beside a declared type whose ancestor set grows with n.
 
 A declaration is visible in the context it is written in and in every context below it,
 and it derives in each of them: a derivation is drawn in the context of the fact it is
-drawn over, from every declaration that context sees. A declaration the context inherits
+drawn over, from every declaration that context sees, and a declaration stated where the
+fact's context does not see it derives at the contexts that see both
+([Where a mint is placed](#where-a-mint-is-placed)). A declaration the context inherits
 rests on the `genlCx` edges through which the context sees it, as a declaration on a
 super-predicate rests on the `genl` edges it descends through, so the justification is
 `[fact, declaration, genl edges…, genlCx edges…]` (`checks/entailment-support`).
@@ -426,6 +428,65 @@ position is the single undeclared one, and `CxCore` says why beside it: `thing` 
 a proper subtype of itself, so the constraint the root would fail is the wrong constraint
 rather than a missing one.
 
+### Where a mint is placed
+
+A mint is placed at each maximal context that sees every ingredient of its derivation with
+no `except` hiding one, as a forward firing and a placed nogood are placed
+(`special/pair-placements`). The ingredients are the fact, the declaration, the `genl`
+edges of one route from the fact's predicate to the declared one, and for an `interArg` or
+homogeneity declaration one trigger membership with its route. Where the fact's context
+sees them all, that context is the one placement. Where it does not, the placements are the
+maximal common descendants of the ingredients' contexts, taken over each uncovered route
+(`tax/general-reach-supports`) and each trigger, keeping the most general, and each mint's
+justification names the route and the `genlCx` edges its placement sees the fact through.
+While an `except` hides an ingredient somewhere, each placement is the maximal context
+past it (`res/exception-aware-placements`).
+
+- With `(P a b)` in CxTop and `(arg P 1 T)` in CxMid below it, `(T a)` is stored in CxMid,
+  believed at CxMid and below, and absent at CxTop.
+- With the fact in CxL, the declaration in CxR and both under CxTop, a CxJoin under CxL and
+  CxR is the placement, one per maximal common descendant.
+- With the fact and `(arg Q 1 T)` in CxTop and `(genl P Q)` in CxMid, `(T a)` is stored in
+  CxMid; with a second `(genl P Q)` in CxTop, in CxTop alone. A trigger membership stated
+  in CxMid places an `interArg` mint the same way.
+- With an `except` of the fact at the placement CxMid and an `except` of that `except` in
+  CxLow, `(T a)` is stored in CxLow.
+
+Each arrival direction reaches the placement:
+
+- a **fact arriving** reads the declarations of its predicate and the predicate's
+  ancestors whose placement is not its own context (`special/deduce-below`): one
+  argument-root read per declaring kind and declared ancestor, skipped when no `genlCx`
+  edge comes up to the fact's context. A posting whose count holds more declarations
+  than the context has descendants is read narrowed to the contexts sharing a descendant
+  with it, which `lein perf`'s `fact-beside-distant-declarations` holds;
+- a **declaration arriving** places each fact of its extent at the pair's placements
+  (`entail-existing`);
+- a **`genl` edge or a trigger membership arriving** draws over the facts it reaches
+  (`entail-under-edge`, `special/triggered-mints`) at their placements;
+- a **`genlCx` edge arriving** draws over the facts stated in the contexts a context under
+  its `sub` sees and its `super` does not, and the declarations stated there over the facts
+  stated where the edge newly shows `sub` (`entail-under-context-edge`), which `lein
+  perf`'s `genlcx-edge-beside-seen-declared-facts` holds;
+- a **`genlCx` edge leaving** takes the mints that named it, and `rederive-descended`
+  draws the pair again at the placements that stand. A context under its `sub` can also
+  become a maximal common descendant of a pair placed in a context it saw only through the
+  edge (the move's effective stratum, `tax/context-move`); the settle's drain reads the mints placed in those contexts, and with
+  pruning on the records there that withheld one, and draws each pair again
+  (`special/departed-context-edge-mints`), which `lein perf`'s
+  `genlcx-edge-leaving-beside-distant-mints` holds;
+- an **`except` moving** draws the derivations of its target again
+  ([An except of an ingredient](#an-except-of-an-ingredient)).
+
+A placement an arrival leaves below a more general one loses its justification in the
+settle: under a `genlCx` edge (`special/surplus-placements`), under a `genl` route or a
+trigger membership (`special/descent-surplus-placements`), and under an `except` leaving
+(`drop-hidden-mints!`). So every arrival order stores the same mints
+(`argtype_entail_test`'s `a-mint-is-placed-at-the-most-general-contexts-that-see-the-fact-and-the-declaration`,
+`a-genlCx-edge-leaving-places-the-mint-at-the-common-descendants-it-gives-back`,
+`a-route-edge-or-trigger-below-the-placement-places-the-mint-where-it-is-seen` and
+`an-except-at-the-placement-places-the-mint-where-the-fact-is-given-back`).
+
 ### An except of an ingredient
 
 A derivation is not drawn in a context from which an `except` hides one of its
@@ -434,8 +495,8 @@ ingredients: the fact, the declaration, a trigger membership or an edge on the r
 ([contexts.md](contexts.md#except-removing-visibility-down-a-context-subtree)). The
 `except` moving reaches the derivations in either direction through the settle
 (`special/except-move-sweeps`). An `except` arriving drops each derivation resting on its
-target that the derivation's context no longer sees, so the KB holds what the `except`
-arriving first leaves. An `except` leaving draws again what its target's arrival draws:
+target that the derivation's context no longer sees, or whose context is no longer a
+placement, so the KB holds what the `except` arriving first leaves. An `except` leaving draws again what its target's arrival draws:
 `entail-existing` for a declaration, the fact's own entailments for a fact, and the
 trigger arm for a membership or a `genl` edge (`special/trigger-entailments`). A target
 that is itself an `except` adds its own target. A `genlCx` edge that moves an `except`
@@ -715,6 +776,49 @@ transition. `order_independence_test`'s
 order of the three ingredients and each retraction. The homogeneity forms below read the
 trigger the same way.
 
+## A type another argument names: `argArg`
+
+`(argArg P n m)` says that argument `n` of every application of `P` is an instance of the
+type its argument `m` names. `arg` fixes the type in the declaration; `argArg` reads it off
+each sentence, so `(argArg kindOfPet 1 2)` over `(kindOfPet Rex dog)` derives `(dog Rex)`
+and over `(kindOfPet Tom cat)` derives `(cat Tom)`. A sentence holding no symbol at `m`
+names no type and is not constrained.
+
+`checks/arg-arg-rows` reads each declaration as an `arg` row for the sentence in hand,
+with the declaration's handle as the row's support. The conviction (`args-problem`), the
+entailment (`constraint-entailments`) and the declaration's sweep over stored facts
+(`special/entail-existing`) are therefore `arg`'s own, and a mint's justification names
+the fact and the `argArg` declaration. The declaration itself is checked as `interArg`'s
+is: both positions must be positions `P` has, and one position named twice is
+`:not-well-formed`.
+
+**A named type the hierarchy does not hold yet waits on the fact.** `arg` names one type,
+so a declaration whose type is not mintable waits under its own handle and is swept again
+once the type is mintable (`special/note-unmintable!`). An `argArg` names no type of its
+own: each fact names one. A fact whose named type `mintable-type?` refuses waits under
+the fact's handle (`special/note-unmintable-fact!`), and `release-mint!` draws its mints
+through `deduce-placed` once the type is mintable, so the edge that makes `dog` a type
+arriving after `(kindOfPet Rex dog)` mints `(dog Rex)` as it would had it come first.
+`argtype_entail_test/every-arrival-order-of-an-arg-arg-reaches-the-same-belief` runs the
+six orders of the declaration, the fact and the edge. A fact waits only on declarations
+visible from its context or placed below it, the two reads the assert path makes.
+
+**`resultArg` types a reified constant through the same arm.** `(resultArg F n)` types
+the value of an application of `F` by the type the application's argument `n` names. Over
+a `(termOfUnit K E)` fact, `E` an application of `F`, `checks/result-arg-rows` reads each
+declaration as an `arg` row at position 1. `(resultArg MemberFn 1)` over `(termOfUnit K
+(MemberFn dog))` therefore derives `(dog K)`, justified by the `termOfUnit` fact and the
+declaration. The mint is placed, waits on an unmintable type and is released as an
+`argArg` mint is. A name the hierarchy does not hold mints nothing until it becomes a
+type, and retracting the declaration withdraws the mint. A declaration arriving after the
+mints reads the stored `termOfUnit` facts of `F`'s applications
+(`special/entail-existing`). The membership is an entailment, so the constraint-only
+reading (`VAELII_ASSERTIVE_ARG_TYPES=0`) draws none, and a minted constant there holds its
+`result` types alone. `argtype_entail_test/a-result-arg-types-a-minted-constant-in-every-order`
+runs the six orders of the declaration, the write and the type edge, each with a recover,
+beside a name that is no type and a retracted declaration. An application that is never
+minted is typed at check time ([nat.md](nat.md#typing-an-application-that-is-never-minted)).
+
 ## Suffix homogeneity: `interArgs` and `interArgAndRest`
 
 `(interArgs R T)` says that when any argument of an application of `R` is a `T`, every
@@ -815,9 +919,48 @@ open-world, so a second spelling stores clean and convicts nothing, with no repo
 ([why one vocabulary](defenses.md#one-vocabulary-not-two)).
 
 `symbol` is the exception, and is **mention-only**. A symbol does not denote itself, so
-the set of names and the set of things named are not one set — `parentOf` is written as a
-symbol and denotes a predicate. It therefore gets no placement in the domain lattice and
-no disjointness: a use-level claim about it would be false of every predicate name.
+the set of names and the set of things named are not one set — `parentOf` written in a
+sentence denotes a predicate, and `(Quote parentOf)` denotes the symbol. `symbol` is below
+`linguistic`, which is disjoint from `relation`, so no term is both a symbol and a
+predicate.
+
+## What a quoted form is
+
+`(Quote X)` denotes the expression X, and X's kind in CxReflection's expression lattice is
+read off how X is written (`provers/shape-kinds`):
+
+| X | kinds |
+|---|---|
+| a variable | `variable` |
+| a symbol | `symbol` |
+| a value | its value kind (`string`, `integer`, …) |
+| a compound under a connective or quantifier head (`not`, `and`, `implies`, `forall`, …) | `open_formula`, or `sentence` when no variable is free in it |
+| a compound under a symbol head | `non_atomic_expression`, beside `open_expression` or `closed_expression` |
+| a compound under any other head | `ill_formed_expression`, beside the same |
+
+A variable inside a nested `(Quote …)`, or bound by a quantifier in X, is not free in X
+(`sx/unquoted-free-vars`). The expression `?x` is open; the sentence around `(Quote ?x)` is
+closed (`sx/closed?`), which is a different expression.
+
+`ExpressionKindProver` answers `(k (F X))` for `k` below `expression` and `F` a
+`quoting_function`, true when one of X's kinds reaches `k` through `genl`. A reifiable
+quoting function's application arrives minted, and the prover reads the constant's
+`termOfUnit` back to the form; an application never minted names no stored term, so a
+query over it matches nothing, as for any NAT ([nat.md](nat.md)). The answer rests on the
+`quoting_function` statements, the `termOfUnit` statement and one `genl` path, and a
+forward firing names them. A datum on `quoting_function` or on an edge-installing functor
+re-joins the rules over an expression kind, so the mark or the lattice arriving after the
+rule and the fact fires it. Forward chaining discharges an antecedent through the prover
+only for the kinds `provers/expression-kind-predicates` names.
+
+**The spelling does not say whether `(R a)` is a predication or a `non_atomic_term`**: that
+is R's stored kind, and the prover does not decide it, so `(predication (Quote (dog
+Muffet)))` is not answered.
+
+**`quotedArg` does not read these kinds.** Its check runs at the assert entry point only:
+a value it refuses when the declaration is already stored is stored and believed when the
+declaration arrives after it. Judging a compound by its kinds would extend that order
+dependence to compounds.
 
 ## Scope
 

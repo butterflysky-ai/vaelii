@@ -108,6 +108,8 @@
 #                     no cap), taken off the front of the launch order
 #   MATRIX_RED_COOLDOWN  seconds after a red run during which no matrix starts or
 #                     queues (default 1800; 0 turns it off)
+#   MATRIX_YIELD      0 keeps an `--owed` run going to its last verdict when a request
+#                     is queued behind it (default 1: it ends at its first verdict)
 #   TEST_MATRIX_SEED  the shuffle seed (default: a fresh one, reported per run), the
 #                     counterpart of `test-shuffle.sh`'s TEST_SHUFFLE_SEED.  A seed
 #                     replays an order within one script and not across the two: the
@@ -133,6 +135,19 @@
 # (scripts/lib/slots.sh).  `--covered` then answers whether a commit has been run, from
 # the primary's run directories, and runs from anywhere.
 #
+# ONE VERDICT, THEN MAKE ROOM.  An `--owed` run reads the queue on every pass.  Once it
+# holds one configuration's verdict and a request is queued behind it, the run stops the
+# configurations still running and starts no more.  A green first verdict YIELDS: the run
+# adds its own baseline to the queue and exits 75, and the matrix the queue starts next
+# runs the owed set of every queued baseline, this one's included, at the primary's HEAD.
+# A red verdict halts the run as red, with the cooldown below.  A run named by group or
+# configuration (`full`, `routine`, a list) never yields, and `MATRIX_YIELD=0` turns
+# yielding off.  A stopped configuration is `stopped` in `summary.tsv`, and `--covered`
+# reads past it to an older verdict.  Each configuration a yield leaves without a verdict
+# goes on `yield-stopped` (scripts/lib/slots.sh): the next `--owed` run that owes it
+# launches it first, keeps it under MATRIX_OWED_MAX, and does not yield before it has a
+# verdict, so steady queueing cannot stop the slowest configuration every time.
+#
 # NOTHING FOR 30 MINUTES AFTER A RED.  A run with a failing configuration drops the queue,
 # and for MATRIX_RED_COOLDOWN seconds no matrix starts or queues: the refusal (exit 75)
 # names the red run's directory, which tests failed under which configurations, and who
@@ -144,7 +159,7 @@
 # that moved does not change the exit status — it is a fact about the runs, not a
 # verdict on them, and a green matrix across two revisions is still that many green runs.
 # 75 when the run did not start because another matrix holds the lock (queued, for
-# `--owed`).  `--covered`: 0 covered, 1 an owed configuration's newest run failed, 75 not
+# `--owed`), or when it yielded to a queued request.  `--covered`: 0 covered, 1 an owed configuration's newest run failed, 75 not
 # yet run.
 
 # Under `sh` — not bash, or bash in POSIX mode — the libraries' `< <(…)` is a syntax
@@ -377,6 +392,7 @@ covered_report() {
       row=$(awk -F'\t' -v c="$c" '$1 == c' "$d" 2>/dev/null | tail -1)
       [[ -n "$row" ]] || continue
       rev=$(cut -f3 <<<"$row"); st=$(cut -f4 <<<"$row")
+      [[ "$st" == passed || "$st" == failed ]] || continue   # stopped, skipped: no verdict
       git merge-base --is-ancestor "$tip" "$rev" 2>/dev/null || continue
       d=${d%/summary.tsv}
       dirty=$(awk -F'\t' -v l="logs/test-matrix/${d##*/}" '$4 == "matrix" && $11 == l { print $8 }' \
@@ -534,6 +550,21 @@ else
 fi
 CONFIGS=("${ORDERED[@]}")
 
+# A CONFIGURATION A YIELD STOPPED GOES FIRST.  `yield-stopped` (scripts/lib/slots.sh) lists
+# what an earlier `--owed` run left without a verdict when it yielded.  An owed run that
+# owes one launches it ahead of the rest, the cap below keeps it, and the run does not
+# yield before it has a verdict (ONE VERDICT, THEN MAKE ROOM, in the header).
+PROTECTED=()
+if (( OWED )); then
+  stopped_before=$(matrix_yield_stopped)
+  first=(); rest=()
+  for c in "${CONFIGS[@]}"; do
+    if grep -qxF -- "$c" <<<"$stopped_before"; then first+=("$c"); else rest+=("$c"); fi
+  done
+  PROTECTED=(${first[@]+"${first[@]}"})
+  CONFIGS=(${first[@]+"${first[@]}"} ${rest[@]+"${rest[@]}"})
+fi
+
 # AN OWED RUN IS CAPPED at MATRIX_OWED_MAX configurations (default 4; 0 lifts the cap),
 # taken off the front of the launch order.  An owed set reaches most of the roster once
 # a diff touches the engine, and the queue re-runs it after every matrix, so an uncapped
@@ -550,12 +581,14 @@ if (( OWED && OWED_MAX > 0 && ${#CONFIGS[@]} > OWED_MAX )); then
   first=(); rest=()
   for c in "${CONFIGS[@]}"; do
     named=0
-    for w in ${NAMED[@]+"${NAMED[@]}"}; do [[ "$c" == "$w" ]] && { named=1; break; }; done
+    for w in ${NAMED[@]+"${NAMED[@]}"} ${PROTECTED[@]+"${PROTECTED[@]}"}; do
+      [[ "$c" == "$w" ]] && { named=1; break; }
+    done
     if (( named )); then first+=("$c"); else rest+=("$c"); fi
   done
   CONFIGS=(${first[@]+"${first[@]}"} ${rest[@]+"${rest[@]}"})
   echo "  ${DIM}owed ${#CONFIGS[@]}, running the first $OWED_MAX (MATRIX_OWED_MAX)," \
-       "${#first[@]} named by a changed file${OFF}"
+       "${#first[@]} named by a changed file or stopped by a yield${OFF}"
   CONFIGS=("${CONFIGS[@]:0:OWED_MAX}")
 fi
 
@@ -622,15 +655,20 @@ fi
 require_primary "lein test-matrix"
 red=$(matrix_red_recent)
 if [[ -n "$red" ]]; then red_notice "$red"; exit 75; fi
+# The baseline an `--owed` request queues under, read before the run: a run that yields
+# queues this one, measured where its owed set was measured.
+if (( OWED )); then
+  QUEUE_BASE=${OWED_BASE:-$(git rev-parse --verify --quiet '@{upstream}' || git rev-parse HEAD)}
+  QUEUE_BASE=$(git rev-parse "$QUEUE_BASE^{commit}")
+fi
 MATRIX_RUN_DIR="${TEST_MATRIX_OUT:-logs/test-matrix/run-$$}"
 if ! matrix_lock_take "$(revision_hash)" "$PWD/$MATRIX_RUN_DIR"; then
   holder=$(matrix_lock_holder)
   echo "${BOLD}a matrix is already running${OFF} ${DIM}(pid ${holder%% *}, at revision" \
        "$(cut -d' ' -f2 <<<"$holder"), $(cut -d' ' -f4 <<<"$holder"))${OFF}"
   if (( OWED )); then
-    base=${OWED_BASE:-$(git rev-parse --verify --quiet '@{upstream}' || git rev-parse HEAD)}
-    matrix_queue_add "$(git rev-parse "$base^{commit}")" "$SELECTOR" "$(matrix_requester)"
-    echo "queued --owed=$(git rev-parse --short "$base^{commit}") $SELECTOR: it runs, with every" \
+    matrix_queue_add "$QUEUE_BASE" "$SELECTOR" "$(matrix_requester)"
+    echo "queued --owed=$(git rev-parse --short "$QUEUE_BASE") $SELECTOR: it runs, with every" \
          "other queued request, when that one ends."
     echo "${DIM}\`lein test-matrix --covered=<your first>..<your last>\` says when your commits have run.${OFF}"
   else
@@ -638,6 +676,12 @@ if ! matrix_lock_take "$(revision_hash)" "$PWD/$MATRIX_RUN_DIR"; then
   fi
   exit 75
 fi
+# This run owes a verdict to each configuration an earlier yield stopped that it runs.
+prot_run=()
+for c in ${PROTECTED[@]+"${PROTECTED[@]}"}; do
+  for w in "${CONFIGS[@]}"; do [[ "$c" == "$w" ]] && { prot_run+=("$c"); break; }; done
+done
+(( ${#prot_run[@]} > 0 )) && matrix_yield_stopped_take "${prot_run[@]}"
 
 # Keep a generous tail of past run directories and never delete a recent one.  Nothing
 # pruned before — a stray `lein clean` did the deleting instead, and took live runs with it
@@ -732,8 +776,12 @@ n=${#CONFIGS[@]}
 # a reader watching a run is the only reader it has.  A relaunched configuration
 # appends a second row; the group the first names is gone by then, so both stand.
 printf 'config\tpid\tpgid\tlog\n' > "$OUT_DIR/configs.tsv" 2>/dev/null || true
-state=(); pid=(); pgid=(); rev=(); logf=(); startt=(); secs=(); diskd=(); fin=()
+state=(); pid=(); pgid=(); rev=(); logf=(); startt=(); secs=(); diskd=(); fin=(); prot=()
 for ((i = 0; i < n; i++)); do state[i]=queued; pid[i]=0; pgid[i]=0; secs[i]=0; diskd[i]=""; fin[i]=""; done
+for ((i = 0; i < n; i++)); do
+  prot[i]=0
+  for c in ${prot_run[@]+"${prot_run[@]}"}; do [[ "${CONFIGS[i]}" == "$c" ]] && prot[i]=1; done
+done
 
 # ---- the per-row reproducer ---------------------------------------------------
 #
@@ -1127,6 +1175,7 @@ redraw() {
         # the closing frame is the one a reader keeps, and it would be the lie.  The
         # summary below already distinguishes them; this makes the frame agree with it.
         local w="queued"; [[ "${state[i]}" == skipped ]] && w="never started"
+        [[ "${state[i]}" == stopped ]] && w="stopped"
         if (( alt )); then
           paint "$(printf '  %s·%s %s%-*s%s %s%s%s' \
             "$DIM" "$OFF" "$DIM" "$CMD_W" "${rcmd[i]}" "$OFF" "$DIM" "$w" "$OFF")"
@@ -1194,6 +1243,10 @@ echo
 if (( LIVE )); then printf '\033[?25l'; trap 'printf "\033[?25h"' EXIT; fi
 
 JOBS_FILE=$(matrix_jobs_file) || JOBS_FILE=""
+# the queue file, resolved once so the per-pass `-s` test forks nothing
+QUEUE_FILE=$(matrix_state_dir) && QUEUE_FILE="$QUEUE_FILE/queue" || QUEUE_FILE=""
+YIELD=0; (( OWED )) && [[ "${MATRIX_YIELD:-1}" != 0 ]] && YIELD=1
+YIELDED=0
 done_n=0; running=0; next=0; last_beat=$SECONDS
 while (( done_n < n )); do
   # `--set-jobs` from another shell, capped at the configuration count as `--jobs` is
@@ -1224,6 +1277,34 @@ while (( done_n < n )); do
     running=$((running - 1)); done_n=$((done_n + 1))
     last_beat=$SECONDS                             # a row just landed; no beat is due
   done
+
+  # ONE VERDICT, THEN MAKE ROOM (the header): a queued request ends an owed run once a
+  # configuration has a verdict and every configuration an earlier yield stopped has one.
+  # A green verdict yields and a red one halts.
+  owed_wait=0
+  if (( YIELD && done_n > 0 && done_n < n )) && [[ -n "$QUEUE_FILE" && -s "$QUEUE_FILE" ]]; then
+    for ((i = 0; i < n; i++)); do
+      (( prot[i] )) && [[ "${state[i]}" == running || "${state[i]}" == queued ]] && owed_wait=1
+    done
+  fi
+  if (( YIELD && done_n > 0 && done_n < n && ! owed_wait )) \
+     && [[ -n "$QUEUE_FILE" && -s "$QUEUE_FILE" ]]; then
+    { stop_all; } 2>/dev/null
+    no_verdict=()
+    for ((i = 0; i < n; i++)); do
+      case "${state[i]}" in
+        running) state[i]=stopped; no_verdict+=("${CONFIGS[i]}")
+                 wait "${pid[i]}" 2>/dev/null      # reaped here, so no job notice prints
+                 [[ $KEEP -eq 1 || -z "${diskd[i]}" ]] || rm -rf "${diskd[i]}" ;;
+        queued)  state[i]=skipped; no_verdict+=("${CONFIGS[i]}") ;;
+      esac
+    done
+    if (( ${#FAILED[@]} == 0 )); then
+      YIELDED=1
+      matrix_yield_stopped_add ${no_verdict[@]+"${no_verdict[@]}"}
+    fi
+    break
+  fi
 
   if (( LIVE )); then
     redraw
@@ -1389,9 +1470,23 @@ if [[ ${#FAILED[@]} -gt 0 ]]; then
 fi
 
 # ---- the verdict -------------------------------------------------------------
-skipped=0
-for ((i = 0; i < n; i++)); do [[ "${state[i]}" == skipped ]] && skipped=$((skipped + 1)); done
-if [[ ${#FAILED[@]} -eq 0 && $skipped -eq 0 ]]; then
+skipped=0; stopped=0; passed_list=""; stopped_list=""
+for ((i = 0; i < n; i++)); do
+  case "${state[i]}" in
+    skipped) skipped=$((skipped + 1)) ;;
+    stopped) stopped=$((stopped + 1)); stopped_list="$stopped_list ${CONFIGS[i]}" ;;
+    passed)  passed_list="$passed_list ${CONFIGS[i]}" ;;
+  esac
+done
+if (( YIELDED )); then
+  echo "${BOLD}yielded to a queued request${OFF} ${DIM}in $(hms $ELAPSED) ($OUT_DIR/)${OFF}"
+  echo "  passed: ${passed_list# }"
+  (( stopped > 0 )) && echo "  ${DIM}stopped:${stopped_list}${OFF}"
+  (( skipped > 0 )) && echo "  ${DIM}$skipped never started${OFF}"
+  echo "  this run's baseline $(git rev-parse --short "$QUEUE_BASE") is queued with the waiting" \
+       "requests, and the next matrix runs their owed configurations at the primary's HEAD."
+  echo "  ${DIM}\`lein test-matrix --covered=<your first>..<your last>\` says when your commits have run.${OFF}"
+elif [[ ${#FAILED[@]} -eq 0 && $skipped -eq 0 && $stopped -eq 0 ]]; then
   # the roster is part of the verdict, not a footnote to it: "all green" over a subset
   # is a different sentence from "all green" over the sixteen, and this is the line
   # that gets quoted into a commit message
@@ -1404,7 +1499,8 @@ if [[ ${#FAILED[@]} -eq 0 && $skipped -eq 0 ]]; then
 else
   echo "${RED}${BOLD}${#FAILED[@]} of $n failed:${OFF} ${FAILED[*]}" \
        "${DIM}in $(hms $ELAPSED)${OFF}"
-  (( skipped > 0 )) && echo "  ${DIM}$skipped never started (--fail-fast)${OFF}"
+  (( stopped > 0 )) && echo "  ${DIM}stopped, a request queued behind this run:${stopped_list}${OFF}"
+  (( skipped > 0 )) && echo "  ${DIM}$skipped never started${OFF}"
   # one path each while that is a short list, the directory once when it is not: a
   # dozen-line column of near-identical paths is the part of a report people skip
   if [[ ${#FAILED[@]} -le 5 ]]; then
@@ -1507,7 +1603,8 @@ fi
 # green" over `routine` is a different sentence from "all green" over `full`, and a
 # reader of the row needs both numbers to tell them apart.
 matrix_summary=$(printf '%d of %d configurations, roster %s, %d failed, %d skipped' \
-                   "$n" "$ROSTER_TOTAL" "$ROSTER_LABEL" "${#FAILED[@]}" "$skipped")
+                   "$n" "$ROSTER_TOTAL" "$ROSTER_LABEL" "${#FAILED[@]}" "$((skipped + stopped))")
+(( YIELDED )) && matrix_summary="$matrix_summary, yielded to a queued request"
 
 # A SUBSET IS ITS OWN VERDICT, so it goes under its own variant rather than
 # overwriting the matrix's.  `lein test-matrix --owed` is the common way to run
@@ -1533,11 +1630,12 @@ matrix_summary=$(printf '%d of %d configurations, roster %s, %d failed, %d skipp
 # under, and the matrix column whose question it also settled.  Claimed only
 # where nothing was skipped — a run stopped by `--fail-fast` or by ^C planned a
 # roster it did not finish, and the plan's word for it is an intention.
-matrix_variant=$(ledger_variant "$skipped")
-if [[ ${#FAILED[@]} -eq 0 && $skipped -eq 0 && $deltas_bad -eq 0 ]]; then
+matrix_variant=$(ledger_variant "$((skipped + stopped))")
+if [[ ${#FAILED[@]} -eq 0 && $((skipped + stopped)) -eq 0 && $deltas_bad -eq 0 ]]; then
   matrix_state=passed
-elif (( skipped == n )); then
-  # Nothing ran at all, which `--fail-fast` cannot produce and an interrupt can.
+elif (( skipped == n || (YIELDED && deltas_bad == 0) )); then
+  # Nothing ran at all, which `--fail-fast` cannot produce and an interrupt can; or the
+  # run yielded, and its stopped configurations hold no verdict.
   matrix_state=interrupted
 else
   matrix_state=failed
@@ -1557,6 +1655,10 @@ if (( ${#FAILED[@]} > 0 || deltas_bad > 0 )); then
   matrix_red_mark "$ABS_OUT_DIR"
 elif [[ "$matrix_state" == passed ]]; then
   matrix_red_clear
+fi
+# A yield queues this run's own baseline before the release, so the next matrix runs it.
+if (( YIELDED && deltas_bad == 0 )); then
+  matrix_queue_add "$QUEUE_BASE" "$SELECTOR" "$(paste -sd, - <"$OUT_DIR/requested-by")"
 fi
 matrix_lock_release
 next_req=$(matrix_queue_take)
@@ -1580,5 +1682,6 @@ elif [[ -n "$next_req" ]]; then
 fi
 
 [[ "$matrix_state" == passed ]] && exit 0
+(( YIELDED && deltas_bad == 0 )) && exit 75
 exit 1
 }

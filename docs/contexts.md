@@ -65,8 +65,8 @@ topology is **two spindles stacked**, most general (top) to most specific (botto
 
 | | head | members | collector |
 |---|---|---|---|
-| the upper spindle | CxCore | `resources/kb/upper/` — seven contexts | CxUniverse |
-| the middle spindle | CxUniverse | `kb/middle/` — seven contexts | CxWell |
+| the upper spindle | CxCore | `resources/kb/upper/` — eight contexts | CxUniverse |
+| the middle spindle | CxUniverse | `kb/middle/` — seven contexts, beside four opt-in theories | CxWell |
 
 CxUniverse is the joint, the first spindle's collector and the second's head, and it can
 be the second's head *because* it is the first's collector: a head is a context every
@@ -80,7 +80,7 @@ Data hangs below CxWell.
   spindle](#a-context-outside-the-spindle)). It also holds the collections at the top
   of the ontology — the parts of the three partitions of `thing`
   ([taxonomy.md](taxonomy.md#the-three-partitions-of-thing)), `spatiotemporal`,
-  `nowhere_never`, `expression`, `biological`, `organism` and `measure` — which the
+  `nowhere_never`, `linguistic`, `biological`, `organism` and `measure` — which the
   engine reads by no name (`vaelii.impl.predicates` classifies each inert) and which are
   here for the reason below: the members of a spindle see each other not at all, so a
   term two of them extend has to be defined in the head.
@@ -101,6 +101,12 @@ Data hangs below CxWell.
     `signOf` / `trendOf`, the three qualitative arithmetic relations and the
     `derivativeOf` edge, for the quantities nobody has a figure for
     ([sign.md](sign.md)).
+  - `CxReflection` — the language the KB is written in, as something the KB can talk
+    about: the expression lattice (atomic and non-atomic expressions, open and closed,
+    well-formed and ill-formed) and the use/mention vocabulary `proposition`, `means`,
+    `denotes` and `expresses`. CxCore keeps the expression kinds the engine or its own
+    declarations name (`symbol`, the value kinds, `formula`, `sentence`,
+    `non_atomic_term`) and `linguistic`.
   - `CxSpace` — qualitative space, four independent calculi in one context because
     all four are *about* space: RCC-8 topology, cardinal direction, relative direction
     and qualitative distance, fifty predicates between them ([space.md](space.md)).
@@ -141,11 +147,48 @@ Data hangs below CxWell.
   - `CxSize` — comparative size said the two ways it can be said: `largerThan`
     among kinds, and a comparison computed between two objects' measures. The worked
     example of `transitiveInArgInverse` ([inherit.md](inherit.md)).
-  - `CxSocial` — what acquaintance follows from, and how employment relates to
-    membership. Every rule runs one way only, because `knows` is deliberately not
-    symmetric.
-- **CxWell** — the middle spindle's *collector*: it sees every middle member, so it (and
-  any context hung beneath it) transitively sees the whole ontology.
+  - `CxSocial` — what acquaintance follows from, how employment relates to
+    membership, and the general relationship and dwelling vocabulary over two
+    persons: `relativeOf`, `romanticPartnerOf`, `coworkerOf`, `roommateOf`,
+    `originatorOf` (read by a rule from `parentOf`), `relationshipLabel`, and
+    `dwelling`/`dwellsIn` (whose rule derives `roommateOf` for co-dwellers). Every
+    rule runs one way only, because `knows` is deliberately not symmetric.
+- **CxNormalPhysicalConditions** — an **opt-in** theory in `kb/middle/` that sees
+  CxUniverse and that CxWell does **not** see: the states of matter of stuff at ordinary
+  room temperature and pressure. Stone, wood and glass are solid, mercury is liquid, and a
+  metal is solid by default, with mercury the stated exception. CxWell stays free of any
+  temperature, so a context below CxWell serves a story set on Mars as well as one set in a
+  kitchen. A context opts in by placing itself under CxNormalPhysicalConditions, and a
+  context under both CxWell and CxNormalPhysicalConditions reads the everyday theories at
+  room temperature.
+- **CxComputing** — an **opt-in** theory in `kb/middle/` that sees CxUniverse and that
+  CxWell does **not** see: ten relations over software tools, their invocations and
+  receipts, media resources and DNS names, and the sixteen kinds the relations are typed
+  over (`computational_system`, `software_tool`, `tool_invocation`, `media_resource`,
+  `ip_address` and the kinds below them), each with its comment, its `genl` edges and
+  its disjointness. CxComputing states no rule. A context opts in by placing itself
+  under CxComputing, and a context that does not see CxComputing reads neither a
+  relation nor a kind. `(functional toolName)` is a decontextualized mark, so every
+  context that sees CxUniverse reads that mark.
+- **CxPerception** — an **opt-in** theory in `kb/middle/` that sees CxUniverse and
+  that CxWell does **not** see: perception relations. `perceives` is the general
+  relation and `sees` specializes it. `seeImage` and `watchVideo` conclude `sees` by a
+  rule guarded by its `spatial` second argument, since an image or a video need not be
+  located. A context opts in by placing itself under CxPerception.
+- **CxSocialExtension** — an **opt-in** theory in `kb/middle/` that sees CxSocial,
+  and through it CxUniverse, and that CxWell does **not** see: `nestingPartnerOf`
+  (a spec of CxSocial's `romanticPartnerOf` and `roommateOf`, and read by a rule from
+  the two) and `chosenSiblingOf` (a spec of `relativeOf`). A context opts in by
+  placing itself under CxSocialExtension, which also carries CxSocial's own
+  relations to it. **`<Theory>Extension` names a
+  theory that extends an existing starter theory with vocabulary most contexts
+  under the base theory have no occasion to see:** the base theory ships to every
+  context below CxWell, and the extension only to a context placed under it.
+- **CxWell** — the middle spindle's *collector*: it sees every middle member, so it
+  (and any context hung beneath it) transitively sees the whole ontology except the
+  four opt-in theories, CxNormalPhysicalConditions, CxComputing, CxPerception and
+  CxSocialExtension. A `kb/middle/` file is a member when it states `(genlCx CxWell
+  <its context>)`, and an opt-in theory when it does not.
 
 **A member sees no member, so a shared term belongs in the head.** That is what makes a
 spindle a spindle: `CxLife` does not see `CxOrganism` and `CxOrganism` does not see
@@ -438,6 +481,22 @@ The removal is **total**, not just for reads:
   `provers/candidate-rules` drops a rule the asking context cannot see, so `query`
   and `prove` do not rebuild through a hidden rule what forward chaining swept.
 
+**An except on a `genlCx` edge.** An except of a `genlCx` edge E in force at a reader R
+removes E from R's ancestor set. It also removes every `genlCx` edge whose every
+justification rests on E, for reads and for a firing's placement alike: a hidden `genlCx`
+edge is on no second route (`exc/witness-paths`), so the read walk forces out what rests
+on E as chain's placement does. The read is stratified, with no fixpoint over the
+hierarchy. The excepts in force at R are those stated in a context of R's ancestor set
+with no except applied (`tax/context-up-global`), so which excepts R reads depends on no
+edge's visibility.
+
+Take CxQ, CxB and CxS, each under CxUniverse, with `(genlCx CxQ CxB)`, the forward rule
+`(genlCx CxQ ?b) ⇒ (genlCx CxS ?b)`, and an except of the first edge stated in CxS. CxS does
+not see CxB: a fact in CxB is not asked true at CxS, and a firing that joins it with a fact
+in CxS is not placed at CxS. Asserting `(genlCx CxS CxB)` directly gives the edge a
+justification resting on no excepted edge, and CxS sees CxB
+(`except_gnarly_test/a-genlCx-edge-resting-on-an-excepted-genlCx-edge-leaves-the-excepting-reader-for-reads-and-chain`).
+
 **`defeat` beside `except`.** `(defeat (sentexHandle H))` has the same shape and is read
 the same way, by target off the trie, and differs in what it removes and when:
 
@@ -478,12 +537,54 @@ while the excepts are not. On a chaining run over a KB with 1,000 excepts the di
 is 16× the whole run (`lein bench-hotreads`).
 
 The re-check triggers are the except arriving or leaving (`special/recheck-except`,
-keyed on the handle it names rather than a predicate) and a `genlCx` edge change
-(`special/recheck-except-ancestors` — a visibility move changes which contexts see the
-excepting context, hence what each hides). A `(genlCx sub super)` edge re-checks only the
-excepts stated in a context `super` sees, read off the `except` extent, and the
-derivations under `sub`: `lein perf`'s `genlcx-edge-beside-excepted-declarations` holds
-an edge flat in the excepts it does not move.
+keyed on the handle it names rather than a predicate) and a `genlCx` move (below).
+
+### One context move
+
+A `genlCx` move is a `genlCx` edge stored, removed or relabelled, or an `except` that
+moved reaching the support of an active edge's supporter. `tax/context-move` computes what
+one move shows or hides, from the taxonomy as it stands, in two strata:
+
+- **raw**: `super`'s global ancestor set with `super`, less `sub`'s global ancestor set
+  without the edge. The excepts in force at a reader are read off its raw ancestor set, so
+  the excepts that come into or leave force at a reader under `sub` are the ones stated in
+  these contexts.
+- **effective**: the readers under `sub` fall into classes by the contexts of their global
+  ancestor set that state an `except` on a `genlCx` supporter's support, or on one of those
+  excepts (`exc/genlCx-except-contexts`). Readers of one class read every `genlCx` supporter
+  alike. Each class's moved contexts are `super`'s ancestor set under the class's scope,
+  less the class's ancestor set of `sub` without the edge; the union over the classes holds
+  every context whose facts a reader under `sub` gains or loses through the edge.
+
+An except that comes into force through the edge hides its target at the readers below,
+and the except family re-checks that target, so the effective stratum names the edge's own
+contribution. After a removal it names a superset of what a reader lost.
+
+The settle computes each move once a pass and hands the value to every family the move
+reaches (`special/drain-context-moves!`, rows in `special/move-families`). The moves are the
+`genlCx` facts out of the lower ends J5 recorded since the placement cursor (J6) that the
+relabel window holds, the removed edges `integrate/sentex-removed!` queued (Q8), and the
+active edges the excepts that moved this pass reach (Q3). The rows are the excepted rules
+whose firings lie under `sub`, the excepts stated in the raw stratum (and the excepts those
+name), the facts the effective stratum makes matchable, the restatements, merges and
+argument-type mints a shown edge owes, and the mints a hidden edge gives back. The
+placement families and the inherited clashes read the moves' reach: `:under`, the contexts
+at or below a moved lower end, and `:below`, what those see that an active edge's upper end
+does not. The `genlCx` integrate arms update the taxonomy alone, so an asserted,
+rule-concluded, computed or relabelled edge reaches the families by one path.
+
+An except stated in a context a reader sees only through a hidden edge is still in force
+there: with `(genlCx CxSup CxTop)` excepted at CxSup and an except of `(ff Aa)` stated in
+CxTop, the edge `(genlCx CxSub CxSup)` puts CxTop in CxSub's raw ancestor set, and the
+firing over `(ff Aa)` at CxSub is swept in every order
+(`except_gnarly_test/an-except-in-a-context-the-sub-reaches-past-a-hidden-edge-is-rechecked-when-the-edge-arrives`).
+A reader below `sub` can gain contexts `sub` already saw: with the edge from CxSub to CxY
+excepted at CxR under CxSub, an edge from CxSub to CxSup under CxY shows CxR the facts of
+CxY (`except_gnarly_test/a-genlCx-edge-shows-a-reader-below-its-sub-what-the-sub-already-saw`).
+`lein perf`'s `genlcx-edge-beside-excepted-declarations` and
+`genlcx-edge-beside-seen-excepts` hold an edge flat in the excepts it does not move, and
+`genlcx-edge-revealing-one-except` in the firings that do not rest on the target of the
+one it moves.
 
 ## ist: find or create in a context
 
@@ -1010,7 +1111,8 @@ just as well when the feature is broken outright.
   handle. `subsumption_support_test` is the standing guard for all of it.
 
   **A `genlCx` edge owes the same debt through the other closure**, and
-  `special/visibility-seeds` is the twin that pays it. Matching fans an antecedent up the
+  `special/move-seeds` is the twin that pays it, from the settle's drain
+  ([One context move](#one-context-move)). Matching fans an antecedent up the
   *visibility* ancestor set, so an edge arriving after both the rule and the facts changes which
   facts the rule can see — and again the arriving datum is the edge, so firing the rules
   keyed on `genlCx` is not the same thing as re-joining the rules the edge just gave
@@ -1024,9 +1126,9 @@ just as well when the feature is broken outright.
   union of the ancestor sets of every context in `sub`'s descendant set, less `up` — the
   contexts some lower context sees that `super` does not. A pair both inside `up` met at
   `super` before the edge, and a pair both inside `seen` met at the context that sees
-  both. The `up` half narrows once more, to `fresh`: the contexts of `up` that `sub` did
-  not already see through its other parents (`taxonomy/context-up-besides`), since every
-  lower context saw the rest before the edge. The old ancestor set is read the way
+  both. The `up` half narrows once more, to `fresh`: the contexts of `up` some reader
+  below `sub` did not already see (`tax/context-move`'s effective stratum). The old
+  ancestor set is read the way
   placement reads it: the walk does not cross an edge with a stored negation, which the
   taxonomy's closure does not apply. So a new pairing has an ingredient in `fresh`, or the lower context saw all of
   it, and one in `seen`, or `super` saw all of it, and its rule sits in one of three
@@ -1036,7 +1138,7 @@ just as well when the feature is broken outright.
   side — a two-antecedent rule above both parents of a diamond, whose two facts only the
   context below both sees together. Seeding is by fact, so the seeds are the believed
   sentexes of the sets a pairing needs a fact from. The equality twins read the same
-  union for the same trigger (`special/context-edge-reader-ancestors`).
+  union for the same trigger (`tax/context-move`'s `:seen`).
 
   **A `genl` edge is an ingredient too.** A match through a subtype reads the `genl`
   edges on a route from the fact's type to the antecedent's, and a route edge stated on
@@ -1080,6 +1182,19 @@ just as well when the feature is broken outright.
   because a context already under `CxCore` re-seeds its second parent's facts for the
   rules stated in `CxCore`.
 
+  **A batch seeds what was stored before the edge arrived.** Under `with-deferred-settle`
+  every assert chains as it arrives and the drain runs once, at the batch's close, so a
+  fact, rule or `genl` edge stored after the edge was chained or joined with the edge
+  already in the taxonomy. When the touched window created every believed supporter of
+  the edge, its least one is the floor (`special/seed-floor`): handles are allocated in
+  assertion order, so the gates on `seen` read only the rules and `genl` edges below the
+  floor, and the seeds keep only the facts below it. The batch then seeds what a settle
+  right after the edge's assert would have seeded. An edge with a believed supporter from
+  before the window has no floor, since it may have come into belief after the facts
+  beside it. The argument-type sweep of the move (`special/entail-under-context-edge`)
+  reads the same floor. `perf`'s `deferred-facts-after-a-context-edge` holds the closing
+  drain to one posting read per fact stored after the edge.
+
   **Each roster predicate's extent is read fanned by `genl`**, the way the matcher fans
   it (`special/roster-antecedent-functors`): down the spec closure for a positive
   antecedent, and up the genl closure for a negated one, since a negation reverses the
@@ -1106,33 +1221,35 @@ just as well when the feature is broken outright.
   **Withdrawal needs no twin of it**: dropping an edge *narrows* what a rule sees, and a
   firing names the edges its placement was seen over, so the dependency-directed sweep
   already collects a conclusion whose antecedent stopped being visible. Revival is the
-  half that does, and it is the same function read the other way —
-  `special/resubsumption-seeds` puts a removed `genlCx` edge's `up` and `seen` back on the
-  agenda beside a removed `genl` edge's spec subtree, because a sighting can outlive the
-  edge that witnessed it when the contexts are wired together a second way.
+  half that does: a sighting can outlive the edge that witnessed it when the contexts are
+  wired together a second way, and the firing must then be placed again.
 
-  **That pass has one condition, and the rule gate above is not it.** It runs only where
-  the sweep collected more than the record asked for: a justification naming the departing
-  edge is deleted with it, so a conclusion that survived kept a second justification and
-  needs nothing, while one that did not is in the swept set. Retracting an edge that
-  licensed nothing — the common case — is therefore one functor read per removed record
-  and no chaining at all. The edge's own argument-type mint does not count as more: its
+  `special/resubsumption-seeds` re-seeds the **antecedents of the firings that named the
+  removed `genlCx` edge**, less what the sweep removed (`special/sighting-seeds`). The
+  set is exact because of two properties of the chainer. Every firing records its
+  justification, including a re-derivation of a conclusion already stored
+  (`chain/place-fact-conclusion`). And a firing names a witness path for every context its
+  placement sees an ingredient over (`chain/visibility-support`). Removing an edge only
+  shrinks the contexts that see a firing's ingredients. So a firing whose placement set
+  changes either lost a placement whose every path ran through the edge, or held one whose
+  named path did, and in both cases its justification named the edge. A conclusion the
+  sweep removed that another firing still licenses is re-derived by that firing, which
+  named the edge or rests on a removed conclusion that is re-derived first and arrives as
+  a new datum. The seeds are read off the removed justification records before the
+  teardown deletes them, and they include the antecedents of a firing whose conclusion a
+  second justification kept: that firing can be owed a placement in a lower context that
+  now sees the rule only by another route.
+
+  The pass costs the firings the edge licensed, not the contexts it joined. Retracting an
+  edge that licensed nothing reads one justification record per swept justification and
+  chains nothing. The rules that join over the `genlCx` closure itself
+  (`closure-reader-rules`) are re-joined only where the sweep collected more than the
+  record asked for, and the edge's own argument-type mint does not count as more: its
   justification takes the edge as the fact typed, not as a route
-  (`special/edge-own-mints`), so `(genlCx CxA CxUniverse)` with `(arg genlCx 1 context)`
-  in view retracts without re-joining CxUniverse's ancestor set. Where it does run the re-join is **unconditional**, and
-  `visibility-seeds` is called in the **ungated** arity it keeps for this caller: the
-  rule-holding gate two paragraphs up is skipped on purpose, not inherited. That gate is
-  sound for an *arriving* edge because an arriving edge is the only new reachability there
-  is — nothing can newly match except through it, so a new pairing has an ingredient in
-  `fresh` and one in `seen`, and its rule is stated in `seen`, `fresh` or the rest of
-  `up`.
-  The ungated arity seeds all of `up` beside `seen`. A
-  departing edge says nothing of the kind. Whether a surviving route still licenses the
-  firing being revived is `place-conseq`'s question, answered from the taxonomy as it
-  stands after the removal, and a gate here would guess that answer from the departing
-  edge's two sets alone.
+  (`special/edge-own-mints`). Whether a surviving route still licenses a re-seeded firing
+  is `place-conseq`'s question, answered from the taxonomy as it stands after the removal.
 
-  So most of the re-join finds nothing to place, and that pass files no `:no-placement`
+  Most re-seeded firings find no placement, and that pass files no `:no-placement`
   (`chain/*report-no-placement?*`): a firing the caller's own retraction just killed is
   the retraction restated, and one ledger entry per killed firing would cost the ledger
   its real ones, which cap at 1000.

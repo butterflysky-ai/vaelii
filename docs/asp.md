@@ -147,7 +147,7 @@ refuses that flag — runs the search asynchronously and cancels the handle when
 is spent. Which solves it stops depends on the machine's speed and load, so a round it
 cuts short decides nothing on one machine that another machine decides. With
 `VAELII_ASP_SOLVE_LIMIT` at 0 it is the only limit
-([defenses.md](defenses.md#where-the-four-properties-stop)).
+([defenses.md](defenses.md#where-the-five-properties-stop)).
 
 A clasp process still running at twice the limit, or at the limit plus 10 seconds when
 that is later, is killed with every process it started, and the solve raises

@@ -163,16 +163,25 @@
                         {:type :unknown-frame :tag tag}))))))
 
 ;; ---- justifications ---------------------------------------------------------
-;; One shape written, so the frame needs no tag.  A seven-element frame carries an
-;; always-empty `:out` set in its last position, and a record frame (nippy froze the
-;; record itself) an `:out` key; decoding drops both.  `jtms/->just` takes a rule-handle
-;; informant out of the antecedents, so every frame decodes to the one record shape.
+;; One shape written, so the frame needs no tag.  A justification with subsumptions is a
+;; seven-element frame carrying them last; one without is six elements.  A seven-element
+;; frame an earlier build wrote carries an always-empty `:out` set there, which decodes
+;; as no subsumptions, and a record frame (nippy froze the record itself) an `:out` key,
+;; which decoding drops.  `jtms/->just` takes a rule-handle informant out of the
+;; antecedents, so every frame decodes to the one record shape.
+
+(defn- intern-pairs
+  "A thawed subsumption set with its symbols pooled (`sx/intern-deep`, which keeps a set
+  as it is), or nil for an empty or absent one."
+  [s]
+  (when (seq s) (into #{} (map sx/intern-deep) s)))
 
 (defn encode-justification
   "A `Justification` as a positional vector; anything else unchanged."
   [d]
   (if (instance? vaelii.impl.types.tms.Justification d)
-    [(:id d) (:informant d) (:antecedents d) (:consequence d) (:bindings d) (:strength d)]
+    (cond-> [(:id d) (:informant d) (:antecedents d) (:consequence d) (:bindings d) (:strength d)]
+      (:subsumptions d) (conj (:subsumptions d)))
     d))
 
 (defn decode-justification
@@ -182,11 +191,11 @@
   (cond
     (vector? v)
     (jtms/->just (nth v 0) (sx/intern-deep (nth v 1)) (nth v 2) (nth v 3)
-                 (sx/intern-deep (nth v 4)) (nth v 5))
+                 (sx/intern-deep (nth v 4)) (nth v 5) (intern-pairs (nth v 6 nil)))
 
     (instance? vaelii.impl.types.tms.Justification v)
     (jtms/->just (:id v) (:informant v) (:antecedents v) (:consequence v) (:bindings v)
-                 (:strength v))
+                 (:strength v) (intern-pairs (:subsumptions v)))
 
     :else v))
 

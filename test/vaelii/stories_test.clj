@@ -103,15 +103,14 @@
   (testing "the liar's cry is not believed"
     (is (empty? (v/sentexes-matching kb '(believed BoyA) 'CxCriedWolf)))
     (is (seq   (v/sentexes-matching kb '(not (believed BoyA)) 'CxCriedWolf))))
-  (testing "the blocked conclusion is never stored — swept, not kept defeated"
-    ;; The pre-`exceptWhen` engine derived (believed BoyA), rebutted it with the
-    ;; competing rule, and left it stored-but-OUT so it could revive.  A blocked
-    ;; justification is simply invalid, so the conclusion is unsupported and the
-    ;; existing dependency-directed sweep deletes it (docs/exceptions.md,
+  (testing "the blocked conclusion is stored with a guard defeat resting on the blocker"
+    ;; `(liar BoyA)` is `:default`, so a placed defeat can hide it, and the firing is
+    ;; stored with `(defeat (sentexHandle F))` resting on it (docs/exceptions.md,
     ;; "Garbage collection, not defeat").
-    (is (nil? (v/handle-of kb '(believed BoyA) 'CxCriedWolf)))
-    (is (empty? (filter #(= '(believed BoyA) (:sentence %))
-                        (v/find-sentexes kb 'BoyA)))))
+    (let [h (v/handle-of kb '(believed BoyA) 'CxCriedWolf)]
+      (is (some? h))
+      (is (false? (v/in? kb h)))
+      (is (some? (v/handle-of kb (list 'defeat (list 'sentexHandle h)) 'CxCriedWolf)))))
   (testing "yet the absence is explicable, not merely a gap"
     ;; the moral is only demonstrated if the KB can say *why* the boy is not
     ;; believed, and a swept conclusion has no handle to ask about — which is what

@@ -632,6 +632,60 @@
       (is (empty? fails) (failure-text "cover through a supertype denial" fails
                                        (count orders))))))
 
+(deftest a-membership-beside-a-denial-of-a-supertype-is-decided-where-the-edge-is-seen-in-every-order
+  ;; No cover is stored: the edge alone convicts the membership beside the denial.
+  ;;
+  ;;   CxUniverse            (dog Rex) default   (not (animal Rex)) monotonic
+  ;;   CxA sees CxUniverse:  (genl dog animal) monotonic
+  ;;   CxB sees CxA
+  ;;
+  ;; CxA and CxB read the edge, so (dog Rex) loses there.  CxUniverse does not, and keeps it.
+  (tu/with-terms [dog animal Rex CxA CxB]
+    (let [member   (list dog Rex)
+          denial   (list 'not (list animal Rex))
+          wiring   [(w (list 'genlCx CxA U) U :monotonic) (w (list 'genlCx CxB CxA) U :monotonic)]
+          content  [(w (list 'genl dog animal) CxA :monotonic)
+                    (w member U)
+                    (w denial U :monotonic)]
+          world    {:contexts #{U CxA CxB} :writes (into wiring content)}
+          expected {U   {member true  denial true}
+                    CxA {member false denial true}
+                    CxB {member false denial true}}
+          orders   (mapv #(into wiring %) (gen/permutations content))
+          {fails :failures known :known} (expected-failures world orders expected)]
+      (is (= [] (reference-agrees world expected)))
+      (print-known "membership beside a supertype denial" known)
+      (is (empty? fails) (failure-text "membership beside a supertype denial" fails
+                                       (count orders))))))
+
+(deftest a-membership-beside-an-inherited-membership-of-a-separated-type-is-decided-where-the-separation-is-seen-in-every-order
+  ;;   CxUniverse            (transitiveInArgInverse down 1 genl) (genl lower upper)
+  ;;                         (down upper) monotonic   (plain lower) default
+  ;;   CxA sees CxUniverse:  (disjoint down plain) monotonic
+  ;;   CxB sees CxA
+  ;;
+  ;; (down upper) reaches (down lower).  CxA and CxB read the separation, so (plain lower)
+  ;; loses there.  CxUniverse does not, and keeps it.
+  (tu/with-terms [down plain upper lower CxA CxB]
+    (let [member   (list plain lower)
+          claim    (list down upper)
+          wiring   [(w (list 'genlCx CxA U) U :monotonic) (w (list 'genlCx CxB CxA) U :monotonic)
+                    (w (list 'transitiveInArgInverse down 1 'genl) U :monotonic)
+                    (w (list 'genl lower upper) U :monotonic)]
+          content  [(w claim U :monotonic)
+                    (w (list 'disjoint down plain) CxA :monotonic)
+                    (w member U)]
+          world    {:contexts #{U CxA CxB} :writes (into wiring content)}
+          expected {U   {member true  claim true}
+                    CxA {member false claim true}
+                    CxB {member false claim true}}
+          orders   (mapv #(into wiring %) (gen/permutations content))
+          {fails :failures known :known} (expected-failures world orders expected)]
+      (is (= [] (reference-agrees world expected)))
+      (print-known "membership beside a separated inherited one" known)
+      (is (empty? fails) (failure-text "membership beside a separated inherited one" fails
+                                       (count orders))))))
+
 ;; Random reference world 283: the reader withdraws a ground and re-reads each `covering`
 ;; nogood, once per denial of the whole.
 (deftest a-cover-denial-stated-in-two-contexts-convicts-at-a-reader-that-withdraws-a-ground-in-every-order

@@ -69,11 +69,16 @@
 #     price for a number that means something.
 #
 # The test stage itself is sharded across JVMs (`scripts/test-parallel.sh`), which is
-# safe because the in-memory registry isolates separate JVMs — see that script.
+# safe because the in-memory registry isolates separate JVMs — see that script.  It
+# starts only once this gate holds one of the box-wide gate slots (`gate_slot_take`,
+# scripts/lib/slots.sh), so its shard count reads the box after admission.  Lint runs
+# while the gate waits, and the slot is released before the perf stage.
 #
 # Env:
 #   GATE_OUT        log directory (default target/gate/run-<pid>)
 #   GATE_JOBS       default shard count for the test stage
+#   GATE_MAX_CONCURRENT  gate test stages admitted at once, box-wide (default 2, 0 = no cap)
+#   GATE_NO_WAIT    exit 75 instead of waiting when every gate slot is held
 #   PERF_TOLERANCE  passed to `lein perf --tolerance` — raise it on a loaded box
 #
 # Each stage streams to its own log, tailable while it goes.  On the console a
@@ -120,6 +125,9 @@ cd "$ROOT" || exit 1
 # report — says what it was taken against.
 # shellcheck source=scripts/lib/revision.sh
 . "$ROOT/scripts/lib/revision.sh"
+# the box-wide gate slots the test stage waits for
+# shellcheck source=scripts/lib/slots.sh
+. "$ROOT/scripts/lib/slots.sh"
 
 GATE_ROOT="${GATE_ROOT:-target/gate}"
 OUT="${GATE_OUT:-$GATE_ROOT/run-$$}"
@@ -295,6 +303,8 @@ pass=0; fail=0; failed=(); skipped=()
 # before this line there is neither a directory to write it to nor a stage to stop.
 trap 'interrupted INT' INT
 trap 'interrupted TERM' TERM
+# `interrupted` exits through this trap too, so a held gate slot is released on every exit
+trap gate_slot_release EXIT
 
 # The banner, in `announce`'s shape: what this gate is a verdict about, and where
 # its logs are.  Read once here and again at the end, because a gate is minutes
@@ -458,6 +468,7 @@ run_stage () {                 # run_stage <name> <blurb> <cmd...>
   # process group the interrupt handler can reach.  `wait` is interruptible, which
   # is what lets that handler run at all while a stage is going.
   revision_stamp "$name" >"$OUT/$name.log"
+  [[ "$name" == test ]] && gate_slot_note >>"$OUT/$name.log"
   spawn "$OUT/$name.log" "$@"
   # perf alone gets the live bar: it is the one stage that runs by itself with nothing to
   # show meanwhile.  The bar loop returns when the process exits, and the `wait` below then
@@ -468,6 +479,28 @@ run_stage () {                 # run_stage <name> <blurb> <cmd...>
   report_stage "$name" "$code" "$((SECONDS - t0))"
   [[ $code -ne 0 && $fail_fast -eq 1 ]] && return 1
   return 0
+}
+
+# admit_test takes a gate slot for the test stage, waiting while every slot is held.  Under
+# GATE_NO_WAIT=1 with none free it stops the stages already running and exits 75.
+admit_test () {
+  local rc=0
+  gate_slot_take "$gate_cmd" "$@" || rc=$?
+  if [[ $rc -ne 0 ]]; then
+    { stop_stages; wait; } 2>/dev/null
+    printf '%s✗ %s not run%s — no gate slot free and GATE_NO_WAIT is set\n' "$RED" "$gate_label" "$RST"
+    exit "$rc"
+  fi
+  [[ $GATE_SLOT_WAITED -gt 0 ]] && printf '  %swaited %s for a gate slot%s\n' \
+    "$DIM" "$(lock_duration "$GATE_SLOT_WAITED")" "$RST"
+  return 0
+}
+
+# gate_slot_note prints the test log's line on the slot this gate holds and the wait for it.
+gate_slot_note () {
+  [[ -n "${GATE_SLOT:-}" ]] || return 0
+  printf '# waited %s for a gate slot (%s)\n' "$(lock_duration "$GATE_SLOT_WAITED")" \
+    "$(basename "$GATE_SLOT")"
 }
 
 # The reflection ratchet's other half.  `scripts/check-reflection.sh` compiles src and
@@ -543,7 +576,11 @@ fi
 if [[ $sequential -eq 1 ]]; then
   # Cheapest first, so `--fail-fast` gets you the fast answer first.
   run_stage lint "static analysis" lein lint || true
-  [[ $fail -gt 0 && $fail_fast -eq 1 ]] || run_stage test "$test_blurb" "${test_cmd[@]}" || true
+  if ! [[ $fail -gt 0 && $fail_fast -eq 1 ]]; then
+    wanted test && admit_test "${test_cmd[@]}"
+    run_stage test "$test_blurb" "${test_cmd[@]}" || true
+    gate_slot_release
+  fi
   check_test_reflection
   check_jvm_warnings
   [[ $perf_opted -eq 1 ]] && { [[ $fail -gt 0 && $fail_fast -eq 1 ]] || run_stage perf "the scaling claims" lein "${perf_args[@]}" || true; }
@@ -560,8 +597,10 @@ else
     spawn "$OUT/lint.log" lein lint; lint_pid=$spawned_pid
   else skipped+=(lint); fi
   if wanted test; then
+    admit_test "${test_cmd[@]}"
     test_t0=$SECONDS
     revision_stamp test >"$OUT/test.log"
+    gate_slot_note >>"$OUT/test.log"
     spawn "$OUT/test.log" "${test_cmd[@]}"; test_pid=$spawned_pid
   else skipped+=(test); fi
 
@@ -579,11 +618,22 @@ else
   # otherwise clobber the one report_stage needs.
   if [[ -n "$lint_pid" ]]; then
     wait "$lint_pid" 2>/dev/null; lint_rc=$?
+    # A lint that ended while this gate waited for a slot can be gone from bash's job
+    # table by now, and `wait` then returns 127 for a lint that passed (a 74-minute
+    # wait, 2026-10-10).  Its log's verdict line records the same outcome.
+    if [[ $lint_rc -eq 127 ]]; then
+      if sed 's/\x1b\[[0-9;]*m//g' "$OUT/lint.log" | grep -qE '^lint: ([0-9]+)/\1 clean'; then
+        lint_rc=0
+      else
+        lint_rc=1
+      fi
+    fi
     echo; announce lint "static analysis" lein lint
     report_stage lint "$lint_rc" "$((SECONDS - lint_t0))"
   fi
   if [[ -n "$test_pid" ]]; then
     wait "$test_pid" 2>/dev/null; test_rc=$?
+    gate_slot_release
     echo; announce test "$test_blurb" "${test_cmd[@]}"
     report_stage test "$test_rc" "$((SECONDS - test_t0))"
   fi
@@ -618,7 +668,7 @@ fi
 # `nat_maintenance`, the `types/` records); a file no claim or cost test executes does not
 # (the public API's shims, io, and the domain reasoners without a claim).  Edit it here
 # when a claim starts timing a file or the hot surface moves.
-PERF_SENSITIVE_RE='^src/vaelii/core\.clj$|^src/vaelii/impl/(provers|resolution|except|withdrawal|inherit|chain|settle|settle_phases|recheck|reroute|clashes|discovery|readings|assert_entry|jtms|dense_jtms|caches|taxonomy|nat|nat_maintenance|context_nat|plan|tactics|rules|rete|strength|levels|special|wiring|checks|violations|abduce|sentex|wff|naming|kb|memory|observe|reindex|literal_cache|tokens|columnar|kv|dense_kv|dense_roots|rewrite|reads|feed|integrate|quasiquote|skolem|capabilities|profile|qcn|qcn_kb|stp|quality|roster|overlay/kv|sign|asp/label|asp/prover)\.clj$|^src/vaelii/impl/(disk|types)/'
+PERF_SENSITIVE_RE='^src/vaelii/core\.clj$|^src/vaelii/impl/(provers|resolution|except|inherit|chain|settle|settle_phases|recheck|clashes|discovery|decide|decide/[a-z_]+|journal|recovery|reasoning_image|vantage|assert_entry|jtms|dense_jtms|caches|taxonomy|nat|nat_maintenance|context_nat|plan|tactics|rules|rete|strength|levels|special|wiring|checks|violations|abduce|sentex|wff|naming|kb|memory|observe|reindex|literal_cache|tokens|columnar|kv|dense_kv|dense_roots|rewrite|reads|feed|integrate|quasiquote|skolem|capabilities|profile|qcn|qcn_kb|space|stp|quality|roster|overlay/kv|overlay/frozen|asp/solve_context|sign|asp/label|asp/prover)\.clj$|^src/vaelii/impl/(disk|types)/'
 #
 # SLOW_OWED_RE.  The engine files the `^:slow` tests drive, in three groups: the index
 # (the retrieval, record and posting stores the index oracles compare), the TMS (the
@@ -627,7 +677,29 @@ PERF_SENSITIVE_RE='^src/vaelii/core\.clj$|^src/vaelii/impl/(provers|resolution|e
 # and whole-KB round trips run).  The slow tests outside all three (the aspif solver, the
 # catalog load, the feed socket, the koinii wire scenarios) name no file here.  Edit it
 # when a slow test starts driving a file, or a file's slow tests lose their marks.
-SLOW_OWED_RE='^src/vaelii/core\.clj$|^src/vaelii/impl/(resolution|except|withdrawal|literal_cache|memory|columnar|dense_kv|dense_roots|reindex|tokens|kv|jtms|dense_jtms|settle|recheck|reroute|clashes|discovery|readings|checks|violations|strength|levels|observe|chain|rete|provers|inference|tactics|plan|rules|inherit|taxonomy|special|sentex|wff|nat|context_nat|abduce|qcn|qcn_kb|stp)\.clj$|^src/vaelii/impl/types/(trie|postings|snapshot|dense_roots)\.clj$|^src/vaelii/impl/disk/index_snapshot\.clj$'
+SLOW_OWED_RE='^src/vaelii/core\.clj$|^src/vaelii/impl/(resolution|except|literal_cache|memory|columnar|dense_kv|dense_roots|reindex|tokens|kv|jtms|dense_jtms|settle|recheck|clashes|discovery|checks|violations|strength|levels|observe|chain|rete|provers|inference|tactics|plan|rules|inherit|taxonomy|special|sentex|wff|nat|context_nat|abduce|qcn|qcn_kb|stp)\.clj$|^src/vaelii/impl/types/(trie|postings|snapshot|dense_roots)\.clj$|^src/vaelii/impl/disk/index_snapshot\.clj$'
+
+# perf_groups_for_path.  The `groups` keys of bench/vaelii/bench/perf.clj whose checks
+# time a changed engine file's code, so the perf owed line names `lein perf --only` over
+# them.  A file not named here prints `all`, which owes the whole run.  The map is a floor:
+# a change whose reach is wider than its file's row owes the whole run too.
+perf_groups_for_path () {
+  case "${1#src/vaelii/impl/}" in
+    kv.clj|reads.clj)                             echo all ;;
+    dense_kv.clj|dense_roots.clj|columnar.clj|reindex.clj|tokens.clj|\
+    literal_cache.clj|overlay/*|disk/*|types/*)  echo index ;;
+    taxonomy.clj)                                 echo taxonomy membership inherit placement clashes ;;
+    except.clj)                                   echo exceptions placement ;;
+    inherit.clj)                                  echo inherit clashes ;;
+    clashes.clj|discovery.clj)                    echo clashes ;;
+    decide.clj|decide/*|journal.clj)              echo placement argtypes membership tuples clashes ;;
+    recovery.clj|reasoning_image.clj)             echo recover ;;
+    qcn.clj|qcn_kb.clj|space.clj|stp.clj|sign.clj|quality.clj|context_nat.clj|plan.clj|asp/*)
+                                                  echo solvers ;;
+    nat.clj|nat_maintenance.clj|feed.clj)         echo chaining ;;
+    *)                                            echo all ;;
+  esac
+}
 
 # What is about to land: committed-since-upstream ∪ staged ∪ unstaged.  Fall back to
 # origin/main, then to the uncommitted diff alone, when no upstream is tracked.
@@ -656,9 +728,15 @@ owed_advisory () {                 # owed_advisory <label> <regex> <what> <why> 
     "$5"
 }
 pending=$(pending_files)
+perf_groups=$(printf '%s\n' "$pending" | grep -E "$PERF_SENSITIVE_RE" \
+  | while read -r f; do perf_groups_for_path "$f"; done | tr ' ' '\n' | sort -u | paste -sd, -)
+case ",$perf_groups," in
+  *,all,*) perf_cmd="${BOLD}lein perf${RST}" ;;
+  *)       perf_cmd="${BOLD}lein perf --only $perf_groups${RST}" ;;
+esac
 [[ $perf_opted -eq 0 ]] && owed_advisory perf "$PERF_SENSITIVE_RE" hot-path \
   "a change here can turn a cost super-linear — the test stage cannot see that." \
-  "${BOLD}lein release-gate${RST} (lint + test + perf), or ${BOLD}lein perf${RST} alone,"
+  "${BOLD}lein release-gate${RST} (lint + test + perf), or $perf_cmd alone,"
 { [[ $all -eq 0 ]] || ! wanted test; } && owed_advisory slow "$SLOW_OWED_RE" "index / TMS / inference" \
   "the ^:slow half holds the order sweeps and oracles over these files — :default skips it." \
   "${BOLD}lein gate --all${RST} (or ${BOLD}lein test :slow${RST} alone)"

@@ -788,17 +788,19 @@
                  " / "
                  (pr-str (set/difference (:derived r) (:derived (first runs))))))))))
 
-(defn- withdrawn-by-a-defeated-claim
-  "`[stored IN, held]` for `(outweighs chihuahua maine_coon)` at CxA after the writes `ops`,
-  in order, beside `kinds!` and `preserving!` in CxUniverse.
+(defn- read-beside-a-contrary-claim
+  "`[stored, IN, held, inherited]` for `(outweighs chihuahua maine_coon)` at CxA after the
+  writes `ops`, in order, beside `kinds!` and `preserving!` in CxUniverse: whether the
+  firing is stored, believed (`v/in?`), matched, and whether `ask?` answers the inherited
+  claim it joins on.
 
   ```
   CxA  G = (typicallyLargerThan dog cat) M                                    (:claim)
        (typicallyLargerThan ?x ?y) => (outweighs ?x ?y)                       (:rule)
-       S = (typicallyLargerThan maine_coon chihuahua) :default                (:specific)
+       S = (typicallyLargerThan maine_coon chihuahua), at `strength`          (:specific)
        (not S) M, which places the defeat of S in CxA                         (:denial)
   ```"
-  [ops]
+  [strength ops]
   (tu/with-neutral-kb [kb tu/fresh]
     (tu/with-terms [dog_t cat_t golden_retriever_t maine_coon_t chihuahua_t siamese_t
                     typicallyLargerThan outweighs CxA]
@@ -814,17 +816,85 @@
             :rule     (v/assert kb (list 'set/forwardRule (list 'implies (list typicallyLargerThan '?x '?y)
                                                                 (list outweighs '?x '?y)))
                                 CxA {:strength :monotonic})
-            :specific (v/assert kb specific CxA)
+            :specific (v/assert kb specific CxA {:strength strength})
             :denial   (v/assert kb (list 'not specific) CxA {:strength :monotonic})))
-        [(boolean (some-> (v/handle-of kb target CxA) (->> (v/in? kb))))
-         (boolean (seq (v/sentexes-matching kb target CxA)))]))))
+        (let [h (v/handle-of kb target CxA)]
+          [(some? h)
+           (boolean (some->> h (v/in? kb)))
+           (boolean (seq (v/sentexes-matching kb target CxA)))
+           (v/ask? kb (list typicallyLargerThan chihuahua_t maine_coon_t) CxA)])))))
 
-(tu/deftest-kb a-defeated-contrary-claim-withdraws-an-inherited-firing-in-every-order
-  ;; The withdrawal reads the network, as every placement in chain does (design.md ruling
-  ;; 19): S is IN, so it undercuts G for the pair whether or not a defeat hides it.
-  (is (= #{[false false]}
-         (into #{} (map withdrawn-by-a-defeated-claim)
+(tu/deftest-kb a-defeated-contrary-claim-gives-the-inherited-firing-back-in-every-order
+  ;; S is `:default`, so the firing is stored with a defeat resting on S (design ruling
+  ;; 25).  The denial's defeat hides S at CxA, so the firing is believed there, as `ask?`
+  ;; reads the inherited claim it joins on.
+  (is (= #{[true true true true]}
+         (into #{} (map #(read-beside-a-contrary-claim :default %))
                (for [a [:claim :rule :specific :denial] b [:claim :rule :specific :denial]
                      c [:claim :rule :specific :denial] d [:claim :rule :specific :denial]
                      :when (= 4 (count (distinct [a b c d])))]
                  [a b c d])))))
+
+(tu/deftest-kb a-default-contrary-claim-stores-the-inherited-firing-hidden-and-a-monotonic-one-refuses-it
+  (is (= {:default #{[true false false false]} :monotonic #{[false false false false]}}
+         (into {} (for [st [:default :monotonic]]
+                    [st (into #{} (map #(read-beside-a-contrary-claim st %))
+                              (for [a [:claim :rule :specific] b [:claim :rule :specific]
+                                    c [:claim :rule :specific]
+                                    :when (= 3 (count (distinct [a b c])))]
+                                [a b c]))])))))
+
+(defn- read-beside-a-separated-membership
+  "`[stored, IN, held, inherited]` for `(noted lower)` in CxUniverse after the writes `ops`,
+  in order, as `read-beside-a-contrary-claim` reads its firing: whether the firing is
+  stored, believed, matched, and whether `ask?` answers the inherited `(down_kind lower)` it
+  joins on.  The declaration and `(genl lower upper)` are written first at `decl`.
+
+  ```
+  (down_kind upper), at `claim`                                (:claim)
+  (down_kind ?x) => (noted ?x)                                 (:rule)
+  (disjoint down_kind plain_kind) M                            (:sep)
+  (plain_kind lower), at `member`                              (:member)
+  ```"
+  [{:keys [decl claim member]} ops]
+  (tu/with-neutral-kb [kb tu/fresh]
+    (tu/with-terms [down_kind plain_kind upper lower noted]
+      (v/assert kb (list 'transitiveInArgInverse down_kind 1 'genl) ctx {:strength decl})
+      (v/assert kb (list 'genl lower upper) ctx {:strength decl})
+      (doseq [op ops]
+        (case op
+          :claim  (v/assert kb (list down_kind upper) ctx {:strength claim})
+          :rule   (v/assert kb (list 'set/forwardRule (list 'implies (list down_kind '?x)
+                                                            (list noted '?x)))
+                            ctx {:strength :monotonic})
+          :sep    (v/assert kb (list 'disjoint down_kind plain_kind) ctx {:strength :monotonic})
+          :member (v/assert kb (list plain_kind lower) ctx {:strength member})))
+      (let [target (list noted lower)
+            h      (v/handle-of kb target ctx)]
+        [(some? h)
+         (boolean (some->> h (v/in? kb)))
+         (boolean (seq (v/sentexes-matching kb target ctx)))
+         (v/ask? kb (list down_kind lower) ctx)]))))
+
+(tu/deftest-kb a-separated-membership-denies-an-inherited-antecedent-in-every-order
+  ;; `(plain lower)` denies `(down lower)`, since no term is a member of two disjoint
+  ;; types.  Beside a `:default` reading the firing is made, as for any `:default`
+  ;; contrary claim, with a defeat resting on the membership (design ruling 25), and a
+  ;; `:monotonic` membership refuses it.  A reading known-true throughout defeats a
+  ;; `:default` membership instead (the inherited nogood), and the firing stands.
+  (let [orders (for [a [:claim :rule :sep :member] b [:claim :rule :sep :member]
+                     c [:claim :rule :sep :member] d [:claim :rule :sep :member]
+                     :when (= 4 (count (distinct [a b c d])))]
+                 [a b c d])]
+    (is (= {:default-member   #{[true false false false]}
+            :monotonic-member #{[false false false false]}
+            :known-true       #{[true true true true]}}
+           (into {}
+                 (for [[k strengths] {:default-member   {:decl :default :claim :default
+                                                         :member :default}
+                                      :monotonic-member {:decl :default :claim :default
+                                                         :member :monotonic}
+                                      :known-true       {:decl :monotonic :claim :monotonic
+                                                         :member :default}}]
+                   [k (into #{} (map #(read-beside-a-separated-membership strengths %))
+                            orders)]))))))

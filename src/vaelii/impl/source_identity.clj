@@ -835,12 +835,14 @@
 
 (caches/register-derived
  {:id :K6 :label "Source parses" :cache :source-parses :kind :cache :keyed-by :value
+  :holds-content? false
   :reads [:source] :retired-by {:caches-cleared :W} :computed :read :imaged? false
   :var #'parsed :value (fn [_] @parsed)
   :note "by URL, re-read when the file's modification time or length moves"})
 
 (caches/register-derived
  {:id :K7 :label "Last source identity" :kind :cache :keyed-by :value :reads [:source :K6]
+  :holds-content? false
   :retired-by {} :computed :read :imaged? false :var #'last-identity
   :value (fn [_] @last-identity)
   :note "one slot keyed by the options and the file hashes"})

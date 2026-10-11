@@ -33,7 +33,8 @@
       ;; the exception must already hold when the rule fires, or (flies Opus) is placed and
       ;; only *later* defeated — a defeat, not a placement-time refusal, and the funnel would
       ;; read the rule as firing.  penguin first, then bird, then a fixpoint to be sure.
-      (v/assert kb '(penguin Opus) 'CxFunnel)
+      ;; Known-true, since a `:default` blocker stores the firing with a defeat.
+      (v/assert kb '(penguin Opus) 'CxFunnel {:strength :monotonic})
       (v/assert kb '(bird Opus) 'CxFunnel)
       (v/forward-chain kb)
       (catalog/register! "base" "Base KB" kb {:source (catalog/source "core")})

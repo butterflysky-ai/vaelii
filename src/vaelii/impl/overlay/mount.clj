@@ -53,6 +53,26 @@
   (let [b (:backend index-store)]
     (when (and b (satisfies? p/KvBackend b)) b)))
 
+(defn- families-kv
+  "The `KvBackend` holding `index`'s families: `kv-backend-of`'s, or the roots backend a
+  columnar index keeps its families other than the trie in."
+  [index]
+  (or (kv-backend-of index)
+      (let [b (:roots index)] (when (and b (satisfies? p/KvBackend b)) b))))
+
+(defn fork-families
+  "A `KvIndexStore` whose writes land in a private in-memory layer over `index`'s family
+  backend (`families-kv`), which it reads through: a taxonomy `detached-copy`'s, so a
+  probe's supporters reach neither the KB's store nor its readers.  Refuses an index with
+  no family backend (`:unforkable-index`) rather than forking nothing."
+  [index]
+  (if-let [b (families-kv index)]
+    (kv/->KvIndexStore (okv/overlay-kv (mem/->MemoryKvBackend (atom {})) (frozen/frozen-kv b)))
+    (throw (ex-info (str "cannot fork the families of a " (.getName (class index)) " — a "
+                         "taxonomy probe forks the KvBackend an index keeps its families in, "
+                         "and this index keeps none")
+                    {:type :unforkable-index :index (class index)}))))
+
 (defn- base-kv
   [base-index]
   (or (kv-backend-of base-index)
@@ -65,13 +85,18 @@
                            "trie behind.)")
                       {:type :unforkable-index :index (class base-index)}))))
 
+(defn meta-space
+  "The RAM space a `:memory` fork's bookkeeping lives under, beside its own `space`."
+  [space]
+  [::meta space])
+
 (defn meta-kv
   "The bookkeeping `KvBackend` for a fork whose *record* overlay is `kind` (`:memory` or
   `:disk`) under `opts` — in RAM for an ephemeral fork, durable beside the records for a
   disk one, so the two are exactly as recoverable as each other."
   [kind opts]
   (case kind
-    :memory (mem/memory-kv-backend {:space [::meta (:space opts 0)]})
+    :memory (mem/memory-kv-backend {:space (meta-space (:space opts 0))})
     :disk   (disk/overlay-meta-for (disk/disk-dir opts))
     (throw (ex-info (str "no overlay bookkeeping for record backend " (pr-str kind)
                          " — a fork's own records are :memory or :disk")
@@ -100,17 +125,6 @@
   [overlay base meta own-index]
   (ostore/overlay-record-store overlay (frozen/frozen-records base) meta
                                (boolean (some-> own-index kv-backend-of okv/index-cleared?))))
-
-(defonce ^:private fork-seq (atom 0))
-
-(defn fresh-overlay-opts
-  "Storage opts for an **ephemeral** fork: an in-RAM overlay on a space nothing else
-  names, so two forks taken with no opts are independent rather than accidentally the same
-  one.  Naming the space explicitly is how a caller asks for the other behaviour — a
-  remount of a fork it took earlier."
-  []
-  (let [n (swap! fork-seq inc)]
-    {:backend :memory :space [::fork n]}))
 
 (defn mount-index
   "A `KvIndexStore` over an `OverlayKv`: `overlay`'s backend (writable) over `base`'s

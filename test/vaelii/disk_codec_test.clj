@@ -91,16 +91,18 @@
 (deftest justification-round-trips
   (doseq [d [(jtms/->just 20 :rule [1 2 3] 4 '{?x A} :monotonic)
              (jtms/->just 21 'someRule [] 5 nil :default)
-             (jtms/->just 22 9 [1 9] 5 nil :default)]]
+             (jtms/->just 22 9 [1 9] 5 nil :default)
+             (jtms/->just 23 9 [1 2] 5 '{?x A} :monotonic '#{[kind inspace] [sort intime]})]]
     (let [t (d-trip d)]
       (is (= d t))
-      (is (instance? vaelii.impl.types.tms.Justification t)))))
+      (is (instance? vaelii.impl.types.tms.Justification t))
+      (is (= (if (:subsumptions d) 7 6) (count (codec/encode-justification d)))))))
 
-(deftest a-seven-element-frame-decodes-to-the-six-field-record
+(deftest an-earlier-frame-decodes-to-a-record-without-subsumptions
   ;; A store can hold frames with an always-empty `:out` set in the last position and a
   ;; rule handle listed among the antecedents as well as in the informant slot, and a
   ;; record frame nippy froze with an `:out` key.  Each decodes to the record
-  ;; `encode-justification` writes: no `:out`, the rule named once.
+  ;; `encode-justification` writes: no `:out`, no subsumptions, the rule named once.
   (let [want (jtms/->just 20 7 [1 2] 3 nil :monotonic)]
     (is (= want (codec/decode-justification [20 7 [1 2 7] 3 nil :monotonic #{}])))
     (is (= want (codec/decode-justification (assoc want :out #{}))))
@@ -113,7 +115,9 @@
         r (sx-trip a)]
     (is (identical? (sx/intern-sym 'parentOf) (first (:sentence r))))
     (is (identical? (sx/intern-sym 'Tom) (second (:sentence r))))
-    (is (identical? (sx/intern-sym 'CxWell) (:context r)))))
+    (is (identical? (sx/intern-sym 'CxWell) (:context r))))
+  (let [j (d-trip (jtms/->just 20 9 [1 2] 3 nil :monotonic '#{[kind inspace]}))]
+    (is (identical? (sx/intern-sym 'kind) (ffirst (:subsumptions j))))))
 
 (deftest non-record-values-pass-through
   (testing "a plain map is not a Literal and must round-trip as the map it is"

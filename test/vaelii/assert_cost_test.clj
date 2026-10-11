@@ -453,11 +453,19 @@
 ;; on the declaration functors' predicate extents, which every shipped index store answers from
 ;; memory.
 ;;
+;; **One `:predicate-extent` read per assert, and one per teardown, is the reified-constant
+;; gate.**  `nat/any-reified-constants?` answers from the in-memory `reifiable_function`
+;; marks, and in a KB declaring none it reads the `termOfUnit` count, since a context slot
+;; mints a `cx/` constant with no declaration (docs/context-nat.md).  The assert workloads
+;; declare none, so each assert reads the count once.  A teardown reads it once, for the
+;; removal record; a KB declaring a reifiable function reads the `contextArgSubrelation`
+;; count instead, for the structural-genlCx revival.
+;;
 ;; **Four `:predicate-extent` reads per scoped `genl` read are the taxonomy's census.**  A
 ;; scoped `genls` or `genl?` reads which contexts state a `genl`, `covering`, `separating`
-;; or `partition` fact, one count read per functor (`tax/visible-ctxs`), and nothing holds
-;; the answer between reads.  A membership asks one scoped read and a declared argument
-;; four.
+;; or `partition` fact, one count read per functor (`tax/visible-ctxs`), and the closure
+;; memo holds the answer per reader until the change clock moves.  A membership asks one
+;; scoped read and a declared argument four; a second read at the same clock reads no count.
 ;;
 ;; **`:argument-root` and `:argument-slot` carry the small-side lead (`res/*lead-side*
 ;; :auto`), which is why they read near-equal.**  A scoped clash retrieval leads from the
@@ -480,39 +488,53 @@
 ;; negation family.  No workload here stores a body in both polarities, so no family's
 ;; writes moved.
 ;;
-;; **One `:predicate-extent` read per settle is the related-types gate**: whether a fact of
+;; **Two `:predicate-extent` reads per settle are the related-types gate**: whether a fact of
 ;; `orthogonal` or of a predicate under it is stored (`related/orthogonals?`), which a
-;; separation declaration the settle relabels can contradict.  A settle after a `genl` edge
+;; separation declaration the settle relabels can contradict, and whether a `disjoint` is
+;; stored, which a cover pair needs (`related/held?`).  A settle after a `genl` edge
 ;; moved reads the `disjoint` and `orthogonal` counts again (`related/sync-related`), which
 ;; is the +2 a KB's first settle reads and `taxonomy-edge` reads per assert.
 ;;
 ;; **`:slots` counts the slot rosters' ops and the shape roster's together.**  A positive
-;; fact writes two shape ops, its length into its functor's lengths and its shape's count
-;; up (`kv/shape-adds`); a retraction writes one, or two when it is its shape's last fact
-;; (`kv/shape-retires`).  A binding or an edge that recomputes the arity candidates reads
+;; fact writes one shape op, its length into its functor's lengths (`kv/shape-adds`); a
+;; retraction writes one when it empties its shape's node (`kv/shape-retires`), and none
+;; otherwise.  A binding or an edge that recomputes the arity candidates reads
 ;; a functor's lengths once, as one `:predicate-extent` read.
 ;;
 ;; **`:roots` counts the root postings and the count-trie node ops together.**  A binary
-;; fact writes its context root, its predicate-extent leaf and one argument leaf per
-;; argument, and the predicate extent's node and each argument's node take a child edge
-;; and a count: ten ops, six of them the nodes'.  A retraction that empties a node deletes
-;; its count and its child edge; one that leaves the node standing decrements the count
-;; alone, which is why the bystander teardowns read 802 rather than 1,000.  A ground
-;; binary self tuple `(p a a)` also enters the self-tuple trie, its leaf, child edge and
-;; count: three ops, which `declared`'s `(acDecl x x)` facts pay.
+;; fact writes its context root, its predicate-extent leaf, one argument leaf per argument
+;; and its shape-trie leaf (`:shape-tuple`), and the predicate extent's node, each
+;; argument's node and the shape node take a child edge and a count: thirteen ops, eight of
+;; them the nodes'.  A retraction that empties a node deletes its count and its child edge;
+;; one that leaves the node standing decrements the count alone, which is why the bystander
+;; teardowns read 1,003 rather than 1,300.  A ground binary self tuple `(p a a)` also
+;; enters the self-tuple trie, its leaf, child edge and count: three ops, which
+;; `declared`'s `(acDecl x x)` facts pay.
+;;
+;; **`:arity-binding` reads where a functor's length entry is computed.**  The first fact of
+;; a functor computes its entry in the arity length cache (`arity/entry`): one probe of
+;; `[:arity-bound]` per type at or above the functor whose lengths the cache does not hold,
+;; and a kinds read per bound one, so a workload pays it once per functor it first writes
+;; and no read per fact after it.
 ;;
 ;; **One `:mint` read per settle pass**, in every workload: the mint withdrawal's gate
-;; reads the mint family's count (`reads/stored-mint-count`).  No record these settles move
-;; can subsume a mint, so nothing else reads the family, `declared`'s filed mints included.
+;; reads the mint family's count (`reads/stored-mint-count-global`).  No record these
+;; settles move can subsume a mint, so nothing else reads the family, `declared`'s filed
+;; mints included.
 ;; `nat-orphan-teardown` settles twice per retraction.
+;;
+;; **One `:argument-root` and one `:argument-slot` read per tuple functor**, in every
+;; assert workload: the arity candidates read a functor's `:monotonic` memberships once
+;; (`arity/types-held`), and the entry holds them after.  `rule-fired` writes tuples of
+;; two functors.
 
 (def ^:private budgets
   [{:name    :plain
     :build   plain
     :sentexes 100
-    :reads   {:exception-index 100 :opposed 100 :predicate-extent 902
+    :reads   {:argument-root 1 :argument-slot 1 :arity-binding 2 :exception-index 100 :opposed 100 :predicate-extent 1103
               :rule-index 100 :trie-counts 700 :trie-lookup 100 :mint 100}
-    :writes  {:levels 500 :terms 400 :roots 1000 :roster 202 :slots 400}}
+    :writes  {:levels 500 :terms 400 :roots 1300 :roster 202 :slots 300}}
 
    ;; **One membership read per assert above `plain`**: a unary fact's argument is read
    ;; for its memberships once by the membership candidates, which keep a term holding two
@@ -531,10 +553,10 @@
    {:name    :membership
     :build   membership
     :sentexes 100
-    :reads   {:argument-root 100 :argument-slot 100 :exception-index 100
-              :opposed 100 :predicate-extent 1300 :rule-index 100 :tax-support 100 :trie-counts 900
+    :reads   {:arity-binding 3 :argument-root 101 :argument-slot 101 :exception-index 100
+              :opposed 100 :predicate-extent 1500 :rule-index 100 :tax-support 100 :trie-counts 900
               :trie-lookup 100 :mint 100}
-    :writes  {:levels 400 :terms 300 :roots 700 :roster 100 :slots 400}}
+    :writes  {:levels 400 :terms 300 :roots 1000 :roster 100 :slots 300}}
 
    ;; **The same reading at depth 8, and the pair is the point.**  Whatever this costs
    ;; above `:membership` is what seven more super-predicates cost, and that is nothing,
@@ -542,10 +564,10 @@
    {:name    :deep-membership
     :build   deep-membership
     :sentexes 100
-    :reads   {:argument-root 100 :argument-slot 100 :exception-index 100
-              :opposed 100 :predicate-extent 1300 :rule-index 100 :tax-support 100 :trie-counts 900
+    :reads   {:arity-binding 11 :argument-root 101 :argument-slot 101 :exception-index 100
+              :opposed 100 :predicate-extent 1500 :rule-index 100 :tax-support 100 :trie-counts 900
               :trie-lookup 100 :mint 100}
-    :writes  {:levels 400 :terms 300 :roots 700 :roster 100 :slots 400}}
+    :writes  {:levels 400 :terms 300 :roots 1000 :roster 100 :slots 300}}
 
    ;; **The workload the entailment moves most.**  Every predicate is declared, so the
    ;; shipped default reads each declaration and tests the argument against the type it
@@ -576,10 +598,10 @@
    {:name    :declared
     :build   declared
     :sentexes 100
-    :reads   {:argument-root 200 :argument-slot 100 :exception-index 100
-              :opposed 100 :predicate-extent 2700 :rule-index 100 :trie-counts 2300
+    :reads   {:arity-binding 2 :argument-root 201 :argument-slot 101 :exception-index 100
+              :opposed 100 :predicate-extent 1700 :rule-index 100 :trie-counts 2300
               :trie-lookup 300 :mint 100}
-    :writes  {:levels 500 :terms 300 :roots 1300 :roster 0 :slots 400}}
+    :writes  {:levels 500 :terms 300 :roots 1600 :roster 0 :slots 300}}
 
    ;; **One `:rule-index` read per assert, and no rule posting.**  An arriving negation
    ;; triggers the `[:not q]` keys for the specs `q` of its body's predicate
@@ -594,7 +616,7 @@
    {:name    :negative
     :build   negative
     :sentexes 100
-    :reads   {:exception-index 200 :opposed 100 :predicate-extent 802
+    :reads   {:exception-index 200 :opposed 100 :predicate-extent 1003
               :rule-index 100 :tax-support 100 :trie-counts 700 :trie-lookup 100 :mint 100}
     :writes  {:levels 400 :terms 400 :roots 1000 :roster 103 :slots 101}}
 
@@ -607,10 +629,10 @@
    {:name    :functional-in-arg-arity-2
     :build   functional-in-arg-arity-2
     :sentexes 100
-    :reads   {:argument-root 100 :argument-slot 200 :exception-index 100
-              :opposed 100 :predicate-extent 1800 :rule-index 100 :trie-counts 2100
+    :reads   {:arity-binding 2 :argument-root 101 :argument-slot 201 :exception-index 100
+              :opposed 100 :predicate-extent 1600 :rule-index 100 :trie-counts 2100
               :trie-lookup 200 :mint 100}
-    :writes  {:levels 500 :terms 400 :roots 1000 :roster 200 :slots 400}}
+    :writes  {:levels 500 :terms 400 :roots 1300 :roster 200 :slots 300}}
 
    ;; `:trie-lookup` 100: a binary tuple reads its converse only under an
    ;; `anti_symmetric` or `asymmetric` mark over its functor (`decide/note-candidate!`),
@@ -618,9 +640,9 @@
    {:name    :compound
     :build   compound
     :sentexes 100
-    :reads   {:exception-index 100 :opposed 100 :predicate-extent 902
+    :reads   {:argument-root 1 :argument-slot 1 :arity-binding 2 :exception-index 100 :opposed 100 :predicate-extent 1103
               :rule-index 100 :trie-counts 700 :trie-lookup 100 :mint 100}
-    :writes  {:levels 800 :terms 600 :roots 1000 :roster 104 :slots 400}}
+    :writes  {:levels 800 :terms 600 :roots 1300 :roster 104 :slots 300}}
 
    ;; 200 indexed sentexes for 100 asserts — the rule concludes one apiece
    ;;
@@ -638,34 +660,44 @@
    {:name    :rule-fired
     :build   rule-fired
     :sentexes 200
-    :reads   {:exception-index 300 :opposed 100 :predicate-extent 1500
+    :reads   {:argument-root 2 :argument-slot 2 :arity-binding 4 :exception-index 300 :opposed 100 :predicate-extent 1700
               :rule-index 300 :trie-counts 1000 :trie-lookup 200 :mint 100}
-    :writes  {:levels 1000 :terms 800 :roots 2000 :roster 200 :slots 800}}
+    :writes  {:levels 1000 :terms 800 :roots 2600 :roster 200 :slots 600}}
 
    ;; **The vocabulary write, and the first budget here that is not about a fact.**  What it
    ;; prices is everything a `genl` edge sets off that a fact does not: the arity
    ;; candidates recomputed below it and the argument-type entailment's two gates.  No
    ;; rule reads a term above the edge, so the chaining seeds read no subtree.  The arity
-   ;; recompute reads the candidate index and no index posting.
+   ;; recompute reads five `:arity-binding` entries an edge: the count of the bound
+   ;; predicates and two probes of the lower end, which holds no binding, at the write;
+   ;; then, for the relation move the install records, the count again and one probe of
+   ;; the lower end, with its shape-roster read (`arity/moved-below`, one
+   ;; `:predicate-extent`).
    {:name    :taxonomy-edge
     :build   taxonomy-edge
     :sentexes 100
-    :reads   {:exception-index 300 :opposed 100 :predicate-extent 1200
+    :reads   {:argument-root 1 :argument-slot 1 :arity-binding 502 :exception-index 300 :opposed 100 :predicate-extent 1500
               :rule-index 500 :trie-counts 700 :trie-lookup 100 :mint 100}
-    :writes  {:levels 500 :terms 400 :roots 1000 :roster 101 :slots 301}}
+    :writes  {:levels 500 :terms 400 :roots 1300 :roster 101 :slots 201}}
 
-   ;; **No read per relative**: an arity arriving recomputes the candidates of the
-   ;; predicate and its specs off the candidate index, so the `declaration-relatives`
-   ;; above it cost no index read, and a change that reads one per relative re-pins here.
+   ;; **No read per relative**: an arity arriving reads the lengths stored above its
+   ;; predicate from its parents' answers, which the arity length entries hold
+   ;; (`arity/lengths-of`), so the `declaration-relatives` are read once, by the first
+   ;; declaration, and each declaration then reads its own predicate's bindings, eight
+   ;; `:arity-binding` reads; a change that reads one per relative re-pins here.
    ;;
    ;; `:trie-lookup` 100: `(arity P n)` is a binary tuple, and no converse mark stands
    ;; over `arity`, so it reads no converse (`decide/note-candidate!`).
+   ;;
+   ;; `(arity P n)` also enters the arity-binding trie, its leaf, child edge and count, and
+   ;; posts `[:exact n]` under P's kinds and P in `[:arity-bound]`: three `:roots` and two
+   ;; `:slots` writes per declaration.
    {:name    :arity-declaration
     :build   arity-declaration
     :sentexes 100
-    :reads   {:exception-index 100 :opposed 100 :predicate-extent 1000
+    :reads   {:argument-root 1 :argument-slot 1 :arity-binding 806 :exception-index 100 :opposed 100 :predicate-extent 1300
               :rule-index 100 :trie-counts 700 :trie-lookup 100 :mint 100}
-    :writes  {:levels 500 :terms 300 :roots 700 :roster 1 :slots 300}}
+    :writes  {:levels 500 :terms 300 :roots 1300 :roster 1 :slots 400}}
 
    ;; **Two workloads, one budget, and the equality is the claim.**  A `genl` edge on a KB
    ;; preserving 4 predicates along `genl` and one preserving 32 read exactly the same, so
@@ -681,21 +713,24 @@
    ;; answer, and asking costs one read that stops at the first predicate it clears: the
    ;; +200 `:rule-index` is the chainer's and the re-check trigger's rule read on one
    ;; preserved predicate, and the +100 `:predicate-extent` the settle's extent read on one.
+   ;; No length is bound here, so the arity recompute of a relation move reads the count of
+   ;; the bound predicates alone, one `:arity-binding` an edge beside the write's one, where
+   ;; `:taxonomy-edge`'s bound root costs it a probe and a `:predicate-extent` read more.
    {:name    :preserved-edges-4
     :build   preserved-edges-4
     :sentexes 100
-    :reads   {:argument-root 2 :argument-slot 600 :exception-index 300 :opposed 100
-              :predicate-extent 3600 :rule-index 700 :trie-counts 700
+    :reads   {:arity-binding 200 :argument-root 2 :argument-slot 600 :exception-index 300 :opposed 100
+              :predicate-extent 3800 :rule-index 700 :trie-counts 700
               :trie-lookup 100 :mint 100}
-    :writes  {:levels 500 :terms 400 :roots 1000 :roster 200 :slots 400}}
+    :writes  {:levels 500 :terms 400 :roots 1300 :roster 200 :slots 300}}
 
    {:name    :preserved-edges-32
     :build   preserved-edges-32
     :sentexes 100
-    :reads   {:argument-root 2 :argument-slot 600 :exception-index 300 :opposed 100
-              :predicate-extent 3600 :rule-index 700 :trie-counts 700
+    :reads   {:arity-binding 200 :argument-root 2 :argument-slot 600 :exception-index 300 :opposed 100
+              :predicate-extent 3800 :rule-index 700 :trie-counts 700
               :trie-lookup 100 :mint 100}
-    :writes  {:levels 500 :terms 400 :roots 1000 :roster 200 :slots 400}}])
+    :writes  {:levels 500 :terms 400 :roots 1300 :roster 200 :slots 300}}])
 
 ;; The retraction half.  `:unindexed` is the retraction budgets' `:sentexes` — how many
 ;; sentexes left the index — and it is checked first for the same reason: a budget
@@ -712,20 +747,20 @@
     :build   plain-teardown
     :sentexes 0
     :unindexed 100
-    :reads   {:exception-index 100 :opposed 100 :predicate-extent 500
+    :reads   {:exception-index 100 :opposed 100 :predicate-extent 700
               :tax-support 3200 :trie-counts 700 :mint 100}
     :writes  {}
-    :retracts {:levels 500 :terms 400 :roots 901 :roster 202 :slots 301 :dead 302}}
+    :retracts {:levels 500 :terms 400 :roots 1102 :roster 202 :slots 201 :dead 302}}
 
    ;; 200 unindexed for 100 retractions — each premise solely supported one conclusion
    {:name    :rule-derived-teardown
     :build   rule-derived-teardown
     :sentexes 0
     :unindexed 200
-    :reads   {:exception-index 200 :opposed 100 :predicate-extent 700
+    :reads   {:exception-index 200 :opposed 100 :predicate-extent 900
               :tax-support 3200 :trie-counts 700 :mint 100}
     :writes  {}
-    :retracts {:levels 1000 :terms 800 :roots 1802 :roster 200 :slots 602 :dead 602}}
+    :retracts {:levels 1000 :terms 800 :roots 2204 :roster 200 :slots 402 :dead 602}}
 
    ;; **`:predicate-extent` and `:term-index` are the two a narrowing of the orphan sweep
    ;; **The workload the orphan sweep's scope is priced by, and the numbers below are the
@@ -733,7 +768,7 @@
    ;; retractions — 108 and 100 per retraction, one pair per standing reified NAT, on a
    ;; teardown naming none of them and collecting none of them, because the sweep read what
    ;; the KB held rather than what the retraction reached.  Narrowed to the removed region
-   ;; it is 5 predicate-extent and 0 term-index per retraction, which is `plain-teardown`'s own
+   ;; it is 7 predicate-extent and 0 term-index per retraction, which is `plain-teardown`'s own
    ;; cost: a bystander NAT population now costs a teardown nothing at all.  `:trie-lookup`
    ;; goes to 0 for the same reason.  The other five families are the same removal either
    ;; way and did not move.
@@ -745,10 +780,10 @@
     :build   nat-bystander-teardown
     :sentexes 0
     :unindexed 100
-    :reads   {:exception-index 100 :opposed 100 :predicate-extent 500
+    :reads   {:exception-index 100 :opposed 100 :predicate-extent 700
               :tax-support 3200 :trie-counts 300 :mint 100}
     :writes  {}
-    :retracts {:levels 500 :terms 400 :roots 802 :roster 102 :slots 202 :dead 301}}
+    :retracts {:levels 500 :terms 400 :roots 1003 :roster 102 :slots 102 :dead 301}}
 
    ;; 200 unindexed for 100 retractions — the use, plus the `termOfUnit` its removal
    ;; orphaned.  **That count is the workload's point and is not a number to re-pin
@@ -757,7 +792,7 @@
    ;; did.  The reads fell with the scope, exactly as the bystander's did — the first
    ;; pinning read 11,800 predicate-extent and 10,100 term-index, off a *declining* population
    ;; the sweep walked twice per retraction (`:term-index` was 2·(100+99+…+1)).  What is
-   ;; left is the region: 10 predicate-extent and 3 term-index per retraction, for a constant
+   ;; left is the region: 14 predicate-extent and 3 term-index per retraction, for a constant
    ;; the population no longer enters.
    ;;
    ;; The orphan question itself settles on the `termOfUnit` clause here — a collected
@@ -770,10 +805,10 @@
     :build   nat-orphan-teardown
     :sentexes 0
     :unindexed 200
-    :reads   {:exception-index 200 :opposed 200 :predicate-extent 1000
+    :reads   {:exception-index 200 :opposed 200 :predicate-extent 1400
               :term-index 300 :tax-support 6400 :trie-counts 600 :mint 200}
     :writes  {}
-    :retracts {:levels 1200 :terms 1000 :roots 1802 :roster 303 :slots 602 :dead 802}}
+    :retracts {:levels 1200 :terms 1000 :roots 2204 :roster 303 :slots 402 :dead 802}}
 
    ;; **The workload the supersession reconcile's scope is priced by**, and `:trie-lookup`
    ;; is the family that reads it: the reconcile probes the store for each displaced
@@ -782,7 +817,7 @@
    ;; here — 100 merges × 100 retractions, on a teardown that names none of them and
    ;; un-merges nothing — and one scoped to the moved region reads **none**.
    ;;
-   ;; Everything else is `plain-teardown` exactly: 500 `:predicate-extent`, 100
+   ;; Everything else is `plain-teardown` exactly: 700 `:predicate-extent`, 100
    ;; `:exception-index`, 100 `:opposed`, 700 `:trie-counts`.  The three retract families that differ from
    ;; it (`:roster`, `:slots`, `:dead`) differ because the *victims* are a different shape
    ;; of fact, not because the merges are there.
@@ -794,10 +829,10 @@
     :build   merge-bystander-teardown
     :sentexes 0
     :unindexed 100
-    :reads   {:exception-index 100 :opposed 100 :predicate-extent 500
+    :reads   {:exception-index 100 :opposed 100 :predicate-extent 700
               :tax-support 3200 :trie-counts 700 :mint 100}
     :writes  {}
-    :retracts {:levels 500 :terms 400 :roots 802 :roster 102 :slots 202 :dead 301}}])
+    :retracts {:levels 500 :terms 400 :roots 1003 :roster 102 :slots 102 :dead 301}}])
 
 ;; ---- measuring -----------------------------------------------------------
 
@@ -959,10 +994,9 @@
           "so the smaller unarmed run out-walks the larger armed one — the skip is what closes the gap"))))
 
 (deftest an-unchained-assert-computes-no-chaining-seeds
-  ;; The seeds feed `chain-all` alone, and `visibility-seeds` reads the whole
-  ;; rule-relevant corpus per `genlCx` edge, so on a large store one edge asserted under
-  ;; `:chain? false` read the corpus into heap to compute seeds it then discarded.
-  ;; The chained assert is the control — the same edge, and the seeds are computed.
+  ;; The seeds feed chaining alone, and `move-seeds` reads the rule-relevant facts the
+  ;; edge shows, so an edge asserted under `:chain? false` computes none in its settle's
+  ;; drain (`special/*seed-moves?*`).  The chained assert is the control.
   (let [calls (atom 0)
         edge  (fn [chain?]
                 (let [kb (fresh)]
@@ -970,8 +1004,8 @@
                             {:direction :forward})
                   (v/assert kb '(v_fact_p VA) 'CxSeedMid)
                   (reset! calls 0)
-                  (with-redefs [special/visibility-seeds
-                                (let [f special/visibility-seeds]
+                  (with-redefs [special/move-seeds
+                                (let [f special/move-seeds]
                                   (fn [& args] (swap! calls inc) (apply f args)))]
                     (v/assert kb '(genlCx CxSeedLow CxSeedMid) 'CxUniverse {:chain? chain?}))
                   {:seeds @calls

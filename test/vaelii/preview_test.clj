@@ -225,7 +225,7 @@
     (v/assert kb (except-rule (list penguin '?b) [(list bird '?b)] (list flies '?b))
               CxStory)
     (v/assert kb (list bird Opus) CxStory)
-    (let [ph     (v/assert kb (list penguin Opus) CxStory)
+    (let [ph     (v/assert kb (list penguin Opus) CxStory {:strength :monotonic})
           _      (is (empty? (v/sentexes-matching kb (list flies Opus) CxStory))
                      "the exception holds, so there is no conclusion to start from")
           before (content kb)

@@ -176,36 +176,41 @@
 ;; family adds no trie count per firing: the index write reads the conclusion's
 ;; `[:false B]` count itself, untallied (`kv/opposed-adds`).
 ;;
+;; `:arity-binding` 2: the conclusion's functor computes its arity length entry once, its
+;; own probe and its closure's (`arity/entry`), and no firing after the first reads it.
+;; One `:argument-root` and one `:argument-slot` read the same way: the entry reads the
+;; conclusion functor's memberships once (`arity/types-held`), held after.
+;;
 ;; `:trie-lookup` is where the two join workloads part, and it is the reading to take them
 ;; by.  The unfanned join walks the trie once per firing (100) and the fanned one never
 ;; touches it, leading from the bound term's postings instead — which costs the two extra
 ;; `:argument-root` and `:argument-slot` reads per firing that separate their budgets.
 ;; Those are the same reads a *singleton* closure would spend on a fan that is not there,
-;; which is why `:unfanned-join` reads none against `:fanned-join`'s 200/200.
+;; which is why `:unfanned-join` reads the entry's one against `:fanned-join`'s 201/201.
 
 (def ^:private budgets
   [{:name :single-antecedent
     :build single-antecedent
     ;; the conclusion is a second membership of the datum's term, which the membership
     ;; candidates read the term's unary roster for once (`membership/note-membership!`)
-    :reads {:argument-root 100 :argument-slot 100 :exception-index 200
+    :reads {:arity-binding 2 :argument-root 101 :argument-slot 101 :exception-index 200
             :predicate-extent 1201 :rule-index 300 :tax-support 100 :trie-counts 500}}
 
    {:name :unfanned-join
     :build unfanned-join
-    :reads {:exception-index 200 :predicate-extent 803 :rule-index 300
+    :reads {:arity-binding 2 :argument-root 1 :argument-slot 1 :exception-index 200 :predicate-extent 803 :rule-index 300
             :trie-counts 400 :trie-lookup 100}}
 
    {:name :fanned-join
     :build fanned-join
-    :reads {:argument-root 200 :argument-slot 200 :exception-index 200
+    :reads {:arity-binding 2 :argument-root 201 :argument-slot 201 :exception-index 200
             :predicate-extent 1203 :rule-index 300 :trie-counts 500}}
 
    ;; two `:trie-lookup` per firing, not one: the mirror is a second orientation to look
    ;; the conclusion's own handle up under, and both orientations reach `join-matches`
    {:name :symmetric-trigger
     :build symmetric-trigger
-    :reads {:exception-index 200 :predicate-extent 803 :rule-index 300
+    :reads {:arity-binding 2 :argument-root 1 :argument-slot 1 :exception-index 200 :predicate-extent 803 :rule-index 300
             :trie-counts 400 :trie-lookup 200}}])
 
 ;; ---- measuring -----------------------------------------------------------

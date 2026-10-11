@@ -267,20 +267,23 @@
 ;; ---- the bridges ---------------------------------------------------------
 
 (tu/deftest-kb a-symmetric-predicate-is-commutative-and-a-commutative-binary-is-symmetric
-  (tu/with-terms [sibOf comm2]
-    (v/assert kb (list 'symmetric sibOf) U)
-    (is (v/ask? kb (list 'commutative sibOf) U)
-        "(genl symmetric commutative) classifies every symmetric predicate")
-    (v/assert kb (list 'commutative comm2) U)
-    (v/assert kb (list 'arity comm2 2) U)
-    (is (v/ask? kb (list 'symmetric comm2) U)
-        "and the bridge rule reads the arity back the other way"))
-  (testing "commutative at another arity implies neither symmetric nor arity 2"
-    (tu/with-terms [comm3]
-      (v/assert kb (list 'commutative comm3) U)
-      (v/assert kb (list 'arity comm3 3) U)
-      (is (not (v/ask? kb (list 'symmetric comm3) U)))
-      (is (not (v/ask? kb (list 'arity comm3 2) U))))))
+  ;; Pinned to the entailing reading: `(arg arity 1 fixed_arity)` refuses `(arity P n)` for
+  ;; a P nothing else classifies under the constraint-only reading.
+  (tu/with-entailing
+    (tu/with-terms [sibOf comm2]
+      (v/assert kb (list 'symmetric sibOf) U)
+      (is (v/ask? kb (list 'commutative sibOf) U)
+          "(genl symmetric commutative) classifies every symmetric predicate")
+      (v/assert kb (list 'commutative comm2) U)
+      (v/assert kb (list 'arity comm2 2) U)
+      (is (v/ask? kb (list 'symmetric comm2) U)
+          "and the bridge rule reads the arity back the other way"))
+    (testing "commutative at another arity implies neither symmetric nor arity 2"
+      (tu/with-terms [comm3]
+        (v/assert kb (list 'commutative comm3) U)
+        (v/assert kb (list 'arity comm3 3) U)
+        (is (not (v/ask? kb (list 'symmetric comm3) U)))
+        (is (not (v/ask? kb (list 'arity comm3 2) U)))))))
 
 (tu/deftest-kb either-spelling-licences-the-permutation-on-its-own
   ;; The two spellings state one licence and neither derives the other: each arm installs

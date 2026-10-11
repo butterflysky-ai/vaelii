@@ -46,6 +46,7 @@ BASE=$(git rev-parse --short "$BASE_REV^{commit}" 2>/dev/null) \
   || { echo "perf-ab: no such revision: $BASE_REV" >&2; exit 2; }
 
 require_primary "lein perf-ab"
+perf_lock_take lein perf-ab "$@"
 
 AB_ROOT="logs/perf-ab"
 LOG="$AB_ROOT/run-$$.log"

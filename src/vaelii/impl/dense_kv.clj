@@ -51,27 +51,27 @@
 
 ;; ---- the backend --------------------------------------------------------
 
+(def ^:private handle-tags
+  "Family tag -> `:leaf` when its `[tag :handles …]` keys hold handles (a trie or count
+  trie whose `:leaf` is `:handles`), `:all` when every key does (a set whose `:leaf` is
+  `:handles`), read off `kv/index-families`."
+  (into {} (keep (fn [[tag {:keys [shape leaf]}]]
+                   (when (= :handles leaf)
+                     [tag (if (#{:trie :count-trie} shape) :leaf :all)])))
+        kv/index-families))
+
 (defn- handle-key?
-  "Does `k` name a HANDLE set (int postings)?  Handle sets: the leaves of the trie and of
-  the count tries ending in the context (`[:trie :handles …]`, `[:argument-root :handles
-  …]`, `[:predicate-extent :handles …]`, `[:rule-antecedent :handles …]`, `[:rule-consequent
-  :handles …]`, `[:rule-extent :handles …]`, `[:opposed :handles …]`, `[:self-tuple
-  :handles …]`, `[:tax-support :handles …]`, `[:mint :handles …]`, `[:mint-in :handles …]`),
-  and the flat sets under `:context-root` `:term-index` `:exception-index` `:opposed-in`.
-  The child sets (`[:trie :children …]` holds tokens, incl. numbers; a count trie's holds
-  contexts), the counters, the term roster `[:term-roster]` (term *names*) and the opposed
-  bodies `[:opposed-bodies]` are not — they stay an ordinary set / a Long.
+  "Does `k` name a HANDLE set (int postings)?  The child sets, the counters and the
+  rosters of names stay an ordinary set / a Long.
 
   A key this fails to recognize is stored boxed and answers every read identically, so
   nothing behavioural can catch a spelling that drifts from the one `vaelii.impl.kv`
   writes; `dense_routing_test` checks the stored representation instead."
   [k]
   (and (vector? k)
-       (case (first k)
-         (:trie :argument-root :predicate-extent :rule-antecedent :rule-consequent :rule-extent
-                :opposed :tax-support :mint :mint-in :self-tuple)
-         (= :handles (second k))
-         (:context-root :term-index :exception-index :opposed-in) true
+       (case (handle-tags (nth k 0 nil))
+         :leaf (= :handles (nth k 1 nil))
+         :all  true
          false)))
 
 (defrecord TieredKvBackend [state]

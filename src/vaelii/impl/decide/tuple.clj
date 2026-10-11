@@ -86,18 +86,23 @@
 (defn- self-tuples-under
   "The stored self tuples of the predicates `fs` that an `irreflexive` mark stands on or
   above, read off the self-tuple trie (`reads/as-stored-self-tuples`), stated in a
-  context of `ctxs` alone when it is given."
+  context of `ctxs` alone when it is given, and in every context otherwise."
   ([kb w fs] (self-tuples-under kb w fs nil))
   ([kb w fs ctxs]
    (let [tax (:tax w)
          idx (:index kb)]
      (when (seq (tax/props tax :irreflexive))
        (into #{} (comp (filter #(seq (tax/props-over tax :irreflexive %)))
-                       (mapcat #(reads/as-stored-self-tuples idx % ctxs)))
+                       (mapcat #(if ctxs
+                                  (reads/as-stored-self-tuples idx % ctxs)
+                                  (reads/as-stored-self-tuples-global idx %))))
              fs)))))
 
 (defn- self-tuples
-  "Every stored self tuple under an `irreflexive` mark (`self-tuples-under`)."
+  "Every stored self tuple under an `irreflexive` mark (`self-tuples-under`).
+
+  The marks are read unscoped: a candidate row is a superset over every reader
+  (`decide/write-view`)."
   [kb w]
   (let [tax (:tax w)]
     (self-tuples-under kb w (into (sorted-set) (mapcat (:specs-global w)) (tax/props tax :irreflexive)))))
@@ -213,7 +218,10 @@
 
 (defn- roster-marks
   "`tax/props-over` of `kind` on `q` with no context.  While `*functor-marks*` is bound,
-  read off the roster's cut with one memo per kind and roster (`tax/props-over-among`)."
+  read off the roster's cut with one memo per kind and roster (`tax/props-over-among`).
+
+  The read is unscoped: a candidate row is a superset over every reader
+  (`decide/write-view`)."
   [tax kind q]
   (if (some? *functor-marks*)
     (tax/props-over-among tax kind q
@@ -555,7 +563,10 @@
 
 (defn self-tuples-in
   "The stored self tuples under an `irreflexive` mark stated in a context of `ctxs`, which
-  a `genlCx` move exposing those contexts can give a placement (`decide/edge-reach`)."
+  a `genlCx` move exposing those contexts can give a placement (`special/drain-context-moves!`' `:reach`).
+
+  The marks are read unscoped: a candidate row is a superset over every reader
+  (`decide/write-view`)."
   [kb w ctxs]
   (when (seq ctxs)
     (let [tax (:tax w)]
@@ -577,14 +588,16 @@
 (defn- note-placement-left!
   "Queue the tuple members a `(contradicts …)` sentex `sx` leaving the store names, so the
   settle places their nogoods where they stand (`take-moved!`): a `genlCx` edge under the
-  placement can have left with it."
+  placement can have left with it.  A placement naming a handle that is no member left
+  with its nogood, and queues nothing: the departed member queued itself (`drop-tuple`),
+  and the others' nogoods keep their placements."
   [kb sx]
   (let [s (:sentence sx)]
     (when (and (seq? s) (= 'contradicts (first s)))
       (let [cands (reasoning/nogood-candidates kb)
             c     @cands
-            hs    (into #{} (comp (keep sx/handle-id) (filter #(member? kb c %))) (rest s))]
-        (when (seq hs)
+            hs    (into #{} (keep sx/handle-id) (rest s))]
+        (when (and (seq hs) (every? #(member? kb c %) hs))
           (swap! cands update ::moved (fnil into #{}) hs))))))
 
 (defn members-under
@@ -703,12 +716,22 @@
   "The taxonomy props a tuple nogood is convicted through."
   #{:irreflexive :anti-symmetric :asymmetric :functional :anti-transitive})
 
-(defn under-mark?
-  "Does a mark a tuple nogood is convicted through stand on `q` or a predicate above it
-  over the unscoped closure?  A `genl` edge below no mark gives no tuple nogood a route."
-  [tax q]
-  (boolean (or (some #(seq (tax/props-over tax % q)) mark-kinds)
-               (seq (tax/functional-in-arg-over tax q)))))
+(defn under-marks
+  "The predicates of `qs` on or below a predicate carrying a mark a tuple nogood is
+  convicted through (a `mark-kinds` roster or a `functionalInArg` declaration) over the
+  unscoped closure: the subtypes of the marked predicates, or one walk up from each of
+  `qs` that enters no type an earlier walk found below no mark
+  (`tax/genls-global-meets?`), whichever reads fewer.  A `genl` edge below no mark gives
+  no tuple nogood a route."
+  [tax qs]
+  (let [marked (into (tax/functional-in-arg-predicates tax) (mapcat #(tax/props tax %)) mark-kinds)
+        qs     (set qs)]
+    (cond
+      (or (empty? marked) (empty? qs)) #{}
+      (< (count qs) (* 4 (count marked)))
+      (let [missed (volatile! #{})]
+        (into #{} (filter #(tax/genls-global-meets? tax % marked missed)) qs))
+      :else (into #{} (comp (mapcat #(tax/specs-global tax %)) (filter qs)) marked))))
 
 (defn owned?
   "Is the placed nogood over `members` with antecedents but the `genlCx` edges `core` one
@@ -741,7 +764,10 @@
   off the self-tuple trie (`self-tuples-under`).  Recover offers the stored facts of the
   predicates under an `anti_symmetric` or `asymmetric` mark to `note-converse!`, and
   queues the self tuples under an `irreflexive` mark.  Each nogood of it is placed as a
-  conclusion (`chain/place-tuples!`)."
+  conclusion (`chain/place-tuples!`).
+
+  The marks are read unscoped: a candidate row is a superset over every reader
+  (`decide/write-view`)."
   {:grounds   {:forced-monotonic '#{irreflexive anti_symmetric} :forced-between-predicates '#{genl}}
    :note!     (fn [kb w sx stored?] (note-converse! kb w sx stored?))
    :recovered (fn [kb w]
@@ -753,13 +779,16 @@
                 (let [self (self-tuples kb w)]
                   (when (seq self)
                     (swap! (reasoning/nogood-candidates kb) update ::moved (fnil into #{}) self))))
-   :handles   :converse
-   :holds?    (fn [c h] (contains? (:converse c) h))})
+   :handles   (fn [_ c] (:converse c))
+   :holds?    (fn [_ c h] (contains? (:converse c) h))})
 
 (def marks-family
   "The tuple-mark family's entry in `decide/registry`.  Liveness reads the `genlCx`
   closure, so a moved generation syncs `::live` (`sync-tuples`).  Each nogood of it is
-  placed as a conclusion (`chain/place-tuples!`)."
+  placed as a conclusion (`chain/place-tuples!`).
+
+  The marks are read unscoped: a candidate row is a superset over every reader
+  (`decide/write-view`)."
   {:grounds   {:forced-monotonic          '#{functional functionalInArg anti_transitive asymmetric}
                :forced-between-predicates '#{genl}}
    :note!     (fn [kb w sx stored?]
@@ -776,13 +805,14 @@
                       (note-tuple! kb w sx true)))))
    :synced?   (fn [tax c] (= (tax/relation-gen tax :genlCx) (::ts-gen c 0)))
    :sync      (fn [_ w c] (sync-tuples w c))
-   :handles   tuple-members
-   :holds?    tuple-member?})
+   :handles   (fn [_ c] (tuple-members c))
+   :holds?    (fn [_ c h] (tuple-member? c h))})
 
 ;; ---- derived state (docs/caches.md, "The derived-state register") ----------------
 
 (caches/register-derived
  {:id :N1 :label "Converse candidates" :kind :cache :keyed-by :handle
+  :holds-content? false
   :reads [:index :records :T2]
   :retired-by {:stored :K :removed :K :respelled :K :declared :K :edge :K :recover :R
                :image-install :R}
@@ -793,6 +823,7 @@
 
 (caches/register-derived
  {:id :N2 :label "Tuple mark candidates" :kind :cache :keyed-by :value
+  :holds-content? false
   :reads [:index :records :T1 :T2]
   :retired-by {:stored :K :removed :K :respelled :K :declared :K :edge :G :edge-belief :G
                :settle-pass :G :recover :R :image-install :R}
@@ -806,5 +837,6 @@
 
 (caches/register-derived
  {:id :N9 :label "Candidate recover memos" :kind :pass :keyed-by :functor :reads [:records]
+  :holds-content? false
   :retired-by {} :computed :pass :imaged? false
   :note "`*functor-marks*`, bound while `decide/rebuild-candidates!` offers the facts under a tuple mark"})

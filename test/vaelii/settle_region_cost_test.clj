@@ -18,18 +18,34 @@
   * A settle reads the standing merges and `except`s only where they moved: a batch of
     merges reads the region once per settle, an un-merge re-examines its own class, a
     settle that moves no equality premise calls no supersession reconcile, and
-    resolution's flip check reads no `except` root when the region is smaller."
+    resolution's flip check reads no `except` root when the region is smaller.
+  * The placement settle a `recover` closes with walks each subsumption its nogoods'
+    routes climb, and each `genlCx` reach their placements see over, once per scope,
+    however many nogoods share it.  A witness walk expands a bounded number of nodes off
+    its target's down-closure, and what a placement pass holds does not grow with the
+    targets' down-closures.
+  * Nogoods placed below their ingredients over one shared subsumption read its routes
+    once per pass.
+  * A settle's tuple placement reads the `genl` edges' lower ends against the marks with
+    one closure per marked predicate, however many edges the settle relabels.
+  * The arity placement reads its candidates' functors against those lower ends with no
+    closure walk, and the candidates a `genlCx` move reaches cut each predicate above
+    them to the exact-length holders once."
   (:require [clojure.set :as set]
             [clojure.test :refer [deftest is testing]]
             [vaelii.core :as v]
-            [vaelii.impl.checks :as checks]
+            [vaelii.impl.chain :as chain]
+            [vaelii.impl.decide :as decide]
             [vaelii.impl.decide.arity :as arity]
+            [vaelii.impl.decide.membership :as membership]
             [vaelii.impl.decide.negation :as negation]
             [vaelii.impl.jtms :as jtms]
+            [vaelii.impl.naming :as nm]
             [vaelii.impl.reads :as reads]
             [vaelii.impl.sentex :as sx]
             [vaelii.impl.settle-phases :as phases]
             [vaelii.impl.special :as special]
+            [vaelii.impl.taxonomy :as tax]
             [vaelii.impl.types.reasoning :as reasoning]
             [vaelii.test-util :as tu]))
 
@@ -120,32 +136,38 @@
   (v/assert kb '(src_plain SrcTarget) 'CxUniverse {})
   kb)
 
-(defn- arbitrable-calls
-  "`checks/arbitrable-violations` calls made while `f` runs."
+(defn- nogood-reads
+  "Terms whose membership nogoods `membership/term-nogoods` derives while `f` runs: a
+  settle re-derives a term's nogoods only through it."
   [f]
-  (let [calls (atom 0)
-        orig  checks/arbitrable-violations]
-    (with-redefs [checks/arbitrable-violations
-                  (fn [& args] (swap! calls inc) (apply orig args))]
+  (let [terms (atom [])
+        orig  @#'membership/term-nogoods]
+    (with-redefs [membership/term-nogoods
+                  (fn [tax w c x] (swap! terms conj x) (orig tax w c x))]
       (f))
-    @calls))
+    @terms))
 
 (deftest a-genl-edge-elsewhere-re-derives-no-standing-clash
   (let [kb (tu/fresh)]
     (try
       (clash-kb kb)
       (is (= n (count (v/contradictions kb)))
-          "the standing set is standing, or the counts below are about an empty memo")
-      (testing "retracting the lone genl edge asks the checks nothing"
+          "the standing set is standing, or the counts below are about an empty candidate index")
+      (testing "retracting the lone genl edge derives no term's nogoods"
         (let [h (v/handle-of kb '(genl srcvictim_t srctop_t) 'CxUniverse)]
-          (is (zero? (arbitrable-calls #(v/retract! kb h))))))
-      (testing "and asserting it back asks them nothing either"
-        (is (zero? (arbitrable-calls
-                    #(v/assert kb '(genl srcvictim_t srctop_t) 'CxUniverse
-                               {:strength :monotonic})))))
+          (is (empty? (nogood-reads #(v/retract! kb h))))))
+      (testing "and asserting it back derives none either"
+        (is (empty? (nogood-reads
+                     #(v/assert kb '(genl srcvictim_t srctop_t) 'CxUniverse
+                                {:strength :monotonic})))))
       (testing "the control: a plain fact leaving is already free"
         (let [h (v/handle-of kb '(src_plain SrcTarget) 'CxUniverse)]
-          (is (zero? (arbitrable-calls #(v/retract! kb h))))))
+          (is (empty? (nogood-reads #(v/retract! kb h))))))
+      (testing "an edge above a standing type re-derives each term holding it"
+        (let [e '(genl srca_t srcabove_t)]
+          (is (= n (count (set (nogood-reads #(v/assert kb e 'CxUniverse
+                                                        {:strength :monotonic}))))))
+          (v/retract! kb (v/handle-of kb e 'CxUniverse))))
       (is (= n (count (v/contradictions kb)))
           "and every standing dilemma is still reported")
       (finally (tu/clear-kb! kb)))))
@@ -377,4 +399,237 @@
         (is (empty? (filter #(= sx/except-functor (second %))
                             (calls-to #'reads/believed-with-functor
                                       #(v/assert kb '(srm_plain SrmAfterExcepts) 'CxUniverse {}))))))
+      (finally (tu/clear-kb! kb)))))
+
+;; ---- the placement settle a recover closes with -----------------------------
+
+(deftest a-recovers-placement-settle-walks-each-subsumption-once-per-vantage
+  ;; CxUniverse  (disjoint srw_a srw_b) M, srw_a2 → srw_a1 → srw_a and srw_b2 → srw_b1 →
+  ;; srw_b, and n terms each in srw_a2 and srw_b2: n membership nogoods, every one placed
+  ;; over the same two subsumptions from the one vantage.
+  (let [kb (tu/isolated-fresh)]
+    (try
+      (tu/with-shipped-config
+        (v/with-deferred-settle kb
+          (v/assert kb '(disjoint srw_a srw_b) 'CxUniverse {:strength :monotonic})
+          (doseq [[s u] '[[srw_a1 srw_a] [srw_a2 srw_a1] [srw_b1 srw_b] [srw_b2 srw_b1]]]
+            (v/assert kb (list 'genl s u) 'CxUniverse {}))
+          (dotimes [i n]
+            (let [x (symbol (str "SrwT" i))]
+              (v/assert kb (list 'srw_a2 x) 'CxUniverse {})
+              (v/assert kb (list 'srw_b2 x) 'CxUniverse {}))))
+        (let [walks (into [] (comp (map #(vec (take 4 (rest %)))) (filter #(= :genl (first %))))
+                          (calls-to #'tax/reach-support #(v/recover kb)))]
+          (is (= n (count (v/sentexes-with-functor kb 'contradicts))))
+          (is (= #{[:genl 'srw_a2 'srw_a 'CxUniverse] [:genl 'srw_b2 'srw_b 'CxUniverse]}
+                 (set walks)))
+          (is (= 2 (count walks)))))
+      (finally (tu/clear-kb! kb)))))
+
+(deftest a-recovers-placement-settle-walks-each-genlCx-reach-once
+  ;; CxSrvR → CxUniverse, (disjoint srv_a srv_b) M and srv_a1 → srv_a, srv_b1 → srv_b in
+  ;; CxUniverse, and n terms each in srv_a1 and srv_b1 in CxSrvR: n membership nogoods
+  ;; placed in CxSrvR, each seeing its ingredients in CxUniverse over the one edge.
+  (let [kb (tu/isolated-fresh)]
+    (try
+      (tu/with-shipped-config
+        (v/assert kb '(genlCx CxSrvR CxUniverse) 'CxUniverse {:strength :monotonic})
+        (v/with-deferred-settle kb
+          (v/assert kb '(disjoint srv_a srv_b) 'CxUniverse {:strength :monotonic})
+          (v/assert kb '(genl srv_a1 srv_a) 'CxUniverse {})
+          (v/assert kb '(genl srv_b1 srv_b) 'CxUniverse {})
+          (dotimes [i n]
+            (let [x (symbol (str "SrvT" i))]
+              (v/assert kb (list 'srv_a1 x) 'CxSrvR {})
+              (v/assert kb (list 'srv_b1 x) 'CxSrvR {}))))
+        ;; the five-argument arity calls the six-argument one through the var
+        (let [walks (into [] (comp (filter #(= 6 (count %))) (map #(vec (take 4 (rest %))))
+                                   (filter #(= :genlCx (first %))))
+                          (calls-to #'tax/reach-support #(v/recover kb)))]
+          (is (= n (count (v/sentexes-with-functor kb 'contradicts))))
+          (is (= [[:genlCx 'CxSrvR 'CxUniverse 'CxSrvR]] walks))))
+      (finally (tu/clear-kb! kb)))))
+
+(deftest a-witness-walk-expands-a-bounded-number-of-nodes-off-the-targets-down-closure
+  ;; CxUniverse  srp_sub → srp_mid → srp_top, and srp_sub → srp_side_i for 300 sides, none
+  ;; of them under srp_top.  The sides sort after srp_mid, so a breadth-first walk from
+  ;; srp_sub reaches every side before srp_top.
+  (let [kb (tu/isolated-fresh)]
+    (try
+      (tu/with-shipped-config
+        (v/with-deferred-settle kb
+          (v/assert kb '(genl srp_sub srp_mid) 'CxUniverse {})
+          (v/assert kb '(genl srp_mid srp_top) 'CxUniverse {})
+          (dotimes [i 300]
+            (v/assert kb (list 'genl 'srp_sub (symbol (str "srp_side_" i))) 'CxUniverse {})))
+        (let [tx    (reasoning/taxonomy kb)
+              path  (atom nil)
+              sorts (count (calls-to #'nm/sort-by-content-key
+                                     #(reset! path (tax/reach-support tx :genl 'srp_sub 'srp_top 'CxUniverse))))]
+          (is (= [(v/handle-of kb '(genl srp_mid srp_top) 'CxUniverse)
+                  (v/handle-of kb '(genl srp_sub srp_mid) 'CxUniverse)]
+                 (mapv first @path)))
+          (is (< sorts 100))))
+      (finally (tu/clear-kb! kb)))))
+
+(deftest a-tuple-placement-reads-genl-ends-against-the-marks-with-a-closure-per-mark
+  ;; CxUniverse  srtFnSub2 → srtFnSub1 → srtFn under a `functional`, `functionalInArg` and
+  ;; `irreflexive` mark, two srtFnSub2 tuples one determinant apart, and 3n `genl` edges
+  ;; between collections in the same settle: the placement reads every edge's lower end.
+  (let [kb (tu/isolated-fresh)]
+    (try
+      (tu/with-shipped-config
+        (let [inside? (atom false)
+              walks   (atom 0)
+              ends    (atom #{})
+              mark    @#'chain/mark-ends
+              closure @#'tax/closure-of]
+          (with-redefs-fn {#'chain/mark-ends (fn [& args]
+                                               (reset! inside? true)
+                                               (try (let [r (apply mark args)] (swap! ends into r) r)
+                                                    (finally (reset! inside? false))))
+                           #'tax/closure-of  (fn [& args]
+                                               (when @inside? (swap! walks inc))
+                                               (apply closure args))}
+            #(v/with-deferred-settle kb
+               (doseq [s '[(functional srtFn) (functionalInArg srtFn 2) (irreflexive srtFn)
+                           (genl srtFnSub1 srtFn) (genl srtFnSub2 srtFnSub1)]]
+                 (v/assert kb s 'CxUniverse {:strength :monotonic}))
+               (dotimes [i (* 3 n)]
+                 (v/assert kb (list 'genl (symbol (str "srt_c" (inc i))) (symbol (str "srt_c" (quot i 3))))
+                           'CxUniverse {}))
+               (v/assert kb '(srtFnSub2 SrtA SrtB) 'CxUniverse {})
+               (v/assert kb '(srtFnSub2 SrtA SrtC) 'CxUniverse {})))
+          (is (= 1 (count (v/sentexes-with-functor kb 'contradicts))))
+          (is (= '#{srtFn srtFnSub1 srtFnSub2} @ends))
+          ;; one closure, the marked predicate's subtypes, where each end built its own
+          (is (= 1 @walks))))
+      (finally (tu/clear-kb! kb)))))
+
+(deftest an-arity-placement-reads-its-candidates-against-genl-ends-with-no-closure-walk
+  ;; CxUniverse  (arity sraRel 2) and k sub-predicates of sraRel, each holding a ternary
+  ;; tuple, and 3n `genl` edges between collections in the same settle: the arity
+  ;; placement reads every candidate's functor against every edge's lower end.
+  (let [kb (tu/isolated-fresh)
+        k  12]
+    (try
+      (tu/with-shipped-config
+        (let [inside? (atom false)
+              walks   (atom 0)
+              found   (atom #{})
+              under   @#'arity/members-under
+              closure @#'tax/closure-of]
+          (with-redefs-fn {#'arity/members-under (fn [& args]
+                                                   (reset! inside? true)
+                                                   (try (let [r (apply under args)] (swap! found into r) r)
+                                                        (finally (reset! inside? false))))
+                           #'tax/closure-of      (fn [& args]
+                                                   (when @inside? (swap! walks inc))
+                                                   (apply closure args))}
+            #(v/with-deferred-settle kb
+               (v/assert kb '(arity sraRel 2) 'CxUniverse {:strength :monotonic})
+               (dotimes [i k]
+                 (let [q (symbol (str "sraSub" i))]
+                   (v/assert kb (list 'genl q 'sraRel) 'CxUniverse {:strength :monotonic})
+                   (v/assert kb (list q 'SraA 'SraB 'SraC) 'CxUniverse {})))
+               (dotimes [i (* 3 n)]
+                 (v/assert kb (list 'genl (symbol (str "sra_c" (inc i))) (symbol (str "sra_c" (quot i 3))))
+                           'CxUniverse {}))))
+          (is (= k (count @found)))
+          (is (zero? @walks))))
+      (finally (tu/clear-kb! kb)))))
+
+(deftest the-candidates-a-move-reaches-cut-each-predicate-above-them-once
+  ;; CxSrbR → CxUniverse, (arity srbTop 2) in CxSrbR over a chain of 20 predicates in
+  ;; CxUniverse, and k sub-predicates of the chain's foot, each holding a ternary tuple:
+  ;; the candidates a move to CxSrbR reaches climb the same chain.
+  (let [kb (tu/isolated-fresh)
+        k  12
+        l  20]
+    (try
+      (tu/with-shipped-config
+        (v/assert kb '(genlCx CxSrbR CxUniverse) 'CxUniverse {:strength :monotonic})
+        (v/with-deferred-settle kb
+          (v/assert kb '(arity srbTop 2) 'CxSrbR {:strength :monotonic})
+          (dotimes [i l]
+            (v/assert kb (list 'genl (symbol (str "srbL" (inc i))) (if (zero? i) 'srbTop (symbol (str "srbL" i))))
+                      'CxUniverse {:strength :monotonic}))
+          (dotimes [i k]
+            (let [q (symbol (str "srbSub" i))]
+              (v/assert kb (list 'genl q (symbol (str "srbL" l))) 'CxUniverse {:strength :monotonic})
+              (v/assert kb (list q 'SrbA 'SrbB 'SrbC) 'CxUniverse {}))))
+        (let [tax  (reasoning/taxonomy kb)
+              c    (decide/synced kb)
+              hits (atom nil)
+              cuts (count (calls-to #'arity/exact-bound?
+                                    #(reset! hits (arity/reached kb (decide/write-view tax) c #{'CxSrbR}))))]
+          (is (= k (count @hits)))
+          ;; each predicate on the chain once, and each candidate's own functor
+          (is (<= cuts (+ k l 2)) (str cuts " exact-length probes"))))
+      (finally (tu/clear-kb! kb)))))
+
+(defn- held-by-passes
+  "The terms each reading pass's neighbour cache holds once its walks return
+  (`tax/with-neighbours`), over the settle of `f`."
+  [f]
+  (let [held (atom [])
+        orig @#'tax/with-neighbours]
+    (with-redefs-fn {#'tax/with-neighbours
+                     (fn [nc g] (let [r (orig nc g)]
+                                  (swap! held conj (transduce (comp (map val) (filter coll?) (map count)) + @nc))
+                                  r))}
+      f)
+    @held))
+
+(deftest an-arity-placement-pass-holds-no-targets-down-closure
+  ;; CxUniverse  (arity shaTop_t 2) on 3 tops, each over `fans` predicates of its own,
+  ;; shaMid under every top, and 2 predicates under shaMid and under 70 sides that sort
+  ;; after it, each holding a ternary tuple: every route walk from one passes its first
+  ;; 64 expansions and prunes, and what the pass holds does not grow with the fans.
+  (let [held (fn [fans]
+               (let [kb (tu/isolated-fresh)
+                     m  {:strength :monotonic}]
+                 (try
+                   (tu/with-shipped-config
+                     (let [h (held-by-passes
+                              #(v/with-deferred-settle kb
+                                 (dotimes [t 3]
+                                   (let [top (symbol (str "shaTop" t))]
+                                     (v/assert kb (list 'arity top 2) 'CxUniverse m)
+                                     (v/assert kb (list 'genl 'shaMid top) 'CxUniverse m)
+                                     (dotimes [j fans]
+                                       (v/assert kb (list 'genl (symbol (str "shaTop" t "F" j)) top) 'CxUniverse m))))
+                                 (dotimes [i 2]
+                                   (let [q (symbol (str "shaQ" i))]
+                                     (v/assert kb (list 'genl q 'shaMid) 'CxUniverse m)
+                                     (dotimes [j 70]
+                                       (v/assert kb (list 'genl q (symbol (str "shaSide" j))) 'CxUniverse m))
+                                     (v/assert kb (list q 'ShaA 'ShaB 'ShaC) 'CxUniverse {})))))]
+                       [(count (v/sentexes-with-functor kb 'contradicts)) (reduce + h)]))
+                   (finally (tu/clear-kb! kb)))))
+        [n10 w10] (held 10)
+        [n40 w40] (held 40)]
+    (is (= 2 n10 n40))
+    (is (= w10 w40) (str w10 " terms held over 10 fans, " w40 " over 40"))))
+
+(deftest descent-placements-over-a-shared-subsumption-read-its-routes-once
+  ;; CxSrdD → CxUniverse, (arity srdTop 2) and n ternary srdQ tuples in CxUniverse, and
+  ;; (genl srdQ srdTop) in CxSrdD alone: CxUniverse sees no route, so each of the n arity
+  ;; nogoods is placed below it, in CxSrdD, over the one subsumption.
+  (let [kb (tu/isolated-fresh)]
+    (try
+      (tu/with-shipped-config
+        (v/assert kb '(genlCx CxSrdD CxUniverse) 'CxUniverse {:strength :monotonic})
+        (let [searches (count (calls-to #'tax/reach-supports
+                                        #(v/with-deferred-settle kb
+                                           (v/assert kb '(arity srdTop 2) 'CxUniverse {:strength :monotonic})
+                                           (v/assert kb '(genl srdQ srdTop) 'CxSrdD {:strength :monotonic})
+                                           (dotimes [i n]
+                                             (v/assert kb (list 'srdQ (symbol (str "SrdA" i)) 'SrdB 'SrdC)
+                                                       'CxUniverse {})))))
+              placed   (v/sentexes-with-functor kb 'contradicts)]
+          (is (= n (count placed)))
+          (is (every? #(= 'CxSrdD (:context %)) placed))
+          ;; one search per placement pass that reads them, where each nogood read its own
+          (is (<= searches 2) (str searches " route searches for " n " nogoods"))))
       (finally (tu/clear-kb! kb)))))

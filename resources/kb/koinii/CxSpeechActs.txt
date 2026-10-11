@@ -38,13 +38,13 @@
 (comment asserts
          "(asserts ?agent ?proposition) names the move of ?agent putting ?proposition forward as true. DOCUMENTARY vocabulary, deliberately never minted as a sentex: origination is the plain assertion of ?proposition in ?agent's own context, and its provenance already records ?agent as creator (first-writer-wins). Wrapping the claim would duplicate what provenance holds, so an assertion in koinii is just an assertion — see speech_acts/assert-claim.")
 (binary_predicate asserts)
-(instance_relation_predicate asserts)
+(set/monotonic (instance_relation_predicate asserts))
 (arg asserts 1 agent)
 
 (comment queries
          "(queries ?agent ?question) is the query NODE ?agent asserts in its own context — the thing a responder answers by handle. Minted (unlike asserts) because a question must be distinguishable from a claim: ?agent is not asserting ?question true, it is asking. ?question is a ground term naming what is asked, left untyped since it carries no fixed type. See speech_acts/pose-query.")
 (binary_predicate queries)
-(instance_relation_predicate queries)
+(set/monotonic (instance_relation_predicate queries))
 (arg queries 1 agent)
 
 ;; ---- response acts: meta-sentexes on their target, target_following_predicate ----
@@ -58,14 +58,14 @@
 (comment disputes
          "(disputes ?agent (sentexHandle ?target)) records that ?agent challenges the claim ?target, a META-SENTEX naming it by handle. Declared target_following_predicate, so it does not outlive its target. The disputing agent also asserts the rebutting claim (the negation of ?target) in its own context, so the pair surfaces in (contradictions kb) with both sides' :context / :defeat-class / :kind, which is what the per-channel dispute reads scope and the adjudication policies resolve. This layer represents the challenge; it does not adjudicate it. See speech_acts/dispute.")
 (binary_predicate disputes)
-(instance_relation_predicate disputes)
+(set/monotonic (instance_relation_predicate disputes))
 (arg disputes 1 agent)
 (target_following_predicate disputes)
 
 (comment endorses
          "(endorses ?agent (sentexHandle ?target)) records that ?agent stands behind the claim ?target, a META-SENTEX naming it by handle. Declared target_following_predicate. Because provenance is first-writer-wins, an endorsement CANNOT be ?agent re-asserting ?target (that writes no new provenance) — it must be its own sentex with its own creator, which is why two endorsers of one claim are two distinct endorses sentexes. The mark sweeps on RETRACTION only: an endorsement of a claim that is stored but no longer believed is left standing, and a reader who wants only the endorsements of believed claims filters on belief.")
 (binary_predicate endorses)
-(instance_relation_predicate endorses)
+(set/monotonic (instance_relation_predicate endorses))
 (arg endorses 1 agent)
 (target_following_predicate endorses)
 
@@ -80,14 +80,14 @@
 (comment votesFor
          "(votesFor ?agent (sentexHandle ?target)) records that ?agent casts a ballot FOR the claim ?target — a META-SENTEX naming it by handle, in ?agent's own context. Declared target_following_predicate, like every other response act: a ballot is cast ON a claim, so retracting the disputed claim withdraws the votes with it rather than leaving a count standing over nothing. Unlike endorses, a ballot is COUNTED: the majority policy tallies distinct voters on each side and upholds the side with strictly more, leaving a tie open. One ballot per agent per stance, by sentence identity — changing a vote retracts the old ballot first. See channel/vote.")
 (binary_predicate votesFor)
-(instance_relation_predicate votesFor)
+(set/monotonic (instance_relation_predicate votesFor))
 (arg votesFor 1 agent)
 (target_following_predicate votesFor)
 
 (comment votesAgainst
          "(votesAgainst ?agent (sentexHandle ?target)) records that ?agent casts a ballot AGAINST the claim ?target. Same shape, placement and mark as votesFor — a META-SENTEX on the target, target_following_predicate, one ballot per agent per stance. A voter holding both stances at once has SPOILED their ballot: the tally counts them on neither side, so one self-contradicting voter can neither manufacture a tie nor swing a majority.")
 (binary_predicate votesAgainst)
-(instance_relation_predicate votesAgainst)
+(set/monotonic (instance_relation_predicate votesAgainst))
 (arg votesAgainst 1 agent)
 (target_following_predicate votesAgainst)
 
@@ -96,7 +96,7 @@
 (comment retracts
          "(retracts ?agent ?target) names the move of ?agent withdrawing the claim ?target. DOCUMENTARY vocabulary: it is realized as the engine's retract! on the target handle (speech_acts/retract-move), not asserted as a sentex — retracting a claim is a real teardown, and it is exactly this teardown that the target_following_predicate response acts cascade with.")
 (binary_predicate retracts)
-(instance_relation_predicate retracts)
+(set/monotonic (instance_relation_predicate retracts))
 (arg retracts 1 agent)
 
 ;; ---- error acts: reference the received edge, in the refuser's context, UNMARKED ----
@@ -104,13 +104,13 @@
 (comment notUnderstood
          "(notUnderstood ?agent (sentexHandle ?received)) records that ?agent could not parse the received edge ?received — the error act an at-least-once, decoupled path needs (D5). A META-SENTEX naming ?received by handle, in ?agent's own context. Deliberately NOT target_following_predicate: a parse failure is a fact about the exchange that should outlive whatever provoked it. It records the failure and nothing more — no rule reads it, and it commits ?agent to nothing. Spelled camelCase because a KB predicate admits no hyphen.")
 (binary_predicate notUnderstood)
-(instance_relation_predicate notUnderstood)
+(set/monotonic (instance_relation_predicate notUnderstood))
 (arg notUnderstood 1 agent)
 
 (comment refuse
          "(refuse ?agent (sentexHandle ?received)) records that ?agent will not act on the received edge ?received. Same shape and placement as notUnderstood, and also UNMARKED, for the same reason. It records the refusal and nothing more; no rule reads it.")
 (binary_predicate refuse)
-(instance_relation_predicate refuse)
+(set/monotonic (instance_relation_predicate refuse))
 (arg refuse 1 agent)
 
 ;; ---- placement: the mark every koinii placement writes ----
@@ -118,7 +118,7 @@
 (comment agentContext
          "(agentContext ?context ?agent) means that ?context is ?agent's own per-agent context. Written into ?context itself by identity/place-agent-context, the one placement channel/join, speech-acts/speaker-context and identity/agent-context all go through, so a reader tells an agent's context from a channel by a stored fact rather than by its spelling or its genlCx edges. Declared here, which a context rooted under CxSpeechActs sees; identity/agent-context roots the agent's context under CxCore alone, and there the mark is stored with no declaration in view.")
 (binary_predicate agentContext)
-(instance_relation_predicate agentContext)
+(set/monotonic (instance_relation_predicate agentContext))
 (quotedArg agentContext 1 symbol)
 (arg agentContext 2 agent)
 

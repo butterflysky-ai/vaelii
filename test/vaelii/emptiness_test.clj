@@ -4,6 +4,7 @@
   "`empty` and `nonempty` partition `unary_predicate` by extension: an `empty` type has no
   instance, and a `nonempty` type has at least one."
   (:require [clojure.test :refer [is testing use-fixtures]]
+            [clojure.walk :as walk]
             [vaelii.core :as v]
             [vaelii.test-util :as tu]))
 
@@ -97,6 +98,44 @@
     (is (stored? kb (list 'nonempty top_kind)))
     (is (not (stored? kb (list 'nonempty leaf_kind))) "nonemptiness does not descend to a subtype")))
 
+;; The partition makes `(nonempty inner)` a denial of the `(empty inner)` that
+;; `(empty outer)` reaches, and `(empty outer)` a denial of the `(nonempty outer)` that
+;; `(nonempty inner)` reaches.  CxCore states both declarations `:monotonic`, so a reading
+;; over a known-true claim and edge is known-true.
+(defn- permutations [xs]
+  (if (empty? xs)
+    [[]]
+    (for [x xs, more (permutations (remove #{x} xs))] (cons x more))))
+
+(tu/deftest-kb a-subtype-stated-nonempty-below-a-type-stated-empty-is-an-inherited-clash-in-every-order
+  ;; Known-true throughout, the two clashes are conflicts.  A `:default` `(nonempty inner)`
+  ;; is the unique weakest member of the first clash and is not believed.
+  (is (= {:monotonic #{[#{'(empty inner) '(nonempty outer)} true]}
+          :default   #{[#{} false]}}
+         (into {}
+               (for [strength [:monotonic :default]]
+                 [strength
+                  (into #{}
+                        (for [order (permutations [:empty :edge :nonempty])]
+                          (tu/with-terms [outer_kind inner_kind]
+                            (v/assert kb (list 'genl outer_kind 'thing) U)
+                            (doseq [op order]
+                              (case op
+                                :empty    (v/assert kb (list 'empty outer_kind) U
+                                                    {:strength :monotonic})
+                                :edge     (v/assert kb (list 'genl inner_kind outer_kind) U
+                                                    {:strength :monotonic})
+                                :nonempty (v/assert kb (list 'nonempty inner_kind) U
+                                                    {:strength strength})))
+                            (let [role {outer_kind 'outer inner_kind 'inner}]
+                              [(into #{}
+                                     (comp (filter #(= :inherited (:kind %)))
+                                           (map #(walk/postwalk-replace
+                                                  role (:sentence (:inherited %))))
+                                           (filter #(some '#{outer inner} %)))
+                                     (concat (v/conflicts kb) (v/contradictions kb)))
+                               (v/ask? kb (list 'nonempty inner_kind) U)]))))])))))
+
 ;; ---- below two disjoint types ---------------------------------------------
 
 (tu/deftest-kb a-type-below-two-disjoint-types-is-empty
@@ -129,6 +168,14 @@
     (v/assert kb (list 'genl crystal_kind mineral_kind) U)
     (v/assert kb (list 'genl both_kind tree_kind) U)
     (v/assert kb (list 'genl both_kind crystal_kind) U)
+    (is (stored? kb (list 'empty both_kind)))))
+
+(tu/deftest-kb a-type-below-two-parts-of-a-partition-is-empty
+  (tu/with-terms [whole_kind plant_kind mineral_kind both_kind]
+    (v/assert kb (list 'unary_predicate both_kind) U)
+    (v/assert kb (list 'partition whole_kind plant_kind mineral_kind) U {:strength :monotonic})
+    (v/assert kb (list 'genl both_kind plant_kind) U)
+    (v/assert kb (list 'genl both_kind mineral_kind) U)
     (is (stored? kb (list 'empty both_kind)))))
 
 (tu/deftest-kb emptiness-from-a-separation-is-concluded-in-the-context-of-the-separation

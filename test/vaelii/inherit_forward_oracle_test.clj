@@ -30,8 +30,10 @@
       edge, whose route replaces a longer one a firing named before it arrived."
   (:require [clojure.set :as set]
             [clojure.test :refer [deftest is testing]]
+            [clojure.walk :as walk]
             [vaelii.core :as v]
             [vaelii.impl.protocols :as p]
+            [vaelii.impl.sentex :as sx]
             [vaelii.test-util :as tu]))
 
 (def ^:private ctx 'CxUniverse)
@@ -52,9 +54,13 @@
 
 ;; ---- content snapshots, by content and never by handle ------------------
 
-(defn- sx-content [kb id]
+(defn- sx-content
+  "`[sentence context]` of the sentex at `id`, each `(sentexHandle h)` in the sentence
+  read as `h`'s own content, since a handle number is the arrival order."
+  [kb id]
   (when-let [s (p/get-sentex (:records kb) id)]
-    [(v/sentence-of s) (:context s)]))
+    [(walk/postwalk #(if-let [h (sx/handle-id %)] (sx-content kb h) %) (v/sentence-of s))
+     (:context s)]))
 
 (defn- derived-content
   "The conclusions the rule drew, as sentences — the half both oracles compare."

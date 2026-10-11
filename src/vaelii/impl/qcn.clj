@@ -717,12 +717,14 @@
 
 (caches/register-derived
  {:id :K2 :label "Compiled algebras" :cache :compiled-algebras :kind :cache :keyed-by :value
+  :holds-content? false
   :reads [] :retired-by {} :computed :read :imaged? false :var #'compiled-cache
   :value (fn [_] (set (keys @compiled-cache)))
   :note "content-keyed by algebra value; cleared at the bound"})
 
 (caches/register-derived
  {:id :K3 :label "Relation decode tables" :cache :relation-decode :kind :cache
+  :holds-content? false
   :keyed-by :value :reads [:K2] :retired-by {:caches-cleared :W} :computed :read
   :imaged? false :var #'compiled-cache
   :value (fn [_] (into {} (map (fn [[a c]] [a (some-> (:decode-cache c) deref)]))

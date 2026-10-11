@@ -55,12 +55,12 @@
 
 (def ^:dynamic *symbol-pool-limit*
   "The most entries the pool holds across its two generations; each generation holds at
-  most half.  Sized well above the shipped ontology plus the whole of OpenCyc (~188k
-  constants), so a KB of that vocabulary never rotates a generation and keeps every name
-  shared.  A store whose vocabulary is larger, or a minter running per fact, rotates the
-  generations: a name mentioned since the previous rotation stays pooled, and a name not
-  mentioned for two rotations leaves.  Dynamic so a test exercises the rotation by binding
-  a small limit."
+  most half.  The root starts at 1M, above the shipped ontology plus the whole of OpenCyc
+  (~188k constants), and `size-symbol-pool` raises it when a store with a larger token
+  dictionary opens.  Past the limit the generations rotate: a name mentioned since the
+  previous rotation stays pooled, and a name not mentioned for two rotations leaves.
+  Dynamic so a test exercises the rotation by binding a small limit, which an open does
+  not move."
   1000000)
 
 (defonce ^{:private true
@@ -75,11 +75,12 @@
   fact: NAT reification (`nat/constant-for`, one content-named `nat/a…` per reified
   non-atomic term), head-existential skolemization (`skolem/skolemize-conclusion`, one witness per
   existential per firing frontier) and abduction (one scratch context each).  A disk store
-  can also name more than the limit outright: its index snapshot's token dictionary interns
-  every token it holds when the store opens, and a large store holds millions.
-  Nothing hands an entry back on its own: the pool is static, process-wide and shared by
-  every KB in it, so `retract!`, the store clears, `core/clear!`, a KB close and a catalog
-  switch all leave it exactly as large as it was.
+  can also name more than the default limit outright: its token dictionaries intern every
+  token they hold when the store opens, and a large store holds millions, so the open
+  raises the limit first (`size-symbol-pool`).  Nothing hands an entry back on its own:
+  the pool is static, process-wide and shared by every KB in it, so `retract!`, the store
+  clears, `core/clear!`, a KB close and a catalog switch all leave it exactly as large as
+  it was.
 
   So it holds two generations.  A lookup reads `current`, then `previous`, and a name found
   in `previous` is put into `current`.  When `current` reaches half of `*symbol-pool-limit*`
@@ -96,6 +97,14 @@
   "The entries `current` holds before it rotates: half of `*symbol-pool-limit*`, at least 1."
   ^long []
   (max 1 (quot (long *symbol-pool-limit*) 2)))
+
+(defn size-symbol-pool
+  "Raise the root of `*symbol-pool-limit*` to twice `tokens`, the entry count of a token
+  dictionary a store is opening, and never lower it.  A caller calls it before the
+  dictionary interns its tokens, so one generation holds them all.  A thread binding is
+  left alone.  See docs/storage.md, \"Symbol interning\"."
+  [tokens]
+  (alter-var-root #'*symbol-pool-limit* max (* 2 (long tokens))))
 
 (defn- rotate!
   "Make `gens`' `current` the `previous`, dropping the old `previous`, and answer the
@@ -673,6 +682,54 @@
   is not one."
   [form]
   (and (sequential? form) (= not-functor (first form)) (= 2 (count form))))
+
+(def exact-arity-classes
+  "What each exact-arity class membership says the arity is.  The `arity` sentexes and
+  these memberships derive each other through the CxCore rules, so a declared
+  relation normally has both — but a `{:chain? false}` assert or a KB loaded without
+  the rules has only what was written, so both spellings are read.
+
+  **Nine spellings, because CxCore ships nine classes.**  `unary` / `binary` / `ternary`
+  are the relation-wide ones and the other six specialize them by kind, so a KB may write
+  the arity of a function as `(binary_function F)` exactly as it writes a predicate's as
+  `(binary_predicate P)`.  The relation-wide three alone would answer `membered-arity`,
+  which reads the term's whole `genl` closure — but the arity nogoods read a **stored**
+  membership by its own functor (`arity-binding`), and what a KB stored is whichever of
+  the nine its author wrote.
+
+  The three arities never disagree across the spellings one term holds: a class and its
+  specializations map to one number, and `(disjoint unary binary)` and its two peers
+  separate the relation-wide three, which the six inherit through their `genl` edges.
+
+  Here, below the index, the checks, `kb/relation-arity` and the provers, because all of
+  them read it; a roster read twice is a roster that drifts."
+  '{unary 1 binary 2 ternary 3
+    unary_predicate 1 binary_predicate 2 ternary_predicate 3
+    unary_function 1 binary_function 2 ternary_function 3})
+
+(def variable-arity-classes
+  "The memberships that release a relation from one exact length."
+  '#{variable_arity variable_arity_predicate variable_arity_function})
+
+(def arity-binding-functors
+  "The functors of the facts `arity-binding` answers a length binding for."
+  (into '#{arity arityMin} cat [(keys exact-arity-classes) variable-arity-classes]))
+
+(defn arity-binding
+  "`[P kind value]` for the sentence `s` of a stored fact that binds a relation's length,
+  else nil: `(arity P n)` and an exact-arity class membership bind `:exact n`, a
+  `variable_arity` membership `:var nil`, and `(arityMin P m)` `:min m`.  The index posts
+  each under its binding family (`vaelii.impl.kv`), which the arity nogoods read."
+  [s]
+  (when (seq? s)
+    (let [[f p v] s
+          n       (count s)]
+      (when (and (symbol? f) (symbol? p) (not (variable? p)))
+        (cond
+          (and (= 3 n) (= 'arity f) (integer? v) (pos? v))    [p :exact v]
+          (and (= 3 n) (= 'arityMin f) (integer? v) (pos? v)) [p :min v]
+          (and (= 2 n) (exact-arity-classes f))               [p :exact (exact-arity-classes f)]
+          (and (= 2 n) (variable-arity-classes f))            [p :var nil])))))
 
 (defn implies?
   "Is `form` a rule form `(implies <ante> <conseq>)`?  Arity checked: an `implies` at
@@ -2706,9 +2763,43 @@
   (conj (key-tokens sentex) (:context sentex)))
 
 (defn ground?
-  "True when the sentence contains no pattern variables (anywhere, nested)."
+  "True when the sentence contains no pattern variables (anywhere, nested).  A plain tree
+  search: a variable inside a `(Quote …)` or under a quantifier counts.  `closed?` is the
+  test for a sentence with no free variable."
   [sx]
   (not (some-symbol? variable? (sentence-of sx))))
+
+(def quote-functor
+  "The quoting function whose argument is a form taken as syntax: `(Quote X)` mentions X.
+  The same symbol as `quasiquote/quote-function`, which this namespace cannot require."
+  'Quote)
+
+(defn- quote-form?
+  "Is `form` a `(Quote X)` mention?"
+  [form]
+  (and (sequential? form) (= quote-functor (first form)) (= 2 (count form))))
+
+(defn unquoted-free-vars
+  "The variables of `form` free in it: every variable occurrence that no enclosing
+  `forall`, `thereExists` or head `exists` binds and no `(Quote …)` holds.  A `Quasiquote`
+  is not opaque, since its variables are meant to be bound from outside."
+  [form]
+  (cond
+    (quote-form? form)   #{}
+    (or (there-exists? form) (forall? form) (head-exists? form))
+    (into #{} (remove (quantified-vars form)) (unquoted-free-vars (nth form 2)))
+    (variable? form)     #{form}
+    (sequential? form)   (into #{} (mapcat unquoted-free-vars) form)
+    :else                #{}))
+
+(defn closed?
+  "True when the sentence has no free variable: every variable occurrence is bound by an
+  enclosing quantifier or sits inside a `(Quote …)`, the quoted form being syntax the
+  sentence mentions.  A `ground?` sentence answers at once.  This is the test for \"is
+  this sentence closed\"; `ground?` is the test for \"does it hold any variable\"."
+  [sx]
+  (or (ground? sx)
+      (empty? (unquoted-free-vars (sentence-of sx)))))
 
 (defn subterms
   "Every subterm of a sentence — each atom and each compound subterm, recursively,
@@ -2855,6 +2946,7 @@
 
 (caches/register-derived
  {:id :K1 :label "Symbol pool" :cache :symbol-pool :kind :cache :keyed-by :value :reads []
+  :holds-content? false
   :retired-by {} :computed :read :imaged? false :var #'symbol-pool-generations
   :value (fn [_] @symbol-pool-generations)
   :note "content-keyed: two generations, the older dropped at half the bound"})

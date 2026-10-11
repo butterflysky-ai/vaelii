@@ -15,6 +15,7 @@
             [vaelii.host.starter :as starter]
             [vaelii.impl.protocols :as p]
             [vaelii.impl.provers :as provers]
+            [vaelii.impl.reads :as reads]
             [vaelii.impl.rules :as vr]
             [vaelii.impl.sentex :as sx]
             [vaelii.test-util :as tu]
@@ -235,8 +236,8 @@
             h2 (v/assert kb (list 'set/backwardRule (list 'implies (list a '?x) (list b '?x))) 'CxU)]
         (is (= h h2) "one rule, however its direction is spelled")
         (testing "both predicate indexes are complete — a rule is findable either way"
-          (is (contains? (p/rules-by-antecedent (:index kb) a) h))
-          (is (contains? (p/rules-by-consequent (:index kb) b) h)))
+          (is (contains? (reads/as-stored-rules-by-antecedent-global (:index kb) a) h))
+          (is (contains? (reads/as-stored-rules-by-consequent-global (:index kb) b) h)))
         (testing "and the direction is the least restrictive of the two, not the first"
           ;; forward joined with backward is both: the two assertions are two claims
           ;; about one rule, and a rule that may run each way may run both.  Resolving

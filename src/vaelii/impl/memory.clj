@@ -45,6 +45,21 @@
       (-> (swap! registry (fn [m] (if (m space) m (assoc m space (atom init)))))
           (get space))))
 
+(defonce ^:private engine-space-seq (atom 0))
+
+(defn engine-space
+  "A fresh private space for an in-RAM KB the engine opens for itself: an ephemeral
+  `fork`, or a `kb-diff` side read from a path.  No entry point hands the value to a
+  caller, so `core/close!` of the KB opened over it drops the space from every registry
+  (`kb/release-engine-space!`).  `kind` labels the space for a reader of the registry."
+  [kind]
+  [::engine kind (swap! engine-space-seq inc)])
+
+(defn engine-space?
+  "Is `space` one `engine-space` allocated?"
+  [space]
+  (and (vector? space) (= ::engine (first space))))
+
 ;; ---- record store --------------------------------------------------------
 
 (def ^:private empty-record-state

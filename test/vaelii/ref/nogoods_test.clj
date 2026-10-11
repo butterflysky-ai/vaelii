@@ -252,6 +252,36 @@
                                      (carriesLoad hauler Bone2) (not (carriesLoad cart Bone1))]
                                    known))]))))
 
+(deftest a-membership-of-a-separated-type-clashes-with-the-inherited-membership
+  (is (= [{:kind    :inherited
+           :members '#{(plain lower) (down upper) (transitiveInArgInverse down 1 genl)
+                       (genl lower upper)}
+           :ground  '#{(disjoint top plain) (genl down top)}}]
+         (ng/inherited (view-of '[(transitiveInArgInverse down 1 genl) (genl lower upper)
+                                  (genl down top) (disjoint top plain)
+                                  (down upper) (plain lower)]
+                                '{(down upper) :monotonic})))))
+
+(deftest a-membership-of-a-type-no-separation-names-or-beside-a-default-claim-is-no-clash
+  (let [view '[(transitiveInArgInverse down 1 genl) (genl lower upper) (down upper)
+               (plain lower)]]
+    (is (= [[] []]
+           [(ng/inherited (view-of view '{(down upper) :monotonic}))
+            (ng/inherited (view-of (conj view '(disjoint down plain))))]))))
+
+;; ---- supertype --------------------------------------------------------------
+
+(deftest a-membership-beside-a-denial-of-a-supertype-of-its-type-is-a-nogood
+  (is (= [{:kind    :supertype
+           :members #{'(dog Rex) '(not (animal Rex))}
+           :ground  #{'(genl dog mammal) '(genl mammal animal)}}]
+         (ng/supertype (view-of '[(genl dog mammal) (genl mammal animal)
+                                  (dog Rex) (not (animal Rex))])))))
+
+(deftest a-denial-of-the-type-itself-or-of-a-type-not-above-it-is-no-supertype-nogood
+  (is (= [] (ng/supertype (view-of '[(dog Rex) (not (dog Rex))]))))
+  (is (= [] (ng/supertype (view-of '[(genl dog animal) (animal Rex) (not (dog Rex))])))))
+
 ;; ---- irreflexive -------------------------------------------------------------
 
 (deftest an-irreflexive-mark-convicts-a-default-self-tuple-as-a-one-member-nogood
@@ -305,7 +335,8 @@
                           (anti_symmetric atOrAbove) (atOrAbove Ann Bob) (atOrAbove Bob Ann)
                           (anti_transitive parentOf) (parentOf Ann Bob) (parentOf Bob Cy)
                           (parentOf Ann Cy) (genl tree plant)
-                          (covering w p1 p2) (w X) (not (p1 X)) (not (p2 X))])
+                          (covering w p1 p2) (w X) (not (p1 X)) (not (p2 X))
+                          (genl dog mammal) (dog Rex) (not (mammal Rex))])
         classes '{(carriesLoad vehicle Bone1) :monotonic (carriesLoad hauler Bone1) :monotonic}
         answer  (fn [sentences]
                   (let [v (view-of sentences classes)]

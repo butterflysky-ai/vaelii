@@ -28,8 +28,10 @@
   [tax]
   {:tax                 tax
    :genls-global        (partial tax/genls-global tax)
+   :direct-genls-global (partial tax/direct-genls-global tax)
    :specs-global        (partial tax/specs-global tax)
    :genl?-global        (partial tax/genl?-global tax)
+   :genls-global-meets? (partial tax/genls-global-meets? tax)
    :genls-global-among  (partial tax/genls-global-among tax)
    :genls-global-union  (partial tax/genls-global-union tax)
    :specs-global-while  (partial tax/specs-global-while tax)
@@ -50,8 +52,9 @@
     recover has emptied the index.
   * `:synced?` `(fn [tax c])` and `:sync` `(fn [kb w c] c)`: rows derived from the
     taxonomy, read again when it moved.
-  * `:handles` `(fn [c])`, every handle some reader can read as a member; `:holds?`
-    `(fn [c h])` answers whether `h` is among them with a few map reads.  Every update that
+  * `:handles` `(fn [kb c])`, every handle some reader can read as a member; `:holds?`
+    `(fn [kb c h])` answers whether `h` is among them with a few map reads, or off the
+    index for a member the family reads there (the related-types family's cover pairs).  Every update that
     can move a handle into or out of it journals it (`journal/note`).  Absent for the
     negation family, whose members are an index family (`reads/as-stored-opposed-in`).
   Every family places its nogoods as conclusions (`chain/place-nogoods!`)."
@@ -89,7 +92,9 @@
   (or (contains? (baseline-roster kind) pred) (tax/has-prop? tax kind pred)))
 
 (defn roster
-  "Every predicate `on-roster?` as `kind`."
+  "Every predicate `on-roster?` as `kind`.
+
+  Read unscoped, as `on-roster?` reads it: the roster decides what a stored sentex is."
   [tax kind]
   (into (baseline-roster kind) (tax/props tax kind)))
 
@@ -161,15 +166,15 @@
   nil)
 
 (defn candidate?
-  "Is `h` among `candidate-handles` of the candidate index `c`?"
-  [c h]
-  (boolean (some #(% c h) (keep :holds? registry))))
+  "Is `h` among `candidate-handles` of the candidate index `c` of `kb`?"
+  [kb c h]
+  (boolean (some #(% kb c h) (keep :holds? registry))))
 
 (defn- handles-of-index
   "Every handle some reader can read as a nogood member of a family of the candidate
-  index `c`."
-  [c]
-  (into #{} (mapcat #(% c)) (keep :handles registry)))
+  index `c` of `kb`."
+  [kb c]
+  (into #{} (mapcat #(% kb c)) (keep :handles registry)))
 
 (defn synced
   "The candidate index after each family's rows derived from the taxonomy are read again
@@ -188,58 +193,30 @@
                              c
                              (swap! cands #(if (synced? tax %) % (sync kb (write-view tax) %)))))
                          @cands registry)
-            c    (swap! cands journal/indexed candidate? #(:context (p/get-sentex recs %))
-                        handles-of-index)]
+            c    (swap! cands journal/indexed #(candidate? kb %1 %2)
+                        #(:context (p/get-sentex recs %)) #(handles-of-index kb %))]
         (vreset! sync-memo [cands t c])
         c))))
 
 (defn candidate-handles
   "Every handle some reader can read as a nogood member of a family."
   [kb]
-  (handles-of-index (synced kb)))
+  (handles-of-index kb (synced kb)))
 
 (defn handles-at
   "The candidates of `c`, as `synced` answers it, stated in a context of the ancestor set
   `up` or in none: every handle a reader with ancestor set `up` can read as a nogood
-  member, which a `genlCx` edge's placement pass reads (`edge-reach`)."
+  member, which a `genlCx` edge's placement pass reads
+  (`special/drain-context-moves!`)."
   [c up]
   (journal/at c up))
 
-(defn edge-reach
-  "What the `genlCx` edges moved after generation `since` reach, `{:under :below}`:
-  `:under` the contexts at or below a lower end `tax/moves-since` names, whose ancestor
-  sets the move changed, and `:below`, for each lower end and each active edge up from it,
-  the contexts a context at or below the lower end sees that the upper end does not;
-  `{:all? true}` when the relation was rebuilt, which restarts its generation.  A
-  placement the move can create or retire lies in `:under`, and a common descendant there
-  is the most general one only when one of its ingredients is stated in `:below`: one
-  whose every ingredient the upper end sees has the upper end, above it, as a common
-  descendant.  A removed or inactive edge reaches nothing in `:below`: the placements
-  resting on it leave with it, and their nogoods are queued again (`negation/take-moved!`,
-  `membership/take-moved!`, `related/take-moved!`).  Read over the unscoped closures
-  (`write-view`), a superset over every reader."
-  [tax since]
-  (if (< (tax/relation-gen tax :genlCx) since)
-    {:all? true}
-    (let [w    (write-view tax)
-          up   (:context-up-global w)
-          down (:context-down-global w)
-          ends (tax/moves-since tax :genlCx since)]
-      {:under (into #{} (mapcat down) ends)
-       :below (into #{}
-                    (mapcat (fn [sub]
-                              (mapcat (fn [super]
-                                        (let [seen (set (up super))]
-                                          (into #{} (comp (mapcat up) (remove seen)) (down sub))))
-                                      (tax/context-parents-global tax sub))))
-                    ends)})))
-
 (defn take-edge-cursor!
   "`[since first?]`: the `genlCx` generation the last call read when it has moved since,
-  else nil, so `tax/moves-since` reads the edges moved after it (`edge-reach`); and
+  else nil, so `tax/moves-since` reads the edges moved after it; and
   `first?`, true when no call has read it since the candidate index was emptied
-  (`rebuild-candidates!`), so every placement may be owed.  The placement pass reads it
-  once (`chain/place-nogoods!`)."
+  (`rebuild-candidates!`), so every placement may be owed.  The settle's drain reads it
+  once a pass (`special/drain-context-moves!`)."
   [kb]
   (let [gen     (tax/relation-gen (reasoning/taxonomy kb) :genlCx)
         [old _] (swap-vals! (reasoning/nogood-candidates kb)
@@ -262,11 +239,12 @@
   (let [c (synced kb)]
     [c (journal/position c) (journal/since c since)]))
 
-(defn note-except-target!
-  "An `except` of `h` arrived or left: queue `h` for the families whose placement reads
-  what a reader below the placement context hides (`arity/note-except-target!`)."
+(defn note-reading-moved!
+  "An `except` of `h` arrived or left, or `h`'s class moved: queue what `h` grounds for the
+  families whose placement reads what a reader believes and sees
+  (`arity/note-reading-moved!`)."
   [kb h]
-  (arity/note-except-target! kb h))
+  (arity/note-reading-moved! kb h))
 
 (defn arity-held?
   "Does the arity index keep a candidate or the binding of a pair (`arity/held?`), read
@@ -287,9 +265,9 @@
         (when (= 2 (count ms))
           (let [[a b] (map #(:sentence (p/get-sentex recs %)) ms)]
             (when (or (= a (list 'not b)) (= b (list 'not a))) :negation)))
-        (membership/kind-of recs ms)
-        (related/kind-of (write-view (reasoning/taxonomy kb)) recs ms)
-        (let [c (synced kb)] (or (tuple/kind-of kb c ms) (arity/kind-of c ms))))))
+        (let [w (write-view (reasoning/taxonomy kb))]
+          (or (membership/kind-of w recs ms) (related/kind-of w recs ms)))
+        (let [c (synced kb)] (or (tuple/kind-of kb c ms) (arity/kind-of kb c ms))))))
 
 (defn exempt-at?
   "Does a reader with ancestor set `up` read no conviction of the placed nogood over the
@@ -329,6 +307,7 @@
 
 (caches/register-derived
  {:id :J1 :label "Candidate journal" :kind :journal :keyed-by :handle :reads [:N1 :N3 :N5]
+  :holds-content? false
   :retired-by {:stored :K :removed :K :respelled :K :edge :K :declared :K :edge-belief :K
                :inherited :K :settle-pass :K :recover :R :image-install :R}
   :computed :write :imaged? false :at [[:nogood-candidates ::journal/journal]]
@@ -336,6 +315,7 @@
 
 (caches/register-derived
  {:id :J2 :label "Candidates by context" :kind :cache :keyed-by :context :reads [:J1 :N1]
+  :holds-content? false
   :retired-by {:stored :K :removed :K :respelled :K :edge-belief :K :inherited :K :recover :R
                :image-install :R}
   :computed :read :imaged? false :at [[:nogood-candidates ::journal/at]]
@@ -343,12 +323,14 @@
 
 (caches/register-derived
  {:id :J6 :label "Placement edge cursor" :kind :counter :keyed-by :global :reads [:J5]
+  :holds-content? false
   :retired-by {:settle-pass :Q :recover :R :image-install :R}
   :computed :settle :imaged? :state :at [[:nogood-candidates ::genlcx]]
-  :note "the `genlCx` generation the last placement pass read (`take-edge-cursor!`); absent after `rebuild-candidates!`, which owes every placement"})
+  :note "the `genlCx` generation the settle's context-move drain last read (`take-edge-cursor!`, `special/drain-context-moves!`), once a pass, for every `genlCx` family and the placement reach; absent after `rebuild-candidates!`, which owes every placement"})
 
 (caches/register-derived
  {:id :X1 :label "Sync memo" :kind :cache :keyed-by :global :reads [:N1 :T1]
+  :holds-content? false
   :retired-by (assoc (caches/on-every :I) :closed :W) :computed :read :imaged? false
   :var #'sync-memo
   :value (fn [_] @sync-memo)

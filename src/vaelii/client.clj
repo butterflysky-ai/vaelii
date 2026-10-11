@@ -547,8 +547,8 @@
   `:asymmetric`, `:reflexive`, `:functional`, `:irreflexive`, `:anti-symmetric`,
   `:anti-transitive`), the grants (`:decontextualized`, `:forced-decontextualized`,
   `:forced-monotonic`, `:abducible`, `:closed-extent`, `:modal`, `:target-following`), the
-  function kinds (`:reifiable`, `:unreifiable`, `:quoting`, `:context-denoting`) and the
-  `:declares-*` kinds naming a predicate as the subject of an argument constraint."
+  function kinds (`:reifiable`, `:unreifiable`, `:quoting`) and the `:declares-*` kinds
+  naming a predicate as the subject of an argument constraint."
   ([conn kind pred] (c/has-prop? conn kind pred))
   ([conn kind pred context] (c/has-prop? conn kind pred context)))
 
@@ -595,11 +595,23 @@
   ([conn level goal] (c/lookup conn level goal))
   ([conn level goal context] (c/lookup conn level goal context)))
 
+(defn max-specs
+  "The **maximal** subtypes of type `t`: its direct children (`direct-specs`) with no other
+  direct child of `t` strictly above them."
+  ([conn t] (c/max-specs conn t))
+  ([conn t context] (c/max-specs conn t context)))
+
 (defn metatype-members
   "The member types of disjoint metatype `m` — the set whose every pair `disjoint?` holds
   of, closed under genl."
   [conn m]
   (c/metatype-members conn m))
+
+(defn min-genls
+  "The **minimal** supertypes of type `t`: its direct parents (`direct-genls`) with no
+  other direct parent of `t` strictly below them."
+  ([conn t] (c/min-genls conn t))
+  ([conn t context] (c/min-genls conn t context)))
 
 (defn possible-relations
   "The base relations `calculus` still allows between `a` and `b`, given everything
@@ -812,11 +824,21 @@
   [conn]
   (c/terms conn))
 
+(defn try-assert
+  "`assert`, refusing a sentence that would open a definitional clash with believed content
+  visible from `context`: a `:disjoint`, `:functional`, `:asymmetric`, `:anti-transitive`
+  or `:cover` clash formed by the sentence, by a membership its argument declarations
+  mint, or, for a `(forced_decontextualized_predicate P)` declaration, by a `(P …)`
+  premise it moves into CxUniverse (`rehome-forced-extent!`)."
+  ([conn sentence] (c/try-assert conn sentence))
+  ([conn sentence context] (c/try-assert conn sentence context))
+  ([conn sentence context opts] (c/try-assert conn sentence context opts)))
+
 (defn types
   "Every type currently in the genl hierarchy — the nodes of the closure, i.e. every type
   named by some believed `genl` edge."
-  [conn]
-  (c/types conn))
+  ([conn] (c/types conn))
+  ([conn context] (c/types conn context)))
 
 (defn vocabulary-audit
   "Every term `CxCore` declares in `kb`, classified — `{:enforced [[term why] …] :inert

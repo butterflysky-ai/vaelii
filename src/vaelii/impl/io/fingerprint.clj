@@ -78,16 +78,18 @@
 (defn justification-hash
   "A 64-bit hash of the justification `j` stored at handle `h` — what belief reads of it:
   the informant, the antecedents in their stored order, the consequence and the
-  strength.  The bindings are not hashed: belief never reads them
-  (`jtms/graph-just`).  A dump's reasoning image is stamped with an accumulator of these, so
-  an import that lands different justifications declines the image."
+  strength, and the subsumptions the network keeps beside them when there are any.  The
+  bindings are not hashed: belief never reads them (`jtms/graph-just`).  A dump's
+  reasoning image is stamped with an accumulator of these, so an import that lands
+  different justifications declines the image."
   ^long [^long h j]
   (-> fnv-offset
       (mix h)
       (mix (hash (:informant j)))
       (mix (hash (vec (:antecedents j))))
       (mix (hash (:consequence j)))
-      (mix (hash (:strength j)))))
+      (mix (hash (:strength j)))
+      (cond-> (:subsumptions j) (mix (hash (:subsumptions j))))))
 
 (defn accumulator
   "A mutable fingerprint accumulator: `(acc h record)` folds one record in, `(acc)` reads

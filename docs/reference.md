@@ -117,6 +117,9 @@ believed?(W, S, C) = S is in believed(W, C)
      the declaration and each edge of the path, and a reading with a `:default` part is
      undercut and forms no nogood
      ([inherit.md](inherit.md#a-contrary-claim-against-a-known-true-one-is-a-contradiction-and-is-reported)).
+     A stored membership `(S A)` of a unary `P`'s argument denies the reached `(P A)` the
+     same way when a believed `(disjoint T1 T2)` separates `P` and `S` at `C`; its grounds
+     are the declaration and the `genl` edges up to the separated types.
 
    The grounds of a definitional family are read through and never weighed. The inherited
    family is the one whose reasons are members
@@ -240,7 +243,9 @@ builders of `vaelii.ref.*` wrote are now citations of these decisions by number.
     antecedents (decision 17), so a ground goes OUT only by retraction and no verdict is re-asked
     because its ground moved. Four spellings bind an arity and each is on the roster:
     `(arity P n)`, an exact-arity class membership, a `variable_arity` membership and
-    `(arityMin P m)`. An `arity` violation is a one-member nogood, the tuple,
+    `(arityMin P m)`; for that read, a `:monotonic` membership whose type reaches an
+    exact-arity class through `:monotonic` `genl` edges binds as the class membership does,
+    those edges standing at roster strength. An `arity` violation is a one-member nogood, the tuple,
     with the binding as its ground, placed as an `irreflexive` violation is (decision 16,
     [taxonomy.md](taxonomy.md#arity)). A
     defeasible disjointness is written as a `:default` rule concluding a denial, which
@@ -294,7 +299,11 @@ builders of `vaelii.ref.*` wrote are now citations of these decisions by number.
     roster premise it rests on is retracted; CxCore's `injection`, `surjection` and `bijection` rules are the case, and
     those three are on the roster. Any other rule is stored, and each firing whose
     conclusion is a roster literal or its denial is convicted: stored, held void and
-    reported as a `:forced-conclusion` violation. Forcing is applied when belief is
+    reported as a `:forced-conclusion` violation, and `why-not` on its conclusion names the
+    antecedent predicates off the roster. A rule whose trigger is an ordinary membership
+    concludes a roster literal once the trigger's predicate is declared
+    `forced_monotonic_predicate`, as CxOrganism declares `folk_species`
+    ([nmtms.md](nmtms.md#the-forced-monotonic-roster)). Forcing is applied when belief is
     computed, and a declaration is a switch whose retraction gives back the belief a KB
     that never held it has. `vaelii.ref.world/inert-write?` reads a v1 rule
     concluding one as inert, since a v1 antecedent is never a roster literal. The
@@ -480,7 +489,7 @@ marks a cell where the stated rule and the code disagree.
 | atom | step | holds | written by | read by | invalidated by |
 |---|---|---|---|---|---|
 | `:nogood-candidates` | write | per family, the stored sentences that could be a member of one of its nogoods: the ground binary tuples under a converse mark with a stored converse, the tuples of a shape a stored arity binding breaks, the bindings of two related predicates whose lengths differ, the determinants under a tuple mark holding two fillers, the `anti_transitive` chains and the converse pairs, and per term holding two memberships or a membership and a denial its entries, its type pairs and the nogoods the unscoped taxonomy reads; the arity bindings and tuple shapes those read; the `disjoint`s over `genl`-related types, the contradicted `orthogonal`s and the covers paired with a `disjoint` separating their whole from a part; and under `:inherited`, every inherited nogood the settle found with its vantages; and every candidate by the context its record is stated in, read again off the journal by `decide/synced` | `decide/note-candidate!`; `decide/rebuild-candidates!` on recover; `inherited/install-inherited!` at step 4 | `chain/place-nogoods!`, `chain/place-inherited!`, `decide/candidate-handles`, `decide/handles-at` (the journal, [nmtms.md](nmtms.md#the-candidate-journal)) | a store or removal of a tuple, a membership, a denial, a binding or a `genl` edge, a tuple mark or a predicate `genl` edge under one (`special/offer-marked-existing`), a move of `tax/separation-stamp` for the membership separations, and a `genlCx` edge for the live determinant members; the inherited nogoods are installed again at step 4, every settle; belief is read by the placement |
-| `:mint-queues` | write | the removed records that can have subsumed a mint (`:departed`), and the records a retraction left standing on a derivation alone (`:unpremised`) | `special/note-departure!`, `special/note-unpremised!` | the mint re-checks beside step 7 | two queues: the mint re-checks drain both, every settle |
+| `:mint-queues` | write | the removed `genlCx` edges and the removed records that can have subsumed a mint (`:departed`), and the records a retraction left standing on a derivation alone (`:unpremised`) | `special/note-departure!`, `special/note-unpremised!` | the context-move drain (the edges) and the mint re-checks beside step 7 | two queues: the drain and the mint re-checks drain them, every settle pass |
 | `:recheck` | write, 2, 5 | `{rule-handle triggers}`, the rules whose block conditions owe a re-evaluation | `special/mark-recheck` | step 6 | a queue: step 6 drains it. Partial: the record comment names fact moves on an exception's predicates and taxonomy edges; the code also posts on declarations, preserving extents, calculus entailments, `except` moves and rule indexing |
 | `:except-moves` | write, 2, 5 | the handles an `except` began or stopped hiding | `special/note-except-move!` | the loop beside step 7, F3 | a queue: F3 takes it, and a leftover forces a full supersession pass |
 | `:respell` | write | the predicates whose permuting marks moved | `special/note-permuting-moves!` | the re-seed after `settle*` | a queue, posted when the permuting-mark pair changes identity at a removal or a relabel |

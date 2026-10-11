@@ -57,8 +57,8 @@ took.
 **`--listen` naming a non-loopback address requires `VAELII_API_TOKEN`.** Without one the
 browser prints a line and exits **2** before it opens a KB; with one, every request to
 that bind carries `Authorization: Bearer <token>` or is answered 401. The routes on the
-other side are why: `/edit` writes belief, and `/kbs/export` and `/kbs/load` write the
-host filesystem at a path the request names. The **loopback** default is unchanged — no
+other side are why: `/edit` writes belief, and `/kbs/export`, `/kbs/load` and `/op :export`
+write the host filesystem, at a path the request names only when `VAELII_REQUEST_PATHS` is on. The **loopback** default is unchanged — no
 token, no header, no 401 — and the daemon holds the identical rule through the identical
 fn ([operations.md](operations.md)).
 [why a refusal rather than a warning](defenses.md#what-a-server-binds-decides-what-it-requires)
@@ -178,7 +178,7 @@ request log either, which [operations.md](operations.md) states as the trade it 
 | `/jobs/cancel` (POST) | **stop** a running job at its next progress report. A write to this process's registry rather than to a KB, so it is origin-checked but not behind `writing` — cancelling a job has to stay reachable *because* one is running |
 | `/kbs` | the **knowledge bases**: what is loaded (with counts, an estimated footprint, and a progress bar for one still loading) and what can be — the shipped ontologies, a generated corpus with a slider per parameter, and every corpus / dump / store the catalog found. See [docs/catalog.md](catalog.md) |
 | `/kbs/load`, `/kbs/unload`, `/kbs/activate` (POST) | **load** a source, **unload** an entry (cancelling it if it is still loading), **switch** to one. Each changes what this process holds, so each is a write: POST-only and origin-checked |
-| `/kbs/export`, `/kbs/export/cancel` (POST) | **write the active KB out** as a portable dump — a destination directory, the variant and the compression — and **stop** one that is running. POST-only and origin-checked, like every other write |
+| `/kbs/export`, `/kbs/export/cancel` (POST) | **write the active KB out** as a portable dump — the variant and the compression, and a destination directory under `VAELII_REQUEST_PATHS` — and **stop** one that is running. POST-only and origin-checked, like every other write |
 | `/kbs/rows` | the loaded-KB panel, refetched once a second **while a load is running** — the trigger is in the answer, so an idle page stops asking |
 | `/kbs/export/rows` | the export panel, on the same self-terminating poll: the last job's report, and whether what it wrote is now offered under **Available** |
 | `/kbs/banner` | the **provisional-KB strip** every page carries when the KB it reads is not finished (below). Like the memory strip it is a read of the *process* and swaps only itself; it answers with the empty element once there is nothing to say, which is what stops the polling |
@@ -217,11 +217,13 @@ with different chrome. The whole feature is one function called from one place.
 Being live is also what obliges the budget. **A picture nobody asked for may never be the
 reason a term page is slow**, so the bound is part of the work and not a follow-up:
 
-- **The graph adds at most 24 facade reads**, ever — twelve expansions, six per side, plus
-  one O(1) count per row that actually elided. The radial view spends at most twelve:
+- **The taxonomy view's expansions cost at most 24 facade reads**, ever — twelve
+  expansions, six per side, at one or two reads each. The radial view spends at most twelve:
   it expands three neighbours, and each costs two O(1) argument counts and two pattern
-  reads. A taxonomy expansion is `(take (inc cap))` over a lazy pattern that pins an
-  argument, so it costs the node's own fan-out and nothing more. A radial expansion reads
+  reads. A taxonomy expansion reads the node's one-step neighbours through
+  `(take (inc cap))`, so it costs the node's own fan-out and nothing more. A `genl` node
+  with two to 500 one-step neighbours costs a second read, `min-genls` or `max-specs`, in
+  which the engine makes one memoized closure read per neighbour. A radial expansion reads
   at most `ego-scan` (500) matches and orders them by handle before the cap cuts.
 - **Measured** twice. Over the shipped schema plus the test-world cast: **2–10 reads** and
   **0.7–2.9 ms** a page (`dog` +3 reads / +0.7 ms, `animal` +10, a synthetic 5,000-subtype
@@ -232,8 +234,9 @@ reason a term page is slow**, so the bound is part of the work and not a follow-
   which is the claim a render cap alone would never make.
 - **Degrade, never defer.** A side that runs out of budget stops a row short and the
   caption says so. There is no fallback to a button.
-- **Nothing new to reach it.** No route, no dependency, no access op — so the graph renders
-  identically against `--attach`, and `docs/web.md` needs no row in the table above.
+- **Nothing new to reach it.** No route and no dependency. Its reads are access ops the
+  daemon serves, so the graph renders identically against `--attach`, and `docs/web.md`
+  needs no row in the table above.
 
 **Three outcomes, chosen by the term's own structure.**
 
@@ -259,11 +262,27 @@ class on its edges says which. That is also what makes a context page worth open
 says nothing about contexts, so the picture is the only thing on the page that shows the
 lattice at all.
 
-**A `genl` row is one step of the closure.** The rows read `direct-genls` and
-`direct-specs`, so an edge a `covering`, `separating` or `partition` roster installs is
-drawn as a stated `(genl sub super)` is, with the same arrow. A roster stores no `genl`
-sentence for its parts, and a picture read off stored `genl` sentences alone would draw a
-part with no parent.
+**A `genl` row holds a node's nearest neighbours in the subsumption order.** Above a
+node the row holds its minimal supertypes (`min-genls`): the supertypes with no other
+supertype of the node below them. Below a node the row holds its maximal subtypes
+(`max-specs`). Every other supertype or subtype is reached through one of those, so the
+next row draws it there. With `dog ⊂ mammal ⊂ animal` believed, the page for `dog` draws
+`mammal` above `dog` and `animal` above `mammal`, and a stated `(genl dog animal)` adds
+no arrow from `dog` to `animal`. The page for `animal` draws `mammal` below it and `dog`
+below `mammal`. Each expanded node's row is read the same way, not the centre's alone.
+
+The engine computes both sets over every believed edge of the closure, whatever installed
+the edge: a stated `(genl sub super)`, a `genl` sentex a rule derived (an `intersection`
+derives one to each type it intersects), and an edge a `covering`, `separating` or
+`partition` roster installs. A roster stores no `genl` sentence for its parts, and a
+picture read off stored `genl` sentences alone would draw a part with no parent. Two
+supertypes that subsume each other are both drawn.
+
+A row is a hop count from the centre. Two nodes of one row can therefore be comparable:
+when `dog`'s minimal supertypes are `mammal` and `pet`, and `animal` is minimal above
+`mammal` while `companion` is minimal above `pet` with `companion ⊂ animal`, the second
+row holds both `animal` and `companion`. A `genlCx` row holds every one-step neighbour of
+a context and is not reduced.
 
 **What is and is not an edge**, stated rather than left to fall out of the code. Binary
 facts only — a ternary `(arg parentOf 1 person)` relates three things and an arrow
@@ -328,14 +347,19 @@ can discard, with nothing arranging for it.
   cleanly and before they are checked, since the checks read the vocabulary the sandbox
   sees through its `genlCx` edge; a form the check then refuses has the edge taken out
   again, so a refused form leaves no sandbox behind.
-- **The token is validated on the way in.** A name is built from it, so a crafted
-  cookie naming a shipped context would write straight into the ontology. Only 8 to 32
-  lowercase hex characters are accepted (`token-pattern`); `mint-token` produces 32.
+- **The server mints the token and tags it.** `mint-token` draws 128 bits from
+  `SecureRandom`, and the cookie carries the token, a dot, and the first 128 bits of the
+  token's HMAC-SHA256 under the key `VAELII_SANDBOX_KEY` names. A cookie whose tag does
+  not check is replaced with a fresh token, so a client cannot choose a sandbox or name
+  one it was not given, and the check needs no server state. With the variable unset the
+  key is 32 random bytes for the process's life, so a restart re-mints every cookie; set
+  it to keep cookies across a restart or across replicas. The cookie carries `Secure`
+  when the request came over HTTPS.
 - **The context is named from a digest of the token, not the token.** Every reader sees
   every context's name — `/find`, `CxWell`'s term page, `/op :contexts` — so a name that
   carried the token would hand any reader a cookie that resets or writes another
   session's sandbox. `CxSandbox` is followed by the first 128 bits of the token's
-  SHA-256.
+  SHA-256, and the tag is in neither.
 - **The assert form defaults its context to the sandbox**, so writing somewhere safe is
   what happens when the reader changes nothing. It is a default, not a lock: the field is
   editable, and anyone who knows they want `CxNaturalWorld` can type it.
@@ -351,10 +375,41 @@ Promotion — moving something out of a sandbox into a context that outlives it 
 deliberately absent. A dead end that cannot be half-escaped is easier to reason about than
 one with an entry point in it.
 
-One limit: a session cookie that is dropped (the browser closed) leaves its
-sandbox in the KB with nothing pointing at it. For the default browser, whose `-main`
-clears and reloads the starter each start, they cannot accumulate; against a persistent KB
-they do, and nothing collects them.
+#### How many sandboxes a KB holds
+
+A KB holds at most `VAELII_SANDBOX_MAX` sandboxes (default 256), and each sandbox at most
+2,000 sentexes (`sandbox/max-sentexes`). An `/assert` form whose lines would take its
+sandbox past that is refused with `:over-ceiling` before anything is opened; what the rules
+derive from an admitted form may pass it. The ceiling counts the sandbox's own context
+alone: the form's context field is a default, and a line written into another context
+counts toward no ceiling, so the ceiling bounds a sandbox and not what a session writes.
+The assert page states both numbers.
+
+Opening a sandbox past the cap first resets one through `sandbox/reset!`, the same
+teardown the reader's own control runs, so what the rules derived in it goes with it. A
+sandbox is a reader's work rather than a cache entry, but the browser is a write surface
+anyone can reach, and a fresh cookie per request would otherwise add a context per
+request. The sandbox reset is chosen by a priority that ages, the GreedyDual form:
+
+- each sandbox's priority is `L + value`, set from the current `L` at each request its
+  session makes; an eviction raises `L` to the evicted priority;
+- `value` is the sandbox's active minutes past the first (distinct minutes with a
+  request), times one plus the log of its write requests, over one plus the log of its
+  stored sentexes. A sandbox used inside one minute is worth 0 however much it wrote, so a
+  flood of fresh cookies evicts its own members and leaves `L` where it was;
+- a sandbox idle longer than `VAELII_SANDBOX_IDLE_MINUTES` (default 1440) is reset before
+  any other, the longest idle first, and its eviction does not raise `L`;
+- of equal priorities, the one used least recently goes.
+
+So a sandbox used for twenty minutes outlasts a flood of new ones, one left idle past the
+horizon goes first whatever its history, and one left idle below the horizon falls behind
+as `L` rises past it. A script that keeps sandboxes alive by requesting through each is
+an admission problem the cap does not answer.
+
+The roster lives in the browser's process; the KB holds the sandboxes. The first admission
+after a start rebuilds the roster from the `CxSandbox…` contexts below `CxWell`, each
+entered as a fresh sandbox of its stored size, so a restart forgets activity, and a KB
+holding more than the cap is brought down to it by that admission.
 
 ### Belief that changes
 
@@ -724,7 +779,10 @@ cancels nothing, and reopening `/jobs` finds the run still going. The list is wa
 the same self-terminating htmx poll every other panel uses — which survives a reload,
 where a socket does not — and the header carries the running count as an out-of-band swap,
 because the header sits outside the region a swap replaces. A finished job's report stays
-for an hour, which is long enough to read what it did. Nothing **unsettled** is dropped, at
+for an hour, which is long enough to read what it did, and the registry holds the newest
+100 settled reports at most (`jobs/max-settled-jobs`), so a flood of quick jobs holds a
+bounded number. Every listing read sweeps as well as every submit, so an idle registry
+shrinks too. Nothing **unsettled** is dropped, at
 any age: forgetting a job releases its writer claim, and a thread that is still running is
 still writing. So a wedged job keeps its place and keeps counting — the badge saying a
 thread will never return is the truth about the process, and better than a store two
@@ -768,11 +826,13 @@ filling.
 ## Writing a KB out
 
 The Export panel on `/kbs` is the return leg of the loop the Available list is the
-outbound half of. It writes the **active** KB as a portable dump — a destination
-directory, the variant (`records` or `records+index`) and the compression — as a job, so
-the page keeps answering and the panel polls itself only while there is something to
-watch. The report it shows is the registry's newest export job rather than a slot of its
-own.
+outbound half of. It writes the **active** KB as a portable dump — the variant
+(`records` or `records+index`) and the compression — as a job, so the page keeps answering
+and the panel polls itself only while there is something to watch. The report it shows is
+the registry's newest export job rather than a slot of its own. The dump goes in a new
+directory under the catalog's `write-root`, named by the server; a `dir` the request names
+is refused with `:path-not-served` unless `VAELII_REQUEST_PATHS` is on
+([catalog.md](catalog.md#where-the-server-writes)).
 
 Two things it says that a bare progress bar would not. A finished job reports **where the
 dump went and whether the catalog can see it there**, asked of `catalog/sources` rather
@@ -1543,6 +1603,11 @@ reader sees as derived is a row the filter leaves out. It is deliberately not
 `vaelii.core/premise?`, which asks the network whether anything concludes the sentex — a
 sentex can be asserted **and** derivable, and the two answers then disagree with each
 other and with what the page drew.
+
+**The concept graph does not read the switch.** The picture draws the same nodes, arrows
+and edge labels with the derived rows hidden or shown
+([the concept graph](#a-terms-shape-drawn)). The switch selects the sentences the page
+lists.
 
 It is one query parameter (`?derived=hide|show`), one cookie and a re-render: no script,
 no per-row state, and a page that is the same page when its URL is shared. The cookie is

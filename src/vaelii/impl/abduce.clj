@@ -45,6 +45,30 @@
   [token]
   (symbol (str "CxAbduction" token)))
 
+(def max-kept
+  "How many `{:keep? true}` abduction contexts a KB holds at once.  The next keep is
+  refused with `:too-many-kept` instead of discarding one: the caller holds each context
+  and discards it, and a context discarded unasked would fail that caller's later read or
+  `abduce-discard!` with no reason given."
+  64)
+
+(defn- kept-contexts
+  "The abduction contexts standing in `kb`, in content order.  Between calls each one is
+  a kept context, since a call without `:keep?` discards its own before returning."
+  [kb]
+  (into [] (filter #(str/starts-with? (name %) "CxAbduction"))
+        (sort (tax/contexts (reasoning/taxonomy kb)))))
+
+(defn- check-room!
+  "Refuse a `{:keep? true}` call when `max-kept` kept contexts already stand, naming them
+  under `:contexts` so the caller can discard one."
+  [kb]
+  (let [held (kept-contexts kb)]
+    (when (>= (count held) max-kept)
+      (throw (ex-info (str "this KB holds " (count held) " kept abduction contexts, its most"
+                           " — abduce-discard! one of " (str/join ", " held) " first")
+                      {:type :too-many-kept :max max-kept :contexts held})))))
+
 (defn- open
   "Mint a fresh abduction context below `base` with one `:monotonic` `genlCx` edge, and
   answer it."
@@ -58,7 +82,7 @@
   any a `{:keep? true}` caller hung on it.  Read off the argument root, so the teardown
   needs nothing but the context name, and all of them, so none is left standing."
   [kb actx]
-  (->> (reads/as-stored-with-arg (:index kb) 1 actx)
+  (->> (reads/as-stored-with-arg-global (:index kb) 1 actx)
        (keep #(p/get-sentex (:records kb) %))
        (filter #(= 'genlCx (nm/functor (:sentence %))))
        (mapv :id)))
@@ -159,6 +183,7 @@
         keep? (boolean (:keep? opts))
         cap   (:max-hypotheses opts)
         for-  (if (= 1 (count goals)) (first goals) (vec goals))
+        _     (when keep? (check-room! kb))
         actx  (open kb context ops)
         ops   (assoc ops :rules (fn [g] ((:rules-fn ops) kb g actx)))]
     (try

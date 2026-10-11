@@ -127,6 +127,12 @@ The spelling is a **biconditional on arity**.  A functor carrying an underscore 
                            (not (context? x))))
 (defn predicate?  [x] (and (symbol? x) (not (lexeme? x))
                            (some? (re-matches #"[a-z][a-zA-Z0-9]*" (nm x)))))
+(defn value?
+  "Is `x` a value: neither a symbol nor a sequential compound?  A string, number, keyword,
+  boolean, character, `nil` and a tagged literal (`#inst`, `#uuid`) each denote themselves,
+  so each has instances of nothing.  A reified NAT is a `nat/` symbol, so it is no value."
+  [x]
+  (not (or (symbol? x) (sequential? x))))
 
 (def ^:private disambiguator-re
   "A **sense** — a word, a `-`, and the disambiguator that says which sense of it is
@@ -202,11 +208,15 @@ The spelling is a **biconditional on arity**.  A functor carrying an underscore 
   that does not — the metadata is no part of what a sentence says.
 
   One binding frame per call, which is why a caller ordering a large collection binds
-  once around the whole sort instead and prints inside it.  `sort_by_content_key_test`
-  scans the sources for a printed key that reaches neither this fn nor such a frame."
+  once around the whole sort instead and prints inside it.  A symbol with no metadata
+  takes no frame: Clojure prints it as its name (`print-simple`), whatever the print vars
+  hold, so the key is `str`, a field read.  `sort_by_content_key_test` scans the sources
+  for a printed key that reaches neither this fn nor such a frame."
   ^String [x]
-  (binding [*print-length* nil *print-level* nil *print-meta* false]
-    (pr-str x)))
+  (if (and (symbol? x) (nil? (meta x)))
+    (str x)
+    (binding [*print-length* nil *print-level* nil *print-meta* false]
+      (pr-str x))))
 
 (defn- form-rank
   "A total order on the *kinds* of thing a sentence is built from, so `compare-form`

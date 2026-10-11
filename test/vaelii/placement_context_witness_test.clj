@@ -318,6 +318,43 @@
     (is (seq (v/sentexes-matching kb (list flies Tweety) CxPlace))
         "the direct edge was never needed to derive it")))
 
+(tu/deftest-kb a-firing-over-a-stored-conclusion-records-its-justification
+  ;; the revival re-seeds the antecedents of the removed firings that named the edge
+  ;; (`special/sighting-seeds`), which reaches every licensed firing only if a firing
+  ;; whose conclusion was already stored still records itself
+  (tu/with-terms [bird flies Tweety CxLow CxHigh]
+    (under! kb CxLow CxHigh)
+    (v/assert kb (list 'implies (list bird '?x) (list flies '?x)) CxLow {:direction :forward})
+    (v/assert kb (list bird Tweety) CxLow)
+    (let [h (v/handle-of kb (list flies Tweety) CxLow)]
+      (is (empty? (edge-sentexes kb h)) "the first firing is placed in its own context")
+      (v/assert kb (list 'implies (list bird '?x) (list flies '?x)) CxHigh {:direction :forward})
+      (is (= h (v/handle-of kb (list flies Tweety) CxLow)))
+      (is (= 2 (count (v/supporting-justifications kb h))))
+      (is (= #{(list 'genlCx CxLow CxHigh)}
+             (set (map :sentence (edge-sentexes kb h))))))))
+
+(tu/deftest-kb a-departing-edge-re-places-a-firing-whose-conclusion-survived
+  ;; the sweep takes the firing that named the edge and keeps its conclusion, which a
+  ;; premise holds in CxMid.  Without the edge the firing is placed in CxLow, which sees
+  ;; the rule directly, so a KB that lost the edge holds the conclusion where one that
+  ;; never had it does
+  (letfn [(arm [edge?]
+            (tu/with-terms [bird flies Tweety CxLow CxMid CxHigh]
+              (v/assert kb (list 'genlCx CxHigh 'CxUniverse) 'CxUniverse)
+              (v/assert kb (list 'genlCx CxMid 'CxUniverse) 'CxUniverse)
+              (v/assert kb (list 'genlCx CxLow CxMid) 'CxUniverse)
+              (v/assert kb (list 'genlCx CxLow CxHigh) 'CxUniverse)
+              (let [e (when edge? (v/assert kb (list 'genlCx CxMid CxHigh) 'CxUniverse))]
+                (v/assert kb (list 'implies (list bird '?x) (list flies '?x)) CxHigh {:direction :forward})
+                (v/assert kb (list bird Tweety) CxMid)
+                (v/assert kb (list flies Tweety) CxMid)
+                (when e (v/retract! kb e))
+                (into #{} (map #(get {CxLow 'low CxMid 'mid} (:context %)))
+                      (v/sentexes-matching kb (list flies Tweety) '?ctx)))))]
+    (is (= '#{low mid} (arm false)))
+    (is (= (arm false) (arm true)))))
+
 (tu/deftest-kb the-re-chain-a-removal-owes-files-no-dropped-conclusion
   ;; the revival pass re-asks every firing the sweep took, to find which of them a
   ;; surviving route still licenses — so the ones it cannot place are the retraction

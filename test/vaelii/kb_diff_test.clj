@@ -16,6 +16,7 @@
   (:require [clojure.test :refer [deftest is testing]]
             [vaelii.core :as v]
             [vaelii.host.cli :as cli]
+            [vaelii.impl.memory :as mem]
             [vaelii.test-util :as tu])
   (:import (java.io File)
            (java.nio.file Files)
@@ -147,6 +148,32 @@
               (testing "a string side is read as a text KB, and the two hold the same knowledge"
                 (is (= {:added [] :removed [] :moved [] :belief-changed []} d)))))))
       (finally (rm-rf! dir)))))
+
+(defn- ram-spaces
+  "Every space the memory backend's registries hold."
+  []
+  (set (concat (keys @@#'mem/record-spaces) (keys @@#'mem/index-spaces))))
+
+(deftest a-path-side-is-released-and-a-passed-kb-stays-open
+  (let [dir (temp-dir "release"), bad (temp-dir "release-bad")]
+    (try
+      (rm-rf! dir)
+      (spit (str (.getPath bad) "/CxBad.txt") "(dog\n")
+      (with-sides*
+        (fn [a _b]
+          (tu/with-terms [dog Muffet CxRel]
+            (v/assert a (list 'genlCx CxRel 'CxUniverse) 'CxUniverse)
+            (v/assert a (list dog Muffet) CxRel)
+            (v/export-text! a (.getPath dir))
+            (let [before (ram-spaces)]
+              (dotimes [_ 3] (v/kb-diff a (.getPath dir)))
+              (v/kb-diff (.getPath dir) (.getPath dir))
+              (is (thrown? clojure.lang.ExceptionInfo (v/kb-diff a (.getPath bad))))
+              (is (= before (ram-spaces))
+                  "a side read from a path, loaded or refused, leaves no space behind")
+              (is (some? (v/handle-of a (list dog Muffet) CxRel))
+                  "and the KB the caller passed is still open and readable")))))
+      (finally (run! rm-rf! [dir bad])))))
 
 ;;; ── the same comparison from a shell line ─────────────────────────────
 
