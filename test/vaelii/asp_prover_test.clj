@@ -149,6 +149,43 @@
         (is (v/ask? kb (list 'bravely    (list pacifist nixon)) 'CxUniverse))
         (is (not (v/ask? kb (list 'cautiously (list pacifist nixon)) 'CxUniverse)))))))
 
+(defn- modal?
+  "Does `(m s)` hold at `ctx`, as a boolean, so a failing `is` prints the question and not
+  the KB."
+  [kb m s ctx]
+  (boolean (v/ask? kb (list m s) ctx)))
+
+(deftest brave-and-cautious-read-the-datum-the-asking-context-sees
+  ;; A datum stored in a parent and no dilemma anywhere: a child reads it in every
+  ;; labeling, and a sibling that does not see the parent reads it in none.
+  (tu/with-neutral-kb [kb tu/fresh]
+    (v/add-reasoner kb :brave-cautious)
+    (tu/with-terms [glad Pat CxParent CxChild CxSibling]
+      (v/assert kb (list 'genlCx CxParent 'CxUniverse) 'CxUniverse)
+      (v/assert kb (list 'genlCx CxChild CxParent) 'CxUniverse)
+      (v/assert kb (list 'genlCx CxSibling 'CxUniverse) 'CxUniverse)
+      (v/assert kb (list glad Pat) CxParent)
+      (doseq [m '[bravely cautiously]]
+        (is (modal? kb m (list glad Pat) CxChild) (str m " in the child"))
+        (is (not (modal? kb m (list glad Pat) CxSibling)) (str m " in the sibling"))))))
+
+(deftest a-datum-a-placed-defeat-hides-from-the-reader-is-neither-brave-nor-cautious
+  ;; A monotonic denial in the child defeats the parent's default there and below, and the
+  ;; default stays IN in the network for the parent.  No dilemma moves it, so its answer
+  ;; is its belief as the asking context reads it (`res/believed-at?`), not `jtms/in?`.
+  (tu/with-neutral-kb [kb tu/fresh]
+    (v/add-reasoner kb :brave-cautious)
+    (tu/with-terms [glad Pat CxParent CxChild]
+      (v/assert kb (list 'genlCx CxParent 'CxUniverse) 'CxUniverse)
+      (v/assert kb (list 'genlCx CxChild CxParent) 'CxUniverse)
+      (v/assert kb (list glad Pat) CxParent)
+      (v/assert kb (list 'not (list glad Pat)) CxChild {:strength :monotonic})
+      (is (v/in? kb (v/handle-of kb (list glad Pat) CxParent)))
+      (doseq [m '[bravely cautiously]]
+        (is (modal? kb m (list glad Pat) CxParent) (str m " in the parent"))
+        (is (not (modal? kb m (list glad Pat) CxChild)) (str m " in the child"))
+        (is (modal? kb m (list 'not (list glad Pat)) CxChild) (str m " denial in the child"))))))
+
 ;; ---- the solve-free bracket (no backend needed) --------------------------
 ;; The `grounded-in-region` read and the bracket's scaling are pure JTMS — no ASP —
 ;; so they live in `grounded_in_region_test`.  These exercise the classifier and prover.
@@ -241,7 +278,7 @@
             P     (list pacifist nixon)
             runs  (atom 0)
             local label/classify-local]
-        (with-redefs [label/classify-local (fn [k] (swap! runs inc) (local k))]
+        (with-redefs [label/classify-local (fn [& args] (swap! runs inc) (apply local args))]
           (is (v/ask? kb (list 'bravely P) 'CxUniverse))
           (is (not (v/ask? kb (list 'cautiously P) 'CxUniverse)))
           (is (= 1 @runs) "two asks, no write between")

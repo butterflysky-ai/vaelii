@@ -14,7 +14,7 @@
   (:import (clojure.lang ExceptionInfo)))
 
 (defn- registry-kb
-  "A fresh CxCore KB with the koinii registry vocabulary loaded."
+  "A fresh vocabulary KB with the koinii registry vocabulary loaded."
   []
   (tu/load-dumped! (tu/fresh) :koinii/registry
                    #(doto % (core-context/load-into) (id/load-registry))))
@@ -36,7 +36,7 @@
 ;; ---- the registry context loads ------------------------------------------
 
 (tu/deftest-kb registry-context-loads-under-core
-  (is (v/sees? kb 'CxRegistry 'CxCore) "CxRegistry wires itself under CxCore")
+  (is (v/sees? kb 'CxRegistry 'CxUniverse) "CxRegistry wires itself under CxUniverse")
   (is (seq (v/sentexes-matching kb (list 'comment 'trustLevel '?t) 'CxRegistry))
       "and its vocabulary — the trustLevel doc — is present"))
 

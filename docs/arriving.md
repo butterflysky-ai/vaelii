@@ -25,7 +25,7 @@
   ancestor set from wherever it asks → [contexts.md](contexts.md)
 - **A symbol's role is read off its spelling**, and `assert` refuses a sentence that
   breaks the convention: `parentOf` a predicate, `Fido` an individual, `physical_object` a
-  type, `CxCore` a context → [naming.md](naming.md)
+  type, `CxUniverse` a context → [naming.md](naming.md)
 - **A rule is a sentex too** — same structure, same handle, same truth maintenance,
   additionally indexed by its antecedent and consequent predicates. So it is retractable,
   believable and askable-about, which is not true of a rule kept in a separate program →

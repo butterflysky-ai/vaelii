@@ -17,6 +17,7 @@
   (:require [clojure.string :as str]
             [clojure.test :refer [deftest is testing]]
             [vaelii.core :as v]
+            [vaelii.host.core-context :as core-context]
             [vaelii.host.seed :as seed]
             [vaelii.impl.io.text :as text]
             [vaelii.impl.naming :as nm]
@@ -60,7 +61,7 @@
   (tu/with-terms [linkedTo Alpha Beta CxWorld]
     (let [readings (in-both-orders
                     #(a-context % CxWorld 'CxUniverse)
-                    {:decl #(v/assert % (list 'forced_decontextualized_predicate linkedTo) 'CxCore)
+                    {:decl #(v/assert % (list 'forced_decontextualized_predicate linkedTo) 'CxUniverse)
                      :fact #(v/assert % (list linkedTo Alpha Beta) CxWorld)}
                     [:decl :fact]
                     (fn [kb] {:universe (some? (v/handle-of kb (list linkedTo Alpha Beta) 'CxUniverse))
@@ -316,15 +317,10 @@
 
 (defn- starter-entries
   "Every sentence the starter loads, as `[sentence context]`, in the shipped loader's
-  order: the vocabulary head's bootstrap pair, CxCore, the upper and middle members, the
-  collectors."
+  order: the upper files into CxUniverse, then the middle contexts."
   []
-  (concat [['(forced_decontextualized_predicate genlCx) 'CxCore]
-           ['(genlCx CxUniverse CxCore) 'CxCore]]
-          (map #(vector % 'CxCore) (seed/read-sentences 'CxCore))
-          (for [c (seed/layer-contexts "upper")  s (seed/read-sentences c "upper")]  [s c])
-          (for [c (seed/layer-contexts "middle") s (seed/read-sentences c "middle")] [s c])
-          (for [c (seed/root-contexts)           s (seed/read-sentences c nil)]      [s c])))
+  (concat (for [f (core-context/upper-files)    s (seed/read-sentences f "upper")]  [s 'CxUniverse])
+          (for [c (seed/layer-contexts "middle") s (seed/read-sentences c "middle")] [s c])))
 
 (defn- load-shuffled!
   "The starter's sentences in the order `seed` shuffles them to, through the text
@@ -333,10 +329,12 @@
   (let [l (java.util.ArrayList. ^java.util.Collection (vec (starter-entries)))]
     (java.util.Collections/shuffle l (java.util.Random. (long seed)))
     (v/with-deferred-settle kb
-      (text/load-entries! (fn [s c o] (v/assert kb s c (or o {}))) (vec l)))
+      (text/load-entries! (fn [s c o] (v/assert kb s c (or o {})))
+                          (fn [s c] (v/assert-inert kb s c))
+                          (vec l)))
     (v/with-deferred-settle kb
       (doseq [t (nm/by-print-key (v/specs kb 'thing))]
-        (v/assert kb (list 'unary_predicate t) 'CxCore)))
+        (v/assert kb (list 'unary_predicate t) 'CxUniverse)))
     kb))
 
 (defn- held-after

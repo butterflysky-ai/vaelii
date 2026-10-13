@@ -48,7 +48,7 @@
   along `genl`, and `claims` stored claims at the **most general** end of the chain —
   so a goal at the specific end has to walk the whole reach to find them."
   [kb {:keys [depth branching claims]}]
-  (v/assert kb (list 'genlCx ctx 'CxCore) 'CxCore {:chain? false})
+  (v/assert kb (list 'genlCx ctx 'CxUniverse) 'CxUniverse {:chain? false})
   (v/with-deferred-settle kb
     (doseq [i (range depth)]
       (v/assert kb (list 'genl (type-name i)

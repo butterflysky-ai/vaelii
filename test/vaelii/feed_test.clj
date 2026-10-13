@@ -964,6 +964,21 @@
     (is (= [] (step-disagreements order [["the except stored" hide]
                                          ["the winner retracted" #(v/retract! % (v/handle-of % '(dog Rex) 'CxB))]])))))
 
+(deftest a-genlcx-edge-to-a-declaring-context-reports-the-denials-it-makes-inert
+  ;; (not (dog Rex)) is a default denial at CxA.  The edge (genlCx CxA D) puts dog on the
+  ;; roster at CxA, which makes the denial inert there, and its retraction takes it off
+  ;; again; no label moves either way.  D is CxUniverse in the second row.
+  (doseq [d ['CxD 'CxUniverse]]
+    (let [m     (fn [s c] {:sentence s :context c :strength :monotonic})
+          edge  (list 'genlCx 'CxA d)
+          order [(m '(genlCx CxA CxUniverse) 'CxUniverse)
+                 (m '(genlCx CxD CxUniverse) 'CxUniverse)
+                 {:sentence '(forced_monotonic_predicate dog) :context d :strength :default}
+                 {:sentence '(not (dog Rex)) :context 'CxA :strength :default}]]
+      (is (= [] (step-disagreements order [["the edge stored" #(v/assert % edge 'CxUniverse {:strength :monotonic})]
+                                           ["the edge retracted" #(v/retract! % (v/handle-of % edge 'CxUniverse))]]))
+          (str d)))))
+
 (deftest every-event-is-the-diff-of-own-context-belief-in-random-worlds
   (random-window-check (range 40)))
 

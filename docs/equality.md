@@ -176,7 +176,7 @@ leaf ([inference.md](inference.md)).
 ## What a merge does
 
 `rewriteOf`, `sameAs` and `equals` are on the forced-monotonic roster's engine baseline,
-so on every KB, CxCore or not, an equation premise is never the loser of a nogood whatever
+so on every KB, upper layer or not, an equation premise is never the loser of a nogood whatever
 strength it was written at ([nmtms.md](nmtms.md#the-forced-monotonic-roster)), and no
 placed `defeat` hides a merge ([reference.md](reference.md#decisions), decision 13). A denial of one is held OUT: it is
 never believed, so it undoes no merge and blocks no rewrite.
@@ -295,7 +295,7 @@ supersession flip moves belief with no relabel behind it.
 
 ### Scope, context, and re-election
 
-**An equality applies where it is visible.** A merge asserted in `CxCore`
+**An equality applies where it is visible.** A merge asserted in `CxUniverse`
 applies everywhere; one asserted in a context applies there and below, by the
 ordinary `genlCx` up-closure. That answers "is equality global or scoped" the
 same way everything else in the engine answers it, and it is what lets a story
@@ -394,7 +394,7 @@ rather than to how much ontology the ancestor set holds. A KB that has merged no
 set-empty test, and each half is gated on the other side holding a merge the reader can
 see, so wiring a context under one whose merges it already inherits enumerates nothing.
 A **derived** edge runs the same arm from `chain/place-fact-conclusion`, so which
-spelling a context reads a fact under does not depend on whether the spindle was written
+spelling a context reads a fact under does not depend on whether the context edge was written
 or inferred.
 
 The removal side needs no twin of this: dropping an edge narrows what a reader sees, and

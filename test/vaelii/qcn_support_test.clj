@@ -107,7 +107,7 @@
 
 (use-fixtures :each (tu/neutral-fresh
                      #(doto (tu/fresh)
-                        (tu/load-core-with! '[[CxSpace "upper"] [CxTime "upper"]])
+                        (tu/load-core!)
                         (v/add-prover (space/spatial-prover))
                         (v/add-prover (iv/allen-prover)))))
 

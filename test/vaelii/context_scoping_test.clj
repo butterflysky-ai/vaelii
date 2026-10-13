@@ -213,7 +213,7 @@
 ;; `(transitive R)`, and `inherit/usable-relation?` reads that from the asker's vantage
 ;; like everything else — which on this KB deliberately changes nothing, and the
 ;; control below is why.  There is no leak to pair it with here: the leak is
-;; unconstructible on a KB carrying CxCore, and `inherit_test` builds the pair on
+;; unconstructible on a KB carrying the upper layer, and `inherit_test` builds the pair on
 ;; one that does not.
 
 (tu/deftest-kb predicate-metadata-is-a-licence-the-whole-kb-holds
@@ -477,7 +477,7 @@
       (is (empty? (head-move-misreads kb shape orders)) (str shape " in " (count orders) " orders")))))
 
 (deftest a-reader-below-a-denial-of-the-rewrite-reads-the-fact-under-the-kb-s-head-in-a-bare-kb
-  ;; no CxCore: the engine's baseline roster holds the `:default` `rewriteOf` `:monotonic`
+  ;; no upper layer: the engine's baseline roster holds the `:default` `rewriteOf` `:monotonic`
   ;; and its denial OUT, so no reader's round defeats the merge's election
   (tu/with-neutral-kb [kb tu/isolated-fresh]
     (tu/with-terms [dog_ Pa Qb CxBase CxMid CxSub]
@@ -539,9 +539,10 @@
     (v/assert kb (list 'binary_predicate palOf13) CxA)
     (v/assert kb (list 'symmetric palOf13) CxA)
     (testing "the mark's own sentex is the declaring context's — its decontextualized
-              copy lands in CxUniverse, below CxCore's sight"
-      (is (seq (v/sentexes-matching kb (list 'symmetric palOf13) CxA)))
-      (is (empty? (v/sentexes-matching kb (list 'symmetric palOf13) 'CxCore))))
+              copy in CxUniverse is no premise"
+      (is (some #(= CxA (:context %)) (v/sentexes-matching kb (list 'symmetric palOf13) CxA)))
+      (is (= [nil] (map :strength (v/sentexes-matching kb (list 'symmetric palOf13)
+                                                       'CxUniverse)))))
     (testing "the two ways of asking give one answer, from either vantage — the mark is
               both the property and the (binary_predicate) type membership"
       (is (= [true true] [(v/has-prop? kb :symmetric palOf13 CxA)

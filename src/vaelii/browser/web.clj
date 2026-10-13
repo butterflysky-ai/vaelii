@@ -6696,7 +6696,7 @@
 (def ^:private context-legal
   "What a legal `ctx` looks like, for every page that asks a context and treats its absence
   as every context."
-  "a context name, e.g. CxCore — or leave it out to ask every context at once (?ctx)")
+  "a context name, e.g. CxWell — or leave it out to ask every context at once (?ctx)")
 
 (def ^:private goal-legal
   "What a legal `q` looks like on the two pages that take a goal."
@@ -7495,7 +7495,7 @@
                                   (cond
                                     (= unreadable ctx)
                                     (bad-parameter (view (current target) req) "ctx" rc
-                                                   (str "a context name, e.g. CxCore — or "
+                                                   (str "a context name, e.g. CxWell — or "
                                                         "leave it out for the calculi and "
                                                         "their vocabularies"))
 
@@ -7831,6 +7831,60 @@
                                 (.getMessage t))})
          h)))
 
+(defn- kb-file-stamps
+  "`{path modified}` for each `.txt` file of the shipped `kb/upper/` and `kb/middle/`
+  layers, read off the classpath where it is a directory; a jar's files never change."
+  []
+  (into (sorted-map)
+        (for [layer ["upper" "middle"]
+              :let  [r (io/resource (str "kb/" layer))]
+              :when (and r (= "file" (.getProtocol r)))
+              ^java.io.File f (.listFiles (io/file r))
+              :when (str/ends-with? (.getName f) ".txt")]
+          [(.getPath f) (.lastModified f)])))
+
+(defn- kb-file-syncing
+  "Wrap a dev handler so the shipped KB files and the loaded KBs follow each other.
+
+  **Files to KBs.**  The first request after a file under `kb/upper/` or `kb/middle/` is
+  saved, added or removed submits `catalog/sync-loaded!`, and the sync runs as a job the
+  KB page lists.  While another job holds the writer the change stays pending, and a later
+  request submits it.
+
+  **The starter to the files.**  After each request that is not a GET, what the starter
+  entry holds in its exact contexts is compared with the last reading
+  (`catalog/write-back!`), and the difference is written into the files, which the next
+  request then syncs to the other loaded KBs.  No comparison runs while a job holds the
+  writer, and a finished sync job takes a fresh reading, so a sync's own writes are never
+  written back.  Requests run the two steps one at a time."
+  [h]
+  (let [st   (atom {:seen (kb-file-stamps)})
+        lock (Object.)
+        busy (fn [e] (if (= :job-busy (:type (ex-data e))) nil (throw e)))]
+    (fn [req]
+      (locking lock
+        (let [{:keys [seen job]} @st]
+          (when (and job (not (#{:running :cancelling} (:status (jobs/job job)))))
+            (swap! st assoc :job nil :base (catalog/held-premises "starter")))
+          (let [now (kb-file-stamps)]
+            (when (and (nil? (:job @st)) (not= seen now))
+              (try (swap! st assoc :seen now :job (catalog/sync-loaded!))
+                   (catch clojure.lang.ExceptionInfo e (busy e)))))))
+      (let [resp (h req)]
+        (locking lock
+          (let [{:keys [base job]} @st]
+            (when-not (or job (jobs/writer))
+              (if (nil? base)
+                (swap! st assoc :base (catalog/held-premises "starter"))
+                (when (not= :get (:request-method req))
+                  (when-let [[now report] (catalog/write-back! "starter" base)]
+                    (swap! st assoc :base now)
+                    (when report
+                      (trove/log! {:level :info :id ::kb-files-written
+                                   :data {:written (:written report)
+                                          :skipped (mapv :form (:skipped report))}}))))))))
+        resp))))
+
 (defn start
   "Start a Jetty server for `target` (a KB, an access value, or a catalog holder).
   Returns the server (non-blocking).  `:host` defaults to loopback; pass an address
@@ -8011,11 +8065,14 @@
 (defn- dev-handler
   "What `dev-repl` serves: `reloading-handler`, so a namespace reloaded through the nREPL
   reaches the server, and with `VAELII_DEV` set — which only `scripts/start-vaelii-dev.sh`
-  sets — the file-watching reloader over it (`hot-reloading`).  Nothing else turns hot
-  reload on: `start` and `-main` serve `app` as built."
+  sets — the file-watching reloader over it (`hot-reloading`) and the shipped KB file sync
+  under that (`kb-file-syncing`).  Nothing else turns hot reload on: `start` and `-main`
+  serve `app` as built."
   [target]
   (cond-> (reloading-handler target)
-    (v/switch-value "VAELII_DEV") hot-reloading))
+    ;; outermost first: the sources reload, then a changed KB file syncs with the
+    ;; reloaded loader
+    (v/switch-value "VAELII_DEV") (-> kb-file-syncing hot-reloading)))
 
 (defn dev-repl
   "Start the browser for a REPL session and hand the prompt straight back.

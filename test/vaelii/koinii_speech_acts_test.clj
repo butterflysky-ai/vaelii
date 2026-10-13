@@ -15,7 +15,7 @@
             [vaelii.test-util :as tu]))
 
 (defn- speech-acts-kb
-  "A fresh CxCore KB with the koinii speech-act vocabulary loaded."
+  "A fresh vocabulary KB with the koinii speech-act vocabulary loaded."
   []
   (tu/load-dumped! (tu/fresh) :koinii/speech-acts
                    #(doto % (core-context/load-into) (sa/load-speech-acts))))
@@ -25,7 +25,7 @@
 ;; ---- the context loads ----------------------------------------------------
 
 (tu/deftest-kb speech-acts-context-loads-under-core
-  (is (v/sees? kb 'CxSpeechActs 'CxCore) "CxSpeechActs wires itself under CxCore")
+  (is (v/sees? kb 'CxSpeechActs 'CxUniverse) "CxSpeechActs wires itself under CxUniverse")
   (is (seq (v/sentexes-matching kb (list 'comment 'endorses '?t) 'CxSpeechActs))
       "and its vocabulary — the endorses doc — is present"))
 

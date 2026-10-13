@@ -1,7 +1,7 @@
 ;; SPDX-License-Identifier: SSPL-1.0
 ;; Copyright © 2026 Vaelii LLC and the Vaelii contributors.
 (ns vaelii.engine-vocabulary-test
-  "The terms the engine reads by name are declared in CxCore, so a KB can query what the
+  "The terms the engine reads by name are declared in CxUniverse, so a KB can query what the
   engine answers and the vocabulary audit classifies each one.  Each row pins one
   declaration against the engine behaviour it describes."
   (:require [clojure.test :refer [is testing use-fixtures]]
@@ -46,7 +46,7 @@
 (tu/deftest-kb every-wrapper-the-engine-peels-is-commented-and-classified
   (doseq [w '[set/forwardRule set/backwardRule set/defaultRule set/inertRule
               set/forwardOnlyRule set/solveRule set/assumptionRule
-              set/hardConstraint set/softConstraint set/monotonic]]
+              set/hardConstraint set/softConstraint set/monotonic set/inert]]
     (is (:enforced (v/interpreted w)) (str w " is classified enforced"))))
 
 ;; ---- the signed integer types ----------------------------------------------

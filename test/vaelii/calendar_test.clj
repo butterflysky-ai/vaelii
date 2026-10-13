@@ -21,13 +21,13 @@
             [vaelii.impl.types.prover :as prover-types]
             [vaelii.test-util :as tu]))
 
-;; A fresh KB per test: the CxCore grammar, the CxTime vocabulary the goals are written in
-;; (which is also what the clock's scoping gate reads), the CxChange event calculus the
-;; last test drives, and the prover registered.  Opt-in like every other reasoner, so an
-;; unregistered KB stores and retrieves calendar facts and pays nothing.
+;; A fresh KB per test: the upper layer, whose time.txt holds the vocabulary the goals are
+;; written in (which is also what the clock's scoping gate reads), the CxChange event
+;; calculus the last test drives, and the prover registered.  Opt-in like every other
+;; reasoner, so an unregistered KB stores and retrieves calendar facts and pays nothing.
 (use-fixtures :each (tu/neutral-fresh
                      #(doto (tu/fresh)
-                        (tu/load-core-with! '[[CxTime "upper"] [CxChange "middle"]])
+                        (tu/load-core-with! '[[CxChange "middle"]])
                         (v/add-prover (cal/calendar-prover)))))
 
 (def ^:private C 'CxUniverse)
@@ -189,11 +189,12 @@
     (is (empty? (v/ask kb '(endOf (YearFn 9999) ?i) C)))))
 
 (tu/deftest-kb the-clock-answers-only-where-its-vocabulary-is-visible
-  ;; CxTime sees CxCore and not the other way about, so a reader down in the grammar has
-  ;; no `startOf` to ask about and gets no answer to it.
-  (is (v/ask? kb '(during (MonthFn 2000 3) (YearFn 2000)) 'CxUniverse))
-  (is (not (v/ask? kb '(during (MonthFn 2000 3) (YearFn 2000)) 'CxCore)))
-  (is (empty? (v/ask kb '(startOf (YearFn 2000) ?i) 'CxCore))))
+  ;; A context with no `genlCx` edge does not see CxUniverse, so a reader there has no
+  ;; `startOf` to ask about and gets no answer to it.
+  (tu/with-terms [CxOutside]
+    (is (v/ask? kb '(during (MonthFn 2000 3) (YearFn 2000)) 'CxUniverse))
+    (is (not (v/ask? kb '(during (MonthFn 2000 3) (YearFn 2000)) CxOutside)))
+    (is (empty? (v/ask kb '(startOf (YearFn 2000) ?i) CxOutside)))))
 
 ;; ---- what the answer rests on, and what it does not displace ------------
 

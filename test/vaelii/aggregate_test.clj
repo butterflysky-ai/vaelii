@@ -131,7 +131,7 @@
 
 (tu/deftest-kb a-measure-sum-is-normalized-and-rendered-in-the-base-unit
   (tu/with-terms [lengthOf Wall Metre Centimetre Length]
-    ;; CxMeasure ships the vocabulary; the units themselves are an ontology's
+    ;; CxUniverse ships the vocabulary; the units themselves are an ontology's
     (v/assert kb (list 'dimensionOf Metre Length) 'CxWell {:strength :monotonic})
     (v/assert kb (list 'dimensionOf Centimetre Length) 'CxWell {:strength :monotonic})
     (v/assert kb (list 'conversionFactor Centimetre Metre 0.01) 'CxWell

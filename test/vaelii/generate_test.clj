@@ -68,7 +68,7 @@
     (is (= (:facts small) (count facts)))
     (is (= (:rules small) (count rules)))
     (testing "the context chain is one edge longer than the context list — the schema
-              context's own edge under CxCore, which no band names"
+              context's own edge under CxUniverse, which no band names"
       (is (= (inc (:contexts small)) (count context-edges))))
     (testing "units is the assertion count a progress bar divides by, and it counts the
               *edges* rather than the contexts, which is what `load-into` asserts"

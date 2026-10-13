@@ -174,7 +174,7 @@
         (is (v/assert kb (list 'genlArg rel 2 'thing) 'CxUniverse))))))
 
 (tu/deftest-kb arity-is-functional-so-a-second-value-is-a-clash
-  ;; the declaration ships in CxCore; this KB is empty, so it states it — that
+  ;; the declaration ships in CxUniverse; this KB is empty, so it states it — that
   ;; the shipped vocabulary carries it is core-context-test's assertion
   (let [rel (tu/tmp-pred)]
     (v/assert kb '(functional arity) 'CxUniverse)
@@ -251,10 +251,10 @@
       (is (v/assert kb2 (list rel a) 'CxUniverse)
           "and the constraint went with the declaration"))))
 
-(tu/deftest-kb the-arity-a-reader-sees-is-the-one-that-binds-it
-  ;; Two contexts declaring different arities: each reader that sees one sees one
-  ;; answer.  Uniqueness is asked of the visible declarations, so a declaration a
-  ;; reader cannot see neither binds it nor suppresses the one it can.
+(tu/deftest-kb two-arities-in-sibling-contexts-bind-no-reader
+  ;; Two contexts declaring different arities: the taxonomy cache answers each reader
+  ;; with the declarations it sees, and a relation's length is read the same at every
+  ;; context, so the two lengths leave the relation unbound at every reader.
   (tu/with-terms [CxLeft CxRight CxBoth]
     (let [rel (tu/tmp-pred) a (tu/tmp-ind) b (tu/tmp-ind)]
       (v/assert kb (list 'genlCx CxLeft 'CxUniverse) 'CxUniverse)
@@ -269,8 +269,9 @@
         (is (nil? (tax/declared-arity tax rel CxBoth))
             "sees both, so has no settled answer")
         (is (nil? (tax/declared-arity tax rel)) "and unscoped is the same"))
-      (testing "and each reader is bound by what it sees"
-        (is (tu/stored-in-clash? kb (list rel a) CxLeft))
+      (testing "and no reader is bound by the length it sees"
+        (v/assert kb (list rel a) CxLeft)
+        (is (v/ask? kb (list rel a) CxLeft))
         (v/assert kb (list rel a b) CxLeft)
         (is (v/ask? kb (list rel a b) CxLeft))
         (v/assert kb (list rel a b) CxBoth)
@@ -280,7 +281,7 @@
   ;; The cache holds what it was told, and it was told two different things.  Refusing
   ;; on whichever was found first would be arbitrary — the same open-world stance the
   ;; check takes toward a predicate nobody has declared at all.  (An ordinary KB never
-  ;; gets here: `(functional arity)` merges the two values instead, and CxCore
+  ;; gets here: `(functional arity)` merges the two values instead, and CxUniverse
   ;; ships that declaration.  A KB without it, or an import that stored both, does.)
   (let [rel (tu/tmp-pred) a (tu/tmp-ind) b (tu/tmp-ind)]
     (v/assert kb (list 'arity rel 2) 'CxUniverse)
@@ -339,10 +340,8 @@
              declaration worth admitting")))))
 
 (tu/deftest-kb a-variableArity-sub-takes-a-constraint-past-the-length-above-it
-  ;; The inherited route into the same arm, and the mark sits where the inheritance never
-  ;; looks: `inherited-arity` asks the release of the *supers*, so a sub carrying it still
-  ;; reads their length — and only the arm's own reading of the predicate's memberships
-  ;; releases the position.
+  ;; The inherited route into the same arm: a sub carrying the mark is bound to no length
+  ;; (`arity/relation-length`), so the arm admits a position past the length above it.
   (tu/with-terms [chainOf subChainOf a_type A B C]
     (v/assert kb (list 'genl a_type 'thing) 'CxUniverse)
     (v/assert kb (list 'binary_predicate chainOf) 'CxUniverse)
@@ -393,7 +392,7 @@
 ;; ---- a literal is typed by what it is ------------------------------------
 ;; `arg` is open-world about a **symbol** — an untyped one violates nothing — and closed
 ;; about a **literal**, whose kind `checks/value-kind` reads straight off its syntax.
-;; The kinds live in the genl lattice (CxCore) so the comparison is an ordinary one;
+;; The kinds live in the genl lattice (CxUniverse) so the comparison is an ordinary one;
 ;; these assert the edges they lean on rather than loading the schema, so what the check
 ;; actually depends on is visible in the test.
 

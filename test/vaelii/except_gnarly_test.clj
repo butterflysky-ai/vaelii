@@ -545,10 +545,10 @@
   ;; The first half.  The rule fires while nothing hides its antecedent; the except then
   ;; arrives **by derivation**, and the conclusion is left resting on a fact its own
   ;; context can no longer see unless the derivation path queues the sweep.
-  ;; `hide` is put on the forced-monotonic roster, so a rule reading it may conclude an
-  ;; `except` (docs/nmtms.md, "The forced-monotonic roster")
+  ;; `hide` is put on the forced-monotonic roster where the rule is stated, so a rule
+  ;; reading it may conclude an `except` there (docs/nmtms.md, "The forced-monotonic roster")
   (tu/with-terms [q p hide Aa trigger CxSub]
-    (v/assert kb (list 'forced_monotonic_predicate hide) 'CxUniverse)
+    (v/assert kb (list 'forced_monotonic_predicate hide) CxSub)
     (v/assert kb (list 'genlCx CxSub 'CxWell) 'CxUniverse {:strength :monotonic})
     (let [h (v/assert kb (list q Aa) CxSub {:strength :monotonic})]
       (v/assert kb (list 'implies (list q '?x) (list p '?x)) CxSub {:direction :forward :strength :monotonic})
@@ -570,7 +570,7 @@
   ;; every warm read — and the KB then disagrees with `recover` over one store, which is
   ;; the property the derivation path exists to keep.
   (tu/with-terms [shiny gold hide trigger CxChild CxParent CxOther]
-    (v/assert kb (list 'forced_monotonic_predicate hide) 'CxUniverse)
+    (v/assert kb (list 'forced_monotonic_predicate hide) CxChild)
     (let [tx (reasoning/taxonomy kb)]
       (v/assert kb (list 'genlCx CxParent 'CxWell) 'CxUniverse {:strength :monotonic})
       (v/assert kb (list 'genlCx CxOther CxParent) 'CxUniverse {:strength :monotonic})

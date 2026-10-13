@@ -286,40 +286,111 @@
      (fn [[k]] (let [[kind own loser] (key-loser recs k)] [(content loser) (named own) kind]))
      ms)))
 
+(def ^:private enumerated-members
+  "The most members of one cycle whose assignments `close-cycle` enumerates: 2^8
+  assignments, each member read once per assignment."
+  8)
+
 (defn- close-cycle
   "Break the cycle `ms` (`[key f]` pairs, opened at index `n`) in content order
-  (`cycle-order`).  The members removing the first loser are read, each with the members
-  removing another loser out of force; met again inside its own read a member answers
-  false, so its own target does not count against it.  Each is kept as read.  When one of
-  them is in force, the others are kept out of force.  When none is, the caller reads the
-  others again with these fixed.  Two defeats of one loser do not compete, so neither is
-  read with the other out of force."
+  (`cycle-order`).  A cycle of at most `enumerated-members` members takes the first
+  assignment in content order, in force first, that every member reads as its own value,
+  with the members removing another loser held at its values.  A larger cycle, or one
+  with no consistent assignment, starts every member out of force, and at most 2m + 1
+  passes over m members read each member at the current values, until a pass changes no
+  value.  A key a member's read opens that rests on a member joins the members, which
+  start again, so each key that joins costs another 2^m · m member reads, plus
+  (2m + 1) · m when no assignment is consistent, or (2m + 1) · m above
+  `enumerated-members`.  A value a member's read kept, one that read no held member,
+  stays in the memo, so a cycle closed inside that read and resting on no member is
+  closed once per read.  A guard defeat's seen justifications (`guard-covered`) are
+  those its read under the chosen values left.  See docs/nmtms.md, \"A defeat-dependency cycle\".
+
+  Answers nil with every member's value kept in the memo, or `{:low i :members ms'}` when a
+  member's read met a defeat open at an index `i` below `n`: the members rest on that
+  defeat, which the frame owning it closes with them."
   [{:keys [memo recs]} n ms]
-  (let [ordered      (cycle-order recs ms)
-        loser        #(peek (key-loser recs (first %)))
-        first-loser  (loser (first ordered))
-        [mine other] ((juxt filter remove) #(= first-loser (loser %)) ordered)
-        ks           (mapv first other)
-        c            (count (::cycle @memo []))]
-    (vswap! memo update ::assumed (fnil into {}) (map #(vector % n)) ks)
-    (doseq [[d f] mine :when (identical? ::absent (get @memo d ::absent))]
-      (let [[r] (marked memo #(opened memo d n f))]
-        (vswap! memo #(-> % (update ::cycle (fnil subvec []) 0 c) (assoc d r)))))
-    (vswap! memo update ::assumed #(apply dissoc % ks))
-    (when (some #(true? (get @memo (first %))) mine)
-      (vswap! memo into (map #(vector % false)) ks))))
+  (let [loser     #(peek (key-loser recs %))
+        seen-key  (fn [k] (when (and (vector? k) (= ::guard (first k))) [::guard-seen (second k)]))
+        ;; met again inside its own read a member answers false, so its own target does
+        ;; not count against it; two defeats of one loser do not compete, so neither is held
+        ;; while the other is read
+        ;; a value the read kept in the memo stays there: `kept`, `in-force-once` and
+        ;; `route-answer` keep a value opened at index i only when its read met no defeat
+        ;; open below i, and every key the read opens has i > n, while a held member
+        ;; answers at n, so a kept value read no held member and holds under every
+        ;; assignment.  The read's own marks, and the guard justifications of the other
+        ;; members, are put back as they stood.
+        read      (fn [members vals [k f]]
+                    (let [saved @memo
+                          c     (count (::cycle saved []))
+                          held  (into {} (keep (fn [[o]] (when (not= (loser k) (loser o))
+                                                           [o [n (get vals o false)]])))
+                                      members)
+                          seen  (seen-key k)]
+                      (vswap! memo update ::assumed (fnil into {}) held)
+                      (let [[r low] (marked memo #(opened memo k n f))
+                            found   (subvec (vec (::cycle @memo [])) (min c (count (::cycle @memo []))))]
+                        (vswap! memo (fn [m] (reduce (fn [m rk] (if-let [[_ v] (find saved rk)] (assoc m rk v) (dissoc m rk)))
+                                                     m
+                                                     (into [::assumed ::open ::open-low ::cycle ::depth ::low]
+                                                           (comp (keep seen-key) (remove #{seen}))
+                                                           (keys members)))))
+                        [r low found])))
+        ;; each member read once in content order, at the values the reads before it left
+        ;; (`step?`) or at `vals`: `[vals' outer-low new-members]`
+        sweep     (fn [members order vals step?]
+                    (reduce (fn [[vs lo new] [k :as m]]
+                              (let [[r low found] (read members (if step? vs vals) m)]
+                                [(assoc vs k r) (min lo (if (< low n) low no-low))
+                                 (into new (remove (fn [[fk]] (contains? members fk))) found)]))
+                            [vals no-low []]
+                            order))
+        ;; every assignment read: `[a outer-low new-members]`, `a` the first consistent one
+        ;; with the seen justifications its reads left, or nil
+        enumerate (fn [members order]
+                    (let [ks  (mapv first order)
+                          m   (count ks)
+                          sks (keep seen-key ks)]
+                      (vswap! memo #(apply dissoc % sks))
+                      (reduce (fn [[best lo new] bits]
+                                (let [a (zipmap ks (map #(bit-test bits (- m 1 %)) (range m)))
+                                      [a' low found] (sweep members order a false)]
+                                  [(or best (when (= a a') (into a (select-keys @memo sks))))
+                                   (min lo low) (into new found)]))
+                              [nil no-low []]
+                              (range (dec (bit-shift-left 1 m)) -1 -1))))
+        start     (fn [members] (zipmap (keys members) (repeat false)))]
+    (loop [members (into {} ms), vals nil, i 0]
+      (let [order           (cycle-order recs (vec members))
+            enum?           (and (nil? vals) (<= (count members) enumerated-members))
+            vals            (when-not enum? (or vals (start members)))
+            [vals' low new] (if enum? (enumerate members order) (sweep members order vals true))]
+        (cond
+          (< low no-low) {:low low :members (vec members)}
+          (seq new)      (recur (into members new) nil 0)
+          enum?          (if vals'
+                           (do (vswap! memo into vals') nil)
+                           (recur members (start members) 0))
+          (or (= vals vals') (>= i (* 2 (count members))))
+          (do (vswap! memo into vals') nil)
+          :else (recur members vals' (inc i)))))))
 
 (defn- in-force-once
   "`(f)`, whether the defeat key `k` (`cycle-order`) is in force at the reader, kept in the
-  read's memo.  Met again while open, or assumed out of force by `close-cycle`, it answers
-  false and lowers the read's mark.  A value that met a key open below its own is kept
-  nowhere, and its key joins the cycle that lower key closes."
+  read's memo.  Met again while open it answers false, and held by `close-cycle` it
+  answers the value held; either lowers the read's mark.  A value that met a key open
+  below its own is kept nowhere, and its key joins the cycle that lower key closes.  A
+  cycle whose members rest on a key open below its own index (`close-cycle`) joins the
+  cycle that key closes, and lowers the read's mark to it."
   [{:keys [memo] :as st} k f]
   (let [m @memo, v (get m k ::absent)]
     (cond
       (not (identical? ::absent v)) v
       (contains? (::open m) k)      (do (vswap! memo update ::open-low (fnil min no-low) (get-in m [::open k])) false)
-      (contains? (::assumed m) k)   (do (vswap! memo update ::open-low (fnil min no-low) (get-in m [::assumed k])) false)
+      (contains? (::assumed m) k)   (let [[i held] (get-in m [::assumed k])]
+                                      (vswap! memo update ::open-low (fnil min no-low) i)
+                                      held)
       :else
       (let [n (count (::open m)) c (count (::cycle m []))
             [r low] (marked memo #(opened memo k n f))]
@@ -328,8 +399,11 @@
           (and (= low n) (> (count (::cycle @memo [])) c))
           (let [ms (conj (subvec (::cycle @memo) c) [k f])]
             (vswap! memo update ::cycle subvec 0 c)
-            (close-cycle st n ms)
-            (in-force-once st k f))
+            (if-let [{:keys [low members]} (close-cycle st n ms)]
+              (do (vswap! memo update ::cycle (fnil into []) members)
+                  (vswap! memo update ::open-low (fnil min no-low) low)
+                  r)
+              (in-force-once st k f)))
           :else (do (vswap! memo assoc k r) r))))))
 
 ;; ---- a second route at the reader ----------------------------------------------
@@ -676,11 +750,43 @@
              (decide/arity-held? kb))
          (pos? (reads/stored-count-with-functor (:index kb) 'contradicts)))))
 
-(defn walk-reads?
-  "Does a belief-filtered read owe the walk (`defeat-hidden-fn`): `placed-reads?`, or a
-  placement some reader can exempt (`exemption-reads?`)."
+(defn- denial-stored?
+  "Is a denial of `pred` stored: a unary one in its denied terms, or the predicate
+  extent, which holds both polarities, counting more facts than its positive shapes do.
+  A gate over every context, read in a few counts; the walk asks each handle at its
+  reader."
+  [kb pred]
+  (let [idx (:index kb)]
+    (boolean
+     (or (seq (reads/as-stored-unary-denied-terms idx pred))
+         (> (reads/stored-count-with-functor idx pred)
+            (transduce (map #(reads/stored-count-shape-tuples-global idx pred %)) +
+                       (reads/as-stored-shape-lengths idx pred)))))))
+
+(defn- roster-reads?
+  "Can the declared roster hide a handle at some reader: a predicate on the roster by a
+  declaration off the global roster (`decide/declared`) has a stored denial
+  (`denial-stored?`), a rule reading it or a rule concluding it, or a rule's consequent
+  functor is a variable.
+  A reader that sees the declaration and one that does not read those apart.  Read over
+  every context: it is the whole-KB gate of `walk-reads?`, and each reader scopes it
+  (`roster-state`)."
   [kb]
-  (boolean (or (placed-reads? kb) (exemption-reads? kb))))
+  (let [idx (:index kb)]
+    (boolean (when-let [declared (seq (decide/declared (reasoning/taxonomy kb)))]
+               (or (seq (reads/as-stored-rules-by-consequent-global idx p/var-consequent-key))
+                   (some (fn [[[_ pred]]]
+                           (or (denial-stored? kb pred)
+                               (seq (reads/as-stored-rules-by-antecedent-global idx pred))
+                               (seq (reads/as-stored-rules-by-consequent-global idx pred))))
+                         declared))))))
+
+(defn walk-reads?
+  "Does a belief-filtered read owe the walk (`defeat-hidden-fn`): `placed-reads?`, a
+  placement some reader can exempt (`exemption-reads?`), or a declared roster that can
+  hide a handle at some reader (`roster-reads?`)."
+  [kb]
+  (boolean (or (placed-reads? kb) (exemption-reads? kb) (roster-reads? kb))))
 
 (defn- exempting-at?
   "Can a placement be exempt at a reader with ancestor set `up`: `exemption-reads?`, a
@@ -700,12 +806,71 @@
                       (some in? rewrite/equality-relations)
                       (and (decide/arity-held? kb) (some in? sx/arity-binding-functors)))))))
 
+;; The roster reading decides which declarations the reader sees (`roster-state`), through
+;; `in-force?`, whose verdict reads the roster (`roster-member-fn`): the two recur into
+;; each other.  `verdict-at` and `mark-defeated` recur through a mark's own defeat.
+(declare in-force?)
+
+(defn- roster-state
+  "What the declared roster reads at a reader with ancestor set `up`: `:on?`, its roster
+  reading (`decide/reader-reading`), which sees a declaration IN in the network, stated in
+  a context of `up`, hidden by no except in force there and named by no `defeat` in force
+  at the reader (`in-force?`, read over the global roster); `:inert?`, whether a predicate
+  it reads on the roster by a declaration has a stored denial (`denial-stored?`); and
+  `:void?`, whether a predicate declared where it does not see is read by a rule stated in
+  `up`, or one it sees declared is concluded by one, or a rule stated in `up` concludes a
+  variable functor.
+  The rules are read off the antecedent index over every context and kept by `up`: the
+  index has no by-context entry point.  `:inert?` and `:void?` read the denial and the
+  rules before `seen?`, so `in-force?` runs only for a predicate one of them reads."
+  [kb tax tms up excepted?]
+  (let [declared  (decide/declared tax)
+        idx       (:index kb)
+        base      (delay {:kb kb :tax tax :tms tms :recs (:records kb) :idx idx :up up
+                          :excepted? excepted? :exempting? (exempting-at? kb up)
+                          :roster {:on? (decide/global-reading tax)}})
+        ;; each declaration's answer is read once per roster state, with a memo of its own
+        answers   (volatile! {})
+        defeated? (fn [h]
+                    (let [v (get @answers h ::absent)]
+                      (if (identical? ::absent v)
+                        (let [r (boolean
+                                 (when-let [ds (seq (reads/as-stored-naming idx sx/defeat-functor h up))]
+                                   (let [st (assoc @base :memo (volatile! {}))]
+                                     (some #(in-force? st %) ds))))]
+                          (vswap! answers assoc h r)
+                          r)
+                        v)))
+        seen?    (fn [h c] (and (contains? up c) (jtms/in? tms h) (not (and excepted? (excepted? h)))
+                                (not (defeated? h))))
+        on?      (if (seq declared) (decide/reader-reading tax seen?) (decide/global-reading tax))]
+    (if (empty? declared)
+      {:on? on?}
+      (let [recs  (:records kb)
+            sees? (fn [[_ ds]] (boolean (some (fn [[h c]] (seen? h c)) ds)))]
+        {:on?    on?
+         :inert? (boolean (some (fn [[[_ pred] :as e]] (and (denial-stored? kb pred) (sees? e)))
+                                declared))
+         :void?  (boolean
+                  (or (some (fn [[[_ pred] :as e]]
+                              (and (some #(contains? up (:context (p/get-sentex recs %)))
+                                         (reads/as-stored-rules-by-antecedent-global idx pred))
+                                   (not (sees? e))))
+                            declared)
+                      (some (fn [[[_ pred] :as e]]
+                              (and (seq (reads/as-stored-rules-by-consequent-in idx pred up))
+                                   (sees? e)))
+                            declared)
+                      (and (seq (reads/as-stored-rules-by-consequent-in idx p/var-consequent-key up))
+                           (some sees? declared))))}))))
+
 (defn- reader-state
   "What the walk reads at `ctx`, with the one-read memo, or nil when `ctx` is a variable,
   the read takes the network reading (`tax/*network-belief*`), or no defeat is stored, no
   except is in force at `ctx` and no placement can be exempt at `ctx` (`exempting-at?`).
   `:closable?` is true when only a defeat stated in a context `ctx` sees can hide a
-  handle there: no except is stated in one and no placement can be exempt (`region-at`).
+  handle there: no except is stated in one, no placement can be exempt (`region-at`) and
+  the declared roster hides nothing there (`roster-state`).
   The ancestor set is the unscoped one (`tax/context-up-global`), as `excepts-seen`'s is:
   the scoped `context-up` is itself filtered by what the reader does not believe."
   [kb ctx]
@@ -714,14 +879,18 @@
     (when-not (or tax/*network-belief* (sx/variable? ctx) (not (walk-reads? kb)))
       (let [tax        (reasoning/taxonomy kb)
             up         (tax/context-up-global tax ctx)
+            tms        (reasoning/tms kb)
             excepted?  (except-hidden-fn kb ctx)
-            exempting? (exempting-at? kb up)]
-        (when (or (pos? ndefs) excepted? exempting?)
-          {:kb kb :ctx ctx :tms (reasoning/tms kb) :recs (:records kb) :tax tax :up up
+            exempting? (exempting-at? kb up)
+            roster     (roster-state kb tax tms up excepted?)
+            hides?     (boolean (or (:inert? roster) (:void? roster)))]
+        (when (or (pos? ndefs) excepted? exempting? hides?)
+          {:kb kb :ctx ctx :tms tms :recs (:records kb) :tax tax :up up
            :idx idx
            :excepted? excepted?
            :exempting? exempting?
-           :closable? (not (or excepted? exempting?))
+           :roster roster
+           :closable? (not (or excepted? exempting? hides?))
            :conflicts? (pos? (reads/stored-count-with-functor (:index kb) 'contradicts))
            :memo (volatile! {})})))))
 
@@ -843,11 +1012,6 @@
                (for [j js, [h ms antes] ctrs :when (contains? antes (set (:antecedents j)))]
                  [j ms h])))))
 
-;; `verdict-at` reads which defeats of a mark are in force (`mark-defeated`), and
-;; `in-force?` reads the verdict at the reader over a defeat's members: the two recur into
-;; each other through a mark's own defeat.
-(declare in-force?)
-
 (defn- mark-defeated
   "The handles of `region`, a support, that a defeat in force at the reader names and that
   lie in the support of a mark a `respell` justification of `region` rests on
@@ -860,14 +1024,69 @@
     (into #{} (filter (fn [t] (some #(in-force? st %) (reads/as-stored-naming idx sx/defeat-functor t up))))
           (into #{} (mapcat #(support tms % (constantly false))) marks))))
 
+(defn- roster-member-fn
+  "`(fn [h])`: is the handle `h` a roster literal as the reader reads the roster
+  (`roster-state`'s `:on?`)?"
+  [{:keys [recs tax roster]}]
+  (fn [h] (boolean (some-> (p/get-sentex recs h) :sentence
+                           (as-> s (decide/roster-literal? tax s (:on? roster)))))))
+
+(defn- roster-inert?
+  "Is the handle `x` a denial of a literal the reader reads on the roster and the global
+  roster does not hold: inert at the reader, where the network, reading the global roster,
+  holds it IN?"
+  [{:keys [recs tax roster]} x]
+  (let [s (:sentence (p/get-sentex recs x))]
+    (boolean (and (sx/negation? s)
+                  (decide/roster-literal? tax (second s) (:on? roster))
+                  (not (decide/roster-literal? tax (second s) (decide/global-reading tax)))))))
+
+(defn- excepted-rule?
+  "Does a believed `exceptWhen` stand against the rule at `rh`: one stored against it,
+  IN in the network, read off the term index once the rule is on the watched roster
+  (`provers/rule-exception-entries` reads the same records)."
+  [{:keys [tms recs idx]} rh]
+  (boolean (and (reads/watched-rule? idx rh)
+                (some #(when-let [s (:sentence (p/get-sentex recs %))]
+                         (and (sx/exceptWhen-meta? s) (= rh (sx/exceptWhen-rule-handle s))
+                              (jtms/in? tms %)))
+                      (reads/as-stored-with-term idx (sx/sentex-handle rh))))))
+
+(defn- roster-void
+  "The ids of the justifications of `x` the reader reads void: a rule firing valid in the
+  network, whose conclusion `x` is a roster literal at the reader, and whose rule is no
+  roster rule there: an antecedent off the reader's roster, an `unknown` antecedent, a
+  `set/defaultRule`, or a believed `exceptWhen`.  The network reads the antecedents on
+  the union over every reader and the conclusion on the global roster
+  (`checks/network-void?`), so such a firing is valid there through a declaration this
+  reader does not see, or because its conclusion is on the roster only by a declaration
+  this reader sees."
+  [{:keys [tms recs tax roster] :as st} x]
+  (let [on? (:on? roster)
+        s   (:sentence (p/get-sentex recs x))]
+    (when (and s (not (sx/negation? s)) (decide/roster-literal? tax s on?))
+      (into #{}
+            (comp (keep #(jtms/justification tms %))
+                  (filter (fn [j]
+                            (and (not (jtms/forced? tms :void (:id j)))
+                                 (when-let [r (p/get-sentex recs (:informant j))]
+                                   (when-let [antes (seq (:antecedent r))]
+                                     (or (:defeasible r)
+                                         (some sx/unknown? antes)
+                                         (some #(not (decide/roster-literal? tax % on?)) antes)
+                                         (excepted-rule? st (:informant j))))))))
+                  (map :id))
+            (jtms/supports tms x)))))
+
 (defn- verdict-at
   "`decide/verdict` over `members` with the classes the reader reads: the network's, or,
   where an except in force at the reader reaches the members' support, or a defeat in
   force there reaches a mark a `respell` justification in it rests on (`mark-defeated`),
   the classes the support carries with those targets forced OUT
-  (`jtms/classes-in-region`).  nil when such a target hides a member."
-  [{:keys [tms recs tax excepted?] :as st} members]
-  (let [roster? #(boolean (some->> (p/get-sentex recs %) :sentence (decide/roster-literal? tax)))
+  (`jtms/classes-in-region`).  nil when such a target hides a member.  The roster is the
+  reader's (`roster-member-fn`)."
+  [{:keys [tms excepted?] :as st} members]
+  (let [roster? (roster-member-fn st)
         marks?  (mark-hazard? st)
         region  (when (or excepted? marks?)
                   (into #{} (mapcat #(support tms % (constantly false) true)) members))
@@ -884,8 +1103,9 @@
 ;; `in-force?` reads whether the defeat itself is believed and seen at the reader
 ;; (`believed-in`), and `believed-in` reads which defeats are in force over the support
 ;; it walks: a defeat's own support holds its target, so the two recur into each other.
-;; `guard-in-force?` reads a guard defeat the same way (`guard-believed?`).
-(declare believed-in guard-believed?)
+;; `guard-in-force?` reads a guard defeat's blockers through `believed-in` too
+;; (`guard-seen-fn`).
+(declare believed-in)
 
 (defn- unseen-fn
   "`(fn [h])`: does the reader not believe and see the handle `h`, IN in the network
@@ -925,10 +1145,11 @@
 (defn- conflict-in-force?
   "Is the placed `(contradicts …)` at `c` a conflict the reader decides against its member
   `x`: placed for a nogood in a context the reader sees, IN and hidden by no except in
-  force there, a conflict in the network (`decide/verdict` answers `:hard`), the verdict
-  at the reader over its members naming `x` (`verdict-at`, whose classes the reader's
-  excepts lower), and `c` IN at the reader through one of its `nogood` justifications,
-  read as `in-force?` reads a defeat's.  A contradicts met again while it is being read
+  force there, a conflict in the network on the roster the reader reads
+  (`decide/verdict` answers `:hard`, `roster-member-fn`), the verdict at the reader over
+  its members naming `x` (`verdict-at`, whose classes the reader's excepts lower), and `c`
+  IN at the reader through one of its `nogood` justifications, read as `in-force?` reads a
+  defeat's.  A contradicts met again while it is being read
   closes a cycle (`in-force-once`)."
   [{:keys [tms recs up excepted?] :as st} c x]
   (in-force-once
@@ -941,11 +1162,10 @@
         (and (contains? up (:context sx)) (jtms/in? tms c)
              (not (excepted? c))
              (seq njs)
-             ;; a conflict in the network: a decided nogood's `defeat`
-             ;; governs its loser, and an except of it releases it
+             ;; a conflict in the network, the roster read as this reader reads it: a
+             ;; decided nogood's `defeat` governs its loser, and an except of it releases it
              (= :hard (decide/verdict #(or (jtms/defeat-class tms %) :default)
-                                      #(boolean (some->> (p/get-sentex recs %) :sentence
-                                                         (decide/roster-literal? (:tax st))))
+                                      (roster-member-fn st)
                                       ms))
              (= {:defeat x} (verdict-at st ms))
              (not (decide/exempt-at? (:kb st) ms up (unseen-fn st)))
@@ -1055,15 +1275,23 @@
         (jtms/supports tms d)))
 
 (defn- guard-seen-fn
-  "`(fn [g])`: is every antecedent of the guard justification `g` of a defeat of `x`, but
-  `x`, believed and seen at the reader?"
-  [st x]
-  (fn [g] (not-any? #(and (not= x %) ((unseen-fn st) %)) (:antecedents g))))
+  "`(fn [g])`: is every blocker of the guard justification `g` of a defeat of `x` believed
+  and seen at the reader?  A blocker is an antecedent of `g` other than `x` and the rule
+  and antecedents of a firing of `x` that `g` belongs to (`guard-owners`).  The firing's
+  own antecedents are not read: where one is not believed the firing is void there, and
+  dropping it moves nothing."
+  [{:keys [tms recs] :as st} x]
+  (let [js (delay (into [] (keep #(jtms/justification tms %)) (jtms/supports tms x)))]
+    (fn [g]
+      (let [owners (guard-owners recs g @js)
+            fired  (into #{x} (comp (filter #(contains? owners (:id %)))
+                                    (mapcat #(conj (:antecedents %) (:informant %))))
+                         @js)]
+        (not-any? #(and (not (contains? fired %)) ((unseen-fn st) %)) (:antecedents g))))))
 
 (defn- guard-in-force?
   "Is the guard defeat at `d`, naming `x`, in force at the reader: IN, no except in force
-  hiding it, `d` itself believed and seen there with its own target exempt
-  (`placed-belief-only`), and one of its `guard` justifications seen there.  The
+  hiding it, and one of its `guard` justifications seen there (`guard-seen-fn`).  The
   justifications are read inside the defeat's own read and kept in the read's memo for
   `guard-covered`, so a guard defeat whose blocker rests on a firing another guard
   defeat removes is met again as a cycle (`in-force-once`), not read without end."
@@ -1074,14 +1302,13 @@
                                 (seq (let [seen (filterv (guard-seen-fn st x)
                                                          (guard-justifications-of tms d))]
                                        (vswap! memo assoc [::guard-seen d] seen)
-                                       seen))
-                                (guard-believed? st d x)))))
+                                       seen))))))
 
 (defn- guard-covered
   "The justifications of `x` a guard defeat in force at the reader covers: those a
-  justification of that defeat belongs to (`guard-owners`), where every antecedent of that
-  justification but `x` is believed and seen at the reader (docs/naf.md, \"A guard below
-  the placement places a defeat\")."
+  justification of that defeat belongs to (`guard-owners`), where that justification's
+  blockers are believed and seen at the reader (docs/naf.md, \"A guard below the
+  placement places a defeat\")."
   [{:keys [tms idx up memo recs] :as st} x]
   (let [gjs (into [] (mapcat (fn [d] (when (guard-in-force? st d x)
                                        (get @memo [::guard-seen d]))))
@@ -1092,11 +1319,10 @@
 
 (defn- believed-set
   "The handles of `h`'s support the reader believes, or ::all when the walk hides none of
-  them, and the handle whose guard coverage was not read: `[in own]`.  Each justification
-  a guard defeat covers there is dropped (`guard-covered`), each `nogood` justification of
-  a placement the reader exempts is dropped (`exempt-justifications`), each of the
-  justification ids `invalid` is dropped, and each target hidden at the reader in `h`'s
-  support is forced OUT — a defeat in force naming it, a placed conflict the reader
+  them.  Each justification a guard defeat covers there is dropped (`guard-covered`),
+  each `nogood` justification of a placement the reader exempts is dropped
+  (`exempt-justifications`), each of the justification ids `invalid` is dropped, and each
+  target hidden at the reader in `h`'s support is forced OUT — a defeat in force naming it, a placed conflict the reader
   decides against it (`conflicts-naming`), and, with `with-excepts?`, an except in force
   naming it (`jtms/region-in` over the support).  A justification that rests on a forced
   witness edge reads it at its label where the reader reaches the path's ends another way
@@ -1104,23 +1330,13 @@
   reaching a permuting mark (`mark-hazard?`), a `:monotonic` handle is taken at its label,
   since a defeat is in force only over a `:default` target, only an except lowers a class,
   and only a `respell` justification rests on a handle that caps no class; and the
-  support is not walked when nothing in it can be hidden there (`region-at`).  The guard
-  coverage of `own` is not read when only `h`'s `guard` justifications rest on it in the
-  support (`guard-believed?`)."
-  [{:keys [tms excepted? exempting? up idx] :as st} h with-excepts? invalid own]
-  (if-let [region (region-at st h (if excepted?
+  support is not walked when nothing in it can be hidden there (`region-at`)."
+  [{:keys [tms excepted? exempting? up idx roster] :as st} h with-excepts? invalid]
+  (if-let [region (region-at st h (if (or excepted? (:inert? roster) (:void? roster))
                                     (constantly false)
                                     #(and (= :monotonic (jtms/defeat-class tms %))
                                           (not (mark-hazard? st)))))]
-    (let [own     (when (and own (contains? region own)
-                             (every? (fn [jid]
-                                       (let [j (jtms/justification tms jid)]
-                                         (or (nil? j) (not (contains? region (:consequence j)))
-                                             (and (= h (:consequence j))
-                                                  (= guard-informant (:informant j))))))
-                                     (jtms/dependents tms own)))
-                    own)
-          ;; every defeat naming `x` is read, so the cycle a read meets is the same
+    (let [;; every defeat naming `x` is read, so the cycle a read meets is the same
           ;; whichever defeat the index lists first
           by-def  (into #{} (filter (fn [x] (reduce (fn [hit d] (or (in-force? st d) hit))
                                                     false
@@ -1128,43 +1344,28 @@
                         region)
           by-conf (into {} (keep (fn [x] (when-let [cs (seq (conflicts-naming st x))] [x (set cs)])))
                         region)
-          other   (if (and with-excepts? excepted?) (into #{} (filter excepted?) region) #{})
-          by-cov  (into {} (keep (fn [x] (when-not (= x own)
-                                           (when-let [js (not-empty (guard-covered st x))] [x js]))))
+          other   (cond-> (if (and with-excepts? excepted?) (into #{} (filter excepted?) region) #{})
+                    (:inert? roster) (into (filter #(roster-inert? st %)) region))
+          by-cov  (into {} (keep (fn [x] (when-let [js (not-empty (guard-covered st x))] [x js])))
                         region)
           invalid (cond-> (into invalid (mapcat val) by-cov)
-                    exempting? (into (mapcat #(exempt-justifications st %)) region))
+                    exempting?      (into (mapcat #(exempt-justifications st %)) region)
+                    (:void? roster) (into (mapcat #(roster-void st %)) region))
           forced  (-> by-def (into (keys by-conf)) (into other))]
-      [(if (and (empty? forced) (empty? invalid))
-         ::all
-         (let [belief (with-routes (placed-belief-only st (into by-def (keys by-cov)) by-conf other)
-                        (when (seq forced) (rerouted st region forced with-excepts?)))]
-           (jtms/region-in tms region region #{} forced belief invalid)))
-       own])
-    [::all nil]))
+      (if (and (empty? forced) (empty? invalid))
+        ::all
+        (let [belief (with-routes (placed-belief-only st (into by-def (keys by-cov)) by-conf other)
+                       (when (seq forced) (rerouted st region forced with-excepts?)))]
+          (jtms/region-in tms region region #{} forced belief invalid))))
+    ::all))
 
 (defn- believed-in
   "Does the reader believe the handle `h` (`with-excepts?` false), or believe and see it
   (true): `h` is among the support handles `believed-set` reads as believed there."
   ([st h with-excepts?] (believed-in st h with-excepts? #{}))
   ([st h with-excepts? invalid]
-   (let [[in] (believed-set st h with-excepts? invalid nil)]
+   (let [in (believed-set st h with-excepts? invalid)]
      (or (= ::all in) (contains? in h)))))
-
-(defn- guard-believed?
-  "Is the guard defeat `d`, naming `x`, believed and seen at the reader with `x` exempt
-  (`believed-in`)?  The read first leaves out `x`'s guard coverage, which reads every
-  guard defeat of `x` and each of those reads this again, so a reader seeing n guard
-  defeats of `x` would read them in every order.  The answer stands where only `d`'s
-  `guard` justifications rest on `x` in `d`'s support and that read believes `x` and the
-  network does: a `guard` justification reads `x` IN whether a guard covers it (at its
-  label, `placed-belief-only`) or not, so the coverage cannot change it.  Otherwise
-  `x`'s coverage is read."
-  [{:keys [tms] :as st} d x]
-  (let [[in own] (believed-set st d true #{} x)]
-    (if (or (= ::all in) (not own) (and (contains? in x) (jtms/in? tms x)))
-      (or (= ::all in) (contains? in d))
-      (believed-in st d true))))
 
 (defn defeat-hidden-fn
   "A predicate `(fn [handle])` answering whether `ctx` reads `handle`, IN in the network, as
@@ -1203,17 +1404,79 @@
     (by-content recs (into (filterv #(in-force? st %) (reads/as-stored-naming idx sx/defeat-functor handle up))
                            (conflicts-naming st handle)))))
 
+(defn- roster-at
+  "`roster-state` at `ctx` outside a read walk: over the unscoped ancestor set, as
+  `reader-state` reads it, since which declarations a reader sees is read as the excepts
+  it sees are (`excepts-seen`), and with the excepts in force there."
+  [kb ctx]
+  (let [tax (reasoning/taxonomy kb)]
+    (roster-state kb tax (reasoning/tms kb)
+                  (if (sx/variable? ctx) #{} (tax/context-up-global tax ctx))
+                  (when-not (sx/variable? ctx) (except-hidden-fn kb ctx)))))
+
+(defn roster-hidden-own-fn
+  "A predicate `(fn [h])` answering whether the declared roster alone hides the handle `h`
+  at its own context: a denial inert there (`roster-inert?`), or a handle with no premise
+  mark every justification of which is a firing void there (`roster-void`); or nil when
+  no declaration off the global roster is stored.  A justification the network holds void
+  (`:void`) counts for neither side.  Both read the roster and `h`'s
+  justifications only, so the answer is the same before and after a write that moves no
+  declaration and removes none of `h`'s justifications.  The reader state of each context
+  is kept for the predicate's lifetime."
+  [kb]
+  (let [tax (reasoning/taxonomy kb)]
+    (when (seq (decide/declared tax))
+      (let [tms  (reasoning/tms kb)
+            recs (:records kb)
+            sts  (volatile! {})
+            at   (fn [c] (or (get @sts c)
+                             (let [st {:recs recs :tax tax :tms tms :idx (:index kb) :roster (roster-at kb c)}]
+                               (vswap! sts assoc c st)
+                               st)))]
+        (fn [h]
+          (boolean
+           (when-let [c (:context (p/get-sentex recs h))]
+             (let [st (at c)]
+               (or (roster-inert? st h)
+                   (and (not (jtms/premise? tms h))
+                        (let [js (remove #(jtms/forced? tms :void %) (jtms/supports tms h))]
+                          (and (seq js) (= (count js) (count (roster-void st h)))))))))))))))
+
 (defn verdict-at-reader
   "`decide/verdict` over the placed nogood `members` as `ctx` reads it (`verdict-at`): the
   network's classes, or those `ctx`'s excepts leave; the network's verdict when the walk
-  reads nothing at `ctx` (`reader-state`)."
+  reads nothing at `ctx` (`reader-state`), over the roster `ctx` reads (`roster-state`)."
   [kb members ctx]
   (if-let [st (reader-state kb ctx)]
     (verdict-at st members)
-    (let [tms (reasoning/tms kb) recs (:records kb) tax (reasoning/taxonomy kb)]
+    (let [tms (reasoning/tms kb)]
       (decide/verdict #(or (jtms/defeat-class tms %) :default)
-                      #(boolean (some->> (p/get-sentex recs %) :sentence (decide/roster-literal? tax)))
+                      (roster-member-fn {:recs (:records kb) :tax (reasoning/taxonomy kb)
+                                         :roster (roster-at kb ctx)})
                       members))))
+
+(defn roster-inert-at?
+  "Is the handle `h`, IN in the network, a denial `ctx` reads as inert: the denial of a
+  literal on the roster by a declaration `ctx` sees (`roster-state`)?"
+  [kb h ctx]
+  (let [tax (reasoning/taxonomy kb)]
+    (boolean (and (jtms/in? (reasoning/tms kb) h) (seq (decide/declared tax))
+                  (roster-inert? {:recs (:records kb) :tax tax :roster (roster-at kb ctx)} h)))))
+
+(defn roster-reading
+  "The roster reading `(fn [kind pred])` of `ctx` (`roster-state`'s `:on?`)."
+  [kb ctx]
+  (:on? (roster-at kb ctx)))
+
+(defn roster-void-at
+  "The ids of the justifications of `h` that `ctx` reads void (`roster-void`): rule
+  firings the network holds valid through a declaration `ctx` does not see."
+  [kb h ctx]
+  (let [tax (reasoning/taxonomy kb)]
+    (when (seq (decide/declared tax))
+      (roster-void {:tms (reasoning/tms kb) :recs (:records kb) :idx (:index kb) :tax tax
+                    :roster (roster-at kb ctx)}
+                   h))))
 
 (defn defeat-member-sets
   "The member sets of the placed nogoods whose `defeat` is the handle `d`, one per nogood

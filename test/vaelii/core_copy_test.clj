@@ -3,10 +3,10 @@
 (ns vaelii.core-copy-test
   "`tu/load-core!` produces the KB `core-context/load-into` produces.
 
-  The suite's `neutral-fresh` fixtures restore CxCore from an export dump built once per
-  JVM instead of re-asserting it, because `load-into` runs the whole `CxCore.txt` through
-  the full write path on every fresh core KB — `tu/core-context-dump` states why.  That
-  trade is only sound while the two routes agree, and nothing else in the suite would
+  The suite's `neutral-fresh` fixtures restore the upper layer from an export dump built
+  once per JVM instead of re-asserting it, because `load-into` runs every `kb/upper/` file
+  through the full write path on every fresh vocabulary KB — `tu/core-context-dump` states
+  why.  That trade is only sound while the two routes agree, and nothing else in the suite would
   notice them diverging: a namespace loading a subtly different baseline still passes its
   own tests, and the difference surfaces later as a test that fails for a reason nobody
   can place.
@@ -15,10 +15,7 @@
   sentences with their contexts, truth and strength, what is believed, the taxonomy
   closures, and the justification graph.  Content, never handles: a handle is minted in
   assertion order and `import!` preserves the dump's, so comparing them would pin
-  something no caller may depend on (README, \"Order independence\").  The
-  `(genlCx CxUniverse CxCore)` edge `load-into` wires before the file is the case this
-  most has to catch: it is asserted first for an ordering reason, and a recovered belief
-  state that did not reproduce it would be a diverged baseline.
+  something no caller may depend on (README, \"Order independence\").
 
   ## On failure
 
@@ -60,7 +57,7 @@
           (v/handles kb))))
 
 (defn- taxonomy-content
-  "The two cached closures a reader sees: the type hierarchy and the context spindle."
+  "The two cached closures a reader sees: the type hierarchy and the context hierarchy."
   [kb]
   (let [t (reasoning/taxonomy kb)]
     {:types    (into {} (for [x (tax/types t)]    [x (set (tax/genls-global t x))]))

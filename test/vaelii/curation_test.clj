@@ -3,7 +3,7 @@
 (ns vaelii.curation-test
   "KB-curation vocabulary.
 
-  Two families, both declared in CxCore beside `comment`:
+  Two families, both declared in CxUniverse beside `comment`:
 
     * cross-reference — `seeAlso`, a directional binary predicate relating two terms,
       alongside `termsRelated`, a symmetric variable-arity grouping for a reader.
@@ -32,7 +32,7 @@
     (is (string? (first (core-context/comment-of kb term))))))
 
 (tu/deftest-kb see-also-is-a-directional-binary-predicate
-  (is (v/ask? kb '(binary_predicate seeAlso) 'CxCore) "seeAlso is a binary predicate")
+  (is (v/ask? kb '(binary_predicate seeAlso) 'CxUniverse) "seeAlso is a binary predicate")
   (is (not (v/has-prop? kb :symmetric 'seeAlso))
       "and NOT symmetric — a 'see also' points one way; the reverse is a separate assertion"))
 
@@ -51,8 +51,7 @@
 ;; truth-agnostic and carries no such obligation.
 
 (defn- scratch
-  "A context below CxUniverse (which sees CxCore in a core-only KB), taken away by the
-  neutral fixture."
+  "A context below CxUniverse, taken away by the neutral fixture."
   [kb]
   (let [c (tu/fresh-term :context :Curation)]
     (v/assert kb (list 'genlCx c 'CxUniverse) 'CxUniverse)
@@ -63,14 +62,14 @@
 (tu/deftest-kb example-vocab-is-documented-and-target-following
   (doseq [term '[positiveExample negativeExample borderlineExample]]
     (is (= 1 (count (core-context/comment-of kb term))) (str "comment for " term))
-    (is (v/ask? kb (list 'binary_predicate term) 'CxCore) (str term " is binary"))
+    (is (v/ask? kb (list 'binary_predicate term) 'CxUniverse) (str term " is binary"))
     (is (v/has-prop? kb :target-following term)
         (str term " names its target sentex by handle and does not outlive it"))))
 
 (tu/deftest-kb the-example-family-is-grouped-by-termsRelated
   (is (seq (v/sentexes-matching
-            kb '(termsRelated positiveExample negativeExample borderlineExample) 'CxCore))
-      "the three example predicates are asserted one termsRelated family in CxCore"))
+            kb '(termsRelated positiveExample negativeExample borderlineExample) 'CxUniverse))
+      "the three example predicates are asserted one termsRelated family in CxUniverse"))
 
 ;; ---- a positive example names a provable sentex --------------------------
 
@@ -201,7 +200,7 @@
 (tu/deftest-kb kb-has-integrity
   ;; The KB-integrity umbrella.  Examples retain their independent oracle above; the
   ;; public sweep composes the declared-population audit with the bounded query-only
-  ;; definition check.  These are known ground candidates exercised by CxCore's numeric
+  ;; definition check.  These are known ground candidates exercised by CxUniverse's numeric
   ;; definitions, not a request for the query engine to enumerate a domain.
   (every-believed-example-holds-as-stated)
   (let [report (v/kb-integrity kb #{-212 0 212} 'CxUniverse)]

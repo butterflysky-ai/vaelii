@@ -786,7 +786,7 @@
   (tu/with-terms [tangible_like intangible_like]
     (let [cover (list 'partition 'thing tangible_like intangible_like)
           orth  (list 'siblingDisjointException tangible_like intangible_like)]
-      ;; the bare test KB has no CxCore, so its edge is asserted here to stand in for it
+      ;; the bare test KB loads no upper layer, so core.txt's edge is asserted here in its place
       (v/assert kb '(genl siblingDisjointException orthogonal) 'CxUniverse)
       (v/assert kb cover 'CxUniverse)
       (v/assert kb orth 'CxUniverse)
@@ -1483,18 +1483,21 @@
                                                   {:categories #{:undeclared-arity}})))))
 
 (tu/deftest-kb a-genl-node-with-no-arity-is-reported
-  (tu/with-terms [stray_kind placed_kind]
+  (tu/with-terms [stray_kind loose_kind placed_kind below_kind]
     (v/assert kb (list 'unary_predicate placed_kind) 'CxUniverse)
-    (v/assert kb (list 'genl stray_kind placed_kind) 'CxUniverse)
+    (v/assert kb (list 'genl below_kind placed_kind) 'CxUniverse)
+    (v/assert kb (list 'genl stray_kind loose_kind) 'CxUniverse)
     (let [before (state-snapshot kb)
           report (v/kb-integrity kb #{} 'CxUniverse {:categories #{:undeclared-arity}})]
       (is (= :gap (:status report)))
-      (is (= [{:term stray_kind}] (:undeclared-arity report))
-          "the declared supertype is not a finding, and the undeclared subtype is")
+      (is (= (mapv (fn [t] {:term t}) (sort-by nm/print-key [loose_kind stray_kind]))
+             (:undeclared-arity report))
+          "a subtype inherits its supertype's length, and both ends of an edge no length binds are findings")
       (is (= before (state-snapshot kb)) "the audit stores, believes and files nothing"))))
 
 (tu/deftest-kb a-genl-node-with-a-declared-arity-is-not-reported
-  (tu/with-terms [typed_kind upper_kind linksX relatesX listsX gathersX arityX aritiesX]
+  (tu/with-terms [typed_kind upper_kind linksX relatesX listsX gathersX arityX aritiesX
+                  relP relQ Xa Xb Xc]
     (v/assert kb (list 'unary_predicate typed_kind) 'CxUniverse)
     (v/assert kb (list 'unary_predicate upper_kind) 'CxUniverse)
     (v/assert kb (list 'genl typed_kind upper_kind) 'CxUniverse)
@@ -1507,27 +1510,34 @@
     (v/assert kb (list 'arity arityX 3) 'CxUniverse)
     (v/assert kb (list 'arity aritiesX 3) 'CxUniverse)
     (v/assert kb (list 'genl arityX aritiesX) 'CxUniverse)
+    (v/assert kb (list 'arity relQ 2) 'CxUniverse)
+    (v/assert kb (list 'genl relP relQ) 'CxUniverse)
+    (v/assert kb (list relP Xa Xb Xc) 'CxUniverse)
     (is (= [] (undeclared kb))
         "a unary_predicate, a binary_predicate, a variable_arity and an (arity P n)
-         declaration each state an arity")))
+         declaration each state an arity, and relP inherits relQ's")))
 
-(tu/deftest-kb undeclared-arity-findings-respect-context-visibility
-  (tu/with-terms [CxHidden stray_kind placed_kind]
+(tu/deftest-kb undeclared-arity-reads-the-edges-a-context-sees-and-an-arity-stated-anywhere
+  (tu/with-terms [CxHidden stray_kind placed_kind hidden_kind loose_kind chainOf relatedTo]
     (v/assert kb (list 'genlCx CxHidden 'CxUniverse) 'CxUniverse)
-    (v/assert kb (list 'unary_predicate placed_kind) 'CxUniverse)
     (v/assert kb (list 'genl stray_kind placed_kind) 'CxUniverse)
     (v/assert kb (list 'unary_predicate stray_kind) CxHidden)
-    (is (= [stray_kind] (undeclared kb)) "a declaration below the audit context is not seen")
-    (is (= [] (undeclared kb CxHidden)))))
+    (v/assert kb (list 'unary_predicate placed_kind) CxHidden)
+    (v/assert kb (list 'genl hidden_kind loose_kind) CxHidden)
+    (v/assert kb (list 'genl chainOf relatedTo) 'CxUniverse)
+    (v/assert kb (list 'variable_arity chainOf) CxHidden)
+    (v/assert kb (list 'variable_arity relatedTo) CxHidden)
+    (is (= [] (undeclared kb))
+        "an arity or a variable_arity stated below declares the node at CxUniverse, which sees no hidden_kind edge")
+    (is (= (sort-by nm/print-key [hidden_kind loose_kind]) (undeclared kb CxHidden)))))
 
 (tu/deftest-kb undeclared-arity-findings-truncate-under-every-bound
-  (tu/with-terms [one_kind two_kind placed_kind]
-    (v/assert kb (list 'unary_predicate placed_kind) 'CxUniverse)
+  (tu/with-terms [one_kind two_kind loose_kind]
     (doseq [k [one_kind two_kind]]
-      (v/assert kb (list 'genl k placed_kind) 'CxUniverse))
+      (v/assert kb (list 'genl k loose_kind) 'CxUniverse))
     (let [run      #(v/kb-integrity kb #{} 'CxUniverse
                                     (assoc % :categories #{:undeclared-arity}))
-          in-order (mapv (fn [t] {:term t}) (sort-by nm/print-key [one_kind two_kind]))]
+          in-order (mapv (fn [t] {:term t}) (sort-by nm/print-key [one_kind two_kind loose_kind]))]
       (is (= in-order (:undeclared-arity (run {}))))
       (testing "a result cap below the finding count keeps the completed prefix"
         (let [report (run {:max-results 1})]

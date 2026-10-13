@@ -13,7 +13,7 @@
   Two arms, and the second is the one that needs saying: a position is type-level when a
   `genlArg` names it **or** when its predicate is a `type_relation_predicate`, which says
   it of every position at once.  That second half is what constrains `genl`'s second
-  argument, the one position in CxCore's schema carrying no declaration of its own."
+  argument, the one position in CxUniverse's schema carrying no declaration of its own."
   (:require [clojure.test :refer [is testing use-fixtures]]
             [vaelii.core :as v]
             [vaelii.test-util :as tu]))
@@ -149,7 +149,7 @@
       (is (= :arg-variable (ex-type #(v/assert kb form 'CxUniverse)))))))
 
 (tu/deftest-kb the-shipped-schema-refuses-a-function-fed-into-a-type-slot
-  ;; The second half of CxCore's "A function is a relation, and is not a predicate", as a
+  ;; The second half of CxUniverse's "A function is a relation, and is not a predicate", as a
   ;; fact rather than as prose — derived from the partition of `relation`, not stated.  Every type is a unary_predicate,
   ;; so a type-level position asks for a predicate, and the three declarations that
   ;; name a function-valued argument all meet `genl` on a variable no term can fill.
@@ -347,8 +347,8 @@
   ;; about.
   (testing "an inert variadic rule checks clean"
     (is (= [] (v/check kb '(set/inertRule
-                            (implies (?pred . ?args) (holdsIn CxCore (?pred . ?args))))
-                       'CxCore))))
+                            (implies (?pred . ?args) (holdsIn CxUniverse (?pred . ?args))))
+                       'CxUniverse))))
   (testing "a bare variadic rule keeps its OWN refusal and loses only the spurious one"
     ;; :not-indexable is the right refusal for a variable functor in an antecedent, and
     ;; it stands; what goes is the :arg-variable clash read off other predicates

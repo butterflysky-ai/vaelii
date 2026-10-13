@@ -1,9 +1,5 @@
-;; CxSociety — social relations among persons: likes, marriedTo, owns.
-;; Sees CxCore; CxUniverse sees it, so any relation here is visible
-;; from every context.
-
-(genlCx CxSociety CxCore)
-(genlCx CxUniverse CxSociety)
+;; society.txt — social relations among persons: likes, marriedTo, owns.
+;; Loaded into CxUniverse with the rest of kb/upper/.
 
 (comment friendOf
          "(friendOf ?person1 ?person2) means that ?person1 and ?person2 are friends. Declared symmetric, so one assertion answers both orders and the mirrored spelling stores as the same sentex. A rule carries it to knows, so friendship entails acquaintance and never the other way about.")

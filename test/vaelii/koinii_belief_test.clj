@@ -15,9 +15,8 @@
   (:import (clojure.lang ExceptionInfo)))
 
 (defn- belief-kb
-  "A fresh CxCore KB, restored by `tu/load-core!` — CxCore carries the `believes`
-  modal_predicate grant, and its load wires `(genlCx CxUniverse CxCore)` so a modal goal
-  asked from CxUniverse is recognized."
+  "A fresh vocabulary KB, restored by `tu/load-core!`: CxUniverse carries the `believes`
+  modal_predicate grant, so a modal goal asked from CxUniverse is recognized."
   []
   (tu/load-core! (tu/fresh)))
 

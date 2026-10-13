@@ -127,8 +127,8 @@
 ;; ---- registration: the table is open, and closed by default --------------
 
 (tu/deftest-kb a-second-modal-predicate-registered-at-runtime-projects-identically
-  ;; before registration, `knows` is an ordinary predicate — not projected
-  (v/assert kb '(binary_predicate knows) 'CxUniverse)
+  ;; before registration, `knows` is an ordinary predicate — not projected.  The starter's
+  ;; `(binary_predicate knows)` has a copy in CxUniverse, which every context sees.
   (believe! kb 'Alice '(dreamsOf Alice Wonderland))
   (is (not (applies? kb '(knows Alice (dreamsOf Alice Wonderland))
                      "BeliefProjectionProver"))
@@ -216,10 +216,10 @@
     (is (not (v/ask? kb '(believes Cara (runs Bolt)) ask-ctx))))
   (testing "retracting the modal_predicate grant ends projection for that predicate"
     (v/assert kb '(binary_predicate hopes) 'CxUniverse)
-    (v/register-modal-predicate kb 'hopes)            ; granted in CxCore
+    (v/register-modal-predicate kb 'hopes)            ; granted in CxUniverse
     (believe! kb 'Cara '(wins Race))
     (is (runs? kb '(hopes Cara (wins Race)) "BeliefProjectionProver"))
-    (v/retract! kb (v/handle-of kb '(modal_predicate hopes) 'CxCore))
+    (v/retract! kb (v/handle-of kb '(modal_predicate hopes) 'CxUniverse))
     (is (not (applies? kb '(hopes Cara (wins Race)) "BeliefProjectionProver")))))
 
 ;; ---- nested belief: only where the marker is visible --------------------
@@ -227,11 +227,11 @@
 (tu/deftest-kb nested-belief-projects-only-where-the-grant-is-visible
   (v/assert kb '(purrs Cat) (modal/context-of-agent 'Bob))
   (let [nested '(believes Alice (believes Bob (purrs Cat)))]
-    (testing "by default Alice's context is independent and cannot see the CxCore grant,
+    (testing "by default Alice's context is independent and cannot see the CxUniverse grant,
               so the inner (believes …) is read as a plain literal — false, no recursion"
       (is (not (v/ask? kb nested ask-ctx))))
     (testing "once Alice's context sees the grant, the nesting projects through"
-      (v/assert kb (list 'genlCx (modal/context-of-agent 'Alice) 'CxCore) 'CxUniverse)
+      (v/assert kb (list 'genlCx (modal/context-of-agent 'Alice) 'CxUniverse) 'CxUniverse)
       (is (v/ask? kb nested ask-ctx)))))
 
 ;; ---- the prover's declared cost, and graceful non-claims ----------------
@@ -258,8 +258,7 @@
   ;; the running one answered: a restart changing an answer.  Covers both the shipped
   ;; `believes` grant and a runtime-registered one.
   (believe! kb 'Alice '(flies Tweety))
-  (v/assert kb '(binary_predicate knows) 'CxUniverse)
-  (v/register-modal-predicate kb 'knows)                  ; a runtime grant, stored in CxCore
+  (v/register-modal-predicate kb 'knows)                  ; a runtime grant, stored in CxUniverse
   (believe! kb 'Alice '(dreamsOf Alice Wonderland))
   (testing "both the shipped and the runtime grant project before the rebuild"
     (is (runs? kb '(believes Alice (flies Tweety)) "BeliefProjectionProver"))

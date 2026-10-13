@@ -699,7 +699,8 @@
 (defn relation?
   "Is `term` a relation of two or more places by what the KB stores of it, visible from
   `context` (default `?ctx`, every context): an `(arity P n)` declaration or exact-arity
-  class membership of two or more, or a `variable_arity` membership."
+  class membership of two or more, or a `variable_arity` membership, or, where none of
+  these answers, a length of two or more inherited through `genl`."
   ([conn term] (c/relation? conn term))
   ([conn term context] (c/relation? conn term context)))
 
@@ -841,7 +842,7 @@
   ([conn context] (c/types conn context)))
 
 (defn vocabulary-audit
-  "Every term `CxCore` declares in `kb`, classified — `{:enforced [[term why] …] :inert
+  "Every term core.txt comments in `kb`, classified — `{:enforced [[term why] …] :inert
   [[term why] …] :unclassified [term …] :retired [term …] :contradicted [term …]}`."
   [conn]
   (c/vocabulary-audit conn))

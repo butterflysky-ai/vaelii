@@ -7,17 +7,16 @@
             [vaelii.host.starter :as starter]
             [vaelii.impl.decide :as decide]
             [vaelii.impl.kb :as kb]
+            [vaelii.impl.predicates :as predicates]
             [vaelii.test-util :as tu]))
 
 (use-fixtures :once (tu/loaded starter/load-into))
 (use-fixtures :each (tu/neutral))
 
 (defn- arity-of
-  "The arity every reader outside the check reads for `pred` from `context`
-  (`kb/relation-arity`): its `(arity P n)` declaration, else its exact-arity class
-  membership."
-  [kb pred context]
-  (kb/relation-arity kb pred context))
+  "The exact length that binds `pred` (`kb/relation-arity`)."
+  [kb pred]
+  (kb/relation-arity kb pred))
 
 (tu/deftest-kb relation-is-the-common-parent
   (is (v/genl? kb 'predicate 'relation))
@@ -30,7 +29,7 @@
   (doseq [mapping '[relationTypeByArity predicateTypeByArity functionTypeByArity]]
     (is (v/isa? kb mapping 'binary_predicate))
     (is (not (v/isa? kb mapping 'unary_predicate)))
-    (is (= 2 (arity-of kb mapping 'CxCore))))
+    (is (= 2 (arity-of kb mapping))))
   (doseq [type '[thing animal tangible fixed_arity]]
     (is (v/isa? kb type 'unary_predicate)))
   (is (v/genl? kb 'predicateTypeByArity 'relationTypeByArity))
@@ -42,25 +41,25 @@
   ;; concludes an arity from a class, since arity is on the forced-monotonic roster.
   (doseq [mapping-first? [true false]]
     (tu/with-terms [four_place_relation classifiedRelation exactOnlyRelation]
-      (v/assert kb (list 'genl four_place_relation 'fixed_arity) 'CxCore)
+      (v/assert kb (list 'genl four_place_relation 'fixed_arity) 'CxUniverse)
       (let [mapping (list 'relationTypeByArity four_place_relation 4)
             member  (list four_place_relation classifiedRelation)
             h       (if mapping-first?
-                      (let [h (v/assert kb mapping 'CxCore)]
-                        (v/assert kb member 'CxCore)
+                      (let [h (v/assert kb mapping 'CxUniverse)]
+                        (v/assert kb member 'CxUniverse)
                         h)
-                      (do (v/assert kb member 'CxCore)
-                          (v/assert kb mapping 'CxCore)))
-            exact   (v/assert kb (list 'arity exactOnlyRelation 4) 'CxCore)]
+                      (do (v/assert kb member 'CxUniverse)
+                          (v/assert kb mapping 'CxUniverse)))
+            exact   (v/assert kb (list 'arity exactOnlyRelation 4) 'CxUniverse)]
         (testing "the arity concludes the class, and the class concludes no arity"
-          (is (v/ask? kb (list four_place_relation exactOnlyRelation) 'CxCore))
-          (is (empty? (v/sentexes-matching kb (list 'arity classifiedRelation '?n) 'CxCore))))
+          (is (v/ask? kb (list four_place_relation exactOnlyRelation) 'CxUniverse))
+          (is (empty? (v/sentexes-matching kb (list 'arity classifiedRelation '?n) 'CxUniverse))))
         (testing "and the class rests on the mapping fact"
           (v/retract! kb h)
-          (is (v/ask? kb member 'CxCore) "the asserted membership stands")
-          (is (v/ask? kb (list 'arity exactOnlyRelation 4) 'CxCore)
+          (is (v/ask? kb member 'CxUniverse) "the asserted membership stands")
+          (is (v/ask? kb (list 'arity exactOnlyRelation 4) 'CxUniverse)
               "the asserted arity stands")
-          (is (not (v/ask? kb (list four_place_relation exactOnlyRelation) 'CxCore))
+          (is (not (v/ask? kb (list four_place_relation exactOnlyRelation) 'CxUniverse))
               "while the class it derived goes with the rule that derived it"))
         (v/retract! kb exact)))))
 
@@ -78,23 +77,23 @@
   (testing "the class is the premise"
     (tu/with-terms [chainOf]
       (let [h (v/assert kb (list 'binary chainOf) 'CxUniverse)]
-        (is (= 2 (arity-of kb chainOf 'CxUniverse)))
+        (is (= 2 (arity-of kb chainOf)))
         (is (empty? (v/sentexes-matching kb (list 'arity chainOf '?n) 'CxUniverse)))
         (v/retract! kb h)
-        (is (nil? (arity-of kb chainOf 'CxUniverse)))
+        (is (nil? (arity-of kb chainOf)))
         (is (not (v/isa? kb chainOf 'binary))))))
   (testing "an arity no class maps to concludes no class at all"
-    (is (v/ask? kb '(arity InstantFn 6) 'CxTime))
+    (is (v/ask? kb '(arity InstantFn 6) 'CxUniverse))
     (doseq [type '[unary binary ternary]]
       (is (not (v/isa? kb 'InstantFn type))))))
 
 (tu/deftest-kb exact-arity-and-variable-floors-are-distinct
   (testing "an exact declaration is fixed, not an overloaded floor"
-    (is (v/ask? kb '(fixed_arity interArg) 'CxCore))
-    (is (not (v/ask? kb '(arityMin interArg 5) 'CxCore))))
+    (is (v/ask? kb '(fixed_arity interArg) 'CxUniverse))
+    (is (not (v/ask? kb '(arityMin interArg 5) 'CxUniverse))))
   (testing "the four current variable-arity predicates state only their lower bounds"
     (doseq [relation '[functionCorrespondingPredicate greaterThan lessThan termsRelated]]
-      (is (some? (v/handle-of kb (list 'arityMin relation 2) 'CxCore))
+      (is (some? (v/handle-of kb (list 'arityMin relation 2) 'CxUniverse))
           (str relation " has an asserted minimum"))
       (is (not (v/isa? kb relation 'binary_predicate))
           (str relation " is not overloaded as exactly binary")))))
@@ -104,10 +103,10 @@
   ;; their genl edges to unary / binary / ternary, and a per-member fact would stamp a
   ;; rule classifying a function of that arity as a predicate.
   (doseq [[type arity] '[[unary 1] [binary 2] [ternary 3]]]
-    (is (v/ask? kb (list 'relationTypeByArity type arity) 'CxCore)))
+    (is (v/ask? kb (list 'relationTypeByArity type arity) 'CxUniverse)))
   (doseq [type '[unary_predicate binary_predicate ternary_predicate
                  unary_function binary_function ternary_function]]
-    (is (empty? (v/sentexes-matching kb (list 'relationTypeByArity type '?arity) 'CxCore))
+    (is (empty? (v/sentexes-matching kb (list 'relationTypeByArity type '?arity) 'CxUniverse))
         (str type " is mapped by its genl edge rather than by a fact of its own")))
   (is (v/genl? kb 'predicateTypeByArity 'relationTypeByArity)
       "the specialization stays declared for a KB that maps an unshipped arity")
@@ -149,8 +148,8 @@
     ;; declaration below the policy classes — (arg fixed_arity_predicate 1 predicate) —
     ;; is what makes it: a relation whose only stated type is variable_arity reaches
     ;; relation and not predicate, so the exact class would be convicted for the
-    ;; argument's type rather than for the policy it contradicts.  CxCore declares the position on
-    ;; fixed_arity and variable_arity alone for that reason.
+    ;; argument's type rather than for the policy it contradicts.  CxUniverse declares the
+    ;; position on fixed_arity and variable_arity alone for that reason.
     (doseq [[first-class second-class] '[[variable_arity binary_predicate]
                                          [binary_predicate variable_arity]
                                          [variable_arity_predicate unary_predicate]
@@ -247,27 +246,34 @@
   ;; variable-arity mark — not from a finite rule set — so the declared vocabulary now
   ;; carries an answer.
   (is (v/isa? kb 'admitsArgnum 'binary_predicate))
-  (is (v/ask? kb '(arg admitsArgnum 1 relation) 'CxCore))
-  (is (v/ask? kb '(arg admitsArgnum 2 positive_integer) 'CxCore))
+  (is (v/ask? kb '(arg admitsArgnum 1 relation) 'CxUniverse))
+  (is (v/ask? kb '(arg admitsArgnum 2 positive_integer) 'CxUniverse))
   (testing "a fixed-arity relation admits one through its arity and no higher position"
     (tu/with-terms [ternaryRel]
-      (v/assert kb (list 'ternary_predicate ternaryRel) 'CxCore)
+      (v/assert kb (list 'ternary_predicate ternaryRel) 'CxUniverse)
       (doseq [n [1 2 3]]
-        (is (v/ask? kb (list 'admitsArgnum ternaryRel n) 'CxCore)
+        (is (v/ask? kb (list 'admitsArgnum ternaryRel n) 'CxUniverse)
             (str "position " n " is admitted")))
-      (is (not (v/ask? kb (list 'admitsArgnum ternaryRel 4) 'CxCore))
+      (is (not (v/ask? kb (list 'admitsArgnum ternaryRel 4) 'CxUniverse))
           "the first position above the arity is not admitted")))
   (testing "a variable-arity relation admits its guaranteed positions and every higher one"
     (doseq [n [1 2 3 212]]                                ; lessThan is variable_arity, arityMin 2
-      (is (v/ask? kb (list 'admitsArgnum 'lessThan n) 'CxCore)
+      (is (v/ask? kb (list 'admitsArgnum 'lessThan n) 'CxUniverse)
           (str "variable-arity position " n " is admitted"))))
   (testing "zero and negative positions never admit"
-    (is (not (v/ask? kb '(admitsArgnum lessThan 0) 'CxCore)))
-    (is (not (v/ask? kb '(admitsArgnum lessThan -1) 'CxCore))))
+    (is (not (v/ask? kb '(admitsArgnum lessThan 0) 'CxUniverse)))
+    (is (not (v/ask? kb '(admitsArgnum lessThan -1) 'CxUniverse))))
+  (testing "a relation bound to no length of its own admits through the length it inherits"
+    (tu/with-terms [relP relQ Xa Xb Xc]
+      (v/assert kb (list 'arity relQ 2) 'CxUniverse)
+      (v/assert kb (list 'genl relP relQ) 'CxUniverse)
+      (let [t (v/assert kb (list relP Xa Xb Xc) 'CxUniverse)]
+        (is (= [true true false] (mapv #(v/ask? kb (list 'admitsArgnum relP %) 'CxUniverse) [1 2 3])))
+        (is (false? (v/believed? kb t 'CxUniverse)) "the three-place tuple breaks the length relQ binds"))))
   (testing "an unclassified relation's positions stay unknown, not admitted"
     (tu/with-terms [unknownRel]
-      (v/assert kb (list 'predicate unknownRel) 'CxCore)
-      (is (not (v/ask? kb (list 'admitsArgnum unknownRel 1) 'CxCore))
+      (v/assert kb (list 'predicate unknownRel) 'CxUniverse)
+      (is (not (v/ask? kb (list 'admitsArgnum unknownRel 1) 'CxUniverse))
           "open-world: no declared arity and no variable mark means no proven position"))))
 
 (tu/deftest-kb admits-argnum-and-the-position-census-answer-one-question
@@ -275,31 +281,40 @@
   ;; provers/admits-position?, so a position the constraint census refuses on a relation is
   ;; exactly one admitsArgnum does not prove, and one it allows is one admitsArgnum proves.
   (tu/with-terms [censusRel]
-    (v/assert kb (list 'ternary_predicate censusRel) 'CxCore)
+    (v/assert kb (list 'ternary_predicate censusRel) 'CxUniverse)
     (testing "a position within the arity: the census admits the constraint, the query proves it"
-      (is (v/assert kb (list 'arg censusRel 3 'thing) 'CxCore))
-      (is (v/ask? kb (list 'admitsArgnum censusRel 3) 'CxCore)))
+      (is (v/assert kb (list 'arg censusRel 3 'thing) 'CxUniverse))
+      (is (v/ask? kb (list 'admitsArgnum censusRel 3) 'CxUniverse)))
     (testing "a position past the arity: the census refuses the constraint, the query denies it"
-      (let [e (try (v/assert kb (list 'arg censusRel 4 'thing) 'CxCore) nil
+      (let [e (try (v/assert kb (list 'arg censusRel 4 'thing) 'CxUniverse) nil
                    (catch clojure.lang.ExceptionInfo e e))]
         (is (= :arg-position (:type (ex-data e)))
             "the constraint census refuses argument 4 of a ternary relation")
-        (is (not (v/ask? kb (list 'admitsArgnum censusRel 4) 'CxCore))
+        (is (not (v/ask? kb (list 'admitsArgnum censusRel 4) 'CxUniverse))
             "and admitsArgnum does not prove the position it refused")))))
 
 (tu/deftest-kb admits-argnum-parity-for-functions
   ;; a variable-arity function admits every positive position, like the predicate case; a
   ;; fixed-arity function alone invents no numeric arity, so its positions stay unknown.
   (tu/with-terms [ChainFn PlainFn]
-    (v/assert kb (list 'variable_arity_function ChainFn) 'CxCore)
-    (v/assert kb (list 'arityMin ChainFn 2) 'CxCore)
+    (v/assert kb (list 'variable_arity_function ChainFn) 'CxUniverse)
+    (v/assert kb (list 'arityMin ChainFn 2) 'CxUniverse)
     (testing "a variable-arity function admits every positive position"
       (doseq [n [1 2 3 9]]
-        (is (v/ask? kb (list 'admitsArgnum ChainFn n) 'CxCore))))
-    (v/assert kb (list 'fixed_arity_function PlainFn) 'CxCore)
+        (is (v/ask? kb (list 'admitsArgnum ChainFn n) 'CxUniverse))))
+    (v/assert kb (list 'fixed_arity_function PlainFn) 'CxUniverse)
     (testing "a fixed-arity function invents no numeric arity — its positions stay unknown"
-      (is (not (v/ask? kb (list 'admitsArgnum PlainFn 1) 'CxCore))
+      (is (not (v/ask? kb (list 'admitsArgnum PlainFn 1) 'CxUniverse))
           "the numeric arity table is predicate-specific, so a function has no proven position"))))
+
+(tu/deftest-kb admits-argnum-reads-a-variable-arity-release-stated-in-any-context
+  (tu/with-terms [CxBelow relP]
+    (v/assert kb (list 'genlCx CxBelow 'CxUniverse) 'CxUniverse)
+    (v/assert kb (list 'arity relP 2) 'CxUniverse {:strength :monotonic})
+    (v/assert kb (list 'variable_arity relP) CxBelow {:strength :monotonic})
+    (doseq [cx ['CxUniverse CxBelow]
+            n  [1 5]]
+      (is (v/ask? kb (list 'admitsArgnum relP n) cx) (str "position " n " at " cx)))))
 
 (tu/deftest-kb every-relation-has-exactly-one-arity-policy
   (let [relations  (->> (v/query kb '(relation ?relation) 'CxInference)
@@ -319,7 +334,7 @@
     (is (empty? violations)
         (str "relations outside the exactly-one arity-policy partition: "
              (pr-str violations)))
-    (is (some? (v/handle-of kb '(partition relation fixed_arity variable_arity) 'CxCore))
+    (is (some? (v/handle-of kb '(partition relation fixed_arity variable_arity) 'CxUniverse))
         "the partition is declared in KB data")))
 
 ;; ---- the declarations the merge added to the shipped functions ------------
@@ -330,17 +345,17 @@
   ;; `predicate`: a function could carry neither before.  Six is not a relation-wide
   ;; exact class, so `InstantFn` is `fixed_arity_function` by declaration and reaches no
   ;; `unary` / `binary` / `ternary`.
-  (is (v/ask? kb '(arity InstantFn 6) 'CxTime))
+  (is (v/ask? kb '(arity InstantFn 6) 'CxUniverse))
   (is (v/isa? kb 'InstantFn 'fixed_arity))
   (doseq [type '[unary binary ternary]]
     (is (not (v/isa? kb 'InstantFn type))
         (str "six arguments do not classify InstantFn as " type)))
   (doseq [position (range 1 7)]
-    (is (v/ask? kb (list 'arg 'InstantFn position 'integer) 'CxTime)
+    (is (v/ask? kb (list 'arg 'InstantFn position 'integer) 'CxUniverse)
         (str "field " position " is declared an integer")))
   (testing "and the ternary calendar constructor carries its class, not six arg rows"
     (is (v/isa? kb 'DayFn 'ternary_function))
-    (is (= 3 (arity-of kb 'DayFn 'CxTime)))))
+    (is (= 3 (arity-of kb 'DayFn)))))
 
 (tu/deftest-kb the-relation-wide-declarations-are-what-the-arity-nogoods-read
   ;; The vocabulary is not documentation: a reader decides a tuple against the arity these
@@ -358,7 +373,7 @@
       (is (v/ask? kb (list chainOf A B C) 'CxUniverse)))))
 
 (tu/deftest-kb a-monotonic-instance-relation-membership-binds-two-arguments
-  ;; CxCore's `(genl instance_relation_predicate binary_predicate)` is :monotonic, so the
+  ;; CxUniverse's `(genl instance_relation_predicate binary_predicate)` is :monotonic, so the
   ;; membership binds as `(binary_predicate P)` does; a :default one binds nothing
   (tu/with-terms [likesRel hatesRel A B C]
     (v/assert kb (list 'instance_relation_predicate likesRel) 'CxUniverse {:strength :monotonic})
@@ -366,9 +381,18 @@
     (is (tu/stored-in-clash? kb (list likesRel A B C) 'CxUniverse))
     (is (not (tu/stored-in-clash? kb (list hatesRel A B C) 'CxUniverse)))))
 
+(tu/deftest-kb the-shipped-disjoint-metatypes-bind-one-argument
+  ;; each is a `:monotonic` disjoint_metatype, which reaches unary_predicate through the
+  ;; `:monotonic` edges by at_least_metatype, so the position check refuses a second argument
+  (doseq [t '[type_type_by_order stuff_type_by_state_of_matter stuff_type_by_substance]]
+    (is (= 1 (arity-of kb t)) (str t)))
+  (is (= :arg-position
+         (:type (ex-data (try (v/assert kb '(arg type_type_by_order 2 thing) 'CxUniverse) nil
+                              (catch clojure.lang.ExceptionInfo e e)))))))
+
 (tu/deftest-kb the-ternary-floor-derives-and-withdraws-with-its-minimum
   ;; No shipped relation states a minimum above two, so the `at_least_ternary`
-  ;; rule fires on nothing in CxCore.  It is stated vocabulary either way, and this is
+  ;; rule fires on nothing in CxUniverse.  It is stated vocabulary either way, and this is
   ;; the case that reads it.
   (tu/with-terms [wideChainOf]
     (v/assert kb (list 'variable_arity_predicate wideChainOf) 'CxUniverse)
@@ -393,8 +417,24 @@
     (is (not (v/isa? kb chainOf 'binary)))
     (is (not (v/isa? kb chainOf 'fixed_arity))))
   (testing "and an exact arity does not become a minimum"
-    (is (empty? (v/sentexes-matching kb '(arityMin interArg ?n) 'CxCore)))
-    (is (v/ask? kb '(arity interArg 5) 'CxCore))))
+    (is (empty? (v/sentexes-matching kb '(arityMin interArg ?n) 'CxUniverse)))
+    (is (v/ask? kb '(arity interArg 5) 'CxUniverse))))
+
+(tu/deftest-kb every-engine-term-s-shape-states-the-length-the-shipped-kb-binds
+  ;; an engine term's length is its `:shape` and no KB binding moves it, so a shipped
+  ;; `arity` or `arityMin` the shape disagrees with states a length no reader applies
+  (let [stated (fn [p q] (into #{} (map #(nth (:sentence %) 2))
+                               (v/sentexes-matching kb (list p q '?n) '?ctx)))
+        off    (for [[q {:keys [shape]}] (sort-by (comp str first) predicates/entries)
+                     :when shape
+                     :let [n     (count (:args shape))
+                           tail? (boolean (or (:optional shape) (:variadic shape)))
+                           exact (stated 'arity q)
+                           floor (stated 'arityMin q)]
+                     :when (or (and (seq exact) (or tail? (not= #{n} exact)))
+                               (and (seq floor) (or (not tail?) (not= #{n} floor))))]
+                 [q shape exact floor])]
+    (is (= [] (vec off)))))
 
 ;; ---- order independence over the shipped generator ------------------------
 ;;
@@ -464,18 +504,18 @@
              (let [wide_arity (tu/tmp-type 'wide_arity)
                    chainOf    (tu/tmp-pred 'chainOf)
                    pairOf     (tu/tmp-pred 'pairOf)]
-               [{:genl      #(v/assert kb (list 'genl wide_arity 'fixed_arity) 'CxCore)
-                 :mapping   #(v/assert kb (list 'relationTypeByArity wide_arity 4) 'CxCore)
-                 :member    #(v/assert kb (list wide_arity chainOf) 'CxCore)
+               [{:genl      #(v/assert kb (list 'genl wide_arity 'fixed_arity) 'CxUniverse)
+                 :mapping   #(v/assert kb (list 'relationTypeByArity wide_arity 4) 'CxUniverse)
+                 :member    #(v/assert kb (list wide_arity chainOf) 'CxUniverse)
                  ;; the SAME arity the mapping fact names, so the converse rule has
                  ;; something to conclude from whenever it is stamped
-                 :unrelated #(v/assert kb (list 'arity pairOf 4) 'CxCore)}
+                 :unrelated #(v/assert kb (list 'arity pairOf 4) 'CxUniverse)}
                 (fn []
-                  {:derived-arity (v/ask? kb (list 'arity chainOf 4) 'CxCore)
+                  {:derived-arity (v/ask? kb (list 'arity chainOf 4) 'CxUniverse)
                    :derived-fixed (v/isa? kb chainOf 'fixed_arity)
                    :no-variable   (v/isa? kb chainOf 'variable_arity)
                    :unrelated-fixed (v/isa? kb pairOf 'fixed_arity)
-                   :converse      (v/ask? kb (list wide_arity pairOf) 'CxCore)
+                   :converse      (v/ask? kb (list wide_arity pairOf) 'CxUniverse)
                    :conflicts     (count (v/conflicts kb))})])))
          n)]
     (testing "and the one reading is the intended one"
@@ -508,18 +548,18 @@
                    chainOf    (tu/tmp-pred 'chainOf)
                    exactOf    (tu/tmp-pred 'exactOf)
                    handle     (volatile! nil)]
-               [{:genl    #(v/assert kb (list 'genl wide_arity 'fixed_arity) 'CxCore)
+               [{:genl    #(v/assert kb (list 'genl wide_arity 'fixed_arity) 'CxUniverse)
                  :mapping #(vreset! handle
                                     (v/assert kb (list 'relationTypeByArity wide_arity 4)
-                                              'CxCore))
+                                              'CxUniverse))
                  :unmap   #(v/retract! kb @handle)
-                 :member  #(v/assert kb (list wide_arity chainOf) 'CxCore)
-                 :exact   #(v/assert kb (list 'arity exactOf 4) 'CxCore)}
+                 :member  #(v/assert kb (list wide_arity chainOf) 'CxUniverse)
+                 :exact   #(v/assert kb (list 'arity exactOf 4) 'CxUniverse)}
                 (fn []
-                  {:member-stands (v/ask? kb (list wide_arity chainOf) 'CxCore)
-                   :arity-gone    (v/ask? kb (list 'arity chainOf 4) 'CxCore)
-                   :mapping-gone  (v/ask? kb (list 'relationTypeByArity wide_arity 4) 'CxCore)
-                   :exact-stands  (v/ask? kb (list 'arity exactOf 4) 'CxCore)
+                  {:member-stands (v/ask? kb (list wide_arity chainOf) 'CxUniverse)
+                   :arity-gone    (v/ask? kb (list 'arity chainOf 4) 'CxUniverse)
+                   :mapping-gone  (v/ask? kb (list 'relationTypeByArity wide_arity 4) 'CxUniverse)
+                   :exact-stands  (v/ask? kb (list 'arity exactOf 4) 'CxUniverse)
                    :conflicts     (count (v/conflicts kb))})]))))]
     (testing "the fact's conclusion goes with it, and nothing else does"
       (is (true? (:member-stands result)) "the membership was asserted and stands")
@@ -541,10 +581,10 @@
              [[:exact] [:class] [:kind] [:other]]
              (let [pairOf  (tu/tmp-pred 'pairOf)
                    chainOf (tu/tmp-pred 'chainOf)]
-               [{:exact #(v/assert kb (list 'arity pairOf 2) 'CxCore)
-                 :class #(v/assert kb (list 'binary_predicate pairOf) 'CxCore)
-                 :kind  #(v/assert kb (list 'instance_relation_predicate pairOf) 'CxCore)
-                 :other #(v/assert kb (list 'variable_arity_predicate chainOf) 'CxCore)}
+               [{:exact #(v/assert kb (list 'arity pairOf 2) 'CxUniverse)
+                 :class #(v/assert kb (list 'binary_predicate pairOf) 'CxUniverse)
+                 :kind  #(v/assert kb (list 'instance_relation_predicate pairOf) 'CxUniverse)
+                 :other #(v/assert kb (list 'variable_arity_predicate chainOf) 'CxUniverse)}
                 (fn []
                   {:fixed     (v/isa? kb pairOf 'fixed_arity)
                    :binary    (v/isa? kb pairOf 'binary)
@@ -558,7 +598,7 @@
                    ;; terms, so a reading that carried a name would differ 24 ways for
                    ;; the one reason this test is not about
                    :arity-rows (count (v/sentexes-matching kb (list 'arity pairOf '?n)
-                                                           'CxCore))
+                                                           'CxUniverse))
                    :conflicts (count (v/conflicts kb))})]))))]
     (testing "one arity, one policy, whichever spelling arrived first"
       (is (true? (:fixed result)))
@@ -575,7 +615,7 @@
 (tu/deftest-kb a-predicate-only-classification-is-order-independent-of-the-arity
   ;; The two spellings in both orders, compared on the whole closure rather than on an
   ;; acceptance.  `instance_relation_predicate` genls `binary_predicate`, so stating the
-  ;; mark supplies predicate-hood; CxCore therefore declares no argument position for it,
+  ;; mark supplies predicate-hood; CxUniverse therefore declares no argument position for it,
   ;; and the classification is accepted before the kind has been stated by any other
   ;; route.  A `(arg instance_relation_predicate 1 predicate)` row would demand its own
   ;; conclusion and refuse the arity-first order alone.
@@ -642,7 +682,7 @@
 
 (tu/deftest-kb an-arity-and-a-kind-do-not-derive-the-intersection
   ;; Every `genl` edge on the exact classes runs downward: a binary_predicate is binary
-  ;; and is a predicate, and nothing states the converse.  CxCore ships no
+  ;; and is a predicate, and nothing states the converse.  CxUniverse ships no
   ;; `(defnSufficient binary_predicate (and (arity ?x 2) (predicate ?x)))`, because
   ;; `(predicate ?x)` matches every class membership of every predicate by subsumption,
   ;; once per genl route between the two: the six of them cost 748 justifications and
@@ -654,8 +694,8 @@
   ;; constraint-only reading.
   (tu/with-entailing
     (tu/with-terms [pred2 fn2]
-      (v/assert kb (list 'predicate pred2) 'CxCore)
-      (v/assert kb (list 'arity pred2 2) 'CxCore)
+      (v/assert kb (list 'predicate pred2) 'CxUniverse)
+      (v/assert kb (list 'arity pred2 2) 'CxUniverse)
       (testing "the arity reaches the relation-wide class and the policy"
         (is (v/isa? kb pred2 'binary))
         (is (v/isa? kb pred2 'fixed_arity)))
@@ -664,13 +704,13 @@
         (is (not (v/isa? kb pred2 'fixed_arity_predicate)))
         (is (not (v/isa? kb pred2 'binary_function))))
       (testing "a function is in the same position"
-        (v/assert kb (list 'arity fn2 2) 'CxCore)
-        (v/assert kb (list 'function fn2) 'CxCore)
+        (v/assert kb (list 'arity fn2 2) 'CxUniverse)
+        (v/assert kb (list 'function fn2) 'CxUniverse)
         (is (v/isa? kb fn2 'binary))
         (is (not (v/isa? kb fn2 'binary_function)))))))
 
 (tu/deftest-kb every-exact-class-spelling-declares-the-arity-it-names
-  ;; `tax/exact-arity-classes` is the membership spelling of an arity, and CxCore
+  ;; `tax/exact-arity-classes` is the membership spelling of an arity, and CxUniverse
   ;; ships nine classes to write one in.  A reader reads each of them, so a wrong-length
   ;; fact is read OUT whichever spelling its author used — including the function ones,
   ;; which no `(arity R n)` sentex need accompany.
@@ -727,11 +767,12 @@
       (is (v/genl? kb mark 'binary_predicate) (str mark " is a binary_predicate"))
       (is (v/genl? kb mark 'binary))
       (is (v/genl? kb mark 'predicate))))
-  (testing "so the mark alone classifies a relation, with no separate arity declaration"
+  (testing "so a :monotonic mark alone binds a relation's length, with no separate arity declaration"
     (tu/with-terms [partOfSomething]
-      (v/assert kb (list 'instance_relation_predicate partOfSomething) 'CxUniverse)
+      (v/assert kb (list 'instance_relation_predicate partOfSomething) 'CxUniverse
+                {:strength :monotonic})
       (is (v/isa? kb partOfSomething 'binary_predicate))
-      (is (= 2 (arity-of kb partOfSomething 'CxUniverse)))
+      (is (= 2 (arity-of kb partOfSomething)))
       (is (v/isa? kb partOfSomething 'fixed_arity))))
   (testing "and every shipped member really is binary"
     (doseq [mark '[instance_relation_predicate type_relation_predicate]]
@@ -750,10 +791,10 @@
       (is (not (v/isa? kb relation 'instance_relation_predicate))
           (str relation " is not a two-place claim"))
       (is (not (v/isa? kb relation 'type_relation_predicate))))
-    (is (v/ask? kb '(arg lessThan 1 number) 'CxCore))
-    (is (v/ask? kb '(arg lessThan 2 number) 'CxCore))
+    (is (v/ask? kb '(arg lessThan 1 number) 'CxUniverse))
+    (is (v/ask? kb '(arg lessThan 2 number) 'CxUniverse))
     (doseq [position (range 1 6)]
-      (is (seq (v/sentexes-matching kb (list 'arg 'interArg position '?t) 'CxCore))
+      (is (seq (v/sentexes-matching kb (list 'arg 'interArg position '?t) 'CxUniverse))
           (str "interArg position " position " is declared")))))
 
 ;; ---- arityMin as an enforced floor, not documentary vocabulary -----------
@@ -763,43 +804,43 @@
   ;; arityMin states.  An application shorter than the minimum is an arity nogood, as a
   ;; fixed-arity relation's wrong length is; one at or above it is believed.
   (tu/with-terms [chainRel a b c]
-    (v/assert kb (list 'variable_arity_predicate chainRel) 'CxCore)
-    (let [floor (v/assert kb (list 'arityMin chainRel 2) 'CxCore)]
+    (v/assert kb (list 'variable_arity_predicate chainRel) 'CxUniverse)
+    (let [floor (v/assert kb (list 'arityMin chainRel 2) 'CxUniverse)]
       (testing "an application shorter than the minimum is read OUT"
-        (is (tu/stored-in-clash? kb (list chainRel a) 'CxCore)))
+        (is (tu/stored-in-clash? kb (list chainRel a) 'CxUniverse)))
       (testing "and a :monotonic one is a hard clash grounded on the arityMin declaration"
-        (let [h (v/assert kb (list chainRel b) 'CxCore {:strength :monotonic})
+        (let [h (v/assert kb (list chainRel b) 'CxUniverse {:strength :monotonic})
               r (first (filter #(contains? (:nogood %) h) (v/conflicts kb)))]
           (is (= [floor] (mapv :handle (:grounds r))))))
       (testing "an application at the minimum is believed"
-        (v/assert kb (list chainRel a b) 'CxCore)
-        (is (v/ask? kb (list chainRel a b) 'CxCore)))
+        (v/assert kb (list chainRel a b) 'CxUniverse)
+        (is (v/ask? kb (list chainRel a b) 'CxUniverse)))
       (testing "a longer application is believed"
-        (v/assert kb (list chainRel a b c) 'CxCore)
-        (is (v/ask? kb (list chainRel a b c) 'CxCore))))))
+        (v/assert kb (list chainRel a b c) 'CxUniverse)
+        (is (v/ask? kb (list chainRel a b c) 'CxUniverse))))))
 
 (tu/deftest-kb a-variable-arity-relation-with-no-minimum-keeps-its-exemption
   ;; The floor is the minimum's alone: a variable-arity relation the KB gives no arityMin
   ;; reads a chain of any length, including one argument, as it did before the minimum was
   ;; read.
   (tu/with-terms [freeRel a]
-    (v/assert kb (list 'variable_arity_predicate freeRel) 'CxCore)
-    (is (v/assert kb (list freeRel a) 'CxCore)
+    (v/assert kb (list 'variable_arity_predicate freeRel) 'CxUniverse)
+    (is (v/assert kb (list freeRel a) 'CxUniverse)
         "a one-argument application of an unfloored variable-arity relation is admitted")))
 
 (tu/deftest-kb a-late-minimum-takes-a-short-fact-stored-before-it-out
   ;; the floor is read at the reader, so the arrival order of the minimum and the short
   ;; application decides nothing
   (tu/with-terms [lateRel a]
-    (v/assert kb (list 'variable_arity_predicate lateRel) 'CxCore)
-    (v/assert kb (list lateRel a) 'CxCore)             ; one argument, no minimum yet
-    (is (v/ask? kb (list lateRel a) 'CxCore) "believed while nothing floors it")
-    (v/assert kb (list 'arityMin lateRel 2) 'CxCore)
-    (is (not (v/ask? kb (list lateRel a) 'CxCore))
+    (v/assert kb (list 'variable_arity_predicate lateRel) 'CxUniverse)
+    (v/assert kb (list lateRel a) 'CxUniverse)             ; one argument, no minimum yet
+    (is (v/ask? kb (list lateRel a) 'CxUniverse) "believed while nothing floors it")
+    (v/assert kb (list 'arityMin lateRel 2) 'CxUniverse)
+    (is (not (v/ask? kb (list lateRel a) 'CxUniverse))
         "and read OUT once the minimum arrives")))
 
 (defn- except-shape
-  "CxCore's `relationTypeByArity` rule derives `(unary rel)` from `(arity rel 1)`, both
+  "CxUniverse's `relationTypeByArity` rule derives `(unary rel)` from `(arity rel 1)`, both
   `:monotonic` in CxUniverse, and two `:default` binary tuples of `rel` sit in each of two
   readers below it, `hid` and `sib`; `hid` excepts the arity, which withdraws the derived
   membership there through the closure.  With `lo`, `(binary rel)`, `(genl lo rel)` and
@@ -852,8 +893,9 @@
   ;;   CxUniverse  (arity rel 2) monotonic
   ;;     └─ CxB    (rel Xa Xb Xc) default
   ;;          └─ CxV  (variable_arity rel)
-  ;; The tuple's nogood is placed at CxB, justified by the binding; CxV reads `rel` as
-  ;; variable-arity, which no length binds, so it believes the tuple.
+  ;; The tuple's nogood is placed at CxB, justified by the binding.  A relation's length
+  ;; reads the same at every context, so the `variable_arity` stated in CxV releases `rel`
+  ;; at CxB too.
   (tu/with-terms [rel Xa Xb Xc CxB CxV]
     (v/assert kb (list 'genlCx CxB 'CxUniverse) 'CxUniverse)
     (v/assert kb (list 'genlCx CxV CxB) 'CxUniverse)
@@ -869,14 +911,56 @@
           (is (contains? (set (mapcat :antecedents (v/supporting-justifications kb (:id c)))) bind))))
       (testing "no reader decides the tuple, and the defeat hides it at CxB"
         (is (false? (v/believed? kb t CxB))))
-      (testing "a reader that reads no length for the functor believes the tuple"
-        (v/assert kb (list 'variable_arity rel) CxV {:strength :monotonic})
-        (is (true? (v/believed? kb t CxV)))
-        (is (false? (v/believed? kb t CxB))))
+      (testing "a variable_arity stated below releases the functor at every context"
+        (let [va (v/assert kb (list 'variable_arity rel) CxV {:strength :monotonic})]
+          (is (true? (v/believed? kb t CxV)))
+          (is (true? (v/believed? kb t CxB)))
+          (v/retract! kb va)
+          (is (false? (v/believed? kb t CxB)))))
       (testing "retracting the binding takes the placed sentexes out"
         (v/retract! kb bind)
         (is (empty? (placed)))
         (is (true? (v/believed? kb t CxB)))))))
+
+(def ^:private unseen-binding-rows
+  "`[binding-strength order]`: the binding's strength and the arrival order of the three
+  writes in `a-binding-the-reader-does-not-see-convicts-its-tuple-through-its-copy`."
+  [[:monotonic [:edge :binding :tuple]]
+   [:monotonic [:tuple :edge :binding]]
+   [:default   [:edge :binding :tuple]]
+   [:default   [:tuple :edge :binding]]])
+
+(tu/deftest-kb a-binding-the-reader-does-not-see-convicts-its-tuple-through-its-copy
+  ;;   CxUniverse    (rel Xa Xb Xc) default
+  ;;     └─ CxWell
+  ;;          └─ CxA  (arity rel 2)
+  ;; CxUniverse does not see CxA, a data context below CxWell.  core.txt declares
+  ;; `(decontextualized_predicate arity)`, so the binding has a copy in CxUniverse, and the
+  ;; tuple is not believed there.
+  (doseq [[strength order] unseen-binding-rows]
+    (tu/with-terms [rel Xa Xb Xc CxA]
+      (let [tuple (list rel Xa Xb Xc)
+            ss    {:edge    #(v/assert kb (list 'genlCx CxA 'CxWell) 'CxUniverse)
+                   :binding #(v/assert kb (list 'arity rel 2) CxA {:strength strength})
+                   :tuple   #(v/assert kb tuple 'CxUniverse)}
+            hs    (into {} (map (fn [k] [k ((ss k))])) order)
+            row   [strength order]]
+        (is (some? (v/handle-of kb (list 'arity rel 2) 'CxUniverse)) (str row " the copy"))
+        (is (false? (v/believed? kb (:tuple hs) 'CxUniverse)) (str row))
+        (v/retract! kb (:binding hs))
+        (is (nil? (v/handle-of kb (list 'arity rel 2) 'CxUniverse))
+            (str row " retracting the binding removes the copy"))
+        (is (true? (v/believed? kb (:tuple hs) 'CxUniverse)) (str row))
+        (run! #(v/retract! kb (hs %)) [:tuple :edge]))))
+  (testing "a recover rebuilds the copy, and the tuple stays OUT at CxUniverse"
+    (tu/with-terms [rel Xa Xb Xc Xd CxA]
+      (let [hs [(v/assert kb (list 'genlCx CxA 'CxWell) 'CxUniverse)
+                (v/assert kb (list 'arity rel 2) CxA {:strength :monotonic})
+                (v/assert kb (list rel Xa Xb Xc) 'CxUniverse)]]
+        (is (= [false false false]
+               (mapv :loser (tu/recovered-readings kb false [(list rel Xa Xb Xc) 'CxUniverse]
+                                                   #(v/assert % (list rel Xa Xd) 'CxUniverse)))))
+        (run! #(v/retract! kb %) (rseq hs))))))
 
 (tu/deftest-kb a-second-length-unbinds-the-functor-and-an-except-of-it-binds-it-again
   ;;   CxUniverse  (arity rel 2) (arity rel 3) monotonic   (rel Xa Xb Xc Xd) default

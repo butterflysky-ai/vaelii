@@ -11,131 +11,95 @@
   sentence carrying an `implies` / `set/*Rule` / `exceptWhen` wrapper.
 
   **The format itself — reader and writer both — is `vaelii.impl.io.text`**, which is
-  where its one non-sentence spelling lives (`(set/monotonic S)`, the known-true class)
+  where its two non-sentence spellings live (`(set/monotonic S)` and `(set/inert S)`)
   and what `vaelii.core/export-text!` writes.  What is here is the *classpath* side: the
   shallow tree under `resources/kb/` and how a layer's files are discovered in it.
 
-  The files live under `resources/kb/`, in a shallow tree that mirrors the context
-  spindle:
+  The files live under `resources/kb/`, in two layers:
 
-      kb/CxCore.txt        the vocabulary head (see vaelii.host.core-context)
-      kb/upper/<C>.txt          definitional layers, between Core and Universe
-      kb/middle/<C>.txt         theory layers, between Universe and Well
+      kb/upper/<domain>.txt     the upper ontology, every file loaded into CxUniverse
+                                (see vaelii.host.core-context)
+      kb/middle/<C>.txt         theory contexts, each seeing CxUniverse
 
-  The file *name* is the context; the sub-directory is the layer.  Only the layer a
-  caller names is discovered, so a sibling directory under `kb/` that names no layer here
-  is not loaded: `kb/koinii/` is one, an application's own context files, which that
-  application loads for itself.  What stays in
-  **code** (vaelii.host.starter) is the *order* the files load in and the handful of
-  genuinely computed assertions.  Sentences read with `clojure.edn`, so a KB file is
-  data and can never run code."
+  An upper file is named for its domain (`core.txt` is the vocabulary); a middle file's
+  *name* is its context.  Only the layer a caller names is discovered, so a sibling
+  directory under `kb/` that names no layer here is not loaded: `kb/koinii/` is one, an
+  application's own context files, which that application loads for itself.  What stays
+  in **code** (vaelii.host.core-context, vaelii.host.starter) is the *order* the layers
+  load in and the one computed batch.  Sentences read with `clojure.edn`, so a KB file
+  is data and can never run code."
   (:require [clojure.java.io :as io]
             [clojure.string :as str]
             [vaelii.core :as v]
             [vaelii.impl.io.text :as text]))
 
-(defn- layer-files
-  "The `Cx<Name>.txt` file names in layer sub-directory `dir`, read off whichever
-  classpath shape holds them: a filesystem tree (repl / lein / test) is listed as a
-  directory, and a packaged jar is listed by its own entries — anchored on
-  `kb/CxCore.txt` when the jar carries no directory entry for `kb/<dir>` to
-  resolve.  Any other protocol is refused rather than answered nil: nil here starts
-  a KB with the upper and middle layers silently absent, the exact failure
-  `read-sentences` exists to refuse one file at a time."
-  [dir]
-  (let [want (str "kb/" dir "/")
-        res  (or (io/resource (str "kb/" dir)) (io/resource "kb/CxCore.txt"))]
-    (when res
-      (case (.getProtocol res)
-        "file" (when-let [d (io/resource (str "kb/" dir))]
-                 (keep (fn [^java.io.File f]
-                         (let [n (.getName f)]
-                           (when (str/ends-with? n ".txt") n)))
-                       (.listFiles (io/file d))))
-        "jar"  (let [conn ^java.net.JarURLConnection (.openConnection res)]
-                 (seq (for [^java.util.jar.JarEntry e (enumeration-seq (.entries (.getJarFile conn)))
-                            :let [n (.getName e)]
-                            :when (and (str/starts-with? n want)
-                                       (str/ends-with? n ".txt")
-                                       (not (str/includes? (subs n (count want)) "/")))]
-                        (subs n (count want)))))
-        (throw (ex-info (str "kb/" dir " sits behind classpath protocol "
-                             (.getProtocol res) ", which layer discovery cannot list"
-                             " — it reads the file and jar protocols")
-                        {:type :missing-resource :dir dir :url (str res)}))))))
+(def anchor
+  "The classpath path of the file every KB carries: layer discovery anchors on it when a
+  jar records no directory entry for the layer."
+  "kb/upper/core.txt")
 
-(defn- root-files
-  "The `Cx<Name>.txt` file names sitting directly under `kb/`, outside every layer
-  sub-directory, read off whichever classpath shape holds them — a filesystem tree
-  (repl / lein / test) or a packaged jar — the way `layer-files` reads a layer.
-  `CxCore.txt` is dropped here: vaelii.host.core-context loads the spindle head on its
-  own, ahead of the topology edge it must precede.  Both branches anchor on
-  `kb/CxCore.txt`, the file every KB carries, so the `kb/` root resolves even when a
-  jar records no directory entry for it."
-  []
-  (let [want "kb/"
-        res  (io/resource "kb/CxCore.txt")]
-    (when res
-      (case (.getProtocol res)
-        "file" (keep (fn [^java.io.File f]
-                       (let [n (.getName f)]
-                         (when (and (str/ends-with? n ".txt") (not= n "CxCore.txt")) n)))
-                     (.listFiles (.getParentFile (io/file res))))
-        "jar"  (let [conn ^java.net.JarURLConnection (.openConnection res)]
-                 (seq (for [^java.util.jar.JarEntry e (enumeration-seq (.entries (.getJarFile conn)))
-                            :let [n (.getName e)]
-                            :when (and (str/starts-with? n want)
-                                       (str/ends-with? n ".txt")
-                                       (not (str/includes? (subs n (count want)) "/"))
-                                       (not= n "kb/CxCore.txt"))]
-                        (subs n (count want)))))
-        (throw (ex-info (str "kb/ root sits behind classpath protocol "
-                             (.getProtocol res) ", which collector discovery cannot list"
-                             " — it reads the file and jar protocols")
-                        {:type :missing-resource :dir nil :url (str res)}))))))
+(defn layer-files
+  "The `.txt` file names in layer sub-directory `dir`, sorted, or nil when it holds none.
+  They are read off whichever classpath shape holds them: a filesystem tree (repl / lein /
+  test) is listed as a directory, and a packaged jar is listed by its own entries —
+  anchored on `anchor` when the jar carries no directory entry for `kb/<dir>` to resolve.
+  Any other protocol is refused rather than answered nil: nil here starts a KB with a
+  layer silently absent, the exact failure `read-sentences` exists to refuse one file at a
+  time."
+  [dir]
+  (let [want  (str "kb/" dir "/")
+        res   (or (io/resource (str "kb/" dir)) (io/resource anchor))
+        names (when res
+                (case (.getProtocol res)
+                  "file" (when-let [d (io/resource (str "kb/" dir))]
+                           (keep (fn [^java.io.File f]
+                                   (let [n (.getName f)]
+                                     (when (str/ends-with? n ".txt") n)))
+                                 (.listFiles (io/file d))))
+                  "jar"  (let [conn ^java.net.JarURLConnection (.openConnection res)]
+                           (for [^java.util.jar.JarEntry e (enumeration-seq (.entries (.getJarFile conn)))
+                                 :let [n (.getName e)]
+                                 :when (and (str/starts-with? n want)
+                                            (str/ends-with? n ".txt")
+                                            (not (str/includes? (subs n (count want)) "/")))]
+                             (subs n (count want))))
+                  (throw (ex-info (str "kb/" dir " sits behind classpath protocol "
+                                       (.getProtocol res) ", which layer discovery cannot list"
+                                       " — it reads the file and jar protocols")
+                                  {:type :missing-resource :dir dir :url (str res)}))))]
+    (some-> (seq names) sort)))
 
 (defn layer-contexts
-  "The context symbols whose KB files live in the layer sub-directory `dir`
-  (\"upper\" / \"middle\"), sorted for determinism.  Discovered from the classpath, so
-  dropping a new `Cx<Name>.txt` in `kb/<dir>/` loads it with no code change — every
-  context is loaded on kb start by default, from a filesystem tree and from a
-  packaged jar alike (`layer-files`)."
+  "The context symbols whose KB files live in the layer sub-directory `dir` (\"middle\"),
+  sorted for determinism.  Discovered from the classpath, so dropping a new
+  `Cx<Name>.txt` in `kb/<dir>/` loads it with no code change — every context is loaded
+  on kb start by default, from a filesystem tree and from a packaged jar alike
+  (`layer-files`)."
   [dir]
   (some->> (layer-files dir)
            (map #(symbol (subs % 0 (- (count %) 4))))
            (sort)                                    ; filename-derived symbols — bare sort, same order
            vec))
 
-(defn root-contexts
-  "The context symbols whose KB files sit directly under `kb/`, minus `CxCore`, sorted
-  for determinism.  A top-level file names a spindle collector context — today only
-  `CxUniverse`, the upper spindle's — whose cross-member axioms name terms from more
-  than one member and so load above every member.  Discovered from the classpath, so
-  dropping a new top-level `Cx<Name>.txt` loads it with no code change, from a
-  filesystem tree and a packaged jar alike (`root-files`)."
-  []
-  (some->> (root-files)
-           (map #(symbol (subs % 0 (- (count %) 4))))
-           (sort)                                    ; filename-derived symbols — bare sort, same order
-           vec))
-
 (defn- resource-path
-  "The classpath path of the KB file for `context`, optionally under layer `dir`."
-  [context dir]
-  (str "kb/" (when dir (str dir "/")) (name context) ".txt"))
+  "The classpath path of KB file `file` (a context or a file stem, with or without
+  `.txt`), optionally under layer `dir`."
+  [file dir]
+  (let [n (name file)]
+    (str "kb/" (when dir (str dir "/")) n (when-not (str/ends-with? n ".txt") ".txt"))))
 
 (defn read-sentences
-  "Read every sentence from the KB file for `context` (a symbol or string), in file
-  order.  `dir` names the layer sub-directory (\"upper\" / \"middle\"), nil for a file
-  at the `kb/` root.  Throws if the resource is missing: a silently empty ontology is
-  worse than a failure to start."
-  ([context] (read-sentences context nil))
-  ([context dir]
-   (let [path (resource-path context dir)]
+  "Read every sentence from KB file `file` — the context a middle file is named for, or
+  an upper file's name — in file order.  `dir` names the layer sub-directory (\"upper\"
+  / \"middle\"), nil for a file at the `kb/` root.  Throws if the resource is missing: a
+  silently empty ontology is worse than a failure to start."
+  ([file] (read-sentences file nil))
+  ([file dir]
+   (let [path (resource-path file dir)]
      (if-let [res (io/resource path)]
        (text/read-forms res)
        (throw (ex-info (str "ontology KB file not found on the classpath: " path)
-                       {:type :missing-resource :context context :dir dir :resource path}))))))
+                       {:type :missing-resource :file file :dir dir :resource path}))))))
 
 (defn load-sentences
   "Assert `sentences` into `context`, **order-insensitively** — `text/load-entries!`,
@@ -147,6 +111,7 @@
   fatal; `text/load-entries!` says why, and what a clean list pays."
   [kb sentences context]
   (text/load-entries! (fn [sentence ctx o] (v/assert kb sentence ctx (or o {})))
+                      (fn [sentence ctx] (v/assert-inert kb sentence ctx))
                       (mapv #(vector % context) sentences))
   kb)
 

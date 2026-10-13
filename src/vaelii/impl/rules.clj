@@ -175,7 +175,7 @@
 ;;   #{:backward}           backward only (the default).
 ;;   #{:forward}            forward-chains but is NOT usable in backward proof
 ;;                          (set/forwardOnlyRule).  The direction for a rule whose
-;;                          conclusion answers a goal its own antecedent poses — CxCore's
+;;                          conclusion answers a goal its own antecedent poses — core.txt's
 ;;                          commutative/symmetric bridge is the one the ontology ships, and
 ;;                          `candidate-rules` says what a backward walk of such a rule costs.
 ;;   #{}                    neither engine (set/inertRule, documentation).

@@ -1263,13 +1263,24 @@ E16_GLOBAL_ROSTER = {
     # The supporter visibility gate and its readers: the targets every stored except and
     # defeat names, each filtered by the reader's view afterwards.
     ("src/vaelii/impl/except.clj", "named-entries"),
+    ("src/vaelii/impl/kb.clj", "supporter-reaches?"),
     ("src/vaelii/impl/except.clj", "genlCx-excepts"),
+    # The declared roster: a reader's rules reading a predicate it misses, kept by its
+    # ancestor set, and a declaration's switch over every reader's network state.
+    ("src/vaelii/impl/except.clj", "roster-state"),
+    ("src/vaelii/impl/except.clj", "roster-reads?"),
+    ("src/vaelii/impl/except.clj", "denial-stored?"),
+    ("src/vaelii/impl/checks.clj", "force-reach!"),
+    # A declaration's reach: the contexts stating its predicate, each kept when a context
+    # at or below the declaration's sees it, over the unscoped closures a placement reads.
+    ("src/vaelii/impl/chain.clj", "declaration-reach"),
     ("src/vaelii/impl/resolution.clj", "defeated-index"),
     ("src/vaelii/impl/settle.clj", "belief-before"),
     # A rule read with no reader context: `concluding-rule-handles`' unscoped arities, a
-    # stratification check over every rule, and two whole-KB reports.
+    # stratification check over every rule, and three whole-KB reports.
     ("src/vaelii/impl/resolution.clj", "concluding-rule-handles"),
     ("src/vaelii/impl/checks.clj", "stratification-readers"),
+    ("src/vaelii/impl/checks.clj", "declared-firings"),
     ("src/vaelii/impl/chain.clj", "rule-firing-report"),
     ("src/vaelii/impl/integrity.clj", "rule-macro-findings"),
     # The planner's lead choice under a variable context, which has no ancestor set yet:
@@ -1291,8 +1302,11 @@ E16_GLOBAL_ROSTER = {
     ("src/vaelii/impl/decide/arity.clj", "routes"),
     ("src/vaelii/impl/decide/arity.clj", "shape-handles"),
     ("src/vaelii/impl/decide/arity.clj", "types-entry"),
-    ("src/vaelii/impl/decide/arity.clj", "meta-visible"),
     ("src/vaelii/impl/decide/arity.clj", "meta-routes"),
+    # A relation's length is read the same at every context, off its bindings and
+    # metatype memberships in every context.
+    ("src/vaelii/impl/decide/arity.clj", "held-bindings"),
+    ("src/vaelii/impl/decide/arity.clj", "meta-held"),
     # The self tuples under an `irreflexive` mark when no reader set is given.
     ("src/vaelii/impl/decide/tuple.clj", "self-tuples-under"),
     # The vocabulary: the term roster keys no context, and the public reads and the
@@ -1519,8 +1533,8 @@ E17_ROSTER = {
     ("src/vaelii/impl/decide/arity.clj", "lengths-of"),
     ("src/vaelii/impl/decide/arity.clj", "meta-paths"),
     ("src/vaelii/impl/decide/arity.clj", "note-reading-moved!"),
-    # Reader-side reads: a reader's binding above a functor reads the unscoped closure cut
-    # to the bound predicates and scopes each member it keeps.
+    # A relation's length is read the same at every context: the predicates above a
+    # functor are its unscoped closure cut to the bound predicates.
     ("src/vaelii/impl/decide/arity.clj", "bound-above"),
     ("src/vaelii/impl/discovery.clj", "preserving-moves"),
     # The visibility filter cannot be scoped by the filter it derives — asking
@@ -1529,6 +1543,13 @@ E17_ROSTER = {
     ("src/vaelii/impl/except.clj", "except-hidden-fn"),
     ("src/vaelii/impl/except.clj", "excepts-seen"),
     ("src/vaelii/impl/except.clj", "reader-state"),
+    ("src/vaelii/impl/except.clj", "roster-at"),
+    # The declared roster's union over every reader, which the network computes and the
+    # placement re-places from: a declaration's reach and the predicates declared.
+    ("src/vaelii/impl/chain.clj", "declaration-reach"),
+    ("src/vaelii/impl/checks.clj", "declared-firings"),
+    ("src/vaelii/impl/decide.clj", "declarations"),
+    ("src/vaelii/impl/decide.clj", "declared"),
     # The settle's `genlCx` moves: the placement reach is a superset over every reader,
     # read where no reader exists, as the candidate rows are (`decide/write-view`).
     ("src/vaelii/impl/special.clj", "drain-moves!"),

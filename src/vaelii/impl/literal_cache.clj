@@ -66,11 +66,12 @@
     (sx/intern-sym (symbol (str "?" n)))))
 
 (defn- has-variable?
-  "Does `form` mention a variable anywhere?  A scan that allocates nothing, so the
-  ground case is answered without building the tree-seq a `some` over one would."
+  "Does `form` hold a variable outside every `(Quote …)`?  A scan that allocates nothing,
+  so the ground case is answered without building the tree-seq a `some` over one would."
   [form]
   (cond
     (sx/variable? form)  true
+    (sx/quote-form? form) false
     (sequential? form)   (boolean (some has-variable? form))
     :else                false))
 
@@ -88,7 +89,8 @@
   micro-optimization: canonicalizing sits in front of every cached lookup, so it is
   charged to the calls that *hit* as much as to the ones that miss, and rebuilding a
   ground literal to discover it had nothing to rename is the whole cost of the lookup it
-  was meant to save.  A `java.util.HashMap` for the scratch numbering, for the same
+  was meant to save.  A `(Quote …)` form is left as written, since `res/unify` matches
+  it only by equality.  A `java.util.HashMap` for the scratch numbering, for the same
   reason — the map is thrown away at the end of the call and never escapes."
   [form]
   (if-not (has-variable? form)
@@ -103,6 +105,7 @@
                         (.put seen x v)
                         (vswap! back assoc v x)
                         v))
+                  (sx/quote-form? x) x
                   (vector? x)     (mapv rn x)
                   (sequential? x) (apply list (map rn x))
                   :else           x))]
@@ -112,10 +115,12 @@
 (defn- rename-term
   "`t` with every canonical variable `rename` knows about replaced by the caller's name.
   One pass, not a fixpoint: each node is rewritten at most once, so a caller whose own
-  goal happens to mention `?0` cannot have its answers rewritten twice."
+  goal happens to mention `?0` cannot have its answers rewritten twice.  A `(Quote …)`
+  form is stored content and is not renamed."
   [rename t]
   (cond
     (contains? rename t) (get rename t)
+    (sx/quote-form? t)   t
     (vector? t)          (mapv #(rename-term rename %) t)
     (sequential? t)      (apply list (map #(rename-term rename %) t))
     :else                t))

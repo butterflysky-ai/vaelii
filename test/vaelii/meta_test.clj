@@ -4,7 +4,7 @@
   "The vocabulary context and meta-level features over the starter schema (with
   the test-world beneath it):
 
-    * the context *spindle* — CxCore ⊏ upper ⊏ CxUniverse ⊏ middle ⊏ CxWell;
+    * the context topology — CxUniverse ⊏ middle ⊏ CxWell;
     * the predicate meta-ontology — predicates classified by arity and by the
       algebraic properties their metadata declares (each mark is itself a
       binary_predicate type, so the property is the classification);
@@ -13,9 +13,12 @@
   (:require [clojure.string :as str]
             [clojure.test :refer [deftest is testing use-fixtures]]
             [clojure.walk :as walk]
+            [taoensso.trove :as trove]
             [vaelii.core :as v]
+            [vaelii.impl.chain :as chain]
             [vaelii.impl.checks :as checks]
             [vaelii.impl.decide :as decide]
+            [vaelii.impl.except :as exc]
             [vaelii.impl.sentex :as sx]
             [vaelii.impl.taxonomy :as tax]
             [vaelii.impl.types.reasoning :as reasoning]
@@ -25,22 +28,18 @@
 (use-fixtures :once (tu/loaded (fn [kb] (-> kb tu/load-starter! world/load-into))))
 (use-fixtures :each (tu/neutral))
 
-(tu/deftest-kb the-context-spindle-core-upper-universe-middle-well
-  (testing "upper rides between Core and Universe: an upper context sees Core, Universe sees it"
-    (is (seq (v/sentexes-matching kb '(genlCx CxOrganism CxCore) '?ctx)))
-    (is (seq (v/sentexes-matching kb '(genlCx CxUniverse CxOrganism) '?ctx))))
+(tu/deftest-kb the-context-topology-universe-middle-well
   (testing "middle rides between Universe and Well"
     (is (seq (v/sentexes-matching kb '(genlCx CxBiology CxUniverse) '?ctx)))
     (is (seq (v/sentexes-matching kb '(genlCx CxWell CxBiology) '?ctx))))
-  (testing "there is no direct Well→Core edge, but Core is transitively visible from Well"
-    (is (empty? (v/sentexes-matching kb '(genlCx CxWell CxCore) '?ctx)))
-    (is (tax/sees? (reasoning/taxonomy kb) 'CxWell 'CxCore)))
-  (testing "CxCore vocabulary is visible from the collector and the data contexts"
+  (testing "there is no direct Well→Universe edge, but Universe is transitively visible from Well"
+    (is (empty? (v/sentexes-matching kb '(genlCx CxWell CxUniverse) '?ctx)))
+    (is (tax/sees? (reasoning/taxonomy kb) 'CxWell 'CxUniverse)))
+  (testing "the upper vocabulary is visible from CxUniverse and the data contexts"
     (is (v/ask? kb '(binary_predicate genl) 'CxUniverse))
     (is (v/ask? kb '(binary_predicate parentOf) 'CxNaturalWorld)))
-  (testing "the upper ontology rides in the upper contexts, not the collector"
-    (is (seq   (v/sentexes-matching kb '(genl dog mammal) 'CxOrganism)))
-    (is (empty? (v/sentexes-matching kb '(genl dog mammal) 'CxUniverse)))
+  (testing "the upper ontology is stored in CxUniverse, and data in the data contexts"
+    (is (seq   (v/sentexes-matching kb '(genl dog mammal) 'CxUniverse)))
     (is (seq   (v/sentexes-matching kb '(human Tom) 'CxNaturalWorld)))))
 
 (tu/deftest-kb predicates-classified-by-arity
@@ -67,31 +66,31 @@
     (is (empty? (v/sentexes-matching kb '(arity dog 1) '?ctx)))
     (is (empty? (v/sentexes-matching kb '(arity parentOf 2) '?ctx)))
     (is (empty? (v/sentexes-matching kb '(arity arg 3) '?ctx))))
-  (testing "every reader of an arity reads the exact-class membership, in its context"
-    (is (= 2 (:arity (v/describe kb 'parentOf 'CxLife))))
-    (is (= 2 (:arity (v/describe kb 'siblingOf 'CxLife))))            ; symmetric -> binary
-    (is (= 3 (:arity (v/describe kb 'arg 'CxCore))))
-    (is (nil? (:arity (v/describe kb 'parentOf 'CxCore)))
-        "a private declaration stays private")
+  (testing "every reader of an arity reads the exact-class membership, the same at every context"
+    (is (= 2 (:arity (v/describe kb 'parentOf 'CxUniverse))))
+    (is (= 2 (:arity (v/describe kb 'siblingOf 'CxUniverse))))        ; symmetric -> binary
+    (is (= 3 (:arity (v/describe kb 'arg 'CxUniverse))))
+    (is (= 2 (:arity (v/describe kb 'parentOf 'CxBiology)))
+        "a declaration in CxUniverse binds the length a middle context reads")
     (is (v/ask? kb '(admitsArgnum parentOf 2) 'CxNaturalWorld))
     (is (not (v/ask? kb '(admitsArgnum parentOf 3) 'CxNaturalWorld))))
   (testing "an asserted arity concludes the relation-wide class, not the kind"
     (tu/with-terms [fooRelation]
-      (v/assert kb (list 'arity fooRelation 2) 'CxCore)
+      (v/assert kb (list 'arity fooRelation 2) 'CxUniverse)
       (is (v/isa? kb fooRelation 'binary) "the converse reaches the relation-wide class")
       (is (not (v/isa? kb fooRelation 'binary_predicate))
           "two arguments is a shape a function has too, so the kind stays open")
       (is (not (v/isa? kb fooRelation 'predicate)))
       (is (v/isa? kb fooRelation 'relation))
       (is (v/isa? kb fooRelation 'fixed_arity))
-      (is (seq (v/sentexes-matching kb (list 'fixed_arity fooRelation) 'CxCore)))
-      (is (seq (v/sentexes-matching kb (list 'binary fooRelation) 'CxCore)))))
+      (is (seq (v/sentexes-matching kb (list 'fixed_arity fooRelation) 'CxUniverse)))
+      (is (seq (v/sentexes-matching kb (list 'binary fooRelation) 'CxUniverse)))))
   (testing "the fixed policy is justified by the arity fact and the rule"
     (tu/with-terms [barRelation]
-      (v/assert kb (list 'arity barRelation 3) 'CxCore)
-      (let [h (v/handle-of kb (list 'fixed_arity barRelation) 'CxCore)
+      (v/assert kb (list 'arity barRelation 3) 'CxUniverse)
+      (let [h (v/handle-of kb (list 'fixed_arity barRelation) 'CxUniverse)
             rule (v/handle-of kb '(implies (arity ?relation ?arity)
-                                           (fixed_arity ?relation)) 'CxCore)]
+                                           (fixed_arity ?relation)) 'CxUniverse)]
         (is (some? h))
         (is (some? rule))
         (is (some (fn [d]
@@ -106,28 +105,28 @@
 (tu/deftest-kb arity-conclusions-retract-with-their-declarations
   (testing "asserting the arity keeps the arity, the class and the policy believed"
     (tu/with-terms [binaryRelation]
-      (let [h (v/assert kb (list 'arity binaryRelation 2) 'CxCore)]
-        (is (seq (v/sentexes-matching kb (list 'arity binaryRelation 2) 'CxCore)))
-        (is (seq (v/sentexes-matching kb (list 'fixed_arity binaryRelation) 'CxCore)))
-        (is (seq (v/sentexes-matching kb (list 'binary binaryRelation) 'CxCore)))
+      (let [h (v/assert kb (list 'arity binaryRelation 2) 'CxUniverse)]
+        (is (seq (v/sentexes-matching kb (list 'arity binaryRelation 2) 'CxUniverse)))
+        (is (seq (v/sentexes-matching kb (list 'fixed_arity binaryRelation) 'CxUniverse)))
+        (is (seq (v/sentexes-matching kb (list 'binary binaryRelation) 'CxUniverse)))
         (testing "and retracting the sole premise collapses the whole cycle"
           (v/retract! kb h)
-          (is (empty? (v/sentexes-matching kb (list 'binary binaryRelation) 'CxCore)))
-          (is (empty? (v/sentexes-matching kb (list 'fixed_arity binaryRelation) 'CxCore)))
-          (is (empty? (v/sentexes-matching kb (list 'arity binaryRelation 2) 'CxCore)))))))
+          (is (empty? (v/sentexes-matching kb (list 'binary binaryRelation) 'CxUniverse)))
+          (is (empty? (v/sentexes-matching kb (list 'fixed_arity binaryRelation) 'CxUniverse)))
+          (is (empty? (v/sentexes-matching kb (list 'arity binaryRelation 2) 'CxUniverse)))))))
   (testing "a specialized predicate witness keeps its type, arity, and predicate policy"
     (tu/with-terms [qPred]
-      (let [h (v/assert kb (list 'unary_predicate qPred) 'CxCore)]
+      (let [h (v/assert kb (list 'unary_predicate qPred) 'CxUniverse)]
         (is (v/isa? kb qPred 'unary))
         (is (v/isa? kb qPred 'fixed_arity_predicate))
-        (is (= 1 (:arity (v/describe kb qPred 'CxCore))))
+        (is (= 1 (:arity (v/describe kb qPred 'CxUniverse))))
         (testing "and retracting it takes the arity with the class"
           (v/retract! kb h)
-          (is (nil? (:arity (v/describe kb qPred 'CxCore)))))))))
+          (is (nil? (:arity (v/describe kb qPred 'CxUniverse)))))))))
 
 (tu/deftest-kb algebraic-predicate-types-classify-a-predicate
   ;; (symmetric siblingOf) etc. are the marks the provers read AND, since each mark is a
-  ;; type — (genl symmetric binary_predicate) in CxCore — the classification itself: the
+  ;; type — (genl symmetric binary_predicate) in CxUniverse — the classification itself: the
   ;; property IS the membership, with no derived (…Predicate) twin between them.
   (testing "the mark is a membership in the property type"
     (is (v/isa? kb 'siblingOf 'symmetric))
@@ -138,11 +137,9 @@
   (testing "and inherit binary_predicate / predicate through genl"
     (is (v/isa? kb 'siblingOf 'binary_predicate))
     (is (v/isa? kb 'ancestorOf 'predicate)))
-  (testing "the mark is decontextualized, so it is visible wherever CxUniverse is — every
-            data context — while staying out of CxCore's own sight above the universe"
-    (is (seq (v/sentexes-matching kb '(symmetric siblingOf) 'CxLife)))
-    (is (v/ask? kb '(symmetric siblingOf) 'CxSocialWorld))
-    (is (empty? (v/sentexes-matching kb '(symmetric siblingOf) 'CxCore)))))
+  (testing "the mark is stated in CxUniverse, so it is visible from every data context"
+    (is (seq (v/sentexes-matching kb '(symmetric siblingOf) 'CxUniverse)))
+    (is (v/ask? kb '(symmetric siblingOf) 'CxSocialWorld))))
 
 (tu/deftest-kb algebraic-predicate-types-answer-and-enumerate
   (testing "membership is answered directly from the stored mark"
@@ -160,7 +157,7 @@
               relativeOf romanticPartnerOf coworkerOf roommateOf
               nestingPartnerOf chosenSiblingOf}
            (set (map #(get % '?p) (v/ask kb '(symmetric ?p) '?ctx)))))
-    ;; `genl` and `genlCx` are in the enumeration because CxCore asserts (transitive genl)
+    ;; `genl` and `genlCx` are in the enumeration because core.txt asserts (transitive genl)
     ;; / (transitive genlCx) outright.  They *are* transitive; answering them from cached
     ;; closures instead of the generic prover is an implementation choice, not a difference
     ;; in what they mean — and saying so is what lets them be named as the relation an
@@ -182,10 +179,8 @@
 
 (tu/deftest-kb genlcx-is-a-forced-decontextualized-predicate
   (testing "a genlCx edge is forced to live in CxUniverse, wherever asserted"
-    (is (seq   (v/sentexes-matching kb '(genlCx CxUniverse CxOrganism) 'CxUniverse)))
-    (is (empty? (v/sentexes-matching kb '(genlCx CxUniverse CxOrganism) 'CxCore))))    ; forced away from CxCore
-  (testing "the closure is intact — CxCore vocabulary is still visible from CxUniverse"
-    (is (v/ask? kb '(binary_predicate genl) 'CxUniverse))))
+    (is (seq   (v/sentexes-matching kb '(genlCx CxBiology CxUniverse) 'CxUniverse)))
+    (is (empty? (v/sentexes-matching kb '(genlCx CxBiology CxUniverse) 'CxBiology)))))
 
 ;; ---- forced_monotonic_predicate: the roster no default reaches ----------------------
 
@@ -249,14 +244,22 @@
           (is (= d (v/assert kb (list 'not (list likes Cal Dan)) 'CxUniverse))
               "the declaration arriving first stores the same record"))))))
 
+(defn- forced-entries
+  "The `:forced-conclusion` entries `violations` reads about a conclusion in `context`,
+  or about the stored spelling of `s` there."
+  ([kb context] (forced-entries kb nil context))
+  ([kb s context]
+   (let [stored (when s (or (some->> (v/handle-of kb s context) (v/sentex kb) :sentence) s))]
+     (filterv #(and (= :forced-conclusion (:violation %)) (= context (:context %))
+                    (or (nil? s) (= stored (:sentence %))))
+              (v/violations kb)))))
+
 (defn- concluded?
-  "`[believed? reported?]`: is `s` believed at `context` (default `CxUniverse`), and is a
-  `:forced-conclusion` violation of `s` filed."
+  "`[believed? reported?]`: is `s` believed at `context` (default `CxUniverse`), and does
+  `violations` read a `:forced-conclusion` entry about it."
   ([kb s] (concluded? kb s 'CxUniverse))
   ([kb s context]
-   [(v/ask? kb s context)
-    (boolean (some #(and (= :forced-conclusion (:violation %)) (= s (:sentence %)))
-                   (v/violations kb)))]))
+   [(v/ask? kb s context) (boolean (seq (forced-entries kb s context)))]))
 
 (tu/deftest-kb a-rule-concludes-a-roster-literal-only-from-roster-antecedents
   (tu/with-terms [strict_kind flies_kind bird_kind parentOf siblingOf Tweety]
@@ -307,9 +310,7 @@
     (doseq [s [(list trigger_kind species_kind) (list other_kind species_kind)
                (list 'disjoint species_kind rival_kind)]]
       (v/assert kb s 'CxUniverse))
-    (let [c  (list 'orthogonal species_kind made_kind)
-          vs (filterv #(and (= :forced-conclusion (:violation %)) (= c (:sentence %)))
-                      (v/violations kb))]
+    (let [vs (forced-entries kb (list 'orthogonal species_kind made_kind) 'CxUniverse)]
       (is (= [#{trigger_kind other_kind}] (mapv (comp set :off-roster :detail) vs))
           "disjoint is on the roster and is not named")
       (is (every? #(and (str/includes? % (str trigger_kind)) (str/includes? % (str other_kind)))
@@ -364,6 +365,494 @@
                   (v/ask? kb (list 'orthogonal species_kind made_kind) 'CxUniverse)])
               (str "forced " forced?)))))))
 
+;; ---- a declaration forces its predicate where it is seen ----------------------------
+
+(defn- orders
+  "Every ordering of `xs`."
+  [xs]
+  (if (empty? xs) [()] (for [x xs, more (orders (remove #{x} xs))] (cons x more))))
+
+(defn- sampled
+  "The first and the last of `orders`, each write's reverse of the other: the sample a
+  sweep's twin at `:default` runs."
+  [orders]
+  [(first orders) (last orders)])
+
+(defn- roster-reading
+  "Assert the `fixed` writes, then the `writes` (`{key [sentence context strength]}`) in
+  `order`, and with `retract` retract that write last.  Answers `{key [believed? …]}`,
+  each `ask?` of `asked` at the context `ctxs` names under that key."
+  [kb ctxs {:keys [fixed writes order asked retract]}]
+  (doseq [[s c st] (concat fixed (map writes order))]
+    (v/assert kb s c {:strength (or st :default)}))
+  (when retract
+    (let [[s c] (writes retract)] (v/retract! kb (v/handle-of kb s c))))
+  (into {} (for [[k c] ctxs] [k (mapv #(v/ask? kb % c) asked)])))
+
+(defn- scoped-contexts
+  "CxA and CxB under CxU under CxUniverse, each edge `:monotonic`."
+  [cu ca cb]
+  (for [[sub super] [[cu 'CxUniverse] [ca cu] [cb cu]]]
+    [(list 'genlCx sub super) 'CxUniverse :monotonic]))
+
+(defn- declaration-seen-reading
+  "[trigger rival conclusion] in each order `pick` keeps: CxA sees the declaration, so
+  the rival loses and the definitional firing stands there; CxB and CxU do not, so the
+  pair is a dilemma and the firing is void.  Retracting the declaration leaves the
+  reading of a KB that never held it at all three."
+  [kb pick]
+  (doseq [order   (pick (orders [:decl :trigger :rival :rule]))
+          retract [nil :decl]]
+    (tu/with-terms [CxU CxA CxB trigger_kind rival_kind made_kind species_kind]
+      (let [world {:fixed  (concat (scoped-contexts CxU CxA CxB)
+                                   [[(list 'disjoint trigger_kind rival_kind) CxU :monotonic]])
+                   :writes {:decl    [(list 'forced_monotonic_predicate trigger_kind) CxA]
+                            :trigger [(list trigger_kind species_kind) CxU]
+                            :rival   [(list rival_kind species_kind) CxU]
+                            :rule    [(definitional-rule trigger_kind made_kind) CxU]}
+                   :order  order :retract retract
+                   :asked  [(list trigger_kind species_kind) (list rival_kind species_kind)
+                            (list 'orthogonal species_kind made_kind)]}]
+        (is (= (if retract
+                 {:a [true true false] :b [true true false] :u [true true false]}
+                 {:a [true false true] :b [true true false] :u [true true false]})
+               (roster-reading kb {:a CxA :b CxB :u CxU} world))
+            (str "order " (vec order) (when retract ", declaration retracted")))))))
+
+(tu/deftest-kb a-declaration-forces-a-verdict-and-a-firing-only-where-it-is-seen
+  (declaration-seen-reading kb sampled))
+
+(tu/deftest-kb ^:slow a-declaration-forces-a-verdict-and-a-firing-only-where-it-is-seen-in-every-order
+  (declaration-seen-reading kb identity))
+
+(tu/deftest-kb a-declaration-makes-a-denial-inert-only-where-it-is-seen
+  ;; [trigger denial] in every arrival order: CxA sees the declaration, so the denial is
+  ;; inert and the trigger stands; at CxB and CxU the :monotonic denial defeats the
+  ;; :default trigger.  Retracting the declaration leaves that reading at CxA too.
+  (doseq [order   (orders [:decl :denial :trigger])
+          retract [nil :decl]]
+    (tu/with-terms [CxU CxA CxB trigger_kind species_kind]
+      (let [t     (list trigger_kind species_kind)
+            world {:fixed  (scoped-contexts CxU CxA CxB)
+                   :writes {:decl    [(list 'forced_monotonic_predicate trigger_kind) CxA]
+                            :denial  [(list 'not t) CxU :monotonic]
+                            :trigger [t CxU]}
+                   :order  order :retract retract
+                   :asked  [t (list 'not t)]}]
+        (is (= (if retract
+                 {:a [false true] :b [false true] :u [false true]}
+                 {:a [true false] :b [false true] :u [false true]})
+               (roster-reading kb {:a CxA :b CxB :u CxU} world))
+            (str "order " (vec order) (when retract ", declaration retracted")))))))
+
+(tu/deftest-kb a-declared-conclusion-is-void-only-where-the-declaration-is-seen
+  ;; [conclusion] in every arrival order: a rule at CxU concludes `(trigger_kind s)` from
+  ;; an antecedent off the roster.  CxA sees the declaration, so the firing is void there;
+  ;; CxB and CxU do not, so the conclusion is an ordinary belief.  Retracting the
+  ;; declaration leaves it believed at all three.
+  (doseq [order   (orders [:decl :rule :fact])
+          retract [nil :decl]]
+    (tu/with-terms [CxU CxA CxB trigger_kind seed_kind species_kind]
+      (let [world {:fixed  (scoped-contexts CxU CxA CxB)
+                   :writes {:decl [(list 'forced_monotonic_predicate trigger_kind) CxA]
+                            :rule [(list 'set/forwardRule (list 'implies (list seed_kind '?s)
+                                                                (list trigger_kind '?s)))
+                                   CxU]
+                            :fact [(list seed_kind species_kind) CxU]}
+                   :order  order :retract retract
+                   :asked  [(list trigger_kind species_kind)]}]
+        (is (= (if retract
+                 {:a [true] :b [true] :u [true]}
+                 {:a [false] :b [true] :u [true]})
+               (roster-reading kb {:a CxA :b CxB :u CxU} world))
+            (str "order " (vec order) (when retract ", declaration retracted")))))))
+
+(tu/deftest-kb why-not-names-the-conviction-of-a-declared-conclusion-where-it-is-seen
+  (tu/with-terms [CxU CxA CxB trigger_kind seed_kind species_kind]
+    (doseq [[s c st] (scoped-contexts CxU CxA CxB)] (v/assert kb s c {:strength st}))
+    (v/assert kb (list 'forced_monotonic_predicate trigger_kind) CxU)
+    (let [r (v/assert kb (list 'set/forwardRule (list 'implies (list seed_kind '?s)
+                                                      (list trigger_kind '?s)))
+                      CxU)
+          c (list trigger_kind species_kind)]
+      (v/assert kb (list seed_kind species_kind) CxU)
+      (let [w (v/why-not kb c CxU)]
+        (is (= :forced-conclusion (:reason w)))
+        (is (= [[r [seed_kind]]] (mapv (juxt :informant :off-roster) (:convicted w)))))
+      (is (= 1 (count (forced-entries kb c CxU))) "the firing is void at a reader"))))
+
+(tu/deftest-kb a-late-declaration-defeats-the-rival-of-a-standing-dilemma
+  ;; [trigger rival] at one context: the declaration turns the dilemma into a defeat of
+  ;; the rival whether it arrives before or after the pair
+  (doseq [order (orders [:decl :trigger :rival])]
+    (tu/with-terms [CxU trigger_kind rival_kind species_kind]
+      (is (= {:u [true false]}
+             (roster-reading kb {:u CxU}
+                             {:fixed  [[(list 'genlCx CxU 'CxUniverse) 'CxUniverse :monotonic]
+                                       [(list 'disjoint trigger_kind rival_kind) CxU :monotonic]]
+                              :writes {:decl    [(list 'forced_monotonic_predicate trigger_kind) CxU]
+                                       :trigger [(list trigger_kind species_kind) CxU]
+                                       :rival   [(list rival_kind species_kind) CxU]}
+                              :order  order
+                              :asked  [(list trigger_kind species_kind) (list rival_kind species_kind)]}))
+          (str "order " (vec order))))))
+
+(tu/deftest-kb a-cxuniverse-declaration-moves-the-verdict-in-every-order
+  ;; [declaration trigger rival] at one context, the declaration stated in CxUniverse or at the
+  ;; context, the rival at either strength, the declaration retracted last or kept: every
+  ;; order gives the answer of the KB that held the same content from the start
+  (doseq [[decl-cx rival-strength retract expected]
+          [[:at       :default   nil   [true false]]
+           [:core     :default   nil   [true false]]
+           [:core     :default   :decl [true true]]
+           [:at       :monotonic nil   [true true]]
+           [:core     :monotonic nil   [true true]]
+           [:core     :monotonic :decl [false true]]]
+          order (orders [:decl :trigger :rival])]
+    (tu/with-terms [CxU trigger_kind rival_kind species_kind]
+      (is (= {:u expected}
+             (roster-reading kb {:u CxU}
+                             {:fixed  [[(list 'genlCx CxU 'CxUniverse) 'CxUniverse :monotonic]
+                                       [(list 'disjoint trigger_kind rival_kind) CxU :monotonic]]
+                              :writes {:decl    [(list 'forced_monotonic_predicate trigger_kind)
+                                                 (if (= :core decl-cx) 'CxUniverse CxU)]
+                                       :trigger [(list trigger_kind species_kind) CxU]
+                                       :rival   [(list rival_kind species_kind) CxU rival-strength]}
+                              :order  order :retract retract
+                              :asked  [(list trigger_kind species_kind) (list rival_kind species_kind)]}))
+          (str "declared " decl-cx ", rival " rival-strength ", order " (vec order)
+               (when retract ", declaration retracted"))))))
+
+(tu/deftest-kb a-cxuniverse-declaration-retracted-beside-another-moves-nothing-it-did-not-force
+  ;; CxA states the declaration too: retracting CxUniverse's leaves CxA forcing the trigger
+  ;; and CxB reading the dilemma, in every order of the four writes
+  (doseq [order (orders [:core :decl-a :trigger :rival])]
+    (tu/with-terms [CxU CxA CxB trigger_kind rival_kind species_kind]
+      (let [decl (list 'forced_monotonic_predicate trigger_kind)]
+        (is (= {:a [true false] :b [true true]}
+               (roster-reading kb {:a CxA :b CxB}
+                               {:fixed  (concat (scoped-contexts CxU CxA CxB)
+                                                [[(list 'disjoint trigger_kind rival_kind) CxU :monotonic]])
+                                :writes {:core    [decl 'CxUniverse]
+                                         :decl-a  [decl CxA]
+                                         :trigger [(list trigger_kind species_kind) CxU]
+                                         :rival   [(list rival_kind species_kind) CxU]}
+                                :order  order :retract :core
+                                :asked  [(list trigger_kind species_kind) (list rival_kind species_kind)]}))
+            (str "order " (vec order)))))))
+
+(defn- cxuniverse-declaration-reading
+  "CxA, CxB and CxDen under CxU; CxA states the declaration too, in each order `pick`
+  keeps.  A :monotonic denial of the CxUniverse declaration at CxDen defeats it there alone,
+  so CxDen reads the dilemma and CxA and CxB force the trigger.  The denial at CxUniverse
+  defeats the declaration at every context, CxA's copy included, so no reader forces
+  anything."
+  [kb pick]
+  (doseq [[deny-cx expected] [[:den  {:a [true false] :b [true false] :d [true true]}]
+                              [:core {:a [true true]  :b [true true]  :d [true true]}]]
+          order (pick (orders [:core :deny :decl-a :trigger :rival]))]
+    (tu/with-terms [CxU CxA CxB CxDen trigger_kind rival_kind species_kind]
+      (let [decl (list 'forced_monotonic_predicate trigger_kind)]
+        (is (= expected
+               (roster-reading kb {:a CxA :b CxB :d CxDen}
+                               {:fixed  (concat (scoped-contexts CxU CxA CxB)
+                                                [[(list 'genlCx CxDen CxU) 'CxUniverse :monotonic]
+                                                 [(list 'disjoint trigger_kind rival_kind) CxU :monotonic]])
+                                :writes {:core    [decl 'CxUniverse]
+                                         :deny    [(list 'not decl) (if (= :core deny-cx) 'CxUniverse CxDen)
+                                                   :monotonic]
+                                         :decl-a  [decl CxA]
+                                         :trigger [(list trigger_kind species_kind) CxU]
+                                         :rival   [(list rival_kind species_kind) CxU]}
+                                :order  order
+                                :asked  [(list trigger_kind species_kind) (list rival_kind species_kind)]}))
+            (str "denial at " deny-cx ", order " (vec order)))))))
+
+(tu/deftest-kb a-cxuniverse-declaration-forces-only-where-it-is-believed
+  (cxuniverse-declaration-reading kb sampled))
+
+(tu/deftest-kb ^:slow a-cxuniverse-declaration-forces-only-where-it-is-believed-in-every-order
+  (cxuniverse-declaration-reading kb identity))
+
+(tu/deftest-kb an-except-of-a-defeat-releases-the-loser-beside-a-declaration-elsewhere
+  ;; CxU holds a :monotonic (kind_a s) and a :default (kind_b s) under a :monotonic
+  ;; `disjoint`; CxR is below CxU and excepts the defeat of (kind_b s).  CxR reads the pair
+  ;; as a dilemma, with or without a declaration of kind_b in CxFoo, which CxR does not see.
+  (doseq [declared? [false true]]
+    (tu/with-terms [CxU CxFoo CxR kind_a kind_b Sp]
+      (let [M  {:strength :monotonic}
+            ab (fn [c] [(v/ask? kb (list kind_a Sp) c) (v/ask? kb (list kind_b Sp) c)])]
+        (v/assert kb (list 'genlCx CxU 'CxUniverse) 'CxUniverse M)
+        (doseq [c [CxFoo CxR]] (v/assert kb (list 'genlCx c CxU) 'CxUniverse M))
+        (v/assert kb (list 'disjoint kind_a kind_b) CxU M)
+        (when declared? (v/assert kb (list 'forced_monotonic_predicate kind_b) CxFoo))
+        (v/assert kb (list kind_a Sp) CxU M)
+        (let [b (v/assert kb (list kind_b Sp) CxU)
+              d (:id (first (filter #(= (list 'defeat (list 'sentexHandle b)) (:sentence %))
+                                    (v/sentexes-with-functor kb 'defeat))))]
+          (is (= [true false] (ab CxR)) "before the except")
+          (v/assert kb (list 'except (list 'sentexHandle d)) CxR M)
+          (is (= {:u [true false] :r [true true] :foo [true declared?]}
+                 {:u (ab CxU) :r (ab CxR) :foo (ab CxFoo)})
+              (str "declared " declared?)))))))
+
+(tu/deftest-kb the-roster-hides-a-handle-whose-valid-firings-are-all-void-at-its-context
+  ;; (functional P) is on the baseline roster.  One rule concludes it from an antecedent no
+  ;; declaration puts on the roster, which the network holds void, and one from an
+  ;; antecedent CxFoo declares, which is valid in the network and void at CxU, which does
+  ;; not see CxFoo.  The roster alone hides the conclusion at CxU, where it is stored.
+  (tu/with-terms [CxU CxFoo kind_d kind_n parentOf]
+    (let [M {:strength :monotonic}]
+      (v/assert kb (list 'genlCx CxU 'CxUniverse) 'CxUniverse M)
+      (v/assert kb (list 'genlCx CxFoo CxU) 'CxUniverse M)
+      (v/assert kb (list 'forced_monotonic_predicate kind_d) CxFoo)
+      (doseq [k [kind_n kind_d]]
+        (v/assert kb (list 'set/forwardRule (list 'implies (list k '?x) (list 'functional '?x))) CxU)
+        (v/assert kb (list k parentOf) CxU))
+      (let [h (v/handle-of kb (list 'functional parentOf) CxU)]
+        (is (= [false true] [(v/ask? kb (list 'functional parentOf) CxU)
+                             (v/ask? kb (list 'functional parentOf) CxFoo)]))
+        (is (true? ((exc/roster-hidden-own-fn kb) h)))))))
+
+(defn- declaration-reach-oracle
+  "Over a random 40-context DAG per seed, two roots under CxUniverse and each later
+  context below one to three earlier ones: the reach of a declaration at each context
+  holds the facts stated in the contexts sharing a descendant with it, by the definition
+  over the DAG's own edges."
+  [kb seeds]
+  (doseq [seed seeds]
+    (tu/with-terms [kind_r Ind]
+      (let [rng     (java.util.Random. (long seed))
+            cxs     (vec (repeatedly 40 #(tu/tmp-ctx "Reach")))
+            parents (into {} (map-indexed
+                              (fn [i c]
+                                [c (if (< i 2)
+                                     #{}
+                                     (into #{} (repeatedly (inc (.nextInt rng 3))
+                                                           #(cxs (.nextInt rng i)))))])
+                              cxs))
+            up      (reduce (fn [m c] (assoc m c (into #{c} (mapcat m) (parents c)))) {} cxs)
+            down    (fn [c] (into #{} (filter #(contains? (up %) c)) cxs))
+            M       {:strength :monotonic}
+            _       (doseq [c cxs, p (or (not-empty (parents c)) ['CxUniverse])]
+                      (v/assert kb (list 'genlCx c p) 'CxUniverse M))
+            stated  (into {} (for [c cxs :when (.nextBoolean rng)]
+                               [c (v/assert kb (list kind_r Ind) c)]))]
+        (doseq [c cxs]
+          (is (= (into #{} (keep (fn [[x h]] (when (some (down x) (down c)) h))) stated)
+                 (set (chain/declaration-reach kb (list 'forced_monotonic_predicate kind_r) c)))
+              (str "seed " seed ", declared at context " (.indexOf ^java.util.List cxs c))))))))
+
+(tu/deftest-kb a-declarations-reach-is-the-facts-stated-where-a-context-below-it-sees
+  (declaration-reach-oracle kb [0]))
+
+(tu/deftest-kb ^:slow every-declarations-reach-is-the-facts-stated-where-a-context-below-it-sees
+  (declaration-reach-oracle kb (range 6)))
+
+;; `violations` reads the `:forced-conclusion` entries off the stored firings
+;; (`checks/forced-conclusion-entries`), so these tests count entries against the store.
+
+(defn- foo-under-u
+  "CxFoo under CxU under CxUniverse, each edge `:monotonic`."
+  [kb cu cfoo]
+  (v/assert kb (list 'genlCx cu 'CxUniverse) 'CxUniverse {:strength :monotonic})
+  (v/assert kb (list 'genlCx cfoo cu) 'CxUniverse {:strength :monotonic}))
+
+(tu/deftest-kb a-forced-conclusion-entry-names-the-stored-spelling-while-its-firing-stands
+  ;; one firing per row: the entry is read once, names the conclusion as stored, leaves
+  ;; when the antecedent's retraction removes the firing, and is read once again when the
+  ;; firing is derived again.  The symmetric rows conclude a spelling the store reorders.
+  (doseq [row [:declared-unary :declared-symmetric :network-orthogonal :network-orthogonal-swapped]]
+    (tu/with-terms [CxU CxFoo kind_s kind_t made_kind symRel amy_kind zed_kind]
+      (foo-under-u kb CxU CxFoo)
+      (let [[conseq c]
+            (case row
+              :declared-unary     [(list kind_t '?x) (list kind_t zed_kind)]
+              :declared-symmetric [(list symRel '?x amy_kind) (list symRel zed_kind amy_kind)]
+              :network-orthogonal [(list 'orthogonal '?x made_kind) (list 'orthogonal zed_kind made_kind)]
+              :network-orthogonal-swapped [(list 'orthogonal made_kind '?x)
+                                           (list 'orthogonal made_kind zed_kind)])]
+        (case row
+          :declared-unary (v/assert kb (list 'forced_monotonic_predicate kind_t) CxFoo)
+          :declared-symmetric (do (v/assert kb (list 'symmetric symRel) 'CxUniverse {:strength :monotonic})
+                                  (v/assert kb (list 'forced_monotonic_predicate symRel) CxFoo))
+          nil)
+        (v/assert kb (list 'set/forwardRule (list 'implies (list kind_s '?x) conseq)) CxU)
+        (let [f       (v/assert kb (list kind_s zed_kind) CxU)
+              stored  (:sentence (v/sentex kb (v/handle-of kb c CxU)))
+              first-n (mapv :sentence (forced-entries kb CxU))
+              _       (v/retract! kb f)
+              gone    [(some? (v/handle-of kb c CxU)) (count (forced-entries kb CxU))]]
+          (v/assert kb (list kind_s zed_kind) CxU)
+          (is (= [[stored] [false 0] [stored]]
+                 [first-n gone (mapv :sentence (forced-entries kb CxU))])
+              (str row)))))))
+
+(defn- entry-shape
+  "The `:forced-conclusion` entries `violations` reads in `context`, as `[sentence context
+  off-roster]`, with each value of `names` replaced by its key."
+  [kb names context]
+  (walk/postwalk-replace (zipmap (vals names) (keys names))
+                         (mapv (juxt :sentence :context (comp :off-roster :detail))
+                               (forced-entries kb context))))
+
+(tu/deftest-kb the-forced-conclusion-entries-are-the-same-in-every-arrival-order
+  ;; a network-void firing (orthogonal, on the global roster) and a reader-only void
+  ;; firing (kind_t, declared at CxFoo); a second trigger arrives and is retracted last
+  (let [shapes (doall
+                (for [order (orders [:decl :rule :fact :gone])]
+                  (tu/with-terms [CxU CxFoo kind_s kind_t made_kind spa_kind spb_kind]
+                    (foo-under-u kb CxU CxFoo)
+                    (v/assert kb (definitional-rule kind_s made_kind) CxU)
+                    (let [writes {:decl [(list 'forced_monotonic_predicate kind_t) CxFoo]
+                                  :rule [(list 'set/forwardRule
+                                               (list 'implies (list kind_s '?x) (list kind_t '?x)))
+                                         CxU]
+                                  :fact [(list kind_s spa_kind) CxU]
+                                  :gone [(list kind_s spb_kind) CxU]}]
+                      (doseq [k order] (apply v/assert kb (writes k)))
+                      (v/retract! kb (apply v/handle-of kb (writes :gone)))
+                      (entry-shape kb {'U CxU 'S kind_s 'T kind_t 'M made_kind 'A spa_kind 'B spb_kind} CxU)))))]
+    (is (= 1 (count (distinct shapes))) (pr-str (distinct shapes)))
+    (is (= #{'[(T A) U [S]] '[(orthogonal M A) U [S]]} (set (first shapes))))))
+
+(tu/deftest-kb the-forced-conclusion-entries-survive-recover-and-clear-violations
+  (tu/with-terms [CxU CxFoo kind_s kind_t made_kind spa_kind spb_kind]
+    (foo-under-u kb CxU CxFoo)
+    (v/assert kb (definitional-rule kind_s made_kind) CxU)
+    (v/assert kb (list 'forced_monotonic_predicate kind_t) CxFoo)
+    (v/assert kb (list 'set/forwardRule (list 'implies (list kind_s '?x) (list kind_t '?x))) CxU)
+    (doseq [sp [spa_kind spb_kind]] (v/assert kb (list kind_s sp) CxU))
+    (let [live (forced-entries kb CxU)]
+      (v/clear-violations! kb)
+      (let [cleared (forced-entries kb CxU)]
+        (v/recover kb)
+        (is (= 4 (count live)))
+        (is (= [live live] [cleared (forced-entries kb CxU)]))))))
+
+(tu/deftest-kb a-firing-void-at-some-reader-reads-one-entry-and-logs-once-while-the-roster-moves
+  ;; a roster rule's exceptWhen arriving and leaving, and the declaration leaving and
+  ;; arriving again, read the firing again: `violations` reads one entry for it each
+  ;; time, and the firing logs once, as its justification is added
+  (tu/with-terms [CxU CxFoo kind_t kind_s Sp]
+    (let [rule (list 'set/forwardRule (list 'implies (list kind_s '?x) (list kind_t '?x)))
+          decl (list 'forced_monotonic_predicate kind_t)
+          n    #(count (forced-entries kb (list kind_t Sp) CxU))
+          logs (atom 0)]
+      (foo-under-u kb CxU CxFoo)
+      (v/assert kb decl CxFoo)
+      (v/assert kb rule CxU)
+      (binding [trove/*log-fn* (fn [_ _ _ id _]
+                                 (when (= :vaelii.impl.violations/dropped-conclusion id)
+                                   (swap! logs inc)))]
+        (v/assert kb (list kind_s Sp) CxU)
+        (let [x      (v/assert kb (list 'exceptWhen (list 'orthogonal '?x 'zz_none) rule) CxU)
+              during (n)
+              _      (v/retract! kb x)
+              after  (n)]
+          (v/retract! kb (v/handle-of kb decl CxFoo))
+          (v/assert kb decl CxFoo)
+          (is (= [1 1 1 1] [during after (n) @logs])))))))
+
+(tu/deftest-kb the-entries-of-the-firings-a-declaration-convicts-follow-the-declaration
+  ;; three firings stand before the declaration; its arrival reads three entries, its
+  ;; leaving none, and its arriving again three
+  (tu/with-terms [CxU CxFoo kind_t kind_s SpA SpB SpC]
+    (let [decl (list 'forced_monotonic_predicate kind_t)
+          n    #(count (forced-entries kb CxU))]
+      (foo-under-u kb CxU CxFoo)
+      (v/assert kb (list 'set/forwardRule (list 'implies (list kind_s '?x) (list kind_t '?x))) CxU)
+      (doseq [sp [SpA SpB SpC]] (v/assert kb (list kind_s sp) CxU))
+      (let [d     (v/assert kb decl CxFoo)
+            filed (n)
+            _     (v/retract! kb d)
+            left  (n)]
+        (v/assert kb decl CxFoo)
+        (is (= [3 0 3] [filed left (n)]))))))
+
+(tu/deftest-kb a-declared-firing-is-listed-only-where-a-context-sees-the-declaration-and-the-conclusion
+  ;; the declaration at CxBar, the rule and its firing at CxU, both under CxUniverse.  No
+  ;; context sees both until CxJ sits under the two, and CxJ reads the firing void
+  (doseq [joined? [false true]]
+    (tu/with-terms [CxU CxBar CxJ kind_t kind_s Zed]
+      (let [c (list kind_t Zed)]
+        (doseq [x [CxU CxBar]]
+          (v/assert kb (list 'genlCx x 'CxUniverse) 'CxUniverse {:strength :monotonic})
+          (when joined? (v/assert kb (list 'genlCx CxJ x) 'CxUniverse {:strength :monotonic})))
+        (v/assert kb (list 'forced_monotonic_predicate kind_t) CxBar)
+        (v/assert kb (list 'set/forwardRule (list 'implies (list kind_s '?x) c)) CxU)
+        (v/assert kb (list kind_s Zed) CxU)
+        (is (= (if joined? [1 true false] [0 true nil])
+               [(count (forced-entries kb c CxU)) (v/ask? kb c CxU) (when joined? (v/ask? kb c CxJ))])
+            (str "joined? " joined?))))))
+
+(defn- defeated-declaration-reading
+  "CxDen and CxB under CxU, the writes in each order `pick` keeps.  A :monotonic denial
+  of the declaration at CxDen defeats it there, so CxDen believes the :monotonic denial
+  of the trigger fact and the fact loses.  CxB sees the declaration believed: the denial
+  is inert and the fact stands."
+  [kb pick]
+  (doseq [decl-cx [:at :core]
+          order   (pick (orders [:decl :deny-decl :deny-fact :fact]))]
+    (tu/with-terms [CxU CxDen CxB kind_t Sp]
+      (let [decl (list 'forced_monotonic_predicate kind_t)
+            t    (list kind_t Sp)]
+        (is (= {:den [false false true] :b [true true false]}
+               (roster-reading kb {:den CxDen :b CxB}
+                               {:fixed  (scoped-contexts CxU CxDen CxB)
+                                :writes {:decl      [decl (if (= :core decl-cx) 'CxUniverse CxU)]
+                                         :deny-decl [(list 'not decl) CxDen :monotonic]
+                                         :deny-fact [(list 'not t) CxU :monotonic]
+                                         :fact      [t CxU]}
+                                :order  order
+                                :asked  [decl t (list 'not t)]}))
+            (str "declared " decl-cx ", order " (vec order)))))))
+
+(tu/deftest-kb a-defeated-declaration-makes-no-denial-inert-where-the-defeat-is-seen
+  (defeated-declaration-reading kb sampled))
+
+(tu/deftest-kb ^:slow a-defeated-declaration-makes-no-denial-inert-where-the-defeat-is-seen-in-every-order
+  (defeated-declaration-reading kb identity))
+
+(tu/deftest-kb an-excepted-defeat-of-a-declaration-leaves-it-forcing-where-the-except-is-seen
+  ;; CxR under CxU.  A :monotonic denial of the declaration at CxU places a defeat D on it,
+  ;; so CxU reads the dilemma.  CxR excepts D, believes the declaration and forces the
+  ;; trigger: the rival loses there, whichever order the four writes arrive in.
+  (doseq [order (orders [:decl :deny :trigger :rival])]
+    (tu/with-terms [CxU CxR trigger_kind rival_kind species_kind]
+      (let [decl   (list 'forced_monotonic_predicate trigger_kind)
+            writes {:decl    [decl CxU]
+                    :deny    [(list 'not decl) CxU :monotonic]
+                    :trigger [(list trigger_kind species_kind) CxU]
+                    :rival   [(list rival_kind species_kind) CxU]}
+            asked  [decl (list trigger_kind species_kind) (list rival_kind species_kind)]
+            read   (fn [c] (mapv #(v/ask? kb % c) asked))]
+        (doseq [[s c st] [[(list 'genlCx CxU 'CxUniverse) 'CxUniverse :monotonic]
+                          [(list 'genlCx CxR CxU) 'CxUniverse :monotonic]
+                          [(list 'disjoint trigger_kind rival_kind) CxU :monotonic]]]
+          (v/assert kb s c {:strength (or st :default)}))
+        (doseq [[s c st] (map writes order)] (v/assert kb s c {:strength (or st :default)}))
+        (let [d (:id (first (filter #(= (list 'defeat (list 'sentexHandle (v/handle-of kb decl CxU)))
+                                        (:sentence %))
+                                    (v/sentexes-with-functor kb 'defeat))))]
+          (is (= {:u [false true true] :r [false true true]} {:u (read CxU) :r (read CxR)})
+              (str "before the except, order " (vec order)))
+          (v/assert kb (list 'except (list 'sentexHandle d)) CxR {:strength :monotonic})
+          (is (= {:u [false true true] :r [true true false]} {:u (read CxU) :r (read CxR)})
+              (str "order " (vec order))))))))
+
+(tu/deftest-kb why-not-names-the-conviction-at-a-reader-that-misses-the-declaration
+  (tu/with-terms [CxU CxA CxB trigger_kind made_kind species_kind]
+    (doseq [[s c st] (scoped-contexts CxU CxA CxB)] (v/assert kb s c {:strength st}))
+    (v/assert kb (list 'forced_monotonic_predicate trigger_kind) CxA)
+    (let [r (v/assert kb (definitional-rule trigger_kind made_kind) CxU)
+          c (list 'orthogonal species_kind made_kind)]
+      (v/assert kb (list trigger_kind species_kind) CxU)
+      (is (v/ask? kb c CxA))
+      (let [w (v/why-not kb c CxB)]
+        (is (= :forced-conclusion (:reason w)))
+        (is (= [[r [trigger_kind]]] (mapv (juxt :informant :off-roster) (:convicted w))))))))
+
 (tu/deftest-kb an-exception-on-a-roster-rule-makes-its-firings-inert-in-either-order
   ;; a context per order, so the rule and its exception are two sentexes per order
   (doseq [exception-first? [true false]]
@@ -407,7 +896,7 @@
 (deftest a-roster-member-is-never-a-loser-whatever-its-strength
   ;; decide/verdict weighs only the members off the roster: two arity-class memberships
   ;; separated by a `:default` `disjoint` form a `:hard` clash and both stay believed, in
-  ;; either order and at either strength.  A bare KB, so no CxCore declaration of the
+  ;; either order and at either strength.  A bare KB, so no upper-layer declaration of the
   ;; separation is re-asserted at `:monotonic`.
   (doseq [membership-strength [:monotonic :default] disjoint-first? [true false]]
     (tu/with-neutral-kb [kb tu/isolated-fresh]
@@ -632,7 +1121,7 @@
 
 (tu/deftest-kb an-uncleared-declaration-is-not-retracted
   (testing "genlCx is always forced: its declaration stays"
-    (let [h (v/handle-of kb '(forced_monotonic_predicate genlCx) 'CxCore)
+    (let [h (v/handle-of kb '(forced_monotonic_predicate genlCx) 'CxUniverse)
           e (try (v/retract! kb h) nil (catch clojure.lang.ExceptionInfo e (ex-data e)))]
       (is (= [:uncleared-forcing 'genlCx :unforced-context-edge]
              ((juxt :type :predicate :missing) e)))
@@ -642,7 +1131,7 @@
                          ['(forced_monotonic_predicate sameAs) :unforced-equality]
                          ['(forced_monotonic_predicate except) :unforced-except]
                          ['(forced_monotonic_between_predicates genl) :unforced-predicate-genl]]]
-      (let [h (v/handle-of kb s 'CxCore)]
+      (let [h (v/handle-of kb s 'CxUniverse)]
         (is (= [:uncleared-forcing missing]
                ((juxt :type :missing)
                 (try (v/retract! kb h) nil (catch clojure.lang.ExceptionInfo e (ex-data e)))))
@@ -698,17 +1187,19 @@
   ;; a claim of the whole KB, and would take a rule's conclusions out with it: a
   ;; decontextualized marriage lifts (knows ?x ?y) through CxSocial's rule into a
   ;; context every data context sees, decontextualizing a predicate nothing declared.
-  (testing "the roster is the algebraic marks, the inverse declaration, and genlCx"
+  (testing "the roster is the algebraic marks, the inverse declaration, the length bindings, and genlCx"
     ;; The three commutativity marks are here for `symmetric`'s reason and one of its
     ;; own: they are predicate algebra, and `res/kb-sentex` reads them **globally** —
     ;; a sentex has one key, so whether a predicate sorts its arguments cannot vary by
     ;; reader.  A context-scoped declaration behind a global read would be a mark
     ;; visible from one context and acted on from every one.
     ;; `functionalInArg` is `functional` read at another position, and lifted with it.
-    (is (= '#{functional functionalInArg inverse reflexive symmetric asymmetric transitive
-              irreflexive anti_symmetric anti_transitive equivalence_relation
-              injection surjection bijection
-              commutative commutativeInArgs commutativeInArgAndRest}
+    ;; The length bindings are lifted so a relation's length reads the same everywhere.
+    (is (= (into '#{functional functionalInArg inverse reflexive symmetric asymmetric transitive
+                    irreflexive anti_symmetric anti_transitive equivalence_relation
+                    injection surjection bijection
+                    commutative commutativeInArgs commutativeInArgAndRest}
+                 sx/arity-binding-functors)
            (v/props kb :decontextualized)))
     (is (= '#{genlCx} (v/props kb :forced-decontextualized))))
   (testing "so a social fact stays in the theory that states it"
@@ -895,16 +1386,14 @@
 (tu/deftest-kb a-lift-out-of-sight-of-the-universe-stores-a-clashing-copy-and-reports-it
   ;; The definitional checks run where a fact is stated, against what is visible from
   ;; there, so they cover the CxUniverse copy whenever the stating context sees
-  ;; CxUniverse.  Two contexts wired outside the spindle do not: neither sees the other's
+  ;; CxUniverse.  Two contexts no genlCx edge names do not: neither sees the other's
   ;; fact, so each assert passes and the copies meet in CxUniverse.  The copy is admitted
   ;; as a firing's conclusion is: the clash is stored and decided there, in either order.
   (tu/with-terms [dog cat Rex CxOffA CxOffB]
-    (v/assert kb (list 'genlCx CxOffA 'CxCore) 'CxUniverse)
-    (v/assert kb (list 'genlCx CxOffB 'CxCore) 'CxUniverse)
-    (is (not (v/sees? kb CxOffA 'CxUniverse)) "wired outside the spindle")
-    (v/assert kb (list 'genl dog 'thing) 'CxCore)
-    (v/assert kb (list 'genl cat 'thing) 'CxCore)
-    (v/assert kb (list 'disjoint dog cat) 'CxCore)
+    (is (not (v/sees? kb CxOffA 'CxUniverse)) "no edge names CxOffA")
+    (v/assert kb (list 'genl dog 'thing) 'CxUniverse)
+    (v/assert kb (list 'genl cat 'thing) 'CxUniverse)
+    (v/assert kb (list 'disjoint dog cat) 'CxUniverse)
     (v/assert kb (list 'decontextualized_predicate dog) 'CxUniverse)
     (v/assert kb (list 'decontextualized_predicate cat) 'CxUniverse)
     (v/clear-violations! kb)

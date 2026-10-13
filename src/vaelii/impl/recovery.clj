@@ -463,7 +463,8 @@
 (defn- rebuild-and-install!
   "Recover `kb`'s belief on a second KB over its stores (`kb/rebuild-kb`, its record store
   passed through `wrap-records`), install it into `kb` (`install-rebuilt!`), write `kb`'s
-  image, and retire the `:stale-belief` hazard.  Returns the source digest the image
+  image, and retire the `:stale-belief` hazard.  The rebuilt KB holds no `:snapshot-dir`
+  (`kb/rebuild-own`), so its settles offer the index image no refresh.  Returns the source digest the image
   carries.  Throws an `ex-info` carrying `::abandoned` when the rebuild is asked to stop
   before its install."
   [kb wrap-records]
@@ -611,7 +612,12 @@
                            :msg (str "reasoning image for " (:snapshot-dir kb)
                                      " not installed (" (name reason)
                                      ") — recovering from the records")}))
-            (recover-from-records kb)
+            ;; the settles write no mid-life image refresh (`kb/*defer-index-refresh?*`);
+            ;; the one refresh runs here, after them.  A process killed before it reopens
+            ;; from the records, as it would from any image not yet written.
+            (binding [kb/*defer-index-refresh?* true]
+              (recover-from-records kb))
+            (kb/refresh-index-image! kb)
             (reasoning-image/register-close! kb (or (:source (reasoning-image/save! kb)) source))))
       ;; Belief now exists over whatever the store holds, so the write entry points stop
       ;; refusing on that count.  Only that count: a **derived** index is not rebuilt here —

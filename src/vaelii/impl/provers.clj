@@ -75,6 +75,7 @@
   (:require [vaelii.impl.budget :as budget]
             [vaelii.impl.caches :as caches]
             [vaelii.impl.datetime :as datetime]
+            [vaelii.impl.decide.arity :as arity]
             [vaelii.impl.except :as exc]
             [vaelii.impl.inherit :as inherit]
             [vaelii.impl.jtms :as jtms]
@@ -1030,7 +1031,7 @@
   `integer` is the **unary** EDN-kind check: `(integer 5)` holds because 5 *is* an integer,
   no stored fact needed.  It is a built-in for the same reason the comparisons are — the
   kind is always present — and it is what lets the four sign-refined integer collections in
-  CxCore (`positive_integer` …) be defined by `defnSufficient` / `defnNecessary` conditions
+  core.txt (`positive_integer` …) be defined by `defnSufficient` / `defnNecessary` conditions
   built on `(integer ?x)` and resolved **by evaluation** at query time, at zero storage
   cost: a sufficient condition with no stored conjunct expands to no forward rule
   (docs/defns.md).
@@ -1146,9 +1147,10 @@
       :else #{})))
 
 (def expression-kind-predicates
-  "The kinds `ExpressionKindProver` answers of a quoted form, as a set: CxReflection's
-  expression lattice and the value kinds below it.  Forward chaining discharges an
-  antecedent through the prover only when its functor is here (`support-answered-preds`),
+  "The kinds `ExpressionKindProver` answers of a quoted form, as a set: the expression
+  lattice `reflection.txt` declares and the value kinds below it.  Forward chaining
+  discharges an antecedent through the prover only when its functor is here
+  (`support-answered-preds`),
   so a kind a KB adds below `expression` is answered by a query and not by a firing."
   '#{expression atomic_expression non_atomic_expression atomic_term variable symbol
      unrepresented_term string number integer keyword boolean character
@@ -1275,25 +1277,6 @@
     (integer? declared)               (<= n declared)
     :else                             nil))
 
-(defn- relation-variable-arity?
-  "Is `pred` a variable-arity relation, visible from `context`?  Read by the type-aware
-  retrieval so a membership stated as `variable_arity_predicate` or `variable_arity_function`
-  answers the `variable_arity` question its `genl` edge entails."
-  [kb pred context]
-  (boolean (seq (res/matches-visible kb (list 'variable_arity pred) context))))
-
-(defn- relation-arity
-  "The exact arity `pred` itself is declared with, visible from `context`: its `(arity P
-  n)` declaration (`tax/declared-arity`), else its exact-arity class membership
-  (`tax/exact-arity-classes`, read by the type-aware retrieval), or nil.  The prover's
-  twin of `kb/relation-arity`, which sits above this namespace."
-  [kb pred context]
-  (or (let [n (tax/declared-arity (reasoning/taxonomy kb) pred context)]
-        (when (and (integer? n) (pos? n)) n))
-      (first (for [[t n] (sort-by key tax/exact-arity-classes)
-                   :when (seq (res/matches-visible kb (list t pred) context))]
-               n))))
-
 (defrecord AdmitsArgnumProver []                 ; the position query over a relation's arity
   Prover
   (applicable? [_ _ goal _]
@@ -1302,15 +1285,16 @@
          (let [[p n] (rest goal)] (and (symbol? p) (integer? n)))))
   (est-bindings [_ _ _ _] 1)
   (cost         [_ _ _ _] :lookup)
-  ;; Authoritative for a ground goal: the answer is computed from the relation's declared
-  ;; arity and variable-arity mark, both of which follow belief.
+  ;; Authoritative for a ground goal: the answer is computed from the relation's length,
+  ;; inherited through `genl` included (`arity/relation-length`), and its `variable_arity`
+  ;; release (`arity/released?`), each read the same at every context.
   (completeness [_ _ _ _] 100)
-  (solve [_ kb goal context]
-    (let [[p n] (rest goal)]
-      (if (true? (admits-position? (relation-variable-arity? kb p context)
-                                   (relation-arity kb p context)
-                                   n))
-        [{}] []))))
+  (solve [_ kb goal _]
+    (let [[p n] (rest goal)
+          var   (arity/released? kb p)]
+      (if (true? (admits-position? var (when-not var (:exact (arity/relation-length kb p))) n))
+        [{}]
+        []))))
 
 ;; ---- different: the unique-name assumption over the equality closure ----
 
@@ -1384,7 +1368,7 @@
   The exemption is read **after** the pairwise check.  The two conjuncts commute, so the
   order is a cost decision rather than a semantic one: a goal that already fails on a
   repeat pays no `indeterminate_term` read at all.  `(different A A)` measures 14.6 us/op
-  against 19.4 for the other order, over a KB holding CxCore and no indeterminate term;
+  against 19.4 for the other order, over a KB holding core.txt and no indeterminate term;
   a goal whose arguments do differ measures the same either way, since it reads every
   argument in both orders."
   [kb context args]
@@ -1729,7 +1713,7 @@
 
 (def measure-comparisons
   "The measure-comparison predicates `QuantityProver` answers — check-only over two
-  ground measures, never stored (declared in the upper CxMeasure, computed here)."
+  ground measures, never stored (declared in `measure.txt`, computed here)."
   '#{sameQuantity quantityLessThan quantityGreaterThan
      quantityLessThanOrEqual quantityGreaterThanOrEqual})
 
@@ -1811,8 +1795,8 @@
   with *stored facts* — so the tempting move is a `:support-source` field on the
   declaration, telling a KB author these rows are required.  It stays here, for two
   reasons that are the same ones the header gives.  Neither predicate is grammar:
-  CxCore's own test for belonging is subject matter, and `dimensionOf` is named there as
-  the example that fails it — both live in `kb/upper/CxMeasure.txt`, where their
+  core.txt's own test for belonging is subject matter, and `dimensionOf` is named there as
+  the example that fails it — both live in `kb/upper/measure.txt`, where their
   `comment` sentexes already say they are read by the quantity provers.  And the reading
   that matters is **live**: `support-source-preds` asks the registry, so a prover
   arriving through `add-prover` contributes its sources and a declaration field would be
@@ -2852,7 +2836,7 @@
 ;; is about.  On-demand and non-materializing, so it follows belief with no cache and
 ;; `sentexes-matching` still shows only what was stored.  `arity` is NOT here: a
 ;; sub-predicate may carry a signature of its own, and the answer would need the forward
-;; `arity`⇒type cycle a backward prover cannot fire; `check`'s `inherited-arity` still
+;; `arity`⇒type cycle a backward prover cannot fire; `arity/relation-length` still
 ;; holds a silent sub-predicate to its supers.
 (def ^:private meta-constraint-shape
   "By functor: the goal-list index of the predicate, the position-number indices that

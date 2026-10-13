@@ -24,7 +24,7 @@
   [kb sentence ctx]
   (boolean (seq (v/sentexes-matching kb sentence ctx))))
 
-(defn- a-spindle
+(defn- a-context
   "Hang `ctx` under CxUniverse, so a `defn*` and the facts written there see the
   universal vocabulary — and two such contexts are siblings that cannot see each
   other, which is what the scoping test needs."
@@ -146,8 +146,8 @@
 
 (tu/deftest-kb the-definition-is-scoped-to-its-context
   (tu/with-terms [bachelor Tom Sam unmarried CxHome CxAway]
-    (a-spindle kb CxHome)
-    (a-spindle kb CxAway)                       ; a sibling CxHome cannot see
+    (a-context kb CxHome)
+    (a-context kb CxAway)                       ; a sibling CxHome cannot see
     (v/assert kb (list 'defnNecessary bachelor (list unmarried '?x)) CxHome)
     (v/assert kb (list bachelor Tom) CxAway)    ; invisible to the definition
     (v/assert kb (list bachelor Sam) CxHome)    ; visible to it

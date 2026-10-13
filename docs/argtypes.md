@@ -419,12 +419,12 @@ super-predicate rests on the `genl` edges it descends through, so the justificat
 Retracting a `genlCx` edge on that path takes the derivation back, and a second path draws
 it again (`special/rederive-descended`), as for a `genl` route.
 
-The starter's `(arg parentOf 1 organism)` lives in `CxLife` while the individuals live in
+The starter's `(arg parentOf 1 organism)` lives in CxUniverse (`life.txt`) while the individuals live in
 `CxNaturalWorld`, below it, so a `parentOf` fact there derives `(organism X)` in
 `CxNaturalWorld`. Every argument position in the shipped ontology is declared, so a
 toggle-on starter load derives a membership per declared position, less the ones
 pruning withholds (the table under [Cost](#cost)). The root's own `genl` supertype
-position is the single undeclared one, and `CxCore` says why beside it: `thing` cannot be
+position is the single undeclared one, and `core.txt` says why beside it: `thing` cannot be
 a proper subtype of itself, so the constraint the root would fail is the wrong constraint
 rather than a missing one.
 
@@ -618,13 +618,17 @@ subsumes what it did. The release is therefore a function of the store: a KB reb
 of the five ways a subsumption ends.
 
 One arrival re-derives too. A record takes the justification of everything that entails
-it, so a record that is not a mint coming IN while a believed record subsumes it — an
-author's `(animal Fred)` beside `(dog Fred)` — has the facts naming `Fred` re-derive that
-one sentence, and each whose mint of it was withheld adds its justification.
+it, so a record a premise or a rule firing holds up coming IN while a believed record
+subsumes it — an author's `(animal Fred)` beside `(dog Fred)` — has the facts naming
+`Fred` re-derive that one sentence, and each whose mint of it was withheld adds its
+justification. The record qualifies whether or not a mint justification already concludes
+it: a firing in the same write can mint onto the record before the settle reads it, and
+the order that stores the record first draws every mint onto it
+(`argtype_entail_test/a-record-a-rule-concludes-takes-the-withheld-mints-in-every-order`).
 
 The KB **answers** the same either way: `isa?`, matching and the definitional checks all
 read the taxonomy, which reaches `animal` from `dog` with or without a record in between.
-Storage differs — the shipped starter holds 2,568 sentexes against 3,561, CxCore 932
+Storage differs — the shipped starter holds 2,568 sentexes against 3,561, `core.txt` 932
 against 1,234 — and so does `why`, which shows the subsumption route rather than a minted
 record.
 
@@ -673,7 +677,7 @@ declarations; the target materialized those entailments when it first became bel
 | a **function application** in the position | `args-problem` / `genls-problem` check it against the function's declared `result` / `genlResult` and refuse where the result misses ([nat.md](nat.md)) — but nothing is minted, a declared result being a claim about the *function* and not about this application, and a compound having no membership to mint |
 | a genuine negation, or a rule | not argument-checked, so not entailed from either |
 | a **query** | nothing, ever. The entailment is on the store path alone |
-| a bulk or dump load | skipped: the fact-direction derivations ride on the checks `*bulk-load?*` skips, and a dump import writes records directly. `v/record-arg-types`, run once after the load on the recovered KB, records what the stored facts derive, so the store then holds what a per-fact load holds (`argtype_entail_test/a-bulk-loaded-store-records-its-derivations-once`) |
+| a bulk or dump load | skipped: `*bulk-load?*` draws none of the three arrival orders (the fact, the declaration, the `genl` edge), and a dump import writes records directly. `v/record-arg-types`, run once after the load on the recovered KB, records what the stored facts derive, so the store then holds what a per-fact load holds (`argtype_entail_test/a-bulk-loaded-store-records-its-derivations-once`) |
 
 ## Cost
 
@@ -824,7 +828,7 @@ minted is typed at check time ([nat.md](nat.md#typing-an-application-that-is-nev
 `(interArgs R T)` says that when any argument of an application of `R` is a `T`, every
 argument is a `T`. `(interArgAndRest R n T)` says the same of the positions from `n` to the
 end of each application and leaves the positions before `n` unconstrained. `(interArgs R
-T)` states what `(interArgAndRest R 1 T)` states, and two forward rules in CxCore derive
+T)` states what `(interArgAndRest R 1 T)` states, and two forward rules in `core.txt` derive
 each spelling from the other, the way `arg1` and `(arg R 1 T)` derive each other.
 
 The reading is `interArg`'s with one type in both roles. The trigger is an argument in the
@@ -926,7 +930,7 @@ predicate.
 
 ## What a quoted form is
 
-`(Quote X)` denotes the expression X, and X's kind in CxReflection's expression lattice is
+`(Quote X)` denotes the expression X, and X's kind in `reflection.txt`'s expression lattice is
 read off how X is written (`provers/shape-kinds`):
 
 | X | kinds |

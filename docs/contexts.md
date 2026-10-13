@@ -1,7 +1,7 @@
 # Contexts
 
 - **Covers:** how a sentex is scoped to a context, how the `genlCx` closure orders
-  contexts into the shipped spindle, where a forward-derived or lifted fact is placed, and
+  contexts into the shipped topology, where a forward-derived or lifted fact is placed, and
   the three **query contexts** — `Cx…` symbols that name a way of reading rather than a
   place.
 - **Not here:** `genl`, the sibling closure over types rather than contexts →
@@ -57,80 +57,62 @@ as well as before, and no firing ever runs against a component the reconcile unm
 Deferred to the next settle instead, one conclusion would land in `CxAlpha` and the
 next in `CxBeta` for no reason but how many settles had run since the defeat.
 
-## The context spindle
+## The context topology
 
-**A spindle is three layers**: a **head** every member sees, a set of **members** that
-see the head and not each other, and a **collector** that sees every member. The default
-topology is **two spindles stacked**, most general (top) to most specific (bottom):
+The default topology is three levels, most general (top) to most specific (bottom):
 
-| | head | members | collector |
-|---|---|---|---|
-| the upper spindle | CxCore | `resources/kb/upper/` — eight contexts | CxUniverse |
-| the middle spindle | CxUniverse | `kb/middle/` — seven contexts, beside four opt-in theories | CxWell |
+| context | holds | sees |
+|---|---|---|
+| CxUniverse | the upper ontology: every file under `resources/kb/upper/` | nothing |
+| the middle contexts | `kb/middle/` — seven theories, beside four opt-in theories | CxUniverse |
+| CxWell | no content of its own | the seven theories |
 
-CxUniverse is the joint, the first spindle's collector and the second's head, and it can
-be the second's head *because* it is the first's collector: a head is a context every
-member sees, and collecting the whole upper spindle is what makes CxUniverse one.
 Data hangs below CxWell.
 
-- **CxCore** — the upper spindle's *head*: the code-supported vocabulary (every
-  special predicate the engine interprets), asserted by `vaelii.host.core-context`. The
-  root — every context in the spindle sees it, and a context no `genlCx` edge names
-  sees nothing but itself ([A context outside the
-  spindle](#a-context-outside-the-spindle)). It also holds the collections at the top
-  of the ontology — the parts of the three partitions of `thing`
+- **CxUniverse** — the root: every context the middle layer wires in sees it, and a
+  context no `genlCx` edge names sees nothing but itself ([A context outside the
+  topology](#a-context-outside-the-topology)). `vaelii.host.core-context` loads every
+  file under `resources/kb/upper/` into it as one batch. `core.txt` is the
+  code-supported vocabulary (every special predicate the engine interprets) and the top
+  of the ontology: the parts of the three partitions of `thing`
   ([taxonomy.md](taxonomy.md#the-three-partitions-of-thing)), `spatiotemporal`,
-  `nowhere_never`, `linguistic`, `biological`, `organism` and `measure` — which the
-  engine reads by no name (`vaelii.impl.predicates` classifies each inert) and which are
-  here for the reason below: the members of a spindle see each other not at all, so a
-  term two of them extend has to be defined in the head.
-  `starter_test/a-term-two-spindle-members-touch-is-defined-in-the-head` holds that.
-- **the upper spindle's members** (`resources/kb/upper/`) — what things *are*, always
-  true, like `genl`. One context per domain (`vaelii.host.starter`), each seeing CxCore
-  and seen by CxUniverse:
-  - `CxAbstract` — the kinds hanging off the skeleton CxCore holds (`made`,
-    `food`, `substance`, `body_part`, `context`, …) plus the
-    structural relations `partOf`/`locatedIn`.
-  - `CxOrganism` — the biological taxonomy and its disjointness.
-  - `CxLife` — the organism relations (`parentOf`, `siblingOf`, `flies`, `mortal`,
+  `nowhere_never`, `linguistic`, `biological`, `organism` and `measure`. Each other file
+  is one domain:
+  - `abstract.txt` — the kinds below the skeleton `core.txt` holds (`made`, `food`,
+    `substance`, `body_part`, `context`, …), the structural relations
+    `partOf`/`locatedIn`, and the `travelling` and `flying` event kinds.
+  - `organism.txt` — the biological taxonomy and its disjointness.
+  - `life.txt` — the organism relations (`parentOf`, `siblingOf`, `flies`, `mortal`,
     `birthYearOf`, `olderThan`, …) with their arg and metadata.
-  - `CxSociety` — the social relations (`marriedTo`, `likes`, `owns`).
-  - `CxMeasure` — the theory of measurement: the two measure terms, the
+  - `society.txt` — the social relations (`marriedTo`, `likes`, `owns`).
+  - `measure.txt` — the theory of measurement: the two measure terms, the
     `dimensionOf`/`conversionFactor` table, the five comparisons
     ([quantity.md](quantity.md)), and measurement said as coarsely as it can be said —
     `signOf` / `trendOf`, the three qualitative arithmetic relations and the
     `derivativeOf` edge, for the quantities nobody has a figure for
     ([sign.md](sign.md)).
-  - `CxReflection` — the language the KB is written in, as something the KB can talk
+  - `reflection.txt` — the language the KB is written in, as something the KB can talk
     about: the expression lattice (atomic and non-atomic expressions, open and closed,
     well-formed and ill-formed) and the use/mention vocabulary `proposition`, `means`,
-    `denotes` and `expresses`. CxCore keeps the expression kinds the engine or its own
-    declarations name (`symbol`, the value kinds, `formula`, `sentence`,
+    `denotes` and `expresses`. `core.txt` keeps the expression kinds the engine or its
+    own declarations name (`symbol`, the value kinds, `formula`, `sentence`,
     `non_atomic_term`) and `linguistic`.
-  - `CxSpace` — qualitative space, four independent calculi in one context because
-    all four are *about* space: RCC-8 topology, cardinal direction, relative direction
-    and qualitative distance, fifty predicates between them ([space.md](space.md)).
-  - `CxTime` — qualitative time in three layers over the same subject: Allen's
+  - `space.txt` — qualitative space: RCC-8 topology, cardinal direction, relative
+    direction and qualitative distance, fifty predicates between them
+    ([space.md](space.md)).
+  - `time.txt` — qualitative time in three layers over the same subject: Allen's
     thirteen interval relations plus seven derived disjunctions, the point algebra over
     instants with the endpoint predicates that bridge the two, and the metric layer
     (`temporalDistance`) that puts real measures on the gaps ([time.md](time.md),
     [stp.md](stp.md)). The `length` / `totalDuration` / `overlapDuration` vocabulary the
-    duration arithmetic computes over lives here too ([duration.md](duration.md)), and so
-    do the three calendar constructors `YearFn` / `MonthFn` / `DayFn`, which name an
+    duration arithmetic computes over is here too ([duration.md](duration.md)), and so
+    are the three calendar constructors `YearFn` / `MonthFn` / `DayFn`, which name an
     interval the calendar already picks out ([context-nat.md](context-nat.md)).
-- **CxUniverse** — the upper spindle's *collector* and the middle spindle's *head*, left free for **lifting**: universally-true facts collect here
-  (`decontextualized_predicate` justifications and the forced `genlCx` extent). It sees
-  every upper member and is seen by every middle member. It also holds hand-authored
-  cross-member axioms in `resources/kb/CxUniverse.txt`: a claim naming terms from two
-  upper members belongs here, since no member sees a sibling and only the collector
-  sees both. It holds `(termsRelated time_interval Duration)`, which names CxAbstract's
-  `time_interval` beside CxMeasure's dimension, and the `travelling` and `flying` event
-  kinds CxLife's abilities name, whose `genl` edges reach CxAbstract's `causal_event`. It
-  also states each shipped context's `context` membership, since it stores every
-  `genlCx` edge. `organization` and `animal`, the pair it once separated, are already
-  separated by `(partition thing tangible intangible)` in CxCore. Being the one context
-  that sees the whole upper spindle is what makes it the head of the next.
-- **the middle spindle's members** (`kb/middle/`) — how the definitional things *interrelate*,
+
+  CxUniverse is also the target of **lifting**: `decontextualized_predicate` copies and
+  the forced `genlCx` extent are stored here. It states each shipped context's `context`
+  membership, since it stores every `genlCx` edge.
+- **the middle contexts** (`kb/middle/`) — how the definitional things *interrelate*,
   where several overlapping theories can coexist. One context per theory, each seeing
   CxUniverse and seen by CxWell:
   - `CxKinship` — grandparentOf, ancestorOf, olderThan.
@@ -184,33 +166,39 @@ Data hangs below CxWell.
   theory that extends an existing starter theory with vocabulary most contexts
   under the base theory have no occasion to see:** the base theory ships to every
   context below CxWell, and the extension only to a context placed under it.
-- **CxWell** — the middle spindle's *collector*: it sees every middle member, so it
-  (and any context hung beneath it) transitively sees the whole ontology except the
-  four opt-in theories, CxNormalPhysicalConditions, CxComputing, CxPerception and
-  CxSocialExtension. A `kb/middle/` file is a member when it states `(genlCx CxWell
-  <its context>)`, and an opt-in theory when it does not.
+- **CxWell** — sees every middle context except the four opt-in theories, so it (and any
+  context below it) transitively sees the whole ontology except
+  CxNormalPhysicalConditions, CxComputing, CxPerception and CxSocialExtension. A
+  `kb/middle/` file is one of the seven theories when it states `(genlCx CxWell <its
+  context>)`, and an opt-in theory when it does not.
 
-**A member sees no member, so a shared term belongs in the head.** That is what makes a
-spindle a spindle: `CxLife` does not see `CxOrganism` and `CxOrganism` does not see
-`CxAbstract`. A term defined in one member and *extended* from another is therefore
-invisible where it is extended, and the closure breaks — an edge placing `animal` under
-`organism` in `CxOrganism` against an `organism` defined in `CxAbstract` left `animal` unable to
-reach `thing` from `CxOrganism` itself, so every `arg` constraint written there convicted
-nothing in its own context. So a term more than one member of a spindle defines or
-extends belongs at or above that spindle's head: CxCore for the upper spindle, and
-CxUniverse or anything CxUniverse sees for the middle spindle. *Using* a member's term
-from another member is a separate question the rule does not cover — extending one is
-what breaks a closure.
+**CxUniverse is locked to the shipped files.** `vaelii.host.sync/sync!` makes
+CxUniverse's premises exactly what the shipped files produce, with two exceptions: a
+`genlCx` premise, which CxUniverse stores whichever context states it, and a sentex that
+is not a premise (a lifted copy, a rule firing). A premise an author writes into
+CxUniverse is retracted at the next sync, and a shipped premise held at another strength
+is restated at the shipped one. `assert` does not refuse a premise written into
+CxUniverse. An author's own vocabulary goes in a context of the author's own
+([Adding a context](#adding-a-context)), which sync does not read.
 
-Each member file wires *itself* in with two `genlCx` edges — one to its spindle's head
-and one to its collector — so the topology is **data**: dropping a `Cx<Name>.txt` in
-`resources/kb/upper/` or `resources/kb/middle/` adds a member, no code change, and every
-context present is loaded on kb start by default. There is **no** direct `(genlCx CxWell
-CxCore)` edge; Well reaches Core through both spindles (middle member → CxUniverse →
-upper member → CxCore).
+**A middle context sees no other middle context, so a term two of them extend belongs
+in CxUniverse.** `CxBiology` does not see `CxSocial`. A term defined in one middle context
+and *extended* from another is invisible where it is extended, and the closure breaks:
+an edge placing `animal` under `organism`, written where `organism` is not visible, leaves
+`animal` unable to reach `thing` from there, so every `arg` constraint written there
+convicts nothing in its own context.
+`starter_test/a-term-two-middle-contexts-touch-is-defined-in-cxuniverse` holds that.
+*Using* another context's term is a separate question the rule does not cover;
+extending one breaks a closure.
 
-`vaelii.host.core-context` loads only the head (CxCore); the members are the starter's,
-so a **CxCore-only KB is just the vocabulary** — a head with no spindle under it.
+Each middle file wires *itself* in with its `genlCx` edges, so the topology is **data**:
+dropping a `Cx<Name>.txt` in `resources/kb/middle/` adds a context, and dropping a
+`<domain>.txt` in `resources/kb/upper/` adds to CxUniverse, with no code change. Every
+file present is loaded on kb start by default. There is **no** direct `(genlCx CxWell
+CxUniverse)` edge; CxWell reaches CxUniverse through each middle context.
+
+`vaelii.host.core-context` loads the upper layer alone, and the middle contexts are the
+starter's, so a **vocabulary KB** holds CxUniverse's content and no `genlCx` edge.
 
 ### The shipped KB is schema only
 
@@ -224,13 +212,13 @@ Because a middle theory is seen by every CxWell descendant, a rule firing over
 cast facts in `CxNaturalWorld` places its conclusion back in `CxNaturalWorld`
 (the maximal common descendant), where a query finds it.
 
-### Adding a sibling context
+### Adding a context
 
-A user adds their **own member** to either spindle. An *upper* member sees
-CxCore and is seen by CxUniverse (`(genlCx CxMy CxCore)` and
-`(genlCx CxUniverse CxMy)`); a *theory* sibling sees CxUniverse and
-is seen by CxWell. Its vocabulary is visible from every data context below Well
-without touching the shipped members.
+A user adds a context of their own to the topology. A context CxUniverse sees
+(`(genlCx CxUniverse CxMy)`) holds universal vocabulary, visible from every data context
+below CxWell. A theory sees CxUniverse and is seen by CxWell (`(genlCx CxMy CxUniverse)`
+and `(genlCx CxWell CxMy)`), so every data context below CxWell reads it. Neither touches
+a shipped file or a premise of CxUniverse, so sync leaves both in place.
 
 ## Context-aware inference
 
@@ -645,7 +633,7 @@ properties fail with it:
 
 The reading a rule wants is that `S` be **visible** in some context, which is what the
 two mechanisms below this section say — `(decontextualized_predicate P)` takes every
-`(P ...)` into CxUniverse, which every context below the joint sees, and a `genlCx` edge puts `Ctx` in
+`(P ...)` into CxUniverse, which every context the topology wires in sees, and a `genlCx` edge puts `Ctx` in
 another context's ancestor set. Under either the literal is written plainly, and the
 `genlCx` topology rather than a per-rule annotation decides what is readable from where.
 An `ist` into a context that already sees the rule and the facts adds nothing, because
@@ -667,20 +655,18 @@ subtypes of `binary_predicate` — `symmetric` / `asymmetric` / `transitive` /
 predicate that maintains its property *and*, through `(genl symmetric binary_predicate)`,
 is a membership, so a `(symmetric siblingOf)` declaration makes `isa? siblingOf symmetric`
 and `isa? siblingOf binary_predicate` hold — exactly as `isa? dog unary_predicate` does for
-a type. The two families scope **oppositely**, on purpose: the **arity** memberships are
-derived by CxCore rules that name no context, so they place where the declaration was made
-(a predicate declared binary in one theory is binary *there*, not KB-wide — see "The
-consumers" below), while the algebraic marks are `decontextualized_predicate`s, lifted into
-CxUniverse and seen by every data context. A predicate's algebra is a claim about the
-predicate itself and belongs to the whole KB; its arity, read off whatever theory declared
-it, stays with that theory.
+a type. Both families are `decontextualized_predicate`s, lifted into CxUniverse and seen
+by every data context. The **arity** memberships are derived by `core.txt` rules that name no
+context, so each places where the declaration was made, and its copy in CxUniverse
+publishes it KB-wide. A predicate's algebra and its length are claims about the predicate
+itself and belong to the whole KB.
 
 ## decontextualized_predicate: a fact that belongs to the KB, not to one theory
 
 `(decontextualized_predicate P)` takes every `(P ...)` out of the context it was stated
 in. Each one — asserted, or concluded by a rule — is additionally **deduced into
 CxUniverse**, supported by the placement sentex *and* the
-`(decontextualized_predicate P)` sentex. Since every context below the joint sees CxUniverse,
+`(decontextualized_predicate P)` sentex. Since every context the topology wires in sees CxUniverse,
 the fact becomes visible everywhere, even from a *sibling* context that cannot see
 where it was stated. Retracting or defeating either the original or the declaration
 withdraws the copy through the JTMS, and declaring it retroactively lifts the `(P ...)`
@@ -689,7 +675,7 @@ OUT, which its arrival could not reach (`special/revived-declaration-sweeps`, ru
 settle for every revived datum).
 
 The mechanism is documented in the KB by the `comment` on `decontextualized_predicate` in
-`CxCore.txt`. It is implemented in code rather than as a rule, because a rule stating it
+`core.txt`. It is implemented in code rather than as a rule, because a rule stating it
 would match every fact in the store and would name its target with an `ist` consequent,
 which a rule is refused. The declaration is ordinary predicate metadata, read back with
 `(has-prop? kb :decontextualized pred)`.
@@ -721,14 +707,12 @@ stated meet in the target as a violation nothing reports:
 ```
 
 CxUniverse is the target that closes this, because every context that lifts sees it:
-the middle spindle and the data contexts below the joint all reach CxUniverse, so the
-first copy is visible to the *next* assert, and the settle weighs the clash where the
-second assert is made. The upper
-spindle sits above the joint and reaches CxCore instead, which is why a declaration
-written in CxCore constrains every context in the tree. That is not a lucky property of a well-known context — it is the
-whole reason the target is fixed.
+the middle contexts and the data contexts below them all reach CxUniverse, so the first
+copy is visible to the *next* assert, and the settle weighs the clash where the second
+assert is made. The same reach is why a declaration written in CxUniverse constrains
+every context in the tree, and it is the reason the target is fixed.
 
-The residual case is a context wired outside the spindle, which sees neither its
+The residual case is a context outside the topology, which sees neither its
 siblings nor CxUniverse. There the stating context could not have run the check
 either, so the lift runs it on the copy itself (`unchecked-target?` — one `sees?` per
 lift, and only that case pays anything more). A sweep over stored facts, the one a
@@ -798,6 +782,10 @@ Every shipped declaration is a claim about a **predicate** rather than about a w
 `transitive`, `anti_transitive`, `equivalence_relation`, `injection`, `surjection` and
 `bijection` carry the mark — so a `(symmetric P)` stated in one theory is the KB's
 claim about `P` and not that theory's — and `genlCx` carries the forced variant below.
+The fourteen length bindings (`sx/arity-binding-functors`: `arity`, `arityMin`, the nine
+exact-arity classes and the three `variable_arity` classes) carry it at `:monotonic`, so a
+copy keeps its binding's strength and a relation's length reads the same at every context
+([taxonomy.md](taxonomy.md#arity)).
 **No domain relation carries either**, and two things hold that line:
 
 - **A domain fact is what a theory is for.** A marriage, an ownership, a location holds
@@ -837,24 +825,24 @@ other reader reads it where its sentex is visible, so a KB with no lift answered
 mirror of a fact from a sibling through the store and denied it through `has-prop?`, the
 symmetric prover and the supporter a mirrored firing names. `special/deduce-lifts`
 therefore deduces a permuting mark into CxUniverse whether or not the KB declares the lift,
-resting the copy on the statement alone. On a KB carrying CxCore, which declares it, the
+resting the copy on the statement alone. On a KB carrying the upper layer, which declares it, the
 copy is the same copy. A context that sees neither a statement nor the copy reads the
-four as the store does ([A context outside the spindle](#a-context-outside-the-spindle)).
+four as the store does ([A context outside the topology](#a-context-outside-the-topology)).
 
-**A KB without CxCore holds the other twelve where they are stated.** Nothing lifts
+**A KB without the upper layer holds the other twelve where they are stated.** Nothing lifts
 them, so every reader reads `(transitive R)` stated in `CxA` from `CxA` and below, alike.
 `inherit_test`'s `the-transitivity-licence-is-read-from-the-asking-context` pins that half,
 and `a-permuting-mark-is-read-from-every-context-on-this-kb-too` beside it pins the four
 permuting marks. Such a KB still holds the forced-monotonic roster's engine baseline, so a
 `genlCx` edge, a `functional` or `irreflexive` mark, a definitional declaration, an arity
 binding, an `except` or an equality stated `:default` is never a loser and a denial of
-one is held OUT, as under CxCore ([nmtms.md](nmtms.md#the-forced-monotonic-roster)).
+one is held OUT, as under the upper layer ([nmtms.md](nmtms.md#the-forced-monotonic-roster)).
 
 Measured on a lattice of two siblings `CxA` and `CxB` under CxUniverse and `CxD` below
 both, with the mark stated in `CxA` and the facts it governs in CxUniverse, each in both
 arrival orders:
 
-| mark | read from, with CxCore | read from, without | what reads it |
+| mark | read from, with the upper layer | read from, without | what reads it |
 |---|---|---|---|
 | `symmetric` | every context | every context | the stored key, and `:props :symmetric` |
 | `commutative` | every context | every context | the `:commuting` table, and `:props :commutative` |
@@ -868,7 +856,7 @@ arrival orders:
 | `anti_transitive` | every context | `CxA`, `CxD` | `:props :anti-transitive` — the refusal and the settle's nogood |
 | `inverse` | every context | `CxA`, `CxD` | the `:inverse` table — the inverse prover |
 | `functional` | every context | `CxA`, `CxD` | `:props :functional` — the merge, placed where the mark is visible |
-| `injection` `surjection` `bijection` | every context | nowhere | CxCore rules deriving `functional` and `functionalInArg`; inert without them |
+| `injection` `surjection` `bijection` | every context | nowhere | `core.txt` rules deriving `functional` and `functionalInArg`; inert without them |
 | `functionalInArg` | every context | `CxA`, `CxD` | the `:functional-in-arg` table — the merge, placed where the mark is visible |
 
 Each table entry records its supporting sentexes with their contexts
@@ -876,15 +864,15 @@ Each table entry records its supporting sentexes with their contexts
 and, where the mark is lifted, the copy in CxUniverse, which is what every reader outside
 `CxA`'s descendants answers from.
 
-### A context outside the spindle
+### A context outside the topology
 
-A context no `genlCx` edge names sees nothing but itself: not CxUniverse, and not CxCore.
-The lattice has no implicit root. A reader of such a context reads what was stated there,
+A context no `genlCx` edge names sees nothing but itself, not even CxUniverse. The
+lattice has no implicit root. A reader of such a context reads what was stated there,
 which is what an agent context's independence rests on
 ([belief.md](belief.md#independence-and-inheriting-base)), and an edge is how a KB puts the
-context under the spindle. The contexts above the joint, CxCore and the upper spindle's
-members, do not see CxUniverse either, so they read a lifted copy no more than an
-unwired context does.
+context into the topology. A context above CxUniverse that sees no context below it does
+not see CxUniverse either, so it reads a lifted copy no more than an unwired context
+does.
 
 For the twelve marks lifted by declaration, "every context" in the table above therefore
 means every context that sees CxUniverse. A context that does not:
@@ -893,10 +881,10 @@ means every context that sees CxUniverse. A context that does not:
   it merges its facts there, and one stated in a sibling does not.
 - has its own statements lifted like any other context's, so every context that sees
   CxUniverse reads a mark stated in it.
-- runs no definitional check whose declaration it cannot see. It sees none of CxCore's
-  argument declarations, so it admits what a context under CxCore refuses, and a lift out
+- runs no definitional check whose declaration it cannot see. It sees none of CxUniverse's
+  argument declarations, so it admits what a context under CxUniverse refuses, and a lift out
   of it runs the check on the copy (`unchecked-target?`, above).
-- gets no CxCore rule firing over its facts, since no context sees both the rule and the
+- gets no CxUniverse rule firing over its facts, since no context sees both the rule and the
   fact. Each such firing files a `:no-placement` entry.
 
 The four permuting marks are the exception, because of the stored key. The store sorts a
@@ -923,15 +911,15 @@ statement is visible, as any sentence is.
 `inherit_test`'s `a-permuting-mark-is-read-from-a-context-with-no-edge` pins the property
 reads, and `order_independence_test`'s
 `a-firing-a-mark-no-statement-of-reaches-is-placed-in-every-order` pins the firing, in an
-unwired context and in one above the joint.
+unwired context and in one that sees a context other than CxUniverse.
 
 ## forced_decontextualized_predicate: a canonical home in CxUniverse
 
 `(forced_decontextualized_predicate P)` is the stronger variant. Instead of leaving the
 original where it was asserted and deducing a copy, it **forces the storage context
 of every `(P ...)` to CxUniverse** on assert — no separate justification, the fact's
-extent simply lives there. `genlCx` is declared this way (the vocabulary head asserts
-`(forced_decontextualized_predicate genlCx)` before any `genlCx` edge), so the whole context
+extent simply lives there. `genlCx` is declared this way (`core.txt` states
+`(forced_decontextualized_predicate genlCx)`), so the whole context
 topology has one canonical home rather than being scattered across the contexts each
 edge was asserted in.
 
@@ -951,10 +939,9 @@ predicate like they are.
 
 `arg` arg checks and disjointness checks are **not global**: when asserting in
 context K they consider only constraints and type memberships *visible from* K
-(its `context-up` closure). So shared vocabulary must live in a context K sees — in the
-starter, the CxCore vocabulary and the upper definitional contexts sit at the top
-of the spindle (every data context reaches them through the axis), so their `arg`
-constraints, comments, and type memberships are visible everywhere.
+(its `context-up` closure). So shared vocabulary must live in a context K sees. In the
+starter, the upper layer sits in CxUniverse, which every data context reaches, so its
+`arg` constraints, comments, and type memberships are visible everywhere.
 
 The `genl` closure reads are scoped the same way (docs/taxonomy.md): `genls` /
 `specs` / `genl?` / `disjoint?` take a context, and a read asked from K walks only
@@ -1152,7 +1139,7 @@ just as well when the feature is broken outright.
   per context).
 
   **The `seen` half reads the cheaper of two sides** (`special/under-seen-edges`). A
-  context wired under a new parent usually already sees `CxCore`, so `seen` holds the
+  context wired under a new parent usually already sees CxUniverse, so `seen` holds the
   whole ontology's edges while `up` holds a handful of facts. When the facts of `up`
   under the roster's fan cost no more postings than `seen` states edges, those facts are
   the seeds; otherwise each edge `seen` states seeds the facts of `up` under it, with the
@@ -1164,7 +1151,7 @@ just as well when the feature is broken outright.
   Both are about cost, and the cost is asymptotic rather than constant. Walking the ancestor set
   and keeping the facts a rule could match is a record fetch per sentex *in the ancestor set*, so
   wiring N contexts under a `CxUniverse` holding K facts is O(N·K) against
-  O(N+K) without it, and a spindle D deep is O(D²) because each edge's ancestor set is the
+  O(N+K) without it, and a chain D deep is O(D²) because each edge's ancestor set is the
   whole chain above. Measured: 3.9x on the first shape, 5x and climbing with depth on the
   second, and 1.8x on the starter load. Two reads of the rule index turn it around: the
   antecedent keys some stored rule takes (`reads/as-stored-rule-keys`), and the contexts
@@ -1179,8 +1166,8 @@ just as well when the feature is broken outright.
   above it and re-joined rules that had already fired on every fact of it. Measured on the starter
   load against the same load with no visibility seeding: 4.7x ungated, 1.03–1.04x with
   both gates over `fresh` and `seen`. A gate over `up` in place of `fresh` measured 2.5x,
-  because a context already under `CxCore` re-seeds its second parent's facts for the
-  rules stated in `CxCore`.
+  because a context already under CxUniverse re-seeds its second parent's facts for the
+  rules stated in CxUniverse.
 
   **A batch seeds what was stored before the edge arrived.** Under `with-deferred-settle`
   every assert chains as it arrives and the drain runs once, at the batch's close, so a
@@ -1273,13 +1260,11 @@ just as well when the feature is broken outright.
   relation's transitivity from the same vantage.
 
 - **The predicate arity meta-ontology concludes where it was declared.** The arity
-  rules in `kb/CxCore.txt` place by the ordinary rule and name no context, so an
+  rules in `kb/upper/core.txt` place by the ordinary rule and name no context, so an
   `(arity myRel 2)` stated in a context concludes `(binary_predicate myRel)` *there*.
-  **Do not name CxCore in them.** Doing so publishes the conclusion: `isa?` would answer
-  from a context that cannot see the declaration, while `has-prop?`, asked of the same
-  declaration from the same context, answers false. (The *algebraic* marks — `symmetric`,
-  `transitive`, … — go the other way on purpose: they are `decontextualized_predicate`s,
-  so a declaration is lifted to CxUniverse and read KB-wide.)
+  **Do not name a context in them.** The KB-wide reading comes from the lift: the
+  declaration and the conclusion are both `decontextualized_predicate`s, so each has a
+  copy in CxUniverse, and the rule fires on the declaration's copy there.
 
 A rule cannot choose its own target: an `(ist Ctx S)` consequent is refused
 ([ist](#ist-find-or-create-in-a-context)), so every forward conclusion is placed by the

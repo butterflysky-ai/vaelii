@@ -1,7 +1,7 @@
-;; CxOrganism — the biological upper-ontology types: animal/plant and their
+;; organism.txt — the biological upper-ontology types: animal/plant and their
 ;; kinds (mammal, bird, fish, reptile, amphibian, insect, arachnid, tree, flower, …)
-;; down to the individual species used across the fables. Sees CxCore;
-;; CxUniverse sees it, so any type here is visible from every context.
+;; down to the individual species used across the fables. Loaded into CxUniverse with the
+;; rest of kb/upper/.
 ;;
 ;; The five vertebrate classes are separated by one `vertebrate_class` metatype rather
 ;; than by ten `disjoint` sentences. Nothing is stored for the pairs — the clique is
@@ -11,8 +11,7 @@
 ;; animal and plant are placed under organism and separated from each other by one
 ;; (separating organism animal plant) roster. The roster states both genl edges and the
 ;; separation, so no (genl plant organism) or (disjoint animal plant) sentence is written
-;; beside it. CxCore states (genl animal organism) as well: CxLife declares arguments
-;; over animal and does not see CxOrganism.
+;; beside it. core.txt also stores (genl animal organism) as a sentence.
 ;;
 ;; The folk taxonomy sorts the organisms as everyday speech does: a species-level kind
 ;; (cat, oak) under a class-level kind (mammal, tree), and an animal class either with a
@@ -20,9 +19,6 @@
 ;; disjoint without a sentence per pair, and every kind below a member inherits the
 ;; separation: folk_species separates every two species, so no organism is a cat and a
 ;; dog, and none is a spider and an owl.
-
-(genlCx CxOrganism CxCore)
-(genlCx CxUniverse CxOrganism)
 
 (comment amphibian "A cold-blooded animal that begins life in water and breathes through its skin.")
 (genl amphibian vertebrate)
@@ -87,6 +83,9 @@
 (unary_predicate folk_biological_class)
 (genlArg folk_biological_class 1 organism)
 (metatype folk_biological_class)
+;; typeGenl requires its target to be a first-order type: (interArg typeGenl 1 metatype 2 type).
+(type organism)
+(typeGenl folk_biological_class organism)
 ;; Every member is a first-order type, whose instances are individual organisms.
 (genl folk_biological_class type)
 ;; The roster installs each part's genl edge to folk_biological_class.
@@ -97,6 +96,7 @@
 (unary_predicate folk_species)
 (genlArg folk_species 1 organism)
 (metatype folk_species)
+(typeGenl folk_species organism)
 ;; Every member is a first-order type, whose instances are individual organisms.
 (genl folk_species type)
 (set/monotonic (disjoint_metatype folk_species))

@@ -1,10 +1,9 @@
-;; CxSpace — qualitative spatial relations. Four independent calculi: the RCC-8
+;; space.txt — qualitative spatial relations. Four independent calculi: the RCC-8
 ;; TOPOLOGY of regions (do they touch, overlap, nest?), the cardinal DIRECTION of one
 ;; place from another (which way, and how far round the compass?), RELATIVE DIRECTION
 ;; (which way is one thing from another as seen from a point of view?) and qualitative
-;; DISTANCE (how far apart, on a scale of classes rather than in numbers?). Sees
-;; CxCore; CxUniverse sees it, so a spatial relation is stateable from every
-;; context.
+;; DISTANCE (how far apart, on a scale of classes rather than in numbers?). Loaded into
+;; CxUniverse with the rest of kb/upper/.
 ;;
 ;; Topology. Eight BASE relations, jointly exhaustive and pairwise disjoint, so exactly
 ;; one holds of any two regions: spatiallyDisconnected (DC), externallyConnected (EC),
@@ -55,9 +54,6 @@
 ;; and nothing narrower, since none of the four calculi needs time; picking them out
 ;; more finely is not this file's job. The context keeps two spaces apart, as it keeps
 ;; two frames of reference apart. See docs/space.md.
-
-(genlCx CxSpace CxCore)
-(genlCx CxUniverse CxSpace)
 
 (comment atSomeDistanceFrom
          "(atSomeDistanceFrom ?thing1 ?thing2) means that ?thing1 and ?thing2 are some distance apart. Any class of the distance chain but the zero one, so it is the complement of coLocatedWith and holds of nothing and itself.")

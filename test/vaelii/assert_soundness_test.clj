@@ -259,7 +259,7 @@
 
 (tu/deftest-kb an-inert-rule-may-carry-a-variable-predicate
   ;; `:inert` runs in neither engine — it is documentation with a handle — so an index
-  ;; key it never reads is nothing it promised.  `CxCore` ships one: the
+  ;; key it never reads is nothing it promised.  `CxUniverse` ships one: the
   ;; decontextualized-predicate lift, stated as `(implies (?pred . ?args) (ist
   ;; CxUniverse (?pred . ?args)))` for a reader and implemented in code.
   (tu/with-terms [likes]

@@ -725,7 +725,7 @@
   ;;     └─ CxB    (not (genlCx CxB CxE)) monotonic   ← the vantage
   ;; The genlCx twin of the `genl` case, with the opposite outcome: `genlCx` is on the
   ;; engine's baseline roster, so the denial is held OUT on this bare KB and no vantage
-  ;; disbelieves the edge.  The KB holds no shipped ontology, so the CxCore mark is
+  ;; disbelieves the edge.  The KB holds no shipped ontology, so the CxUniverse mark is
   ;; asserted: `genlCx` is forced-decontextualized and stores in CxUniverse, while the
   ;; `not` denial stays in CxB.
   (doseq [edge-first? [true false]]

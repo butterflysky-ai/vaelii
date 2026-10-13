@@ -17,7 +17,7 @@
 
 (use-fixtures :each (tu/neutral-fresh
                      #(doto (tu/fresh)
-                        (tu/load-core-with! '[[CxSpace "upper"]])
+                        (tu/load-core!)
                         (v/add-reasoner :rcc8 :cardinal :relative :distance))))
 
 (def ^:private C 'CxUniverse)
@@ -170,7 +170,7 @@
                       (sort (apply set/union preds)))))))
 
 (tu/deftest-kb a-spatial-relation-between-predicates-is-stored-or-refused-by-the-reading
-  ;; temporary predicates, each a monotonic binary_predicate as genl is in CxCore
+  ;; temporary predicates, each a monotonic binary_predicate as genl is in CxUniverse
   (tu/with-terms [rel1 rel2]
     (doseq [r [rel1 rel2]] (v/assert kb (list 'binary_predicate r) C {:strength :monotonic}))
     (let [s (list 'northOf rel1 rel2)]

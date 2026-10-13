@@ -120,7 +120,7 @@
                                                -dependents -justification -justifications
                                                -ensure-node -add-premise -suspend-premise
                                                -add-justification -restrength-informant
-                                               -forced? -set-forced
+                                               -forced? -forced-members -set-forced
                                                -relabel -set-blocked
                                                -supersede -retract -sweep
                                                -drop-justification -snapshot
@@ -1012,6 +1012,7 @@
   (-restrength-informant [_ informant strength]
     (swap! state restrength-informant* informant strength) nil)
   (-forced? [_ kind x] (contains? (forced-set (ref-view hold state) kind) x))
+  (-forced-members [_ kind] (forced-set (ref-view hold state) kind))
   (-set-forced [_ kind xs on?] (swap! state set-forced* kind xs on?) nil)
   (-relabel [_] (swap! state relabel-all*) nil)
   (-set-blocked [_ jids] (swap! state set-blocked* jids) nil)
@@ -1412,6 +1413,10 @@
 (defn forced?
   "Is `x` a member of forced set `kind`?"
   [tms kind x] (-forced? tms kind x))
+
+(defn forced-members
+  "Every member of forced set `kind`, as a set."
+  [tms kind] (-forced-members tms kind))
 
 (defn set-forced
   "Add each of `xs` to forced set `kind` (`on?` true) or take it out, and relabel the

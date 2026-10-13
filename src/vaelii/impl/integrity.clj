@@ -6,6 +6,7 @@
   `predall` and `provers`, which also sit below `vaelii.core`.  See docs/integrity.md."
   (:require [clojure.string :as str]
             [vaelii.impl.budget :as budget]
+            [vaelii.impl.decide.arity :as arity]
             [vaelii.impl.inherit :as inherit]
             [vaelii.impl.jtms :as jtms]
             [vaelii.impl.kb :as kb]
@@ -193,7 +194,7 @@
   [kb tx term context]
   (and (not (do (budget/spend!) (kb/relation? kb term context)))
        (or (do (budget/spend!) (seq (tax/direct-genls tx term context)))
-           (= 1 (do (budget/spend!) (kb/relation-arity kb term context))))))
+           (= 1 (do (budget/spend!) (kb/relation-arity kb term))))))
 
 (defn- cover-suggestion
   "The suggestion one visible cover `[whole parts]` forces on `term`, or nil: when the
@@ -576,7 +577,7 @@
     (merge (into {} (map (fn [p] [p :variable])) (subjects '(variable_arity_predicate ?p)))
            (into {} (keep (fn [p]
                             (budget/spend!)
-                            (when-let [n (kb/relation-arity kb p context)] [p n])))
+                            (when-let [n (kb/relation-arity kb p)] [p n])))
                  fixed))))
 
 (defn- arity-min
@@ -756,7 +757,7 @@
   or, with `unknown-ok?`, declared with no arity and no variable arity?"
   [kb pred n context unknown-ok?]
   (budget/spend!)
-  (let [declared (kb/relation-arity kb pred context)]
+  (let [declared (kb/relation-arity kb pred)]
     (if declared
       (= n declared)
       (and unknown-ok?
@@ -946,7 +947,7 @@
             (recur (conj findings finding) (rest units))))
         {:status :complete :findings findings}))))
 
-;; ---- undeclared-arity: a genl node with no arity the KB states ----
+;; ---- undeclared-arity: a genl node no length binds ----
 
 (defn- genl-nodes
   "The ground symbols at either end of a `genl` edge `context` sees, in print order: the
@@ -961,12 +962,12 @@
        (sort-by nm/print-key)))
 
 (defn- undeclared-arity?
-  "Does `context` see no arity for `term`: neither an exact arity `kb/relation-arity`
-  reads (an `(arity P n)` declaration or an exact-arity class membership such as
-  `unary_predicate`) nor a `variable_arity` membership?"
-  [kb term context]
-  (and (do (budget/spend!) (nil? (kb/relation-arity kb term context)))
-       (do (budget/spend!) (not (kb/isa? kb term 'variable_arity context)))))
+  "Is `term` bound to no exact length, its own or one it inherits through `genl`
+  (`arity/relation-length`), and released by no `variable_arity` binding
+  (`arity/released?`), each read the same at every context?"
+  [kb term]
+  (budget/spend!)
+  (not (or (arity/released? kb term) (:exact (arity/relation-length kb term)))))
 
 (defn- undeclared-arity-findings
   "Audit each `genl` node `context` sees, in print order, one term at a time, stopping
@@ -975,7 +976,7 @@
   [kb context remaining]
   (loop [findings []
          units    (for [term  (genl-nodes kb context)
-                        :when (undeclared-arity? kb term context)]
+                        :when (undeclared-arity? kb term)]
                     {:term term})]
     (if-let [finding (first units)]
       (if (and remaining (>= (count findings) remaining))

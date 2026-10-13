@@ -160,7 +160,7 @@
   ;;
   ;; The commutativity marks reach through `integrate/commute-existing`: a declaration
   ;; that moves a *spelling* re-spells the records already stored, which neither convicts
-  ;; nor mints.  `commutative` reaches at one remove the way `arg1` does, the CxCore
+  ;; nor mints.  `commutative` reaches at one remove the way `arg1` does, the CxUniverse
   ;; rule's `(commutativeInArgAndRest P 1)` conclusion being what the re-spelling fires on.
   (is (= (into '#{genl genlCx disjoint disjoint_metatype sibling_disjoint
                   covering separating partition
@@ -383,8 +383,8 @@
   ;; carrying `:enforced` or `:inert` prose, so its keys cannot fail to be declared here.
   ;; It stays as the statement that the roster is still that read: a refactor putting the
   ;; prose back in a list of its own fails here rather than passing quietly.  What the
-  ;; population actually rests on is `vocabulary_audit_test`, which asks CxCore.
-  (testing "every term CxCore's roster answers for is declared here"
+  ;; population actually rests on is `vocabulary_audit_test`, which asks CxUniverse.
+  (testing "every term CxUniverse's roster answers for is declared here"
     (is (empty? (remove pr/table (keys vocab/roster)))))
   (testing "every functor the special table interprets is declared here"
     (is (empty? (remove pr/table table-functors))))

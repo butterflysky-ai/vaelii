@@ -856,12 +856,12 @@
 (defn- rule-concluded-merge!
   "Assert a rule concluding `(rel ?x ?y)` from a fact of `aliasOf`, plus one fact naming
   the spelling the merge retires, and fire it.  `aliasOf` is declared on the
-  forced-monotonic roster, since a firing concludes an equality only from roster
-  antecedents.  Returns `[lo hi]` — the elected representative and the retired
+  forced-monotonic roster where the rule is stated, since a firing concludes an equality
+  only from roster antecedents.  Returns `[lo hi]` — the elected representative and the retired
   spelling."
   [kb rel aliasOf caresFor Tom context]
   (let [[lo hi] (sort [(tu/tmp-ind "Ann") (tu/tmp-ind "Ann")])]
-    (v/assert kb (list 'forced_monotonic_predicate aliasOf) 'CxUniverse)
+    (v/assert kb (list 'forced_monotonic_predicate aliasOf) context)
     (v/assert-rule kb [(list aliasOf '?x '?y)] (list rel '?x '?y) context {:direction :forward})
     (v/assert kb (list caresFor hi Tom) context)
     (v/assert kb (list aliasOf lo hi) context)
@@ -910,7 +910,7 @@
     (let [[lo hi] (sort [(tu/tmp-ind "Ann") (tu/tmp-ind "Ann")])]
       (v/assert kb (list lives lo) CxAlias)
       ;; a firing concludes an equality only from roster antecedents
-      (v/assert kb (list 'forced_monotonic_predicate aliasOf) 'CxUniverse)
+      (v/assert kb (list 'forced_monotonic_predicate aliasOf) CxAlias)
       (v/assert-rule kb [(list aliasOf '?x '?y)] (list 'sameAs '?x '?y) CxAlias {:direction :forward})
       (v/assert kb (list caresFor hi Tom) CxAlias)
       (is (nil? (v/handle-of kb (list devotedTo hi Tom) CxAlias))
@@ -929,7 +929,7 @@
     (tu/with-terms [aliasOf CxAlias]
       (let [[lo hi] (sort [(tu/tmp-ind "Ann") (tu/tmp-ind "Ann")])
             m       {:strength :monotonic}]
-        (v/assert kb (list 'forced_monotonic_predicate aliasOf) 'CxUniverse)
+        (v/assert kb (list 'forced_monotonic_predicate aliasOf) CxAlias)
         (doseq [op ops]
           (case op
             :fact    (v/assert kb (list aliasOf lo hi) CxAlias m)

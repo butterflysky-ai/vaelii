@@ -2,7 +2,7 @@
 ;; Copyright © 2026 Vaelii LLC and the Vaelii contributors.
 (ns vaelii.function-marks-test
   "`injection`, `surjection` and `bijection`, the three composite function marks shipped
-  in CxCore: no engine code, eight CxCore forward rules derive what the engine already
+  in CxUniverse: no engine code, eight CxUniverse forward rules derive what the engine already
   enforces and audits — `equivalence_relation`'s pattern, over the functional family and
   the `predAll` audit pair.
 
@@ -29,7 +29,7 @@
   that the wiring is belief-following, and that the audit half follows the `arg`
   declarations it reads.
 
-  A CxCore-loaded KB throughout, like `relation-properties-test`: the shipped
+  A vocabulary KB throughout, like `relation-properties-test`: the shipped
   declarations are what is tested, not a hand-built fixture that could drift from the
   file."
   (:require [clojure.test :refer [is testing use-fixtures]]
@@ -59,9 +59,9 @@
 
 ;;; ── the shipped declarations ──────────────────────────────────────────
 
-(tu/deftest-kb cxcore-declares-the-three-function-marks
+(tu/deftest-kb cxuniverse-declares-the-three-function-marks
   (doseq [term '[injection surjection bijection]]
-    (testing (str term " carries its comment sentex like any other CxCore entry")
+    (testing (str term " carries its comment sentex like any other CxUniverse entry")
       (is (= 1 (count (core-context/comment-of kb term))) (str "comment for " term))
       (is (string? (first (core-context/comment-of kb term)))))
     (testing (str "and the classification half: a " term " is a binary_predicate")
@@ -358,7 +358,7 @@
 (tu/deftest-kb a-reader-convicts-no-tuple-through-a-mark-its-except-withdraws
   ;; The mark a rule concludes from a roster literal is not itself hidden where the
   ;; literal is excepted; it leaves that reader through the except's closure alone.  One
-  ;; row per family that reads marks: CxCore's `injection` rule concludes
+  ;; row per family that reads marks: CxUniverse's `injection` rule concludes
   ;; `(functionalInArg P 1)` (the tuple-mark family), and a stated rule concludes
   ;; `(irreflexive P)` from `(anti_transitive P)` (the self and converse family).
   (let [M {:strength :monotonic}]

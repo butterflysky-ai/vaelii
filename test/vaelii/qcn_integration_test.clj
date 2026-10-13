@@ -12,8 +12,6 @@
   (:require [clojure.test :refer [deftest is testing use-fixtures]]
             [clojure.walk :as walk]
             [vaelii.core :as v]
-            [vaelii.host.core-context :as core-context]
-            [vaelii.host.seed :as seed]
             [vaelii.impl.interval :as iv]
             [vaelii.impl.observe :as observe]
             [vaelii.impl.qcn :as qcn]
@@ -27,7 +25,7 @@
 ;; being that they coexist without seeing each other's facts
 (use-fixtures :each (tu/neutral-fresh
                      #(doto (tu/fresh)
-                        (tu/load-core-with! '[[CxSpace "upper"] [CxTime "upper"]])
+                        (tu/load-core!)
                         (v/add-prover (space/spatial-prover))
                         (v/add-prover (iv/allen-prover)))))
 
@@ -496,8 +494,7 @@
           {:keys [setup steps derived]} (qualitative-case t)
           run     (fn [order]
                     (let [k (doto (tu/isolated-fresh)
-                              (core-context/load-into)
-                              (seed/load-context 'CxSpace "upper")
+                              (tu/load-core!)
                               (v/add-prover (space/spatial-prover)))]
                       (doseq [s setup] (v/assert k s 'CxUniverse))
                       (doseq [step order] (step k))
@@ -521,7 +518,7 @@
                 [:r :f1 :f2 :e2 :e1]]
         run    (fn [order]
                  (let [k (doto (tu/isolated-fresh)
-                           (tu/load-core-with! '[[CxSpace "upper"] [CxTime "upper"]])
+                           (tu/load-core!)
                            (v/add-prover (space/spatial-prover)))]
                    (try
                      (v/assert k '(genlCx CxQlA CxUniverse) 'CxUniverse)
@@ -858,8 +855,7 @@
   ;; the one thing the neutral fixture will not accept.
   (let [kb (doto (v/open-kb tu/plain-memory-space)
              (tu/clear-kb!)
-             (core-context/load-into)
-             (seed/load-context 'CxSpace "upper")
+             (tu/load-core!)
              (v/add-prover (space/spatial-prover)))]
     (try
       (v/assert kb (list 'nonTangentialProperPart 'TmpWipedA 'TmpWipedB) C)

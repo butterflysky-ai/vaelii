@@ -23,14 +23,14 @@
             [vaelii.impl.qcn-kb :as qkb]
             [vaelii.test-util :as tu]))
 
-;; A fresh KB per test: the CxCore grammar, the CxTime vocabulary that states
-;; interval relations in it, and the prover registered.  The vocabulary is an upper
-;; context (it is *about* time, so it is nobody else's business); the prover is opt-in, so
+;; A fresh KB per test: the upper layer, whose time.txt states the interval relations, and
+;; the prover registered.  The vocabulary is upper-layer content (it is *about* time, so
+;; it is nobody else's business); the prover is opt-in, so
 ;; registering it is what turns stored interval facts into a network.  The algebra tests
 ;; below need none of it.
 (use-fixtures :each (tu/neutral-fresh
                      #(doto (tu/fresh)
-                        (tu/load-core-with! '[[CxTime "upper"]])
+                        (tu/load-core!)
                         (v/add-prover (iv/allen-prover)))))
 
 (def ^:private C 'CxUniverse)
@@ -305,7 +305,7 @@
 
 (tu/deftest-kb an-unsatisfiable-point-network-withdraws-the-allen-firings-it-licensed
   (tu/with-terms [A B X Y finishedFirst]
-    (v/assert kb (list 'arg finishedFirst 1 'thing) 'CxCore {:strength :monotonic})
+    (v/assert kb (list 'arg finishedFirst 1 'thing) 'CxUniverse {:strength :monotonic})
     (v/assert kb (list 'instantBefore (list 'EndFn A) (list 'StartFn B)) C)
     (v/assert-rule kb [(list 'before '?x B)] (list finishedFirst '?x) C {:direction :forward})
     (testing "the rule fires on a relation only the point network entails"

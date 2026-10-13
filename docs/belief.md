@@ -179,11 +179,11 @@ the stored belief as well.
 ## More than one modal predicate
 
 Which predicates project is a KB property, not a hard-coded set. `believes` ships granted
-in `CxCore`; `knows`, `desires`, `intends` are the same projection under a different
+in `CxUniverse`; `knows`, `desires`, `intends` are the same projection under a different
 predicate, and one assertion away:
 
 ```clojure
-(v/register-modal-predicate kb 'knows)   ; grants (modal_predicate knows) in CxCore
+(v/register-modal-predicate kb 'knows)   ; grants (modal_predicate knows) in CxUniverse
 ;; or scope the grant to one theory:
 (v/register-modal-predicate kb 'knows 'CxPsychology)
 ```
@@ -196,7 +196,7 @@ default.
 
 This scoping is also what governs **nested** belief. `(believes A (believes B P))` proves
 `(believes B P)` in `A`'s context, and the inner `believes` projects only if the grant is
-visible *there*. An independent `CxAgentA` cannot see the `CxCore` grant, so by default the
+visible *there*. An independent `CxAgentA` cannot see the `CxUniverse` grant, so by default the
 inner `believes` is an ordinary literal and the nested query is simply false — there is no
 recursion to speak of. Give `A` a `genlCx` edge that reaches the grant and the nesting
 projects through. That is the whole of the nesting story: a consequence of where the marker

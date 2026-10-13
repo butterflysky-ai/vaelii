@@ -1,12 +1,8 @@
-;; CxLife — relations about organisms: kinship (parentOf/childOf/siblingOf/
+;; life.txt — relations about organisms: kinship (parentOf/childOf/siblingOf/
 ;; ancestorOf/grandparentOf), age (birthYearOf/olderThan/mortal), and behaviour
 ;; (eats, and the capabilityType/hasCapability pair, whose second argument is an
-;; event kind such as CxAbstract's flying or travelling). Sees
-;; CxCore; CxUniverse sees it, so any relation here is visible from every
-;; context.
-
-(genlCx CxLife CxCore)
-(genlCx CxUniverse CxLife)
+;; event kind such as abstract.txt's flying or travelling). Loaded into CxUniverse with
+;; the rest of kb/upper/.
 
 (comment alive
          "(alive ?organism) means that ?organism is currently living. True by default of every organism and blocked for one known to be dead, so a KB never told otherwise takes its organisms to be alive — which is the common-sense reading, and the one every story assumes without saying.")

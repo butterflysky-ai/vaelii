@@ -5,8 +5,6 @@
   reports and the interval bridge over a KB."
   (:require [clojure.test :refer [deftest is testing use-fixtures]]
             [vaelii.core :as v]
-            [vaelii.host.core-context :as core-context]
-            [vaelii.host.seed :as seed]
             [vaelii.impl.duration :as dur]
             [vaelii.impl.interval :as iv]
             [vaelii.impl.naming :as nm]
@@ -17,10 +15,10 @@
             [vaelii.test-util :as tu])
   (:import [vaelii.impl.stp TemporalDistanceProver]))
 
-;; A fresh KB per test with CxMeasure, CxTime and the opt-in prover registered.
+;; A fresh KB per test with the upper layer and the opt-in prover registered.
 (use-fixtures :each (tu/neutral-fresh
                      #(doto (tu/fresh)
-                        (tu/load-core-with! '[[CxMeasure "upper"] [CxTime "upper"]])
+                        (tu/load-core!)
                         (v/add-prover (stp/stp-prover)))))
 
 (def ^:private C 'CxUniverse)
@@ -487,9 +485,7 @@
                  (list 'temporalDistance Q R '(QuantityFn 1 Hour))
                  (list 'temporalDistance P R '(QuantityFn 1 Hour))]
           other (doto (tu/isolated-fresh)
-                  (core-context/load-into)
-                  (seed/load-context 'CxMeasure "upper")
-                  (seed/load-context 'CxTime "upper")
+                  (tu/load-core!)
                   (v/add-prover (stp/stp-prover)))]
       (try
         (load-time-units other)
@@ -609,7 +605,7 @@
   (load-time-units kb)
   (tu/with-terms [A B As Ae Bs Be finishedFirst]
     (with-allen kb
-      (v/assert kb (list 'arg finishedFirst 1 'thing) 'CxCore {:strength :monotonic})
+      (v/assert kb (list 'arg finishedFirst 1 'thing) 'CxUniverse {:strength :monotonic})
       (v/assert-rule kb [(list 'before '?x '?y)] (list finishedFirst '?x) C {:direction :forward})
       (let [[_ _ h-gap] (two-hours-apart! kb A B As Ae Bs Be)
             concl (tu/sole-answer (v/sentexes-matching kb (list finishedFirst A) '?ctx)
@@ -627,7 +623,7 @@
   (load-time-units kb)
   (tu/with-terms [A B As Ae Bs Be P Q finishedFirst]
     (with-allen kb
-      (v/assert kb (list 'arg finishedFirst 1 'thing) 'CxCore {:strength :monotonic})
+      (v/assert kb (list 'arg finishedFirst 1 'thing) 'CxUniverse {:strength :monotonic})
       (v/assert-rule kb [(list 'before '?x '?y)] (list finishedFirst '?x) C {:direction :forward})
       (two-hours-apart! kb A B As Ae Bs Be)
       (testing "the rule fires on a relation only the metric layer entails"
@@ -673,7 +669,7 @@
                 (with-allen kb
                   (let [metre! #(v/assert kb (list 'temporalDistance P Q '(QuantityFn 5 Metre)) C)
                         h      (when metre-first? (metre!))]
-                    (v/assert kb (list 'arg finishedFirst 1 'thing) 'CxCore {:strength :monotonic})
+                    (v/assert kb (list 'arg finishedFirst 1 'thing) 'CxUniverse {:strength :monotonic})
                     (v/assert-rule kb [(list 'before '?x '?y)] (list finishedFirst '?x) C
                                    {:direction :forward})
                     (two-hours-apart! kb A B As Ae Bs Be)

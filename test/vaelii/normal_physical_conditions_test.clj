@@ -36,11 +36,9 @@
 
 (tu/deftest-kb the-theory-is-opt-in-below-cxuniverse
   (testing "the theory sees the upper ontology through CxUniverse"
-    (is (holds-sees NPC 'CxUniverse))
-    (is (holds-sees NPC 'CxAbstract)))
+    (is (holds-sees NPC 'CxUniverse)))
   (testing "neither CxWell nor the upper ontology sees the theory"
     (is (not (holds-sees 'CxWell NPC)))
-    (is (not (holds-sees 'CxAbstract NPC)))
     (is (not (holds-sees 'CxUniverse NPC)))))
 
 (tu/deftest-kb cxwell-concludes-no-state-of-matter
@@ -54,9 +52,9 @@
     (is (not (holds-isa Ingot 'solid 'CxWell)))))
 
 (tu/deftest-kb mercury-is-a-first-order-kind-of-metal
-  (is (holds-genl 'mercury 'metal 'CxAbstract))
-  (is (holds-ask '(type mercury) 'CxAbstract))
-  (is (seq (v/sentexes-matching kb '(comment mercury ?c) 'CxAbstract))))
+  (is (holds-genl 'mercury 'metal 'CxUniverse))
+  (is (holds-ask '(type mercury) 'CxUniverse))
+  (is (seq (v/sentexes-matching kb '(comment mercury ?c) 'CxUniverse))))
 
 (tu/deftest-kb stone-wood-and-glass-are-solid-under-normal-conditions
   (tu/with-terms [CxStuff CxRoom CxElsewhere Pebble Plank Pane]
@@ -74,13 +72,12 @@
         (is (holds-isa x 'solid CxRoom) (str x " is solid in a room"))
         (is (holds-ask (list 'solid x) CxRoom))))
     (testing "a context that does not see the theory concludes no state"
-      (doseq [ctx [CxStuff CxElsewhere 'CxWell 'CxAbstract 'CxUniverse]
+      (doseq [ctx [CxStuff CxElsewhere 'CxWell 'CxUniverse]
               x   [Pebble Plank Pane]]
         (is (not (holds-isa x 'solid ctx)) (str x " is not concluded solid in " ctx))))
     (testing "the three edges are the theory's, not the upper ontology's"
       (doseq [t '[stone wood glass_stuff]]
         (is (holds-genl t 'solid NPC))
-        (is (not (holds-genl t 'solid 'CxAbstract)))
         (is (not (holds-genl t 'solid 'CxUniverse)))))))
 
 (tu/deftest-kb a-metal-is-solid-by-default-and-mercury-is-the-exception
@@ -113,6 +110,6 @@
       (is (empty? (filter #(some #{Droplet Nail} (flatten (map :sentence (:sides %))))
                           (concat (v/contradictions kb) (v/conflicts kb))))))
     (testing "a context that does not see the theory concludes no state"
-      (doseq [ctx [CxStuff CxElsewhere 'CxWell 'CxAbstract 'CxUniverse]]
+      (doseq [ctx [CxStuff CxElsewhere 'CxWell 'CxUniverse]]
         (is (not (holds-ask (list 'solid Nail) ctx)) (str "Nail solid in " ctx))
         (is (not (holds-isa Droplet 'liquid ctx)) (str "Droplet liquid in " ctx))))))

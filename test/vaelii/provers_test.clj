@@ -391,7 +391,7 @@
 (tu/deftest-kb the-transitive-licence-is-read-from-the-asking-context-by-the-prover
   ;; `applicable?` reads `(transitive p)` from the vantage — the prover's own half of
   ;; the licence scoping `inherit_test` pins for preservation.  A fresh KB, because
-  ;; CxCore decontextualizes `transitive` and would lift the declaration where
+  ;; CxUniverse decontextualizes `transitive` and would lift the declaration where
   ;; every context sees it.
   (tu/with-terms [reaches X Y Z CxA CxB]
     (v/with-deferred-settle kb

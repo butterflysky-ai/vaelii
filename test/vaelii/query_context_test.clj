@@ -219,7 +219,7 @@
     (is (= #{'dog} nothing)
         "the reflexive answer, and not one edge of the shipped taxonomy")
     (is (contains? well 'mammal)
-        "control: a real vantage below the spindle walks the chain in CxOrganism")
+        "control: a real vantage below the middle contexts walks the chain in CxUniverse")
     (is (proper-subset? nothing well))))
 
 ;; ---- an entry point that cannot resolve one says so ------------------------------

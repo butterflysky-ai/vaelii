@@ -75,17 +75,17 @@
   [kb extra under-sub?]
   (tu/with-terms [parentOf CxLeft CxRight CxSub]
     (v/assert kb (list 'functional parentOf) 'CxUniverse)
-    (v/assert kb (list 'genlCx CxLeft 'CxUniverse) 'CxCore)
-    (v/assert kb (list 'genlCx CxRight 'CxUniverse) 'CxCore)
-    (v/assert kb (list 'genlCx CxSub CxLeft) 'CxCore)
+    (v/assert kb (list 'genlCx CxLeft 'CxUniverse) 'CxUniverse)
+    (v/assert kb (list 'genlCx CxRight 'CxUniverse) 'CxUniverse)
+    (v/assert kb (list 'genlCx CxSub CxLeft) 'CxUniverse)
     (dotimes [_ extra]
       (v/assert kb (list 'genlCx (tu/fresh-term :context "CxR") (if under-sub? CxSub CxLeft))
-                'CxCore))
+                'CxUniverse))
     (dotimes [_ pairs]
       (let [k (tu/fresh-term :individual "Kid")]
         (v/assert kb (list parentOf k (tu/fresh-term :individual "MumA")) CxLeft)
         (v/assert kb (list parentOf k (tu/fresh-term :individual "MumB")) CxRight)))
-    (sweep-derivations #(v/assert kb (list 'genlCx CxSub CxRight) 'CxCore))))
+    (sweep-derivations #(v/assert kb (list 'genlCx CxSub CxRight) 'CxUniverse))))
 
 (def ^:private sizes [0 4 8 16])
 

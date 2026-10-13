@@ -34,10 +34,11 @@
             [vaelii.impl.nat :as nat]
             [vaelii.impl.protocols :as p]
             [vaelii.impl.reads :as reads]
+            [vaelii.impl.sentex :as sx]
             [vaelii.impl.special :as special]
             [vaelii.impl.types.reasoning :as reasoning]))
 
-(def ^:private universal-context 'CxUniverse)
+(def ^:private universal-context sx/root-context)
 
 ;; ---- the bounded R oracle -------------------------------------------------
 

@@ -74,7 +74,7 @@
   "Where every NAT bookkeeping fact lives — `(reifiable_function F)`, `(termOfUnit K
   E)`, `(result F T)`, and a minted reified NAT's materialized types — so it is visible
   from every context, matching the other universal vocabulary."
-  'CxUniverse)
+  sx/root-context)
 
 (def no-match
   "The reserved `nat/` constant a read-mode reify resolves an unknown (never-minted)

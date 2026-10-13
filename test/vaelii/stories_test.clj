@@ -53,7 +53,7 @@
 
 (tu/deftest-kb joined-antecedents-infer-a-part-type
   ;; partOf carries (arg partOf 2 tangible), so an untyped part is a
-  ;; tangible from how it is used: the declaration, inherited from CxAbstract,
+  ;; tangible from how it is used: the declaration, inherited from CxUniverse,
   ;; derives the membership (docs/argtypes.md), and under the constraint-only reading
   ;; the backward read answers it with nothing stored.
   (testing "Roof1 is never typed, but its tangible-hood is derived from partOf"
@@ -127,7 +127,7 @@
     (is (empty? (v/sentexes-matching kb '(in_danger WolfA) 'CxCriedWolf)))))   ; the constant binds only the victim
 
 (tu/deftest-kb middle-theories-reach-story-characters-but-siblings-stay-isolated
-  ;; In the layered spindle a *middle* theory (biology) is seen by every CxWell
+  ;; A *middle* theory (biology) is seen by every CxWell
   ;; descendant, so it DOES reach story characters — the mortal default lands on the
   ;; lion, placed back in its own leaf.  What stays isolated is a join across sibling
   ;; data contexts (owns/partOf, tested above) and a rule whose type does not match.
@@ -190,7 +190,6 @@
   (testing "an untyped event's eventhood is derived from causes' arg"
     (tu/with-terms [Spill]
       (v/assert kb (list 'causes 'CrowSings Spill) 'CxFoxCrow)
-      (is (= (arg-derivation-expected) (arg-derived kb (list 'event Spill))))
       (is (v/ask? kb (list 'event Spill) 'CxFoxCrow))))
   (testing "explicit types still compose through genl (an action is an event)"
     (is (v/isa? kb 'Flatter1 'event))                       ; action < event

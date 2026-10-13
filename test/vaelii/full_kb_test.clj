@@ -43,14 +43,14 @@
     sampled corpus sentexes' belief is what it was.
   * **a corpus premise out and back** — a stored premise something rests on, retracted
     and reasserted under its own strength; what rested on it is believed as before.
-  * **the spindle** — `sync-spindle!`, and a second one that finds nothing to do.
+  * **the sync** — `sync/sync!`, and a second one that finds nothing to do.
   * **a genl edge** — a new type made a spec of the corpus type, and retracted.
   * **a new context** — wired under that corpus context by a `genlCx` edge, the edge that
     reseeds visibility, and retracted."
   (:require [clojure.string :as str]
             [clojure.test :refer [deftest is]]
             [vaelii.core :as v]
-            [vaelii.host.spindle :as spindle]
+            [vaelii.host.sync :as sync]
             [vaelii.impl.io.text :as text]
             [vaelii.impl.jtms :as jtms]
             [vaelii.impl.profile :as prof]
@@ -72,8 +72,8 @@
    :rule          {:ops 220000  :ms 30000}
    :teardown      {:ops 1600000 :ms 60000}
    :premise       {:ops 450000  :ms 30000}
-   :spindle       {:ops 5000000 :ms 120000}
-   :spindle-again {:ops 5000000 :ms 120000}
+   :sync       {:ops 5000000 :ms 120000}
+   :sync-again {:ops 5000000 :ms 120000}
    :genl          {:ops 220000  :ms 60000}
    :context       {:ops 220000  :ms 60000}})
 
@@ -82,7 +82,7 @@
   runs and reports its cost, and fails nothing: the suite catches a probe that grows, and
   one already past any ceiling cannot grow into a failure.  A probe that comes in under
   its ceiling says so, and leaves this map."
-  {:spindle "the sync did not return by its deadline (2026-09-28): 95% of samples in the
+  {:sync "the sync did not return by its deadline (2026-09-28): 95% of samples in the
              settle after its retractions, re-examining remembered clash pairs and the
              genl closures of their types"
    :genl    "a genl edge onto a corpus type did not return by its deadline (2026-09-27)"
@@ -426,20 +426,20 @@
         (is (v/handle-of kb (:sentence sentex) (:context sentex)))
         (is (= before (belief-of kb dependents)))))))
 
-(def ^:private shipped
-  "What this engine ships, loaded once: a scratch KB's load, which the spindle probe would
+(def ^:private ships
+  "What this engine ships, loaded once: a scratch KB's load, which the sync probe would
   otherwise count as its own cost."
-  (delay (spindle/shipped)))
+  (delay (sync/premises)))
 
-(defn- probe-spindle!
+(defn- probe-sync!
   [kb]
   (when (clear-to-write?)
-    (let [ships @shipped
-          r     (step! :spindle #(spindle/sync-spindle! kb ships))]
+    (let [ships @ships
+          r     (step! :sync #(sync/sync! kb ships))]
       (when-not (= ::wedged r)
         (is (empty? (:refused r)) (str "the KB refused shipped sentences: " (pr-str (:refused r))))
         (is (= {:added 0 :removed 0 :refused []}
-               (step! :spindle-again #(spindle/sync-spindle! kb ships)))
+               (step! :sync-again #(sync/sync! kb ships)))
             "a second sync found work")))))
 
 (defn- report!
@@ -498,7 +498,7 @@
           (within? :reads (probe-reads! kb sample))
           (probe-writes! kb sample)
           (probe-premise! kb sample)
-          (probe-spindle! kb)
+          (probe-sync! kb)
           (probe-genl! kb sample)
           (probe-context! kb sample)))
       (finally
@@ -508,7 +508,7 @@
 ;; ---- the twin -------------------------------------------------------------------
 
 (def ^:private twin-corpus
-  "A corpus context under the spindle, with a type fact, a binary fact and a firing."
+  "A corpus context below CxWell, with a type fact, a binary fact and a firing."
   '[[(genlCx CxFullKbTwin CxWell) CxUniverse]
     [(animal Rex) CxFullKbTwin]
     [(animal Tib) CxFullKbTwin]
@@ -527,7 +527,7 @@
           (probe-reads! kb sample)
           (probe-writes! kb sample)
           (probe-premise! kb sample)
-          (probe-spindle! kb)
+          (probe-sync! kb)
           (probe-genl! kb sample)
           (probe-context! kb sample)))
       (finally (tu/clear-kb! kb)))))

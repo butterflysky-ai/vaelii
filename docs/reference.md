@@ -42,15 +42,20 @@ premises arrived in is not part of the world.
 ```
 up(C)              = C and every context C reaches over the stored genlCx edges
 visible(C)         = the premises of W whose context is in up(C)
-derived(C, O)      = the closure of visible(C) − O under the rules in visible(C)
-                     and under argument preservation
+roster(C)          = the global roster and every P a (forced_monotonic_predicate P)
+                     in visible(C) declares, unless an except at C hides the
+                     declaration or a defeat at C names it, decided over the global
+                     roster alone
+inert(C)           = the denials in visible(C) of a literal on roster(C)
+derived(C, O)      = the closure of visible(C) − inert(C) − O under the rules in
+                     visible(C) and under argument preservation
 believed(W, C)     = derived(C, O*), where O* is the least O closed under the decisions below
 believed?(W, S, C) = S is in believed(W, C)
 ```
 
 1. **Visibility.** `up(C)` is reflexive and transitive. A context no `genlCx` edge names
    sees only itself, with no implicit root
-   ([contexts.md](contexts.md#a-context-outside-the-spindle)). Every `genlCx` edge is
+   ([contexts.md](contexts.md#a-context-outside-the-topology)). Every `genlCx` edge is
    `:monotonic` and a denial of one is inert (invariant 1), so `up(C)` reads the stored
    edges alone, whatever context stores them, and does not depend on belief.
 2. **Taxonomy.** At `C`, `A` is a subtype of `B` when a chain of `genl` edges, each
@@ -124,8 +129,8 @@ believed?(W, S, C) = S is in believed(W, C)
    The grounds of a definitional family are read through and never weighed. The inherited
    family is the one whose reasons are members
    ([nmtms.md](nmtms.md#what-qualifies-as-a-nogood)).
-7. **Decision.** Read each member's class at `C`, and weigh the members off the
-   forced-monotonic roster alone: a roster member is never a loser
+7. **Decision.** Read each member's class at `C`, and weigh the members off `roster(C)`
+   alone: a roster member is never a loser
    ([nmtms.md](nmtms.md#the-forced-monotonic-roster)). A unique weakest weighed member at
    `:default` goes OUT at `C`. Two or more weighed members tied at `:default` are a
    dilemma, and every member stays believed. No weighed member at `:default` is a hard
@@ -296,16 +301,24 @@ builders of `vaelii.ref.*` wrote are now citations of these decisions by number.
     antecedents are all roster literals, with no `unknown`, `exceptWhen` or
     `set/defaultRule`, keeps the strength it was written at, and its conclusion is an
     ordinary belief at its antecedents' class, never a loser, which goes OUT only when a
-    roster premise it rests on is retracted; CxCore's `injection`, `surjection` and `bijection` rules are the case, and
+    roster premise it rests on is retracted; `core.txt`'s `injection`, `surjection` and `bijection` rules are the case, and
     those three are on the roster. Any other rule is stored, and each firing whose
-    conclusion is a roster literal or its denial is convicted: stored, held void and
-    reported as a `:forced-conclusion` violation, and `why-not` on its conclusion names the
+    conclusion is a roster literal or its denial is convicted: stored and held void, and
+    `core/violations` reads a `:forced-conclusion` entry for it off the stored firing, and `why-not` on its conclusion names the
     antecedent predicates off the roster. A rule whose trigger is an ordinary membership
     concludes a roster literal once the trigger's predicate is declared
-    `forced_monotonic_predicate`, as CxOrganism declares `folk_species`
-    ([nmtms.md](nmtms.md#the-forced-monotonic-roster)). Forcing is applied when belief is
-    computed, and a declaration is a switch whose retraction gives back the belief a KB
-    that never held it has. `vaelii.ref.world/inert-write?` reads a v1 rule
+    `forced_monotonic_predicate`, as `organism.txt` declares `folk_species`
+    ([nmtms.md](nmtms.md#the-forced-monotonic-roster)). The baseline
+    declarations form the global roster, which every context reads; a declaration stated
+    in any context, CxUniverse's included, puts its predicate on `roster(C)` at the contexts `C`
+    that see it and believe it and at no other, so the verdict, the inert denial and the roster rule all follow the reader.
+    The reader decides a declaration's own defeat over the global roster alone, so no
+    declaration takes part in deciding whether a declaration is believed
+    (`exc/roster-state`). `vaelii.ref.believe` reads every declaration in `visible(C)`:
+    v1 admits no `except` and no denial of a declaration, and `vaelii.ref.gen` draws no
+    nogood a declaration is a member of.
+    Forcing is applied when belief is computed, and a declaration is a switch whose
+    retraction gives back the belief a KB that never held it has. `vaelii.ref.world/inert-write?` reads a v1 rule
     concluding one as inert, since a v1 antecedent is never a roster literal. The
     engine holds it ([nmtms.md](nmtms.md#the-forced-monotonic-roster)). Section:
     [taxonomy.md](taxonomy.md#what-a-rule-may-conclude-and-what-it-reaches).
@@ -370,7 +383,7 @@ refused. Each entry states how the engine holds it.
    written at, its denial is inert, and it is derived only from roster antecedents
    (decision 17). A `genl` between types stays defeasible.
    `vaelii.ref.world/predicate-genl?` reads the spelling. The engine holds such an edge
-   never a loser and its denial OUT under CxCore's `(forced_monotonic_between_predicates
+   never a loser and its denial OUT under `core.txt`'s `(forced_monotonic_between_predicates
    genl)`, so a merge `special/equate-under-edge` derives over such an edge, and a claim
    `discovery/preserving-moves` re-opens through it, move only when the edge is stored or
    retracted.
@@ -495,7 +508,7 @@ marks a cell where the stated rule and the code disagree.
 | `:respell` | write | the predicates whose permuting marks moved | `special/note-permuting-moves!` | the re-seed after `settle*` | a queue, posted when the permuting-mark pair changes identity at a removal or a relabel |
 | `:refused` | write, 9 | `{rule-handle #{refusal}}`, the firings a block condition declined, plus pending mints and lifts | `chain/record-refusal!`, `special/note-pending!` | steps 8–9 | a refusal dies when it fires, its rule goes, or its antecedents stop being believed; a rule's entries are re-asked only while the rule is on `:recheck`; constraint and lift entries on a move of the `genl` or `genlCx` generation or a region naming the term; mint entries on the generation alone |
 | `:qcn-joined` | write, 9 | per calculus and context, the network the rules were last joined over | the chainer's qualitative re-join | the next join | none by design: a missing baseline makes the next join a full one |
-| `:violations` | write, F2 | the ledger of dropped conclusions and sweep cuts, newest 1000 | `vaelii.impl.violations` | `core/violations` | not a belief input: a retraction does not withdraw an entry, `clear-violations!` empties it, and a refused firing placed later withdraws its entry |
+| `:violations` | write, F2 | the ledger of dropped conclusions and sweep cuts, newest 1000 | `vaelii.impl.violations` | `core/violations` | not a belief input: a retraction does not withdraw an entry, `clear-violations!` empties it, and a refused firing placed later withdraws its entry. A `:forced-conclusion` entry is not in the ledger: `core/violations` reads it off the stored void firings (`checks/forced-conclusion-entries`) |
 | `:preserved-clashes` | 4 | per stored claim, its inherited nogoods, the askers and the classes read | `discovery/preserving-nogoods` | step 4 | a member OUT or reclassed, a vocabulary move, a moved claim that reaches it, a retraction in the region, a moved flat-cache entry it reads (`tax/flat-moves`), and the `genlCx` generation and the excepts that moved (`special/except-moved`) ([nmtms.md](nmtms.md#the-inherited-clash-memo)) |
 | network `:blocked` | 9 | the justification ids whose block condition holds at the placement context | `jtms/set-blocked`, from `recheck/exception-blocked-set` | `valid?` | the `:recheck` triggers. Partial: `set-blocked` says the caller re-evaluates every exception, and `exception-blocked-set` carries every block outside the queued candidates forward |
 | taxonomy relations | write, 2, F2, F4 | per relation, the supporters, the active edges and a generation | `tax/add-edge` and its removal twin, `tax/refresh-beliefs` | every closure read | an edge change moves the generation; `refresh-beliefs` after a relabel re-activates an edge exactly when some supporter is believed ([taxonomy.md](taxonomy.md#the-closures-are-derived-state)) |

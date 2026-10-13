@@ -53,8 +53,8 @@
   Returns the KB; the caller wires whatever sits under `left` and asserts the edge."
   [kb left right pred a v1 v2]
   (v/assert kb (list 'functional pred) 'CxUniverse)
-  (v/assert kb (list 'genlCx left 'CxUniverse) 'CxCore)
-  (v/assert kb (list 'genlCx right 'CxUniverse) 'CxCore)
+  (v/assert kb (list 'genlCx left 'CxUniverse) 'CxUniverse)
+  (v/assert kb (list 'genlCx right 'CxUniverse) 'CxUniverse)
   (v/assert kb (list pred a v1) left {:strength :monotonic})
   (v/assert kb (list pred a v2) right {:strength :monotonic})
   kb)
@@ -65,11 +65,11 @@
   (tu/with-neutral-kb [kb tu/fresh]
     (tu/with-terms [parentOf Tom MumA MumB CxLeft CxRight CxSub CxRead]
       (two-branch-kb kb CxLeft CxRight parentOf Tom MumA MumB)
-      (v/assert kb (list 'genlCx CxSub CxLeft) 'CxCore)
-      (v/assert kb (list 'genlCx CxRead CxSub) 'CxCore)
+      (v/assert kb (list 'genlCx CxSub CxLeft) 'CxUniverse)
+      (v/assert kb (list 'genlCx CxRead CxSub) 'CxUniverse)
       (is (not (merged-at? kb MumA MumB CxRead))
           "before the edge no context sees both halves")
-      (v/assert kb (list 'genlCx CxSub CxRight) 'CxCore)
+      (v/assert kb (list 'genlCx CxSub CxRight) 'CxUniverse)
       (testing "the edge reaches the reader below sub, not only sub"
         (is (merged-at? kb MumA MumB CxRead))
         (is (merged-at? kb MumA MumB CxSub)))
@@ -89,11 +89,11 @@
       (v/assert kb (list 'functional parentOf) 'CxUniverse)
       (doseq [[lo hi] [[CxExtra 'CxUniverse] [CxRight 'CxUniverse] [CxSub 'CxUniverse]
                        [CxRead CxSub] [CxRead CxExtra]]]
-        (v/assert kb (list 'genlCx lo hi) 'CxCore))
+        (v/assert kb (list 'genlCx lo hi) 'CxUniverse))
       (v/assert kb (list parentOf Tom MumA) CxExtra {:strength :monotonic})
       (v/assert kb (list parentOf Tom MumB) CxRight {:strength :monotonic})
       (is (not (merged-at? kb MumA MumB CxRead)) "no context sees both halves yet")
-      (v/assert kb (list 'genlCx CxSub CxRight) 'CxCore)
+      (v/assert kb (list 'genlCx CxSub CxRight) 'CxUniverse)
       (testing "the reader below sub derives it, being the only context that sees the pair"
         (is (merged-at? kb MumA MumB CxRead)))
       (testing "and sub itself does not, never having seen the half in the reader's branch"
@@ -103,10 +103,10 @@
   (tu/with-neutral-kb [kb tu/fresh]
     (tu/with-terms [parentOf Tom MumA MumB CxLeft CxRight CxSub CxR1 CxR2 CxR3]
       (two-branch-kb kb CxLeft CxRight parentOf Tom MumA MumB)
-      (v/assert kb (list 'genlCx CxSub CxLeft) 'CxCore)
+      (v/assert kb (list 'genlCx CxSub CxLeft) 'CxUniverse)
       (doseq [[lo hi] [[CxR1 CxSub] [CxR2 CxR1] [CxR3 CxR2]]]
-        (v/assert kb (list 'genlCx lo hi) 'CxCore))
-      (v/assert kb (list 'genlCx CxSub CxRight) 'CxCore)
+        (v/assert kb (list 'genlCx lo hi) 'CxUniverse))
+      (v/assert kb (list 'genlCx CxSub CxRight) 'CxUniverse)
       (is (every? #(merged-at? kb MumA MumB %) [CxR1 CxR2 CxR3])
           "three deep below sub, all of them in context-down(sub)"))))
 
@@ -116,15 +116,15 @@
   (tu/with-neutral-kb [kb tu/fresh]
     (tu/with-terms [parentOf Tom MumA MumB CxLeft CxRight CxSub CxHidden CxPlain]
       (two-branch-kb kb CxLeft CxRight parentOf Tom MumA MumB)
-      (v/assert kb (list 'genlCx CxSub CxLeft) 'CxCore {:strength :monotonic})
-      (v/assert kb (list 'genlCx CxPlain CxSub) 'CxCore {:strength :monotonic})
-      (let [edge (v/assert kb (list 'genlCx CxHidden CxSub) 'CxCore {:strength :monotonic})]
+      (v/assert kb (list 'genlCx CxSub CxLeft) 'CxUniverse {:strength :monotonic})
+      (v/assert kb (list 'genlCx CxPlain CxSub) 'CxUniverse {:strength :monotonic})
+      (let [edge (v/assert kb (list 'genlCx CxHidden CxSub) 'CxUniverse {:strength :monotonic})]
         (is (contains? (set (tax/context-down (reasoning/taxonomy kb) CxSub)) CxHidden)
             "in the swept set before the except")
         (v/assert kb (list 'except (sx/sentex-handle edge)) CxHidden {:strength :monotonic})
         (is (not (contains? (set (tax/context-down (reasoning/taxonomy kb) CxSub)) CxHidden))
             "and out of it after"))
-      (v/assert kb (list 'genlCx CxSub CxRight) 'CxCore {:strength :monotonic})
+      (v/assert kb (list 'genlCx CxSub CxRight) 'CxUniverse {:strength :monotonic})
       (testing "the excepted reader cannot see the joined branch, so it holds no merge"
         (is (not (merged-at? kb MumA MumB CxHidden))))
       (testing "its unexcepted sibling in the same position does"
@@ -142,10 +142,10 @@
         (tu/with-terms [parentOf CxLeft CxRight CxSub CxRead]
           (binding [tax/*exposure-instance-budget* budget]
             (v/assert kb (list 'functional parentOf) 'CxUniverse)
-            (v/assert kb (list 'genlCx CxLeft 'CxUniverse) 'CxCore)
-            (v/assert kb (list 'genlCx CxRight 'CxUniverse) 'CxCore)
-            (v/assert kb (list 'genlCx CxSub CxLeft) 'CxCore)
-            (v/assert kb (list 'genlCx CxRead CxSub) 'CxCore)
+            (v/assert kb (list 'genlCx CxLeft 'CxUniverse) 'CxUniverse)
+            (v/assert kb (list 'genlCx CxRight 'CxUniverse) 'CxUniverse)
+            (v/assert kb (list 'genlCx CxSub CxLeft) 'CxUniverse)
+            (v/assert kb (list 'genlCx CxRead CxSub) 'CxUniverse)
             (let [kids (vec (for [_ (range pairs)]
                               [(tu/fresh-term :individual "Kid")
                                (tu/fresh-term :individual "MumA")
@@ -153,7 +153,7 @@
               (doseq [[k a b] kids]
                 (v/assert kb (list parentOf k a) CxLeft {:strength :monotonic})
                 (v/assert kb (list parentOf k b) CxRight {:strength :monotonic}))
-              (v/assert kb (list 'genlCx CxSub CxRight) 'CxCore)
+              (v/assert kb (list 'genlCx CxSub CxRight) 'CxUniverse)
               (testing (str "budget " budget ": merges the candidates it kept")
                 (is (= expected-merges
                        (count (filter (fn [[_ a b]] (merged-at? kb a b CxRead)) kids)))))

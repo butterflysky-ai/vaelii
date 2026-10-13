@@ -199,7 +199,7 @@
 (def ^:private shapes
   [(sentex-types/->LiteralSentex '(dog Muffet) 'C 7 :monotonic)
    (sentex-types/->LiteralSentex '(bornIn Tom 1970) 'CxWell 12 nil)
-   (sentex-types/->LiteralSentex '(comment dog "a domestic canine") 'CxCore 13 :default)
+   (sentex-types/->LiteralSentex '(comment dog "a domestic canine") 'CxUniverse 13 :default)
    (sentex-types/->LiteralSentex '(likes Ann (mother (father Bob))) 'C 3 :default)
    (sentex-types/->LiteralSentex '(measures Rod 1.5) 'C 14 nil)
    (sentex-types/->LiteralSentex '(p A) 'C nil nil)

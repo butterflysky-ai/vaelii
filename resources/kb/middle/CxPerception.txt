@@ -46,12 +46,12 @@
            (sees ?x ?y)))
 
 ;; ---- image_viewing: the ability, read as an event kind -------------------
-;; CxLife's hasCapability takes an event kind as its second argument
-;; (resources/kb/upper/CxLife.txt): (hasCapability ?x ?eventKind) means ?x can be the
+;; life.txt's hasCapability takes an event kind as its second argument
+;; (resources/kb/upper/life.txt): (hasCapability ?x ?eventKind) means ?x can be the
 ;; doer of an event of that kind. image_viewing pairs with seeImage the way flying
 ;; pairs with flies: the relation states who is looking, the event kind states the
 ;; ability to be its doer. Taking in an image changes nothing about what it depicts,
-;; so image_viewing is a kind of acausal_event, CxAbstract's intersection of acausal
+;; so image_viewing is a kind of acausal_event, abstract.txt's intersection of acausal
 ;; and event, whose own comment names an observation as an example.
 (comment image_viewing
          "An event of taking in a static image through sight and perceiving what it shows. The event-kind counterpart of seeImage: (hasCapability ?x image_viewing) means ?x can be the doer of one.")

@@ -14,10 +14,13 @@
   byte-identical files whatever order they were built in, because a text KB is ordered by
   **content** and carries nothing about the run that wrote it."
   (:require [clojure.java.io :as io]
+            [clojure.string :as str]
             [clojure.test :refer [deftest is testing]]
             [vaelii.core :as v]
             [vaelii.host.starter :as starter]
             [vaelii.impl.io.text :as text]
+            [vaelii.impl.jtms :as jtms]
+            [vaelii.impl.kb :as kb]
             [vaelii.impl.protocols :as p]
             [vaelii.impl.rules :as vr]
             [vaelii.impl.sentex :as sx]
@@ -112,8 +115,8 @@
 
 (defn- build!
   "Every shape a text writer can quietly drop: a known-true premise, a negative fact, a
-  defeasible rule stating its own `exceptWhen`, a backward-only rule, an inert rule, a
-  reified NAT in argument position, and a plain fact."
+  defeasible rule stating its own `exceptWhen`, a backward-only rule, an inert rule, an
+  inert sentex, a reified NAT in argument position, and a plain fact."
   [kb {:keys [bird penguin flies feathered happy nests heightOf
               Tweety Opus Rex Nest1 ctx]}]
   (v/assert kb (list 'genlCx ctx 'CxUniverse) 'CxUniverse)
@@ -133,6 +136,8 @@
                      (vr/rule-sentence [(list bird '?b)] (list nests '?b)))
             ctx)
   (v/assert kb (list feathered Rex) ctx)
+  ;; an inert sentex: stored, never believed
+  (v/assert-inert kb (list happy Opus) ctx)
   (v/assert kb (list bird Opus) ctx)
   (v/assert kb (list penguin Opus) ctx)
   ;; a negative fact
@@ -231,7 +236,7 @@
                     [(genlCx CxA CxB) CxA]
                     [(cat Tom) CxA]
                     [(genlCx CxB CxUniverse) CxB]]
-          n       (text/load-entries! (fn [sen ctx _] (swap! seen conj [sen ctx])) entries)]
+          n       (text/load-entries! (fn [sen ctx _] (swap! seen conj [sen ctx])) nil entries)]
       (is (= 5 n) "every entry was read")
       (is (= '[(genlCx CxA CxB) (genlCx CxB CxUniverse)] (mapv first (take 2 @seen)))
           "both edges go in front, in the order they were written")
@@ -250,7 +255,7 @@
                     (swap! seen conj sen))
           entries '[[(transitiveInArgInverse largerThan 1 partOf) CxA]
                     [(transitive partOf) CxA]]]
-      (is (= 2 (text/load-entries! assert! entries)) "both entries were read")
+      (is (= 2 (text/load-entries! assert! nil entries)) "both entries were read")
       (is (= '[(transitive partOf) (transitiveInArgInverse largerThan 1 partOf)] @seen)
           "the refused one landed on the retry round, after what it needed")))
 
@@ -263,7 +268,7 @@
                       (throw (ex-info "no" {:type :naming :sentence sen}))
                       sen))
           e       (is (thrown? clojure.lang.ExceptionInfo
-                               (text/load-entries! assert! '[[(nope X) CxA] [(fine Y) CxA]])))]
+                               (text/load-entries! assert! nil '[[(nope X) CxA] [(fine Y) CxA]])))]
       (is (= :naming (:type (ex-data e)))
           "the entry's own refusal, not a wrapper the retry loop invented"))))
 
@@ -353,11 +358,129 @@
                              (v/load-text! kb (str (.getPath ^File dir) "/nope"))))]
           (is (= :missing-resource (:type (ex-data e)))))))))
 
+;;; ── inert sentexes: (set/inert S) ─────────────────────────────────────
+
+(defn- write-text-kb!
+  "Write `forms` into `dir` as the file of `context`, one form per line."
+  [^File dir context forms]
+  (.mkdirs dir)
+  (spit (io/file dir (str context ".txt")) (apply str (map #(str (pr-str %) "\n") forms))))
+
+(defn- stored-mentioning
+  "Every stored sentence of `kb` that names `term`, read off the records with no belief
+  filter, in handle order."
+  [kb term]
+  (let [recs (:records kb)]
+    (into [] (comp (keep #(p/get-sentex recs %))
+                   (map v/sentence-of)
+                   (filter #(some #{term} (tree-seq sequential? seq %))))
+          (sort (p/sentex-ids recs)))))
+
+(defn- refusal-type [f]
+  (try (f) nil (catch clojure.lang.ExceptionInfo e (:type (ex-data e)))))
+
+(deftest a-set-inert-form-loads-its-sentence-stored-and-never-believed
+  (tu/with-terms [bird flies Tweety CxText]
+    (with-dirs* 1 "inert"
+      (fn [^File dir]
+        (tu/with-neutral-kb [kb tu/fresh]
+          (write-text-kb! dir CxText
+                          [(list 'genlCx CxText 'CxUniverse)
+                           (list 'set/forwardRule (list 'implies (list bird '?x) (list flies '?x)))
+                           (list 'set/monotonic (list 'not (list bird Tweety)))
+                           (list 'set/inert (list bird Tweety))])
+          (v/load-text! kb (.getPath dir))
+          (let [h (v/handle-of kb (list bird Tweety) CxText)]
+            (is (integer? h) "the sentence is stored")
+            (is (nil? (:strength (v/sentex kb h))) "and is no premise")
+            (is (false? (v/in? kb h)))
+            (is (false? (v/ask? kb (list bird Tweety) CxText)))
+            (is (nil? (v/handle-of kb (list flies Tweety) CxText)) "the forward rule did not fire")
+            (is (not (true? (v/ask? kb (list flies Tweety) CxText))))
+            (is (true? (v/ask? kb (list 'not (list bird Tweety)) CxText)))
+            (is (not-any? #(some #{h} (:handles %))
+                          (concat (v/contradictions kb) (v/conflicts kb)))
+                "no clash names the inert sentex")))))))
+
+(deftest an-inert-intersection-mints-no-membership-and-no-genl-edge
+  (tu/with-terms [solid hot hot_solid warm_solid Rock CxText]
+    (with-dirs* 1 "inert-intersection"
+      (fn [^File dir]
+        (tu/with-neutral-kb [kb #(doto (tu/fresh) (tu/load-core!))]
+          (write-text-kb! dir CxText
+                          [(list 'genlCx CxText 'CxUniverse)
+                           (list solid Rock)
+                           (list hot Rock)
+                           (list 'set/inert (list 'intersection hot_solid solid hot))
+                           (list 'intersection warm_solid solid hot)])
+          (v/load-text! kb (.getPath dir))
+          (testing "an intersection asserted beside it places its type"
+            (is (true? (v/ask? kb (list 'genl warm_solid solid) CxText)))
+            (is (true? (v/ask? kb (list warm_solid Rock) CxText))))
+          (testing "the inert intersection is the only stored sentence naming its type"
+            (is (integer? (v/handle-of kb (list 'intersection hot_solid solid hot) CxText)))
+            (is (not (true? (v/ask? kb (list 'genl hot_solid solid) CxText))))
+            (is (not (true? (v/ask? kb (list hot_solid Rock) CxText))))
+            (is (= [(list 'intersection hot_solid solid hot)] (stored-mentioning kb hot_solid))))
+          (testing "the mints the other intersection drew are not drawn again from the inert one"
+            (v/retract! kb (v/handle-of kb (list 'intersection warm_solid solid hot) CxText))
+            (let [inert (v/handle-of kb (list 'intersection hot_solid solid hot) CxText)
+                  recs  (:records kb)]
+              (is (= [] (filterv #(some #{inert} (jtms/rests-on (p/get-justification recs %)))
+                                 (p/justification-ids recs)))))))))))
+
+(deftest an-inert-sentex-exports-as-set-inert-and-reloads-inert
+  (tu/with-terms [bird Tweety CxText]
+    (with-dirs* 2 "inert-trip"
+      (fn [^File a ^File b]
+        (let [file (str CxText ".txt")
+              text (tu/with-cleared-kb [kb tu/fresh]
+                     (v/assert kb (list 'genlCx CxText 'CxUniverse) 'CxUniverse)
+                     (v/assert-inert kb (list bird Tweety) CxText)
+                     (is (zero? (:skipped (v/export-text! kb (.getPath a)))))
+                     (slurp (io/file a file)))]
+          (is (str/includes? text (pr-str (list 'set/inert (list bird Tweety))))
+              "the export writes the wrapper")
+          (tu/with-cleared-kb [kb tu/fresh]
+            (v/load-text! kb (.getPath a))
+            (let [h (v/handle-of kb (list bird Tweety) CxText)]
+              (is (integer? h) "the reload stores the sentence")
+              (is (nil? (:strength (v/sentex kb h))))
+              (is (false? (v/in? kb h))))
+            (v/export-text! kb (.getPath b)))
+          (is (= text (slurp (io/file b file))) "a second export is byte-identical"))))))
+
+(deftest a-set-inert-rule-is-refused-not-indexable-and-a-nested-or-malformed-wrapper-shape
+  ;; an inert sentex has no strength, so the two wrappers never nest
+  (tu/with-terms [bird flies Tweety CxText]
+    (tu/with-neutral-kb [kb tu/fresh]
+      (doseq [[form want] [[(list 'set/inert (list 'implies (list bird '?x) (list flies '?x)))
+                            :not-indexable]
+                           [(list 'set/inert (list 'set/monotonic (list bird Tweety))) :shape]
+                           [(list 'set/monotonic (list 'set/inert (list bird Tweety))) :shape]
+                           [(list 'set/inert) :shape]
+                           [(list 'set/inert (list bird Tweety) (list flies Tweety)) :shape]]]
+        (with-dirs* 1 "inert-refused"
+          (fn [^File dir]
+            (write-text-kb! dir CxText [form])
+            (is (= want (refusal-type #(v/load-text! kb (.getPath dir)))) (pr-str form))))))))
+
+(deftest an-export-over-unbuilt-belief-refuses-when-a-sentex-is-neither-premise-nor-node
+  ;; a derived sentex and an inert one both lack a premise mark, and only the TMS node
+  ;; tells them apart
+  (tu/with-terms [bird Tweety CxText]
+    (with-dirs* 1 "unbuilt"
+      (fn [^File dir]
+        (tu/with-cleared-kb [kb tu/fresh]
+          (v/assert-inert kb (list bird Tweety) CxText)
+          (kb/note-hazards! kb {:no-belief true})
+          (is (= :unrecovered-kb (refusal-type #(v/export-text! kb (.getPath dir))))))))))
+
 ;;; ── the shipped schema and the test-world ─────────────────────────────
 
 (deftest ^:slow the-shipped-schema-round-trips-through-text
-  ;; The whole starter ontology — CxCore plus every upper and middle context — written
-  ;; out and read back into an empty KB.  ~1300 premises across 15 files.
+  ;; The whole starter ontology — the upper layer in CxUniverse plus every middle context —
+  ;; written out and read back into an empty KB.  2,817 premises across 12 files.
   (with-dirs* 1 "starter"
     (fn [dir]
       (let [[before after export load] (round-trip (.getPath ^File dir) starter/load-into)]
@@ -380,3 +503,10 @@
         (is (= (:sentexes before) (:sentexes after)))
         (is (= (:strengths before) (:strengths after)))
         (is (= (:believed before) (:believed after)))))))
+
+(deftest each-form-carries-the-lines-it-opens-and-closes-on
+  (is (= [{:form '(genl dog mammal) :start 2 :end 2}
+          {:form '(implies (and (dog ?x)) (mammal ?x)) :start 4 :end 5}]
+         (text/form-spans (java.io.StringReader.
+                           (str ";; a header\n(genl dog mammal)\n\n"
+                                "(implies (and (dog ?x))\n         (mammal ?x)) ; a tail\n"))))))

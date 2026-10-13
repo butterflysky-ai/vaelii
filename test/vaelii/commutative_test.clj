@@ -26,7 +26,7 @@
   - **One spelling leaning on the other.**  `commutative` and `commutativeInArgAndRest … 1`
     state one licence, and each installs it at its own arm rather than deriving the other.
     Each has to licence the permutation alone, withdraw it alone, and survive `recover`
-    alone.  The CxCore bridges between the marks carry the directions that are not a
+    alone.  The CxUniverse bridges between the marks carry the directions that are not a
     backward cycle — two `set/inertRule`s for the equivalence, `set/forwardOnlyRule` for
     the arity bridge to `symmetric` — and a row below pins each one."
   (:require [clojure.test :refer [is testing use-fixtures]]
@@ -305,7 +305,7 @@
           "and a tail-at-1 concludes no sugar"))))
 
 (tu/deftest-kb no-bridge-between-the-marks-is-walkable-backward
-  ;; Three CxCore rules bridge these marks, and each concludes something another of them
+  ;; Three CxUniverse rules bridge these marks, and each concludes something another of them
   ;; needs.  `set/forwardRule` adds forward chaining *without* taking the backward use
   ;; away (its engines are `#{:forward :backward}`), so written that way all three answer
   ;; goals — and `provers/candidate-rules` carries no ancestor-goal guard to stop the
@@ -321,7 +321,7 @@
           [['(implies (and (commutative ?p)) (commutativeInArgAndRest ?p 1))      #{}]
            ['(implies (and (commutativeInArgAndRest ?p 1)) (commutative ?p))      #{}]
            ['(implies (and (commutative ?p) (arity ?p 2)) (symmetric ?p)) #{:forward}]]]
-    (let [h (v/handle-of kb rule 'CxCore)]
+    (let [h (v/handle-of kb rule 'CxUniverse)]
       (is (some? h) (str "the bridge is still written down: " (pr-str rule)))
       (is (= want (:engines (v/sentex kb h)))
           (str "a backward-walkable bridge here is the cycle: " (pr-str rule))))))

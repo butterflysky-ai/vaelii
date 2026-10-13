@@ -87,6 +87,22 @@
           (is (= created (v/handle-of kb (list dog Rex) CxStory)))
           (v/retract! kb created))))))
 
+(tu/deftest-kb handle-of-an-exceptWhen-answers-the-exception-assert-returned
+  ;; under either variable name and by the rule's handle; an exception never asserted
+  ;; is nil, and retracting the handle leaves the rule stored
+  (tu/with-terms [bird flies penguin ostrich]
+    (let [xs (fn [q v] (list 'exceptWhen (list q v) (list 'implies (list bird v) (list flies v))))
+          rh (v/assert kb (list 'implies (list bird '?b) (list flies '?b)) 'CxUniverse)
+          mh (v/assert kb (xs penguin '?b) 'CxUniverse)]
+      (is (= [mh mh mh nil]
+             [(v/handle-of kb (xs penguin '?b) 'CxUniverse)
+              (v/handle-of kb (xs penguin '?q) 'CxUniverse)
+              (v/handle-of kb (list 'exceptWhen (list penguin '?b) (list 'sentexHandle rh)) 'CxUniverse)
+              (v/handle-of kb (xs ostrich '?b) 'CxUniverse)]))
+      (v/retract! kb (v/handle-of kb (xs penguin '?b) 'CxUniverse))
+      (is (= [rh nil] [(v/handle-of kb (list 'implies (list bird '?b) (list flies '?b)) 'CxUniverse)
+                       (v/handle-of kb (xs penguin '?b) 'CxUniverse)])))))
+
 (tu/deftest-kb handle-of-probes-a-symmetric-mirror-and-sees-defeated-sentexes
   (tu/with-terms [siblingOf dog Ann Bob Muffet CxStory]
     (v/assert kb (list 'symmetric siblingOf) 'CxUniverse)

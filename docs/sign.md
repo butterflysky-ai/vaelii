@@ -32,7 +32,7 @@ The layer holds no numbers.
 (v/ask? kb '(trendOf WaterLevel SignPositive) ctx)   ;=> true — the tub fills
 ```
 
-The seven predicates live in `resources/kb/upper/CxMeasure.txt`, beside the measures:
+The seven predicates live in `resources/kb/upper/measure.txt`, beside the measures:
 
 | | |
 |---|---|

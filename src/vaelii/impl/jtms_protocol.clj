@@ -198,6 +198,8 @@
     that region, plus the scan for the informant's justifications.")
   (-forced?          [tms kind x] "Is `x` a member of forced set `kind`?  A set lookup,
     read on the relabel path.")
+  (-forced-members   [tms kind] "Every member of forced set `kind`, as a set.  Read by a
+    diagnostic that enumerates the set (`vaelii.core/violations`); no relabel path calls it.")
   (-set-forced       [tms kind xs on?] "Add each of `xs` to forced set `kind` (`on?`
     true) or take it out, and relabel the region of the members that moved: the datums
     themselves for `:mono` and `:out`, the consequences for `:void`.  A member need not
@@ -276,7 +278,7 @@
                   -justification -justifications -ensure-node -add-premise
                   -suspend-premise -add-justification -retract -sweep -drop-justification
                   -relabel}
-    :attribute  #{-premise-strength -restrength-informant -forced? -set-forced}
+    :attribute  #{-premise-strength -restrength-informant -forced? -forced-members -set-forced}
     :blocked    #{-blocked -set-blocked}
     :superseded #{-superseded -supersede}
     :output     #{-believed? -believed -any-belief? -defeat-class -snapshot}

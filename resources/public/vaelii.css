@@ -533,7 +533,7 @@ header.site {
 a.t-type    { color: var(--t-type); font-weight: 600; }  /* dog, physical_object */
 a.t-ind     { color: var(--t-ind); }                     /* Muffet, Tom            */
 a.t-pred    { color: var(--t-pred); }                    /* parentOf, genl       */
-a.t-context { color: var(--t-context); }                 /* CxCore          */
+a.t-context { color: var(--t-context); }                 /* CxUniverse      */
 a.t-num     { color: var(--t-num); }                     /* 1970                 */
 .t-var      { color: var(--t-var); }                     /* ?x — not a link      */
 

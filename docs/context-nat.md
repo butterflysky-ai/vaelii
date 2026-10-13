@@ -12,7 +12,7 @@
 - **Assumes:** sentex, context, `genlCx`, reification, the `termOfUnit` map →
   [glossary.md](glossary.md), [nat.md](nat.md), [contexts.md](contexts.md).
 
-A context is normally a `Cx`-prefixed name — `CxTime`, `CxUniverse`. A **reified-NAT
+A context is normally a `Cx`-prefixed name — `CxWell`, `CxUniverse`. A **reified-NAT
 context** is denoted instead by a function application: `(CxTimeFn CxMonad (DatetimeFn
 "2000"))` is "the year 2000, along the `CxMonad` dimension". The value of it is that the
 context hierarchy can then be **computed**: `(CxTimeFn CxMonad (DatetimeFn "2000-01"))` is a
@@ -44,7 +44,7 @@ query context.
 
 **A read names the context through the application only while CxUniverse believes
 `(result CxTimeFn context)`** (`nat/context-function-believed?`): the declaration that
-`CxTimeFn`'s applications are contexts. `context` is the CxCore type, and `result` is the
+`CxTimeFn`'s applications are contexts. `context` is the `core.txt` type, and `result` is the
 ordinary result declaration ([argtypes.md](argtypes.md)), so one declaration says what the
 function denotes in both positions. Otherwise the read refuses the slot for `:shape`, and
 the message names the missing `(result CxTimeFn context)`. A fact stored while CxUniverse
@@ -54,13 +54,13 @@ CxUniverse believes the declaration.
 
 The check reads the declaration in CxUniverse, the context every reader reads the slot's
 `termOfUnit` map in ([nat.md](nat.md#what-reification-does-not-cover)). A declaration
-stated in CxUniverse or in a context CxUniverse sees, such as CxCore, admits the slot. A
+stated in CxUniverse or in a context CxUniverse sees admits the slot. A
 declaration stated in an unwired context or in a spec of CxUniverse admits no read, and
 an `except` or a denial at CxUniverse hides the declaration (`res/supporter-visible?`). An
 `except` in a sub-context leaves the declaration believed at CxUniverse, and the slot
 reads. The check does not read the context the slot names: a `cx/` context no `genlCx`
 edge names sees nothing but itself
-([contexts.md](contexts.md#a-context-outside-the-spindle)), so a check read there would
+([contexts.md](contexts.md#a-context-outside-the-topology)), so a check read there would
 refuse every read of an unwired context NAT.
 
 Only the **outer** function reifies. Its arguments are left alone by the mint, so an
@@ -233,8 +233,8 @@ year one way and the month the other still orders the two contexts. Fields are n
 
 Three constructors and not six: a year, a month and a day are the granularities somebody
 writes a holiday or a policy *for*, and each finer field is a spelling ISO already gives.
-The three are declared in `resources/kb/upper/CxTime.txt` — they are about time, and CxTime
-is the upper context that owns time — each with a `(result … temporal)`, so a
+The three are declared in `resources/kb/upper/time.txt`, the upper file that owns time,
+each with a `(result … temporal)`, so a
 calendar term is an interval and not an instant. That is also why it cannot stand in an
 `instantBefore`, and why the moments it lies between are a separate term with a separate
 constructor: see [What this does not cover](#what-this-does-not-cover).
@@ -357,6 +357,6 @@ which is the only spelling the map is keyed by.
 - `vaelii.impl.datetime` — the calendar containment comparator, over the ISO strings and
   the three calendar constructors alike, and beside it the half-open `bounds` the calendar
   clock reads a term's two moments out of ([time.md](time.md)).
-- `resources/kb/CxCore.txt` — `contextArgSubrelation`, and `result`'s comment on
+- `resources/kb/upper/core.txt` — `contextArgSubrelation`, and `result`'s comment on
   `(result F context)`, documented in the KB's own representation.
-- `resources/kb/upper/CxTime.txt` — `YearFn` / `MonthFn` / `DayFn`, each with its `result`.
+- `resources/kb/upper/time.txt` — `YearFn` / `MonthFn` / `DayFn`, each with its `result`.

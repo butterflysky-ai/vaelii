@@ -41,8 +41,8 @@
     :shows "Two stored edges, one question they never state. Transitivity is a cached
             closure rather than a rule, so the answer costs a set lookup and no chaining
             at all — and no (genl penguin vertebrate) sentex is ever materialized."
-    :rests-on [['(genl penguin bird) 'CxOrganism]
-               ['(genl bird vertebrate) 'CxOrganism]]
+    :rests-on [['(genl penguin bird) 'CxUniverse]
+               ['(genl bird vertebrate) 'CxUniverse]]
     :goal '(genl penguin vertebrate) :context 'CxWell :expect :yes}
 
    {:id "disjoint-metatype" :group "Taxonomy"
@@ -51,9 +51,9 @@
             five vertebrate classes pairwise, and genl carries each separation down to
             every subtype. The pairs are consulted, never stored: retract the metatype
             and all ten go at once."
-    :rests-on [['(disjoint_metatype vertebrate_class) 'CxOrganism]
-               ['(vertebrate_class bird) 'CxOrganism]
-               ['(vertebrate_class mammal) 'CxOrganism]]
+    :rests-on [['(disjoint_metatype vertebrate_class) 'CxUniverse]
+               ['(vertebrate_class bird) 'CxUniverse]
+               ['(vertebrate_class mammal) 'CxUniverse]]
     :goal '(disjoint penguin dog) :context 'CxWell :expect :yes}
 
    {:id "arg-preserving" :group "Taxonomy"
@@ -63,8 +63,8 @@
             pair of subkinds beneath it — here dogs and ants, about whose sizes the KB
             holds nothing whatever."
     :rests-on [['(largerThan mammal insect) 'CxSize]
-               ['(transitiveInArgInverse largerThan 1 genl) 'CxAbstract]
-               ['(transitiveInArgInverse largerThan 2 genl) 'CxAbstract]]
+               ['(transitiveInArgInverse largerThan 1 genl) 'CxUniverse]
+               ['(transitiveInArgInverse largerThan 2 genl) 'CxUniverse]]
     :goal '(largerThan dog ant) :context 'CxWell :expect :yes}
 
    {:id "arg-preserving-stops" :group "Taxonomy"
@@ -73,18 +73,18 @@
             down the hierarchy; it does not make the relation symmetric, and largerThan
             is declared asymmetric besides. A KB that answered this would be inventing."
     :rests-on [['(largerThan mammal insect) 'CxSize]
-               ['(asymmetric largerThan) 'CxAbstract]]
+               ['(asymmetric largerThan) 'CxUniverse]]
     :goal '(largerThan ant dog) :context 'CxWell :expect :no}
 
    ;; ---- the vocabulary reasoning about itself -------------------------
    {:id "metadata-to-type" :group "Predicates about predicates"
     :title "Declaring a property concludes a type"
     :shows "(symmetric friendOf) is metadata the engine reads. Because `symmetric` is
-            itself a kind of binary_predicate — (genl symmetric binary_predicate) in CxCore
+            itself a kind of binary_predicate — (genl symmetric binary_predicate) in CxUniverse
             — the same assertion classifies friendOf as a binary_predicate, with no derived
             twin between the mark and the type."
-    :rests-on [['(symmetric friendOf) 'CxSociety]
-               ['(genl symmetric binary_predicate) 'CxCore]]
+    :rests-on [['(symmetric friendOf) 'CxUniverse]
+               ['(genl symmetric binary_predicate) 'CxUniverse]]
     :goal '(binary_predicate friendOf) :context 'CxWell :expect :yes}
 
    {:id "arity-by-class" :group "Predicates about predicates"
@@ -94,8 +94,8 @@
             class: the position query answers that a second argument exists. No rule
             concludes (arity largerThan 2), since arity is on the forced-monotonic
             roster; an asserted (arity R 2) concludes (binary R) the other way."
-    :rests-on [['(binary_predicate largerThan) 'CxAbstract]
-               ['(genl binary_predicate binary) 'CxCore]]
+    :rests-on [['(binary_predicate largerThan) 'CxUniverse]
+               ['(genl binary_predicate binary) 'CxUniverse]]
     :goal '(admitsArgnum largerThan 2) :context 'CxWell :expect :yes}
 
    {:id "type-level" :group "Predicates about predicates"
@@ -104,8 +104,8 @@
             which is which. relation_kind is a disjoint_metatype over the two, so a
             predicate is at most one of them — asking whether largerThan relates
             individuals is answered no, not merely left unanswered."
-    :rests-on [['(type_relation_predicate largerThan) 'CxAbstract]
-               ['(disjoint_metatype relation_kind) 'CxCore]]
+    :rests-on [['(type_relation_predicate largerThan) 'CxUniverse]
+               ['(disjoint_metatype relation_kind) 'CxUniverse]]
     :goal '(instance_relation_predicate largerThan) :context 'CxWell :expect :no}
 
    {:id "part-type" :group "Predicates about predicates"
@@ -116,8 +116,8 @@
             nothing about which kinds of wing. Compare largerThan, which is declared on
             both — each position is a separate decision about the relation."
     :rests-on [['(partType bird wing) 'CxAnatomy]
-               ['(transitiveInArgInverse partType 1 genl) 'CxAbstract]
-               ['(genl penguin bird) 'CxOrganism]]
+               ['(transitiveInArgInverse partType 1 genl) 'CxUniverse]
+               ['(genl penguin bird) 'CxUniverse]]
     :goal '(partType penguin wing) :context 'CxWell :expect :yes}
 
    ;; ---- defaults and their exceptions ---------------------------------
@@ -210,7 +210,7 @@
             fact, probing both argument orders. knows is deliberately not symmetric:
             declaring it so would have the KB assert the converse of every acquaintance
             it ever learned."
-    :rests-on [['(symmetric friendOf) 'CxSociety]
+    :rests-on [['(symmetric friendOf) 'CxUniverse]
                ['(implies (and (friendOf ?x ?y)) (knows ?x ?y)) 'CxSocial]]
     :premises '[(person AdaEx) (person BenEx) (friendOf AdaEx BenEx)]
     :goal '(knows BenEx AdaEx) :expect :yes}
@@ -235,7 +235,7 @@
             two types one, which the type hierarchy does not hold. The edge is malformed
             as written, so it is refused. A membership that breaks a disjointness is
             stored instead, and the clash is decided and reported."
-    :rests-on [['(genl dog mammal) 'CxOrganism]]
+    :rests-on [['(genl dog mammal) 'CxUniverse]]
     :kind :refusal
     :refuse '(genl mammal dog)}
 
@@ -246,7 +246,7 @@
             the sentence is refused. A name in that position is not refused: the
             constraint adds the type it names, so (eats RexEx GarageEx) is stored and
             derives (food GarageEx)."
-    :rests-on [['(arg eats 2 food) 'CxLife]]
+    :rests-on [['(arg eats 2 food) 'CxUniverse]]
     :premises '[(dog RexEx)]
     :kind :refusal
     :refuse '(eats RexEx 42)}

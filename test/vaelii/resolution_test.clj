@@ -15,6 +15,19 @@
   (is (nil? (res/unify '(dog ?x) '(cat Muffet))))
   (is (= 'Muffet (get (res/unify '(?r ?x ?y) '(parentOf Muffet Rex)) '?x))))
 
+(deftest a-quoted-form-is-a-constant-to-unify-and-substitute
+  (testing "a quoted form unifies with an equal form or a variable, and binds nothing inside"
+    (is (= {} (res/unify '(Quote (dog ?x)) '(Quote (dog ?x)))))
+    (is (nil? (res/unify '(Quote (dog ?x)) '(Quote (dog Muffet)))))
+    (is (nil? (res/unify '(Quote (dog ?x)) '(Quote (dog ?y)))))
+    (is (= '{?x (Quote (dog ?x))} (res/unify '?x '(Quote (dog ?x))))))
+  (testing "substitute returns a quoted form whole"
+    (is (= '(said Tom (Quote (dog ?x)))
+           (res/substitute '(said Tom (Quote (dog ?x))) '{?x Muffet}))))
+  (testing "an argument list headed by the symbol Quote is not a quoted form"
+    (is (= '{?t expression} (res/unify-args '(Quote ?t) '(Quote expression))))
+    (is (= '{?t expression} (res/unify '(result Quote ?t) '(result Quote expression))))))
+
 (tu/deftest-kb backward-with-rule
   (let [parentOf (tu/tmp-pred) grandparentOf (tu/tmp-pred)
         tom (tu/tmp-ind) bob (tu/tmp-ind) ann (tu/tmp-ind)]

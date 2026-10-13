@@ -75,7 +75,7 @@ The prover reads every component's length, requires them all to share **one dime
 sums the `lo` and `hi` bounds separately, and renders the sum. The dimension check is the
 whole of the unit consistency check: two hours plus five metres has no answer.
 
-`(list I1 I2 …)` is **one argument**, so CxTime declares `totalDuration` a
+`(list I1 I2 …)` is **one argument**, so `time.txt` declares `totalDuration` a
 `binary_predicate`.
 
 Three cases yield no answer:
@@ -174,8 +174,8 @@ came first.
 ## Vocabulary and registration
 
 `length`, `totalDuration` and `overlapDuration` are declared in
-`resources/kb/upper/CxTime.txt`, beside the Allen relations. `length` is a duration, not a
-spatial extent. The measure terms and the unit table are CxMeasure's.
+`resources/kb/upper/time.txt`, beside the Allen relations. `length` is a duration, not a
+spatial extent. The measure terms and the unit table are `measure.txt`'s.
 
 The prover is **opt-in**. It needs no other prover registered, because
 `possible-allen-relations` and `stp/overlap-window-with-support` are functions of the

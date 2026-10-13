@@ -10,6 +10,7 @@
             [vaelii.impl.chain :as chain]
             [vaelii.impl.checks :as checks]
             [vaelii.impl.decide :as decide]
+            [vaelii.impl.discovery :as discovery]
             [vaelii.impl.except :as exc]
             [vaelii.impl.feed :as feed]
             [vaelii.impl.integrate :as integrate]
@@ -484,41 +485,73 @@
                                  (into (partners kb x)))))))
               #{} writes))))
 
-(defn- edge-write-seeds
-  "The handles a batch of `genlCx` edge writes can move the belief of at their own
-  contexts, or nil when a write of `writes` is not a `genlCx` edge between two symbols:
-  each one's `special/context-move` names the contexts whose ancestor sets it changes
-  (`:under`) and the contexts it shows or hides (`:moved`, `:raw`).  The seeds are the
-  targets of the defeats and the members of the `contradicts` stored in those contexts,
-  and the nogood candidates stated under the edge, where a placement it gives or takes
-  hides one at its own context (ruling 21)."
+(defn- edge-moves
+  "The `special/context-move` of each write of `writes`, or nil when one is not a `genlCx`
+  edge between two symbols."
   [kb writes]
-  (let [recs  (:records kb)
-        edge  (fn [[op x]]
-                (let [s (case op
-                          :assert  x
-                          :retract (:sentence (p/get-sentex recs x)))]
-                  (when (and (seq? s) (= 'genlCx (first s)) (= 3 (count s))
-                             (symbol? (second s)) (symbol? (nth s 2)))
-                    [(second s) (nth s 2)])))
-        es    (map edge writes)]
+  (let [recs (:records kb)
+        edge (fn [[op x]]
+               (let [s (case op
+                         :assert  x
+                         :retract (:sentence (p/get-sentex recs x)))]
+                 (when (and (seq? s) (= 'genlCx (first s)) (= 3 (count s))
+                            (symbol? (second s)) (symbol? (nth s 2)))
+                   [(second s) (nth s 2)])))
+        es   (map edge writes)]
     (when (and (seq writes) (every? some? es))
-      (let [idx   (:index kb)
-            ms    (map (fn [[a b]] (special/context-move kb a b)) es)
-            under (into #{} (mapcat #(deref (:under %))) ms)
-            ctxs  (into under (mapcat #(concat (:moved %) (:raw %))) ms)
-            named (fn [f] (into [] (comp (keep #(p/get-sentex recs %))
-                                         (mapcat #(rest (:sentence %)))
-                                         (keep sx/handle-id))
-                                (reads/as-stored-with-functor-in idx f ctxs)))]
-        (-> #{}
-            (into (named sx/defeat-functor))
-            (into (named 'contradicts))
-            (into (decide/handles-at (decide/synced kb) under)))))))
+      (mapv (fn [[a b]] (special/context-move kb a b)) es))))
+
+(defn- edge-write-seeds
+  "The handles the `genlCx` edge moves `ms` (`edge-moves`) can move the belief of at their
+  own contexts: each move names the contexts whose ancestor sets it changes (`:under`)
+  and the contexts it shows or hides (`:moved`, `:raw`).  The seeds are the targets of
+  the defeats and the members of the `contradicts` stored in those contexts, and the
+  nogood candidates stated under the edge, where a placement it gives or takes hides one
+  at its own context (ruling 21)."
+  [kb ms]
+  (let [recs  (:records kb)
+        idx   (:index kb)
+        under (into #{} (mapcat #(deref (:under %))) ms)
+        ctxs  (into under (mapcat #(concat (:moved %) (:raw %))) ms)
+        named (fn [f] (into [] (comp (keep #(p/get-sentex recs %))
+                                     (mapcat #(rest (:sentence %)))
+                                     (keep sx/handle-id))
+                            (reads/as-stored-with-functor-in idx f ctxs)))]
+    (-> #{}
+        (into (named sx/defeat-functor))
+        (into (named 'contradicts))
+        (into (decide/handles-at (decide/synced kb) under)))))
+
+(defn- edge-declaration-seeds
+  "The handles the `genlCx` edge moves `ms` (`edge-moves`) can move the roster reading
+  of: for each predicate a believed declaration stated in a context a move shows or hides
+  puts on the roster (`decide/declared`), its stored facts and their stored denials
+  stated under that move's edge.  A reader under the edge gains or loses the declaration,
+  and an inert denial and a void firing are hidden by the read walk alone."
+  [kb ms]
+  (let [declared (decide/declared (reasoning/taxonomy kb))]
+    (when (seq declared)
+      (let [idx  (:index kb)
+            recs (:records kb)]
+        (into #{} (mapcat (fn [m]
+                            (let [shown (into (set (:moved m)) (:raw m))
+                                  preds (into #{} (keep (fn [[[_ pred] decls]]
+                                                          (when (some shown (vals decls)) pred)))
+                                              declared)]
+                              (when (seq preds)
+                                (let [under @(:under m)]
+                                  (concat (mapcat #(reads/as-stored-with-functor-in idx % under) preds)
+                                          (filter #(let [d (:sentence (p/get-sentex recs %))]
+                                                     (and (sx/negation? d) (contains? preds (nm/functor (second d)))))
+                                                  (when (reads/stores-opposed? idx)
+                                                    (reads/as-stored-opposed-in idx under)))))))))
+              ms)))))
 
 (defn belief-before
   "`{handle hidden?}` for every handle what `writes` can move reaches: `kb/moved-reach` of
-  their seeds (`write-seeds`, or `edge-write-seeds` for a batch of `genlCx` edges).  For a
+  their seeds (`write-seeds`, or `edge-write-seeds` for a batch of `genlCx` edges), and of
+  the facts a roster declaration among them moves (`chain/declaration-reach`) or a `genlCx`
+  edge among them shows or hides (`edge-declaration-seeds`).  For a
   write no seed set places, or a reach a handle of which moves a placement or queues a
   watched rule (`special/posts-recheck?`), the reach is that of every standing defeat's
   target and every placed `contradicts`' members.  The value is
@@ -538,7 +571,8 @@
         ;; rule by moving
         placed?    (fn [s] (and (or (plain-literal? tax s) (contains? '#{contradicts defeat} (nm/functor s)))
                                 (not (special/posts-recheck? kb s))))
-        edges      (when (or reads? conflicts?) (edge-write-seeds kb writes))
+        ms         (edge-moves kb writes)
+        edges      (when (and ms (or reads? conflicts?)) (edge-write-seeds kb ms))
         seeds      (when (and (nil? edges) (or reads? conflicts?)) (write-seeds kb writes))
         reach      (when (and seeds reads?) (kb/moved-reach kb seeds))
         reach      (cond edges        (kb/moved-reach kb edges)
@@ -549,6 +583,17 @@
                                       reach))
                          reach
                          :else (everything))
+        ;; a roster declaration moves its predicate's readings with no defeat: an inert
+        ;; denial and a void firing are hidden by the read walk alone
+        declared   (into #{} (mapcat (fn [[op x c]]
+                                       (case op
+                                         :assert  (chain/declaration-reach kb x c)
+                                         :retract (when-let [sx (p/get-sentex recs x)]
+                                                    (chain/declaration-reach kb (:sentence sx) (:context sx)))
+                                         nil)))
+                         writes)
+        declared   (cond-> declared ms (into (edge-declaration-seeds kb ms)))
+        reach      (cond-> reach (seq declared) (-> set (into (kb/moved-reach kb declared))))
         hid        (exc/own-hidden-fn kb)]
     (into {} (map (fn [h] [h (boolean (and hid (hid h)))])) reach)))
 
@@ -857,7 +902,11 @@
               ;; region keeps its label from before; a handle no defeat reached before the
               ;; write was not hidden by one
               open?  #(not (contains? @opened %))
-              was-in (into #{} (remove #(get snap % false))
+              ;; a handle the reading does not hold that the declared roster alone hides
+              ;; now was hidden before: a write that moves a declaration reads its reach
+              roster (exc/roster-hidden-own-fn kb)
+              hidden #(if (contains? snap %) (get snap %) (boolean (and roster (roster %))))
+              was-in (into #{} (remove hidden)
                            (-> @extra-in
                                (into (filter open?) (jtms/touched-in tms))
                                (into (filter #(and (not (contains? @region %)) (jtms/in? tms %)
@@ -866,6 +915,7 @@
           (when sink    (swap! sink into moved))
           (when in-sink (swap! in-sink into was-in))
           (when fed?    (feed/note-region! kb moved was-in)))))
+    (discovery/note-window! kb @extra)
     (jtms/reset-touched! (reasoning/tms kb))
     (swap! (reasoning/settle-stats kb)
            (fn [s] (-> s

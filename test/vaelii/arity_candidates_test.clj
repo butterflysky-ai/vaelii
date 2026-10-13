@@ -14,6 +14,8 @@
             [vaelii.core :as v]
             [vaelii.impl.decide :as decide]
             [vaelii.impl.decide.arity :as arity]
+            [vaelii.impl.kb :as kb]
+            [vaelii.impl.predicates :as predicates]
             [vaelii.impl.profile :as prof]
             [vaelii.impl.protocols :as p]
             [vaelii.impl.reads :as reads]
@@ -473,88 +475,6 @@
           (is (= [] (conflicts-below-mismatches kb)) (str where ", rebuilt")))))
     (is (pos? @found) "the streams put functors under a conflict")))
 
-;; A reader's binding for a functor with none of its own is read off the bound predicates
-;; above it (`arity/bound-above`), each kept when the reader's ancestor set reaches it
-;; (`tax/genls-asserted-among`).  The oracle is the definition: the closure over the edges
-;; stated in the ancestor set, read whole (`tax/genls-asserted-in`).
-
-(defn- reader-binding-by-definition
-  "What binds `q`'s length at a reader with ancestor set `up`, read off `q`'s whole scoped
-  closure."
-  [kb q up]
-  (let [vis (fn [p] (@#'arity/visible-bindings kb p up nil))
-        own (vis q)]
-    (cond
-      (seq (:var own))   (when (= 1 (count (:min own)))
-                           (let [[m hs] (first (:min own))] {:min m :grounds hs}))
-      (seq (:exact own)) (when (= 1 (count (:exact own)))
-                           (let [[n hs] (first (:exact own))] {:exact n :grounds hs}))
-      :else
-      (let [sup (into [] (keep (fn [p] (let [b (vis p)] (when (or (seq (:var b)) (seq (:exact b))) b))))
-                      (sort (disj (tax/genls-asserted-in (reasoning/taxonomy kb) q up) q)))
-            ns  (into #{} (mapcat (comp keys :exact)) sup)]
-        (when (and (= 1 (count ns)) (not-any? #(seq (:var %)) sup))
-          {:exact (first ns) :grounds (into #{} (mapcat #(mapcat val (:exact %))) sup)})))))
-
-(deftest a-reader-s-binding-reads-the-bound-predicates-its-ancestor-set-reaches
-  (let [rnd  (java.util.Random. 4111)
-        seen (atom 0)
-        bad  (atom [])]
-    (doseq [trial (range 8)]
-      (tu/with-neutral-kb [kb tu/isolated-fresh]
-        (tu/with-terms [CxAr CxBr CxCr]
-          (doseq [[c up] [[CxAr 'CxUniverse] [CxBr CxAr] [CxCr 'CxUniverse]]]
-            (v/assert kb (list 'genlCx c up) 'CxUniverse))
-          (let [ctxs ['CxUniverse CxAr CxBr CxCr]]
-            (doseq [s (random-stream rnd)]
-              (try (v/assert kb s (ctxs (.nextInt rnd (count ctxs))))
-                   (catch clojure.lang.ExceptionInfo _)))
-            (let [bs    (stored-bindings kb)
-                  tax   (reasoning/taxonomy kb)
-                  above (@#'arity/bound-above kb tax)
-                  recs  (:records kb)
-                  fs    (into (into #{} (keep #(some-> (p/get-sentex recs %) (@#'arity/fact-shape) first))
-                                    (p/sentex-ids recs))
-                              (keys bs))]
-              (doseq [cx ctxs
-                      :let [up (tax/context-up-global tax cx)]
-                      q (sort fs)
-                      :let [want (reader-binding-by-definition kb q up)
-                            got  (@#'arity/reader-binding kb above q up nil)]]
-                (when want (swap! seen inc))
-                (when (not= want got)
-                  (swap! bad conj {:trial trial :context cx :functor q :want want :got got}))))))))
-    (is (pos? @seen) "the streams bind a length at some reader")
-    (is (= [] @bad))))
-
-(deftest a-reader-s-bound-predicates-are-read-off-one-walk-from-the-functor
-  ;; q → p0 → … → p5 stated in CxAr, each p bound to two arguments, and an edge stated in
-  ;; CxCr, so CxAr's ancestor set misses a context stating a `genl` edge and the cut is
-  ;; checked against the edges it states: one walk up from q answers the whole cut, where
-  ;; a walk per bound predicate costs the cut times the reach
-  (tu/with-neutral-kb [kb tu/isolated-fresh]
-    (tu/with-terms [CxAr CxCr]
-      (doseq [c [CxAr CxCr]] (v/assert kb (list 'genlCx c 'CxUniverse) 'CxUniverse))
-      (let [q     (tu/fresh-term :predicate 'rel)
-            ps    (vec (repeatedly 6 #(tu/fresh-term :predicate 'rel)))
-            other (vec (repeatedly 2 #(tu/fresh-term :predicate 'rel)))]
-        (doseq [[a b] (partition 2 1 (cons q ps))] (v/assert kb (list 'genl a b) CxAr))
-        (v/assert kb (list 'genl (first other) (second other)) CxCr)
-        (doseq [p ps] (v/assert kb (list 'arity p 2) 'CxUniverse))
-        (let [tax   (reasoning/taxonomy kb)
-              up    (tax/context-up-global tax CxAr)
-              walks (atom {})
-              count! (fn [k real] (fn [& args] (swap! walks update k (fnil inc 0)) (apply real args)))]
-          (with-redefs [tax/genl-path            (count! :path @#'tax/genl-path)
-                        tax/reachable-filtered?  (count! :walk @#'tax/reachable-filtered?)
-                        tax/visible-neighbours   (count! :nodes @#'tax/visible-neighbours)]
-            (is (= 6 (count (:grounds (@#'arity/reader-binding kb (@#'arity/bound-above kb tax)
-                                                               q up nil))))
-                "every bound predicate above q grounds the conviction"))
-          (is (nil? (:path @walks)) "no path is read per bound predicate")
-          (is (nil? (:walk @walks)) "and no pair walks")
-          (is (<= (:nodes @walks 0) 6) "one walk enters each node below the top once"))))))
-
 ;; A pair `[f g]` is a nogood at a reader whose ancestor set reaches `g` from `f` over
 ;; the edges it states and whose own visible exact lengths differ, `variable_arity`
 ;; neither.  The settle places one `contradicts` per exact binding of each end
@@ -623,16 +543,44 @@
       (doseq [p chain] (v/assert kb (list 'arity p 1) 'CxUniverse))
       (v/assert kb (list 'arity top 2) 'CxUniverse)
       (v/assert kb (list q (ind) (ind) (ind)) 'CxUniverse)
-      (let [tax   (reasoning/taxonomy kb)
-            cands (decide/synced kb)
+      (let [cands (decide/synced kb)
             calls (atom 0)
-            real  @#'arity/visible-bindings]
+            real  @#'arity/held-bindings]
         (is (contains? (::arity/cand-shapes cands) [q 3]) "the ternary shape is a candidate")
-        (with-redefs [arity/visible-bindings (fn [& args] (swap! calls inc) (apply real args))]
-          (is (nil? (@#'arity/reader-binding kb (@#'arity/bound-above kb tax) q
-                                             (tax/context-up-global tax 'CxUniverse) nil))
-              "q is unbound, so its tuple breaks nothing"))
+        (with-redefs [arity/held-bindings (fn [& args] (swap! calls inc) (apply real args))]
+          (is (nil? (arity/relation-length kb q)) "q is unbound, so its tuple breaks nothing"))
         (is (<= @calls 3) (str @calls " bindings read"))))))
+
+(deftest a-functor-s-bound-predicates-are-read-off-one-walk-up-from-it
+  ;; q → p0 → … → p5, each p bound to two arguments, the edges stated alternately in CxAr
+  ;; and CxCr so no context sees the chain whole: one walk up from q over the unscoped
+  ;; closure answers the whole cut, where a walk per bound predicate costs the cut times
+  ;; the reach
+  (tu/with-neutral-kb [kb tu/isolated-fresh]
+    (tu/with-terms [CxAr CxCr]
+      (doseq [c [CxAr CxCr]] (v/assert kb (list 'genlCx c 'CxUniverse) 'CxUniverse))
+      (let [q  (tu/fresh-term :predicate 'rel)
+            ps (vec (repeatedly 6 #(tu/fresh-term :predicate 'rel)))]
+        (doseq [[i [a b]] (map-indexed vector (partition 2 1 (cons q ps)))]
+          (v/assert kb (list 'genl a b) (if (even? i) CxAr CxCr)))
+        (doseq [p ps] (v/assert kb (list 'arity p 2) 'CxUniverse))
+        (let [walks  (atom {})
+              built  (atom 0)
+              count! (fn [k real] (fn [& args] (swap! walks update k (fnil inc 0)) (apply real args)))
+              union  tax/genls-global-union]
+          (with-redefs [tax/genl-path           (count! :path @#'tax/genl-path)
+                        tax/reachable-filtered? (count! :walk @#'tax/reachable-filtered?)
+                        tax/genls-global-union  (fn [tx t xf memo]
+                                                  (swap! walks update :union (fnil inc 0))
+                                                  (let [r (union tx t xf memo)]
+                                                    (swap! built + (count @memo))
+                                                    r))]
+            (is (= 6 (count (:grounds (arity/relation-length kb q nil true))))
+                "every bound predicate above q grounds the length"))
+          (is (nil? (:path @walks)) "no path is read per bound predicate")
+          (is (nil? (:walk @walks)) "and no pair walks")
+          (is (= 1 (:union @walks)) "one walk up from q")
+          (is (<= @built 7) "the walk builds q and each of its six supers once"))))))
 
 ;; A `genl` edge whose belief moves while it stays stored moves the lengths above every
 ;; type below its lower end.  A defeat and an except leave the edge in the unscoped closure
@@ -844,3 +792,244 @@
           (v/assert kb (ss raised) 'CxUniverse m)
           (is (= [true false] [before (v/believed? kb t 'CxUniverse)]) (name raised))
           (doseq [h (cons t (rseq hs))] (v/retract! kb h)))))))
+
+;; ---- the readers of a relation's length against one definition -----------------------
+;;
+;; One function answers "what length binds P": `arity/relation-length`, which the
+;; argument-position check, the arity nogood, `admitsArgnum` and `kb/relation-arity` (its
+;; `:exact`) read.  The definition below reads only
+;; what is stored and believed and takes no context: a relation has one binding, read the
+;; same at every context.  Its own binding is its `arity` declarations, its exact-class
+;; memberships and each `:monotonic` metatype membership whose metatype reaches an exact
+;; class through `:monotonic` `genl` edges.  `variable_arity` leaves one `arityMin` floor
+;; and no exact length, two own lengths leave the relation unbound, and a relation with no
+;; own binding takes the one exact length the predicates above it agree on, none of them
+;; `variable_arity`.  An engine term's length is the argument count of its `:shape`.
+;;
+;; `kb/relation-arity` claims the whole's exact length and `relation-length` the whole.  Each
+;; disagreement is a row of `length-divergences`, named for the finding.  A row stays until
+;; the work it waits on removes it; a disagreement no row names fails the test.
+
+(def ^:private exact-class-names (vec (sort (keys sx/exact-arity-classes))))
+
+(defn- length-world
+  "A vector of ops over six predicates `p0`..`p5`, two metatypes `k0` `k1` and `ncx`
+  contexts: `genl` edges, `arity`, exact-class, `arityMin` and `variable_arity`
+  declarations, a metatype membership `(K P)` and a metatype edge `(genl K C)`, each at a
+  context index and a strength."
+  [^java.util.Random rnd ncx]
+  (let [r  #(.nextInt rnd (int %))
+        at (fn [m] (assoc m :cx (r ncx) :st (if (zero? (r 4)) :monotonic :default)))
+        p  #(r 6)]
+    (into []
+          (concat
+           (for [_ (range (+ 2 (r 6))) :let [i (p) j (p)] :when (not= i j)]
+             (at {:op :edge :sub i :sup j}))
+           (for [_ (range (+ 1 (r 5)))]
+             (at (case (int (r 5))
+                   (0 1) {:op :arity :p (p) :n (inc (r 3))}
+                   2     {:op :class :p (p) :c (exact-class-names (r 9))}
+                   3     {:op :var :p (p)}
+                   4     {:op :member :k (r 2) :p (p)})))
+           (for [k (range 2) :when (< (r 3) 2)]
+             (at {:op :route :k k :c (exact-class-names (r 9))}))
+           (for [_ (range (r 2))] (at {:op :min :p (p) :n (inc (r 3))}))))))
+
+(defn- length-sentence [{:keys [ps ks]} op]
+  (case (:op op)
+    :edge   (list 'genl (ps (:sub op)) (ps (:sup op)))
+    :arity  (list 'arity (ps (:p op)) (:n op))
+    :class  (list (:c op) (ps (:p op)))
+    :min    (list 'arityMin (ps (:p op)) (:n op))
+    :var    (list 'variable_arity (ps (:p op)))
+    :member (list (ks (:k op)) (ps (:p op)))
+    :route  (list 'genl (ks (:k op)) (:c op))
+    :engine (list 'arity (:t op) (:n op))))
+
+(defn- length-build!
+  "Assert `world` into `kb` in order, over fresh terms, and answer `{:ps :ks :ctx :hs}`,
+  `hs` mapping each op the KB stored to its handle."
+  [kb world]
+  (let [ps  (vec (repeatedly 6 #(tu/fresh-term :predicate 'rel)))
+        ks  (vec (repeatedly 2 #(tu/fresh-term :predicate 'kindrel)))
+        cxs (vec (repeatedly 3 #(tu/fresh-term :context 'Cx)))
+        ctx (into ['CxUniverse] cxs)
+        env {:ps ps :ks ks :ctx ctx}]
+    (v/assert kb (list 'genlCx (cxs 0) 'CxUniverse) 'CxUniverse)
+    (v/assert kb (list 'genlCx (cxs 1) (cxs 0)) 'CxUniverse)
+    (v/assert kb (list 'genlCx (cxs 2) 'CxUniverse) 'CxUniverse)
+    (assoc env :hs
+           (into {}
+                 (keep (fn [op]
+                         (when-let [h (try (v/assert kb (length-sentence env op) (ctx (:cx op))
+                                                     {:strength (:st op)})
+                                           (catch clojure.lang.ExceptionInfo _))]
+                           [op h])))
+                 world))))
+
+(defn- believed-with-functor [kb f] (v/sentexes-with-functor kb f {:believed? true}))
+
+(defn- genl-edges
+  "`{sub #{super}}` over the believed `genl` sentexes in any context, `:monotonic` ones
+  only when `mono?`."
+  [kb mono?]
+  (reduce (fn [m s]
+            (let [[_ a b] (:sentence s)]
+              (cond-> m (or (not mono?) (= :monotonic (:strength s))) (update a (fnil conj #{}) b))))
+          {} (believed-with-functor kb 'genl)))
+
+(defn- reachable-from [edges t]
+  (let [walk (fn walk [seen u] (reduce (fn [s w] (if (s w) s (walk (conj s w) w))) seen (get edges u)))]
+    (disj (walk #{} t) t)))
+
+(defn- own-bindings
+  "`{:exact #{n} :min #{m} :var? bool}` of `q`, as the definition reads it.  A believed
+  metatype membership binds when it is `:monotonic`, or at any strength with `any-route?`,
+  and its metatype reaches an exact class over `genl` edges of the same strengths."
+  [kb q ks any-route?]
+  (let [route? #(or any-route? (= :monotonic (:strength %)))
+        edges  (genl-edges kb (not any-route?))
+        about  (fn [f] (keep #(let [[_ p x] (:sentence %)] (when (= p q) x)) (believed-with-functor kb f)))
+        unary? (fn [f] (some #(= (list f q) (:sentence %)) (believed-with-functor kb f)))]
+    {:exact (into (into #{} (filter #(and (integer? %) (pos? %))) (about 'arity))
+                  (concat (for [[c n] sx/exact-arity-classes :when (unary? c)] n)
+                          (for [k ks
+                                :when (some #(and (route? %) (= (list k q) (:sentence %)))
+                                            (believed-with-functor kb k))
+                                c (conj (reachable-from edges k) k)
+                                :let [n (sx/exact-arity-classes c)] :when n]
+                            n)))
+     :min   (into #{} (about 'arityMin))
+     :var?  (boolean (some unary? sx/variable-arity-classes))}))
+
+(defn- own-length
+  "What own bindings `b` bind: `{:exact n}`, or `{:min m}` under `variable_arity`, else nil."
+  [b]
+  (cond
+    (:var? b)        (when (= 1 (count (:min b))) {:min (first (:min b))})
+    (seq (:exact b)) (when (= 1 (count (:exact b))) {:exact (first (:exact b))})))
+
+(defn- engine-length [q] (some-> (predicates/shape-of q) :args count))
+
+(defn- defined-length
+  "The definition's answer for `q`, `{:exact n}`, `{:min m}` or nil.  With `any-route?`,
+  the same definition counting a metatype route at any strength."
+  ([kb q ks] (defined-length kb q ks false))
+  ([kb q ks any-route?]
+   (if-let [n (engine-length q)]
+     {:exact n}
+     (let [b (own-bindings kb q ks any-route?)]
+       (if (or (:var? b) (seq (:exact b)))
+         (own-length b)
+         (let [bs    (filter #(or (:var? %) (seq (:exact %)))
+                             (map #(own-bindings kb % ks any-route?)
+                                  (reachable-from (genl-edges kb false) q)))
+               exact (into #{} (mapcat :exact) bs)]
+           (when (and (= 1 (count exact)) (not-any? :var? bs))
+             {:exact (first exact)})))))))
+
+(defn- length-readers
+  "What each reader answers for `q`: `kb/relation-arity` an exact length or nil,
+  `relation-length` `{:exact n}` or `{:min m}` or nil."
+  [kb q]
+  {:kb-relation-arity (kb/relation-arity kb q)
+   :relation-length   (not-empty (select-keys (arity/relation-length kb q) [:exact :min]))})
+
+(def ^:private length-divergences
+  "The disagreements the readers have with the definition, one row per finding:
+  `:readers` that disagree, `:worlds` that each show it alone, and `:waits-on`, the work
+  that removes it.  A row whose worlds no longer disagree is deleted."
+  {:decide-route-above
+   {:readers  #{:kb-relation-arity :relation-length}
+    :worlds   [[{:op :edge :sub 0 :sup 1 :cx 0 :st :default} {:op :member :k 0 :p 1 :cx 0 :st :monotonic}
+                {:op :route :k 0 :c 'binary :cx 0 :st :monotonic}]]
+    :waits-on "consolidate/13: the derived class membership is a stored binding above"}})
+
+(defn- length-rows
+  "The names of the `length-divergences` rows that account for the disagreement of
+  `reader` about `q`, at a KB `kb` over `ks`."
+  [kb ks q {:keys [reader]}]
+  (cond-> #{}
+    (and (#{:kb-relation-arity :relation-length} reader)
+         (some #(not= (:exact (own-bindings kb % [] false)) (:exact (own-bindings kb % ks false)))
+               (reachable-from (genl-edges kb false) q)))
+    (conj :decide-route-above)))
+
+(defn- length-disagreements
+  "Every disagreement between a reader and the definition over the predicates of `env`
+  and `extra`, each with the rows that account for it.  No reader takes a context, so
+  one reading per predicate answers every context."
+  [kb {:keys [ps ks]} extra]
+  (for [[qi q] (concat (map-indexed vector ps) (map (fn [t] [t t]) extra))
+        :let   [whole (defined-length kb q ks)
+                r     (length-readers kb q)]
+        [k want] [[:kb-relation-arity (:exact whole)] [:relation-length whole]]
+        :when  (not= want (r k))
+        :let   [d {:reader k :qi qi :want want :got (r k)}]]
+    (assoc d :rows (length-rows kb ks q d))))
+
+(defn- length-run
+  "Build `world` in a fresh KB and answer `{:ds the disagreements :answers every reader's
+  answer :stored the ops stored}`, then `:after` the disagreements once a third of the
+  stored ops are retracted."
+  [^java.util.Random rnd world extra]
+  (tu/with-neutral-kb [kb tu/isolated-fresh]
+    (let [b  (length-build! kb world)
+          ds (vec (length-disagreements kb b extra))
+          an (into {} (for [[qi q] (map-indexed vector (:ps b))
+                            [k a] (length-readers kb q)]
+                        [[k qi] a]))]
+      (doseq [[_ h] (sort-by (fn [_] (.nextInt rnd)) (:hs b)) :when (zero? (.nextInt rnd 3))]
+        (v/retract! kb h))
+      {:ds ds :answers an :stored (set (keys (:hs b)))
+       :after (vec (length-disagreements kb b extra))})))
+
+(defn- length-sweep
+  "Run `n` seeded worlds over `ncx` contexts in `orders` shuffled arrival orders each,
+  and answer the disagreements no row names, the answers that differ between two orders
+  storing the same ops, and the disagreements that no row names after retractions."
+  [seed ncx n orders]
+  (let [rnd (java.util.Random. seed)
+        out (atom {:unnamed [] :order [] :after []})]
+    (dotimes [_ n]
+      (let [world (length-world rnd ncx)
+            runs  (vec (for [_ (range orders)] (length-run rnd (vec (shuffle world)) nil)))]
+        (doseq [{:keys [ds]} runs
+                d ds :when (empty? (:rows d))]
+          (swap! out update :unnamed conj {:world world :d (dissoc d :rows)}))
+        (doseq [{:keys [after]} runs
+                d after :when (empty? (:rows d))]
+          (swap! out update :after conj {:world world :d (dissoc d :rows)}))
+        (doseq [[a b] (partition 2 1 runs)
+                :when (and (= (:stored a) (:stored b)) (not= (:answers a) (:answers b)))]
+          (swap! out update :order conj world))))
+    @out))
+
+(deftest the-readers-of-a-relation-s-length-agree-with-its-definition-bar-the-known-divergences
+  (doseq [[ncx n] [[1 4] [4 3]]]
+    (let [{:keys [unnamed order after]} (length-sweep (+ 6101 ncx) ncx n 2)]
+      (is (= [] unnamed) (str ncx " contexts: a disagreement no row of length-divergences names"))
+      (is (= [] order) (str ncx " contexts: an answer that depends on arrival order"))
+      (is (= [] after) (str ncx " contexts: a disagreement no row names after retractions")))))
+
+(deftest ^:slow the-readers-of-a-relation-s-length-agree-with-its-definition-over-many-worlds
+  (doseq [[seed ncx] [[6201 1] [6202 4]]]
+    (let [{:keys [unnamed order after]} (length-sweep seed ncx 60 3)]
+      (is (= [] (take 3 unnamed)) (str ncx " contexts"))
+      (is (= [] (take 3 order)) (str ncx " contexts"))
+      (is (= [] (take 3 after)) (str ncx " contexts")))))
+
+(deftest an-engine-term-s-length-is-its-shape-whatever-the-kb-binds
+  (doseq [world [[{:op :engine :t 'genl :n 3 :cx 0 :st :default}] []]]
+    (is (= [] (:ds (length-run (java.util.Random. 1) world '[genl arity]))))))
+
+(deftest every-known-length-divergence-fires-on-its-minimal-worlds
+  ;; a row whose worlds all agree with the definition describes a reader that no longer
+  ;; disagrees; the row is deleted with it
+  (doseq [[k {:keys [readers worlds extra]}] length-divergences]
+    (let [runs  (for [world worlds] (:ds (length-run (java.util.Random. 1) world extra)))
+          fired (fn [ds] (into #{} (comp (filter #(contains? (:rows %) k)) (map :reader)) ds))]
+      (is (every? #(seq (fired %)) runs) (str k ": each world fires the row"))
+      (is (= readers (into #{} (mapcat fired) runs)) (str k ": the readers the worlds show"))
+      (is (every? (fn [ds] (every? #(seq (:rows %)) ds)) runs)
+          (str k ": every disagreement of its worlds is named")))))

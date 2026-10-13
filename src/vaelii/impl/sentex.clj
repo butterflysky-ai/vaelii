@@ -561,6 +561,11 @@
 (def and-functor  'and)
 (def or-functor   'or)
 (def ist-functor  'ist)
+
+(def root-context
+  "The context the upper ontology is stored in, every `genlCx` edge with it, and the one
+  every context the shipped topology wires in sees (docs/contexts.md)."
+  'CxUniverse)
 (def dot-marker   '.)
 
 ;; ---- sentex handles: a stored sentex as a term --------------------------
@@ -685,24 +690,23 @@
 
 (def exact-arity-classes
   "What each exact-arity class membership says the arity is.  The `arity` sentexes and
-  these memberships derive each other through the CxCore rules, so a declared
+  these memberships derive each other through the core.txt rules, so a declared
   relation normally has both — but a `{:chain? false}` assert or a KB loaded without
   the rules has only what was written, so both spellings are read.
 
-  **Nine spellings, because CxCore ships nine classes.**  `unary` / `binary` / `ternary`
+  **Nine spellings, because core.txt ships nine classes.**  `unary` / `binary` / `ternary`
   are the relation-wide ones and the other six specialize them by kind, so a KB may write
   the arity of a function as `(binary_function F)` exactly as it writes a predicate's as
-  `(binary_predicate P)`.  The relation-wide three alone would answer `membered-arity`,
-  which reads the term's whole `genl` closure — but the arity nogoods read a **stored**
-  membership by its own functor (`arity-binding`), and what a KB stored is whichever of
-  the nine its author wrote.
+  `(binary_predicate P)`.  The arity readers read a **stored** membership by its own
+  functor (`arity-binding`), and what a KB stored is whichever of the nine its author
+  wrote.
 
   The three arities never disagree across the spellings one term holds: a class and its
   specializations map to one number, and `(disjoint unary binary)` and its two peers
   separate the relation-wide three, which the six inherit through their `genl` edges.
 
-  Here, below the index, the checks, `kb/relation-arity` and the provers, because all of
-  them read it; a roster read twice is a roster that drifts."
+  Here, below the index, `arity/relation-length` and `kb/relation?`, because all of them
+  read it; a roster read twice is a roster that drifts."
   '{unary 1 binary 2 ternary 3
     unary_predicate 1 binary_predicate 2 ternary_predicate 3
     unary_function 1 binary_function 2 ternary_function 3})
@@ -2774,8 +2778,9 @@
   The same symbol as `quasiquote/quote-function`, which this namespace cannot require."
   'Quote)
 
-(defn- quote-form?
-  "Is `form` a `(Quote X)` mention?"
+(defn quote-form?
+  "Is `form` a `(Quote X)` mention?  `unquoted-free-vars`, `res/unify`, `res/substitute`
+  and the literal cache's renaming all read a form this answers true for as a constant."
   [form]
   (and (sequential? form) (= quote-functor (first form)) (= 2 (count form))))
 

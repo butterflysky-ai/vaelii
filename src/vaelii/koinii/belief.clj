@@ -54,9 +54,8 @@
   (belief-context agent))
 
 (def ^:private grant-ctx
-  "A context that sees the `believes` `modal_predicate` grant (declared in CxCore), so a
-  modal goal posed from here is recognized by `BeliefProjectionProver`.  CxUniverse sees
-  CxCore by construction (`core-context/load-into` wires `(genlCx CxUniverse CxCore)`)."
+  "The context the `believes` `modal_predicate` grant is declared in (core.txt, loaded into
+  CxUniverse), so a modal goal posed from here is recognized by `BeliefProjectionProver`."
   'CxUniverse)
 
 (defn would-believe?

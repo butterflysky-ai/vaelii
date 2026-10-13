@@ -146,8 +146,12 @@ echo "running $n namespaces at $selector across $jobs shard(s) — $(revision_li
 # and a bare `lein test-parallel` writes no other file here — `gate.sh` captures
 # this stdout into `test.log`, and a run outside the gate captures nothing.  So
 # a watcher had nothing to read the plan off (vaelii-tools: vaelii-top/src/vtop/live.py).
-printf 'selector\t%s\nshards\t%d\nnamespaces\t%d\n' \
-  "$selector" "$jobs" "$n" > "$OUT/test.plan" 2>/dev/null || true
+# A `shard-<b>` row per shard gives its namespace count: the split is by time, so
+# the counts are uneven.
+{
+  printf 'selector\t%s\nshards\t%d\nnamespaces\t%d\n' "$selector" "$jobs" "$n"
+  awk -F'\t' -v jobs="$jobs" '{ c[$1]++ } END { for (b = 1; b <= jobs; b++) printf "shard-%d\t%d\n", b, c[b] }' "$assign_out"
+} > "$OUT/test.plan" 2>/dev/null || true
 
 # ---- run --------------------------------------------------------------------
 t0=$SECONDS
@@ -172,6 +176,7 @@ for ((b = 1; b <= jobs; b++)); do
       | while IFS= read -r line; do
           case "$line" in
             "lein test "*) printf '%s\t%s\n' "$SECONDS" "${line#lein test }" ;;
+            "Ran "*" tests containing "*) printf '%s\t\n' "$SECONDS" ;;
           esac
         done > "$timing"
   ) &
@@ -183,8 +188,9 @@ elapsed=$((SECONDS - t0))
 
 # ---- timings for the next run ----------------------------------------------
 # Each `lein test <ns>` line is a start stamp; a namespace's cost is the gap to the
-# next one.  The last namespace in a shard has no successor, so it keeps its previous
-# figure rather than a guess.
+# next one.  clojure.test's `Ran …` total closes the last namespace with an end stamp
+# whose name is empty, so a shard's last namespace is measured too; a shard killed
+# before its total keeps that namespace's previous figure.
 {
   [[ -f "$TIMINGS" ]] && cat "$TIMINGS"
   for ((b = 1; b <= jobs; b++)); do

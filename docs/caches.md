@@ -277,7 +277,7 @@ The tables are generated from the register by `lein regen-goldens`, and
 | N9 | Candidate recover memos | `decide.tuple` | functor | records | P | pass | pass | no |  |  |
 | X1 | Sync memo | `decide` | global | N1 T1 | E20 W, every other event I | read | cache | no |  |  |
 | X3 | Change clock | `observe` | global |  | every event G* | write | counter | no |  |  |
-| D3 | Preserved clashes | `discovery` | handle | index T1 Q3 J4 J6 M2 | E3 K, E15 K, E17 R, E18 R, E22 K | settle | cache | state |  |  |
+| D3 | Preserved clashes | `discovery` | handle | index T1 Q2 Q3 J4 J6 M2 | E3 K, E15 K, E16 K, E17 R, E18 R, E22 K | settle | cache | state |  |  |
 | Q1 | Exception re-check queue | `special` | handle | records | E17 R, E18 R, E22 Q | write | queue | state |  |  |
 | Q2 | Supersession moves | `special` | value | Q5 M1 | E16 Q, E17 R, E18 R, E19 W | write | queue | state |  |  |
 | Q3 | Except moves | `special` | handle | index T1 | E16 Q, E17 W, E22 Q | write | queue | no |  |  |
@@ -330,7 +330,7 @@ The tables are generated from the register by `lein regen-goldens`, and
 | E13 | `rule-indexed` | `special/index-rule-sentex` | rule, antecedent predicates, context | T5 T7 X1 X3 R1 R2 R3 K10 K11 |
 | E14 | `recheck` | `special/mark-recheck` | rules; a trigger, :all or :all-rejoin | T5 T7 X1 X3 R1 R2 R3 K10 K11 |
 | E15 | `inherited` | `decide.inherited/install-inherited!` | clash rows | T5 T7 J1 J2 N7 X1 X3 D3 R1 R2 R3 K10 K11 |
-| E16 | `settle-exit` | `settle/settle-finish` | region | T1 T5 T7 M2 X1 X3 Q2 Q3 Q5 Q6 R1 R2 R3 K10 K11 |
+| E16 | `settle-exit` | `settle/settle-finish` | region | T1 T5 T7 M2 X1 X3 D3 Q2 Q3 Q5 Q6 R1 R2 R3 K10 K11 |
 | E17 | `recover` | `recovery/recover-from-records`, `recovery/install-rebuilt!` | the whole store | S5 T1 T2 T3 T4 T5 T7 T11 M1 M2 J1 J2 J4 J5 J6 N1 N2 N3 N5 N6 N7 N8 X1 X3 D3 Q1 Q2 Q3 Q4 Q5 Q6 Q7 Q8 Q9 R1 R2 R3 R6 R9 K10 K11 |
 | E18 | `image-install` | `reasoning-image/install-from!` | the image | S5 S7 T1 T2 T3 T4 T5 T7 M1 J1 J2 J5 J6 N1 N2 N3 N5 N6 N7 X1 X3 D3 Q1 Q2 Q5 Q7 R1 R2 R3 K10 K11 |
 | E19 | `cleared` | `vaelii.core/clear!`, `reindex/reindex`, `io.import/clearing-on-refusal` | the stores, wiped | S5 T5 T7 X1 X3 Q2 Q8 Q9 R1 R2 R3 R4 R10 K10 K11 |
@@ -399,7 +399,8 @@ compares its recompute with the value it replaces, counts `:compared`, and count
 keeps one (R1–R3, T7), the last value computed under
 another stamp for a row keyed by one (T5), and for a row that drops its entries, the
 value the instrument saw the event drop (`caches/compare-retired`). A kept value is its hash, and the
-comparison is of hashes. With the instrument off, nothing is compared and no value is
+comparison is of hashes. Keeping the value itself holds every retired value reachable for
+the instrument's run, and on the full store that took a 40 GB heap. With the instrument off, nothing is compared and no value is
 kept. `:spurious` over `:compared` is a row's
 spurious fraction, the measure of how coarse its retirement is. `caches/tally-ranking` orders the
 counted rows two ways: by recompute time times spurious fraction, and by hit rate.

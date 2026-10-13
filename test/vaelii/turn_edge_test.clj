@@ -12,7 +12,7 @@
   its own KB on the scratch dbs and is net-neutral: `tu/with-neutral-kb` retracts
   what the test added; the persistence tests (a second KB over the same durable
   store) use `tu/with-cleared-kb`, whose teardown is a clear.  Invented
-  domain terms are gensym'd; the real spindle contexts and starter/story terms a
+  domain terms are gensym'd; the shipped contexts and starter/story terms a
   test verifies stay literal."
   (:require [clojure.test :refer [deftest is testing]]
             [vaelii.core :as v]
@@ -178,7 +178,7 @@
         (is (v/ask? kb (list 'reflexive sameSpotAs)))
         (is (= #{sameSpotAs}
                (set (map #(get % '?p) (v/ask kb '(reflexive ?p) '?ctx)))))
-        ;; containment, not equality: CxCore declares (functional arity) itself,
+        ;; containment, not equality: CxUniverse declares (functional arity) itself,
         ;; so the shipped vocabulary is a member of this enumeration too
         (is (contains? (set (map #(get % '?p) (v/ask kb '(functional ?p) '?ctx)))
                        heightOf)))
@@ -223,58 +223,54 @@
   ;; with no derived (…Predicate) twin between them.
   (tu/with-neutral-kb [kb core-context-kb]
     (let [fooRel (tu/tmp-pred)]
-      (v/assert kb (list 'symmetric fooRel) 'CxCore)
+      (v/assert kb (list 'symmetric fooRel) 'CxUniverse)
       (is (v/ask? kb (list 'symmetric fooRel)))
       (is (v/isa? kb fooRel 'binary_predicate)))))
 
 (deftest a-bare-dot-argument-is-rejected
   (tu/with-neutral-kb [kb core-context-kb]
     (let [dog (tu/tmp-type)]
-      (is (thrown? clojure.lang.ExceptionInfo (v/assert kb (list dog '.) 'CxCore))))))
+      (is (thrown? clojure.lang.ExceptionInfo (v/assert kb (list dog '.) 'CxUniverse))))))
 
-;; ---- the context spindle (CxCore <| upper <| CxUniverse <| middle <| CxWell) ----
+;; ---- the context topology (CxUniverse <| middle <| CxWell) ----
 
-(deftest a-core-context-kb-is-just-the-vocabulary-head
-  ;; The spindle's bands (the upper definitional contexts, the middle theories) are
-  ;; the starter's, not the vocabulary head's.  A CxCore-only KB has CxCore and its
-  ;; vocabulary — including the forced_decontextualized_predicate declaration — but no
-  ;; genlCx topology at all.
+(deftest a-vocabulary-kb-is-the-upper-layer-alone
+  ;; The middle theories are the starter's.  A vocabulary KB holds the upper layer in
+  ;; CxUniverse, including the forced_decontextualized_predicate declaration, and no genlCx
+  ;; topology at all.
   (tu/with-neutral-kb [kb core-context-kb]
-    (testing "CxCore vocabulary is present, including the forcing declaration"
-      (is (seq (v/sentexes-matching kb '(binary_predicate genl) 'CxCore)))
-      (is (seq (v/sentexes-matching kb '(forced_decontextualized_predicate genlCx) 'CxCore))))
-    (testing "but no spindle members — those come with the starter"
-      (is (empty? (v/sentexes-matching kb '(genlCx CxOrganism CxCore) '?ctx)))
-      (is (not (tax/sees? (reasoning/taxonomy kb) 'CxWell 'CxCore))))))
+    (testing "the upper vocabulary is present, including the forcing declaration"
+      (is (seq (v/sentexes-matching kb '(binary_predicate genl) 'CxUniverse)))
+      (is (seq (v/sentexes-matching kb '(forced_decontextualized_predicate genlCx) 'CxUniverse))))
+    (testing "but no middle contexts: those come with the starter"
+      (is (empty? (v/sentexes-matching kb '(genlCx CxBiology CxUniverse) '?ctx)))
+      (is (not (tax/sees? (reasoning/taxonomy kb) 'CxWell 'CxUniverse))))))
 
-(deftest ^:slow a-user-defined-sibling-upper-context-supplies-universal-vocabulary
-  ;; The spindle design lets a user add a sibling upper context — one that sees
-  ;; CxCore and is seen by CxUniverse — to hold their own *universal* domain
-  ;; terms.  Vocabulary put there (a type, an arg, an individual) is visible from
-  ;; every data context below Well, and its arg constraints are read there.
+(deftest ^:slow a-user-context-above-cxuniverse-supplies-universal-vocabulary
+  ;; A user context that CxUniverse sees holds the user's own *universal* domain terms,
+  ;; which `sync/sync!` leaves alone because they are not premises of CxUniverse.
+  ;; Vocabulary put there (a type, an arg, an individual) is visible from every data
+  ;; context below Well, and its arg constraints are read there.
   (tu/with-neutral-kb [kb starter-world-kb]
     (let [widgets (tu/tmp-ctx) widget (tu/tmp-type) priceOf (tu/tmp-pred)
           gadget (tu/tmp-ind) bad (tu/tmp-ind) plain (tu/tmp-ind)]
-      ;; a sibling upper context: sees CxCore, seen by CxUniverse (so every
-      ;; descendant of CxUniverse — the middle theories, and CxNaturalWorld
-      ;; below Well — sees it)
-      (v/assert kb (list 'genlCx widgets 'CxCore)     'CxUniverse)
+      ;; seen by CxUniverse, so every descendant of CxUniverse (the middle theories, and
+      ;; CxNaturalWorld below Well) sees it
       (v/assert kb (list 'genlCx 'CxUniverse widgets) 'CxUniverse)
-      ;; universal domain vocabulary defined once, in the sibling context
+      ;; universal domain vocabulary defined once, in the user context
       (v/assert kb (list 'genl widget 'made)      widgets)
       (v/assert kb (list 'arg priceOf 1 widget) widgets)
       (v/assert kb (list widget gadget)            widgets)
-      (testing "the sibling sits among the upper spindle's members"
-        (is (tax/sees? (reasoning/taxonomy kb) widgets 'CxCore))
+      (testing "the user context is above CxUniverse"
         (is (tax/sees? (reasoning/taxonomy kb) 'CxUniverse widgets))
         (is (tax/sees? (reasoning/taxonomy kb) 'CxNaturalWorld widgets)))   ; via Universe, through Well
-      (testing "the sibling's vocabulary is visible from a data context"
+      (testing "the user context's vocabulary is visible from a data context"
         (is (v/isa? kb gadget widget     'CxNaturalWorld))
         (is (v/isa? kb gadget 'made      'CxNaturalWorld)))          ; genl widget made
-      (testing "a fact using the sibling's term is allowed from the data context"
+      (testing "a fact using the user context's term is allowed from the data context"
         (v/assert kb (list priceOf gadget 10) 'CxNaturalWorld)      ; gadget is a widget: OK
         (is (seq (v/sentexes-matching kb (list priceOf gadget 10) 'CxNaturalWorld))))
-      (testing "and the sibling's arg constraint speaks for the data context"
+      (testing "and the user context's arg constraint speaks for the data context"
         (testing "under the entailing reading it derives the type it names"
           (tu/with-entailing
             (v/assert kb (list priceOf plain 7) 'CxNaturalWorld)
@@ -285,11 +281,11 @@
                        (tu/without-entailing
                         (v/assert kb (list priceOf bad 5) 'CxNaturalWorld)))))))))
 
-;; ---- recovery rebuilds the spindle and the derived stories ---------------
+;; ---- recovery rebuilds the context topology and the derived stories ---------------
 
-(deftest recover-rebuilds-the-spindle-and-the-stories
+(deftest recover-rebuilds-the-context-topology-and-the-stories
   ;; A restart (fresh in-memory taxonomy + JTMS over the same durable dbs) must
-  ;; recover the spindle topology and the stories: their character types and their
+  ;; recover the context topology and the stories: their character types and their
   ;; derived morals come back IN with support.  This verifies the real starter +
   ;; test-world recover, so its terms stay literal.
   (tu/with-cleared-kb [kb1 starter-world-kb]
@@ -297,13 +293,12 @@
       (is (v/in? kb1 moral) "the moral was derived before the restart")
       (let [kb2 (tu/test-kb)]                     ; same dbs, empty memory
         (testing "before recover, the in-memory graph is empty"
-          (is (not (tax/sees? (reasoning/taxonomy kb2) 'CxWell 'CxCore)))
+          (is (not (tax/sees? (reasoning/taxonomy kb2) 'CxWell 'CxUniverse)))
           (is (not (v/in? kb2 moral))))
         (v/recover kb2)
-        (testing "the spindle topology is rebuilt from the durable genlCx sentexes"
-          (is (tax/sees? (reasoning/taxonomy kb2) 'CxUniverse 'CxOrganism))
-          (is (tax/sees? (reasoning/taxonomy kb2) 'CxOrganism 'CxCore))
-          (is (tax/sees? (reasoning/taxonomy kb2) 'CxWell     'CxCore))     ; transitive, whole spindle
+        (testing "the context topology is rebuilt from the durable genlCx sentexes"
+          (is (tax/sees? (reasoning/taxonomy kb2) 'CxBiology  'CxUniverse))
+          (is (tax/sees? (reasoning/taxonomy kb2) 'CxWell     'CxUniverse))     ; transitive
           (is (tax/sees? (reasoning/taxonomy kb2) 'CxStories  'CxWell)))
         (testing "a story character keeps its ontology type after recovery"
           (is (v/isa? kb2 'LionA 'mammal))

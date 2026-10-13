@@ -33,7 +33,7 @@
 
 (tu/deftest-kb match1-subsumes-a-genl-under-a-negation
   (tu/with-terms [fatherOf parentOf loves A B]
-    (v/assert kb (list 'genl fatherOf parentOf) 'CxCore {:strength :monotonic})
+    (v/assert kb (list 'genl fatherOf parentOf) 'CxUniverse {:strength :monotonic})
     (let [x (symbol "?x") y (symbol "?y")]
       (testing "a negated parentOf fact satisfies a negated fatherOf antecedent"
         (is (= {x A y B}
@@ -53,7 +53,7 @@
   ;; a negation is two elements long, so it has the form the unary-type branch takes and
   ;; is told apart from one by the negation arm running first; the same claim at arity 1
   (tu/with-terms [dog_t animal_t Muffet]
-    (v/assert kb (list 'genl dog_t animal_t) 'CxCore {:strength :monotonic})
+    (v/assert kb (list 'genl dog_t animal_t) 'CxUniverse {:strength :monotonic})
     (let [x (symbol "?x")]
       (is (= {x Muffet}
              (res/match1 kb (negate (list dog_t x)) (negate (list animal_t Muffet)))))
@@ -63,9 +63,9 @@
 
 (tu/deftest-kb match-pattern-reaches-a-negated-genl-fact
   (tu/with-terms [dog_t animal_t A B]
-    (v/assert kb (list 'genl dog_t animal_t) 'CxCore {:strength :monotonic})
-    (v/assert kb (negate (list animal_t A)) 'CxCore {:strength :monotonic})
-    (v/assert kb (negate (list dog_t B)) 'CxCore {:strength :monotonic})
+    (v/assert kb (list 'genl dog_t animal_t) 'CxUniverse {:strength :monotonic})
+    (v/assert kb (negate (list animal_t A)) 'CxUniverse {:strength :monotonic})
+    (v/assert kb (negate (list dog_t B)) 'CxUniverse {:strength :monotonic})
     (testing "a negated dog query matches the negated animal fact and the direct one"
       (let [sentences (set (map (fn [[h _]] (:sentence (v/sentex kb h)))
                                 (res/match-pattern kb (negate (list dog_t (symbol "?x"))) '?ctx)))]
@@ -81,11 +81,11 @@
   ;; the oracle, mirroring `predicate-subsumption-test`'s: the negative fan is exactly
   ;; the union of raw matches over the genl closure of the body's functor
   (tu/with-terms [dog_t canine_t animal_t A B C]
-    (v/assert kb (list 'genl dog_t canine_t) 'CxCore {:strength :monotonic})
-    (v/assert kb (list 'genl canine_t animal_t) 'CxCore {:strength :monotonic})
-    (v/assert kb (negate (list animal_t A)) 'CxCore {:strength :monotonic})
-    (v/assert kb (negate (list canine_t B)) 'CxCore {:strength :monotonic})
-    (v/assert kb (negate (list dog_t C)) 'CxCore {:strength :monotonic})
+    (v/assert kb (list 'genl dog_t canine_t) 'CxUniverse {:strength :monotonic})
+    (v/assert kb (list 'genl canine_t animal_t) 'CxUniverse {:strength :monotonic})
+    (v/assert kb (negate (list animal_t A)) 'CxUniverse {:strength :monotonic})
+    (v/assert kb (negate (list canine_t B)) 'CxUniverse {:strength :monotonic})
+    (v/assert kb (negate (list dog_t C)) 'CxUniverse {:strength :monotonic})
     (doseq [pat [(negate (list dog_t (symbol "?x")))
                  (negate (list canine_t (symbol "?x")))
                  (negate (list animal_t (symbol "?x")))
@@ -100,7 +100,7 @@
 
 (tu/deftest-kb super-predicates-is-the-genl-closure
   (tu/with-terms [dog_t animal_t]
-    (v/assert kb (list 'genl dog_t animal_t) 'CxCore {:strength :monotonic})
+    (v/assert kb (list 'genl dog_t animal_t) 'CxUniverse {:strength :monotonic})
     (is (= (tax/genls-global (reasoning/taxonomy kb) dog_t) (res/super-predicates kb dog_t nil)))
     (is (contains? (res/super-predicates kb dog_t nil) animal_t))
     (is (not (contains? (res/sub-predicates kb dog_t nil) animal_t)))))
@@ -109,24 +109,24 @@
 
 (tu/deftest-kb ask-reaches-through-a-negation-and-follows-belief
   (tu/with-terms [dog_t animal_t A]
-    (v/assert kb (negate (list animal_t A)) 'CxCore {:strength :monotonic})
+    (v/assert kb (negate (list animal_t A)) 'CxUniverse {:strength :monotonic})
     (testing "before the genl edge, the negated subtype goal is unanswered"
-      (is (not (v/ask? kb (negate (list dog_t A)) 'CxCore))))
-    (let [edge (v/assert kb (list 'genl dog_t animal_t) 'CxCore {:strength :monotonic})]
+      (is (not (v/ask? kb (negate (list dog_t A)) 'CxUniverse))))
+    (let [edge (v/assert kb (list 'genl dog_t animal_t) 'CxUniverse {:strength :monotonic})]
       (testing "with the edge, the contrapositive answers it"
-        (is (v/ask? kb (negate (list dog_t A)) 'CxCore)))
+        (is (v/ask? kb (negate (list dog_t A)) 'CxUniverse)))
       (testing "retracting the edge withdraws it (belief-following)"
         (v/retract! kb edge)
-        (is (not (v/ask? kb (negate (list dog_t A)) 'CxCore)))))))
+        (is (not (v/ask? kb (negate (list dog_t A)) 'CxUniverse)))))))
 
 (tu/deftest-kb forward-chaining-fires-a-negated-antecedent-through-the-genl-edge
   (tu/with-terms [dog_t animal_t notADog A]
-    (v/assert kb (list 'genl dog_t animal_t) 'CxCore {:strength :monotonic})
+    (v/assert kb (list 'genl dog_t animal_t) 'CxUniverse {:strength :monotonic})
     (v/assert-rule kb [(negate (list dog_t (symbol "?x")))]
-                   (list notADog (symbol "?x")) 'CxCore {:direction :forward})
-    (v/assert kb (negate (list animal_t A)) 'CxCore {:strength :monotonic})
+                   (list notADog (symbol "?x")) 'CxUniverse {:direction :forward})
+    (v/assert kb (negate (list animal_t A)) 'CxUniverse {:strength :monotonic})
     (testing "a rule negated on the subtype fires on a fact negated on the supertype"
-      (is (seq (v/sentexes-matching kb (list notADog A) 'CxCore))))))
+      (is (seq (v/sentexes-matching kb (list notADog A) 'CxUniverse))))))
 
 (tu/deftest-kb the-negative-firing-rests-on-the-genl-edge-it-climbed
   ;; A firing that reached its antecedent through a `genl` edge names a witness for the
@@ -135,13 +135,13 @@
   ;; the same witness — without it the conclusion outlives its own reason.
   (tu/with-terms [dog_t animal_t notADog A]
     (let [x    (symbol "?x")
-          edge (v/assert kb (list 'genl dog_t animal_t) 'CxCore {:strength :monotonic})]
-      (v/assert-rule kb [(negate (list dog_t x))] (list notADog x) 'CxCore {:direction :forward})
-      (v/assert kb (negate (list animal_t A)) 'CxCore {:strength :monotonic})
-      (is (seq (v/sentexes-matching kb (list notADog A) 'CxCore))
+          edge (v/assert kb (list 'genl dog_t animal_t) 'CxUniverse {:strength :monotonic})]
+      (v/assert-rule kb [(negate (list dog_t x))] (list notADog x) 'CxUniverse {:direction :forward})
+      (v/assert kb (negate (list animal_t A)) 'CxUniverse {:strength :monotonic})
+      (is (seq (v/sentexes-matching kb (list notADog A) 'CxUniverse))
           "the rule fires through the contrapositive")
       (v/retract! kb edge)
-      (is (empty? (v/sentexes-matching kb (list notADog A) 'CxCore))
+      (is (empty? (v/sentexes-matching kb (list notADog A) 'CxUniverse))
           "and the conclusion goes with the edge it climbed"))))
 
 (tu/deftest-kb a-genl-edge-arriving-last-fires-the-negated-antecedent
@@ -152,26 +152,26 @@
   ;; **genls** of the edge's super, not on the specs of its sub.
   (tu/with-terms [dog_t animal_t notADog A]
     (let [x (symbol "?x")]
-      (v/assert-rule kb [(negate (list dog_t x))] (list notADog x) 'CxCore {:direction :forward})
-      (v/assert kb (negate (list animal_t A)) 'CxCore {:strength :monotonic})
-      (is (empty? (v/sentexes-matching kb (list notADog A) 'CxCore))
+      (v/assert-rule kb [(negate (list dog_t x))] (list notADog x) 'CxUniverse {:direction :forward})
+      (v/assert kb (negate (list animal_t A)) 'CxUniverse {:strength :monotonic})
+      (is (empty? (v/sentexes-matching kb (list notADog A) 'CxUniverse))
           "nothing relates the two predicates yet")
-      (v/assert kb (list 'genl dog_t animal_t) 'CxCore {:strength :monotonic})
-      (is (seq (v/sentexes-matching kb (list notADog A) 'CxCore))
+      (v/assert kb (list 'genl dog_t animal_t) 'CxUniverse {:strength :monotonic})
+      (is (seq (v/sentexes-matching kb (list notADog A) 'CxUniverse))
           "the edge arriving last derives what it would have derived arriving first"))))
 
 (tu/deftest-kb forward-chaining-does-not-fire-the-other-way
   (tu/with-terms [dog_t animal_t notAnAnimal A]
-    (v/assert kb (list 'genl dog_t animal_t) 'CxCore {:strength :monotonic})
+    (v/assert kb (list 'genl dog_t animal_t) 'CxUniverse {:strength :monotonic})
     (v/assert-rule kb [(negate (list animal_t (symbol "?x")))]
-                   (list notAnAnimal (symbol "?x")) 'CxCore {:direction :forward})
-    (v/assert kb (negate (list dog_t A)) 'CxCore {:strength :monotonic})
+                   (list notAnAnimal (symbol "?x")) 'CxUniverse {:direction :forward})
+    (v/assert kb (negate (list dog_t A)) 'CxUniverse {:strength :monotonic})
     (testing "not being a dog is not not being an animal"
-      (is (empty? (v/sentexes-matching kb (list notAnAnimal A) 'CxCore))))))
+      (is (empty? (v/sentexes-matching kb (list notAnAnimal A) 'CxUniverse))))))
 
 (tu/deftest-kb subsuming-unify-honors-consequent-genl-under-a-negation
   (tu/with-terms [fatherOf parentOf loves A B]
-    (v/assert kb (list 'genl fatherOf parentOf) 'CxCore {:strength :monotonic})
+    (v/assert kb (list 'genl fatherOf parentOf) 'CxUniverse {:strength :monotonic})
     (let [x (symbol "?x") y (symbol "?y")]
       (testing "a negated parentOf consequent answers a negated fatherOf goal"
         (is (= {x A y B}
@@ -196,32 +196,32 @@
   ;; materialize `(not (animal A))` and mask the backward path
   (tu/with-terms [dog_t animal_t robot_t A]
     (let [x (symbol "?x")]
-      (v/assert kb (list 'genl dog_t animal_t) 'CxCore {:strength :monotonic})
+      (v/assert kb (list 'genl dog_t animal_t) 'CxUniverse {:strength :monotonic})
       (v/assert-rule kb [(list robot_t x)] (negate (list animal_t x))
-                     'CxCore {:direction :backward})
-      (v/assert kb (list robot_t A) 'CxCore {:strength :monotonic})
+                     'CxUniverse {:direction :backward})
+      (v/assert kb (list robot_t A) 'CxUniverse {:strength :monotonic})
       (testing "the negated supertype conclusion is never materialized"
-        (is (nil? (v/handle-of kb (negate (list animal_t A)) 'CxCore)))
-        (is (empty? (v/sentexes-matching kb (negate (list dog_t A)) 'CxCore))))
+        (is (nil? (v/handle-of kb (negate (list animal_t A)) 'CxUniverse)))
+        (is (empty? (v/sentexes-matching kb (negate (list dog_t A)) 'CxUniverse))))
       (testing "the node engine answers the negated subtype goal, with the right binding"
-        (is (v/query? kb (negate (list dog_t x)) 'CxCore {:max-depth 2}))
-        (is (contains? (set (v/query kb (negate (list dog_t x)) 'CxCore {:max-depth 2}))
+        (is (v/query? kb (negate (list dog_t x)) 'CxUniverse {:max-depth 2}))
+        (is (contains? (set (v/query kb (negate (list dog_t x)) 'CxUniverse {:max-depth 2}))
                        {x A})))
       (testing "prove agrees"
-        (is (v/provable? kb (negate (list dog_t x)) 'CxCore))
-        (is (some #(= A (% x)) (v/prove kb (negate (list dog_t x)) 'CxCore)))))))
+        (is (v/provable? kb (negate (list dog_t x)) 'CxUniverse))
+        (is (some #(= A (% x)) (v/prove kb (negate (list dog_t x)) 'CxUniverse)))))))
 
 ;; ---- which rules an arriving negation reaches ----------------------------
 
 (tu/deftest-kb trigger-keys-fan-the-negated-specs-off-the-rule-roster
   (tu/with-terms [dog_t animal_t other_t grounded A]
-    (v/assert kb (list 'genl dog_t animal_t) 'CxCore {:strength :monotonic})
+    (v/assert kb (list 'genl dog_t animal_t) 'CxUniverse {:strength :monotonic})
     (let [tax'   (reasoning/taxonomy kb)
           roster #(reads/as-stored-rule-keys (:index kb))]
       (testing "with no rule reading a negation, an arriving negation names no key"
         (is (empty? (rules/trigger-keys tax' (negate (list animal_t A)) (roster)))))
       (v/assert-rule kb [(negate (list dog_t (symbol "?x")))]
-                     (list grounded (symbol "?x")) 'CxCore {:direction :forward})
+                     (list grounded (symbol "?x")) 'CxUniverse {:direction :forward})
       (testing "a negation on the supertype reaches the rule negated on the subtype"
         (is (= [[:not dog_t]]
                (vec (rules/trigger-keys tax' (negate (list animal_t A)) (roster))))))
@@ -233,7 +233,7 @@
       (testing "a positive fact names no key while no rule reads its predicate or a supertype"
         (is (empty? (rules/trigger-keys tax' (list dog_t A) (roster)))))
       (v/assert-rule kb [(list animal_t (symbol "?x"))]
-                     (list grounded (symbol "?x")) 'CxCore {:direction :forward})
+                     (list grounded (symbol "?x")) 'CxUniverse {:direction :forward})
       (testing "a positive fact names the supertypes some rule reads"
         (is (= [animal_t] (rules/trigger-keys tax' (list dog_t A) (roster))))))))
 
@@ -241,10 +241,10 @@
 
 (tu/deftest-kb the-negative-fan-walks-only-visible-genl-edges
   (tu/with-terms [dog_t animal_t Muffet CxA CxB]
-    (v/assert kb (list 'genlCx CxA 'CxCore) 'CxCore)
-    (v/assert kb (list 'genlCx CxB 'CxCore) 'CxCore)
+    (v/assert kb (list 'genlCx CxA 'CxUniverse) 'CxUniverse)
+    (v/assert kb (list 'genlCx CxB 'CxUniverse) 'CxUniverse)
     (v/assert kb (list 'genl dog_t animal_t) CxA)
-    (v/assert kb (negate (list animal_t Muffet)) 'CxCore)
+    (v/assert kb (negate (list animal_t Muffet)) 'CxUniverse)
     (doseq [hierarchical? [true false]]
       (binding [res/*hierarchical-retrieval* hierarchical?]
         (testing (str "hierarchical-retrieval " hierarchical?)
@@ -267,15 +267,15 @@
   ;; contradicting what the conjunct reads.
   (tu/with-terms [winged_t appendaged_t bird_t flies Opus]
     (let [x (symbol "?x")]
-      (v/assert kb (list 'genl winged_t appendaged_t) 'CxCore {:strength :monotonic})
+      (v/assert kb (list 'genl winged_t appendaged_t) 'CxUniverse {:strength :monotonic})
       (v/assert kb (list 'exceptWhen (negate (list winged_t x))
                          (list 'set/defaultRule
                                (list 'set/forwardRule (list 'implies (list 'and (list bird_t x)) (list flies x)))))
-                'CxCore)
-      (v/assert kb (list bird_t Opus) 'CxCore)
+                'CxUniverse)
+      (v/assert kb (list bird_t Opus) 'CxUniverse)
       (is (seq (v/sentexes-matching kb (list flies Opus) '?ctx))
           "the rule concludes while nothing excepts it")
-      (v/assert kb (negate (list appendaged_t Opus)) 'CxCore)
+      (v/assert kb (negate (list appendaged_t Opus)) 'CxUniverse)
       (is (empty? (v/sentexes-matching kb (list flies Opus) '?ctx))
           "a negation on the supertype satisfies the negated exception, contravariantly"))))
 
@@ -287,13 +287,13 @@
   ;; nothing to derive it again, which is what `released-rules` re-chains.
   (tu/with-terms [winged_t appendaged_t bird_t flies Opus]
     (let [x (symbol "?x")]
-      (v/assert kb (list 'genl winged_t appendaged_t) 'CxCore {:strength :monotonic})
+      (v/assert kb (list 'genl winged_t appendaged_t) 'CxUniverse {:strength :monotonic})
       (v/assert kb (list 'exceptWhen (negate (list winged_t x))
                          (list 'set/defaultRule
                                (list 'set/forwardRule (list 'implies (list 'and (list bird_t x)) (list flies x)))))
-                'CxCore)
-      (v/assert kb (list bird_t Opus) 'CxCore)
-      (let [neg (v/assert kb (negate (list appendaged_t Opus)) 'CxCore)]
+                'CxUniverse)
+      (v/assert kb (list bird_t Opus) 'CxUniverse)
+      (let [neg (v/assert kb (negate (list appendaged_t Opus)) 'CxUniverse)]
         (is (empty? (v/sentexes-matching kb (list flies Opus) '?ctx))
             "the supertype negation satisfies the negated exception")
         (v/retract! kb neg)
@@ -307,10 +307,10 @@
       (v/assert kb (list 'exceptWhen (negate (list winged_t x))
                          (list 'set/defaultRule
                                (list 'set/forwardRule (list 'implies (list 'and (list bird_t x)) (list flies x)))))
-                'CxCore)
-      (v/assert kb (list bird_t Opus) 'CxCore)
+                'CxUniverse)
+      (v/assert kb (list bird_t Opus) 'CxUniverse)
       (is (seq (v/sentexes-matching kb (list flies Opus) '?ctx)))
-      (let [neg (v/assert kb (negate (list winged_t Opus)) 'CxCore)]
+      (let [neg (v/assert kb (negate (list winged_t Opus)) 'CxUniverse)]
         (is (empty? (v/sentexes-matching kb (list flies Opus) '?ctx))
             "the exception holds on its own predicate")
         (v/retract! kb neg)

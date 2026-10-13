@@ -112,7 +112,7 @@
   The four consecutive links are stated and no more: `instantBefore` is transitive, and a
   forward join over a transitive antecedent reads the closure, so the race's beginning
   comes before its end without anybody writing that down (CxChange).  Each event is an
-  `event`, which reaches `temporal` through CxAbstract's `(genl event situation)`, so it
+  `event`, which reaches `temporal` through `happening` and `situation` in CxUniverse, so it
   satisfies both `happens`, whose first argument is a temporal, and `beforeEvent`, whose
   arguments are events."
   '[(time_point RaceBegins) (time_point HareLiesDown) (time_point TortoisePasses)
@@ -121,7 +121,7 @@
     (instantBefore RaceBegins HareLiesDown)     (instantBefore HareLiesDown TortoisePasses)
     (instantBefore TortoisePasses HareWakes)    (instantBefore HareWakes RaceEnds)
 
-    (event HareNaps) (event TortoiseGoesPast) (event HareStirs)
+    (causal_event HareNaps) (causal_event TortoiseGoesPast) (causal_event HareStirs)
 
     (happens HareNaps HareLiesDown)
     (initiates HareNaps (AsleepFn HareA) HareLiesDown)

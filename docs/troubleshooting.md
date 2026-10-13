@@ -44,7 +44,7 @@ term and no idea what the KB will accept about it.  One read answers it.
 ```clojure
 (v/describe kb 'parentOf 'CxWell)
 ;; {:role :predicate :arity 2
-;;  :arg-declarations [{:kind :arg :sentence (arg parentOf 1 organism) :context CxLife} …]
+;;  :arg-declarations [{:kind :arg :sentence (arg parentOf 1 organism) :context CxUniverse} …]
 ;;  :props #{} :inverse childOf :extent-count 0 :comment ["(parentOf ?parent ?child) …"]
 ;;  :genls {…} :specs {…} :disjoint {…}
 ;;  :genls-direct {…} :specs-direct {…} :disjoint-maximal {…}}
@@ -60,8 +60,9 @@ ancestor sets and how many sentexes hold in it.
 **The context argument is not decoration.**  An `arg` declaration, an
 `abducible_predicate` grant and a `comment` are each a policy of the context that states
 them, so `describe` reads them up that context's `genlCx` ancestor set: `(describe kb 'parentOf
-'CxCore)` reports no declaration at all, because `CxCore` sits *above* the one that binds
-`parentOf`, and a reader there is genuinely unconstrained.  If a declaration you expected
+'CxElsewhere)` reports no declaration at all when no `genlCx` edge names `CxElsewhere`,
+because it does not see CxUniverse, where the one that binds `parentOf` is stated, and a
+reader there is genuinely unconstrained.  If a declaration you expected
 is absent, that is the first thing to check — it is the same ancestor set `assert` consults when
 it decides whether to refuse ([contexts.md](contexts.md), [argtypes.md](argtypes.md)).
 
@@ -138,7 +139,9 @@ Three other causes, each with its own tell:
 - **The conclusion is on the forced-monotonic roster.** `why-not` answers
   `:forced-conclusion`, naming the rule and its antecedent predicates off the roster. A
   `(forced_monotonic_predicate P)` declaration for each one puts the rule's firings on
-  the roster. [nmtms.md](nmtms.md#the-forced-monotonic-roster).
+  the roster. `(v/violations kb)` lists each such firing as a `:forced-conclusion` entry
+  while it is stored, and `clear-violations!` does not remove it.
+  [nmtms.md](nmtms.md#the-forced-monotonic-roster).
 - **Another rule already concluded it**, so the firing added nothing to see. `(:subsumption
   (v/kb-quality kb))` names the rules a broader one covers, with the substitution;
   `(:clashes (v/kb-quality kb))` names the pairs whose conclusions would fight if both
@@ -602,7 +605,7 @@ so one vocabulary reads both.
 | `:still-exporting` | an unload was asked for while an export of that KB is running | [catalog.md](catalog.md) |
 | `:still-loading` | an export was asked for while the KB is still being written | [catalog.md](catalog.md) |
 | `:still-stopping` | an unload was asked for while the loader has not reached an interruptible point | [catalog.md](catalog.md) |
-| `:still-writing` | an unload was asked for while a job — a chaining run, a spindle sync — writes that KB | [catalog.md](catalog.md) |
+| `:still-writing` | an unload was asked for while a job — a chaining run, a sync of the shipped contexts — writes that KB | [catalog.md](catalog.md) |
 | `:store-unusable` | a disk store stopped: it was closed, a thread interrupt closed one of its channels, or a write or an fsync failed. `:reason` says which, and every call refuses until the directory is opened again | [storage.md](storage.md#a-store-that-stops) |
 | `:too-many-kbs` | the catalog already holds its maximum of loaded KBs; `:entries` names them — unload one first | [catalog.md](catalog.md#loading) |
 | `:too-many-kept` | an `abduce` with `{:keep? true}` while the KB already holds its maximum of kept abduction contexts; `:contexts` names them — `abduce-discard!` one first | [abduction.md](abduction.md#isolation) |

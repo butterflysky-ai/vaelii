@@ -27,17 +27,14 @@
 
 (tu/deftest-kb the-theory-is-opt-in-below-cxuniverse
   (testing "the theory sees the upper ontology through CxUniverse"
-    (is (holds-sees PCP 'CxUniverse))
-    (is (holds-sees PCP 'CxAbstract)))
+    (is (holds-sees PCP 'CxUniverse)))
   (testing "neither CxWell nor the upper ontology sees the theory"
     (is (not (holds-sees 'CxWell PCP)))
-    (is (not (holds-sees 'CxAbstract PCP)))
     (is (not (holds-sees 'CxUniverse PCP)))))
 
 (tu/deftest-kb the-specialization-chain-is-the-theorys-own
   (is (holds-genl 'sees 'perceives PCP))
   (is (not (holds-genl 'sees 'perceives 'CxUniverse)))
-  (is (not (holds-genl 'sees 'perceives 'CxAbstract)))
   (doseq [sub '[seeImage watchVideo]]
     (is (not (holds-genl sub 'sees PCP)) (str sub " reaches sees by a rule, not a genl edge"))))
 
@@ -87,7 +84,7 @@
       (is (not (holds-ask (list 'seeImage Seer Scene) CxRoom)))
       (is (not (holds-ask (list 'watchVideo Seer Scene) CxRoom))))
     (testing "a context that does not see the theory still concludes none of it"
-      (doseq [ctx ['CxWell 'CxAbstract 'CxUniverse]]
+      (doseq [ctx ['CxWell 'CxUniverse]]
         (is (not (holds-ask (list 'sees Viewer Image) ctx)) (str "Viewer sees in " ctx))
         (is (not (holds-ask (list 'perceives Seer Scene) ctx)) (str "Seer perceives in " ctx))))))
 
@@ -96,8 +93,7 @@
     (is (holds-genl 'image_viewing 'acausal_event PCP))
     (is (holds-genl 'image_viewing 'event PCP))
     (is (holds-genl 'image_viewing 'acausal PCP))
-    (is (not (holds-genl 'image_viewing 'acausal_event 'CxUniverse)))
-    (is (not (holds-genl 'image_viewing 'acausal_event 'CxAbstract)))))
+    (is (not (holds-genl 'image_viewing 'acausal_event 'CxUniverse)))))
 
 (tu/deftest-kb a-user-context-under-cxperception-derives-hascapability-of-image-viewing
   (tu/with-terms [CxRoom Viewer]
@@ -109,6 +105,6 @@
       (is (holds-ask (list 'hasCapability Viewer 'event) CxRoom))
       (is (holds-ask (list 'hasCapability Viewer 'acausal_event) CxRoom)))
     (testing "a context that does not see the theory concludes no such capability class"
-      (doseq [ctx ['CxWell 'CxAbstract 'CxUniverse]]
+      (doseq [ctx ['CxWell 'CxUniverse]]
         (is (not (holds-ask (list 'hasCapability Viewer 'acausal_event) ctx))
             (str "Viewer hasCapability acausal_event in " ctx))))))

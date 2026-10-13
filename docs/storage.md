@@ -626,6 +626,15 @@ by `reindex` or by the importer's inline bulk load — both of which post throug
 image, at the close, whatever the threshold says. A batch build is therefore already on the
 cadence it wants without asking for anything.
 
+**A recover from the records defers it.** The settles of `recover` write sentexes, and an
+image written part-way through them is stale before the recover ends. `kb/*defer-index-refresh?*`
+is true while they run, `refresh-index-image!` writes nothing, and `recover` offers the
+refresh once after them (the floor and the threshold still decide whether it writes). A
+process killed during the recover reopens from the records. A background rebuild runs its
+settles on a second KB that holds no image directory (`kb/rebuild-own`), so they write no
+refresh; its install writes the reasoning image, and the index image waits for the next
+write that crosses the cadence.
+
 **And it can be declined.** `vaelii.disk.auto-compact=false` turns the mid-life refresh off
 and leaves the image to the close and the shutdown hook: a refresh *is* an opportunistic
 compaction of a derived structure — `save!` compacts the live trie to write it — so it

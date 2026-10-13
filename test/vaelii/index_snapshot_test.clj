@@ -27,9 +27,11 @@
             [vaelii.impl.kb :as kb]
             [vaelii.impl.protocols :as p]
             [vaelii.impl.reads :as reads]
+            [vaelii.impl.recovery :as recovery]
             [vaelii.impl.reindex :as reindex]
             [vaelii.impl.rules :as rules]
             [vaelii.impl.sentex :as sx]
+            [vaelii.impl.settle :as settle]
             [vaelii.impl.tokens :as tok]
             [vaelii.impl.types.snapshot :as snapshot-types]
             [vaelii.test-util :as tu])
@@ -554,6 +556,38 @@
                 (let [[kb2 rebuilds] (opening dir)]
                   (is (zero? rebuilds) "so the next open maps rather than reindexes")
                   (is (= want (answers kb2))))))))))))
+
+(deftest a-recover-from-records-refreshes-the-image-once-after-its-settles
+  (tu/with-snapshot-platform
+    ;; A store with no image (a layout upgrade leaves one) is totally drifted, so the first
+    ;; write past the floor would refresh the image on the settle's thread, and the settle's
+    ;; later writes would stale it.  The recover defers the refresh and takes it once.
+    (with-properties {"vaelii.disk.compact-min-interval-ms" "0"
+                      "vaelii.index.snapshot-drift" "0.001"}
+      (fn []
+        (with-snapshot-dir
+          (fn [dir]
+            (build! (v/open-kb {:records :disk :index :snapshot :dir dir :recover? false}))
+            (backend/close-dir! dir)
+            (rm-rf! (snap/snapshot-root dir))
+            (let [kb    (v/open-kb {:records :disk :index :snapshot :dir dir :recover? false})
+                  saves (atom 0)
+                  in    (atom nil)
+                  real  snap/save!
+                  real-settle settle/settle]
+              (v/reindex kb)
+              (with-redefs [snap/save! (fn [& args] (swap! saves inc) (apply real args))
+                            settle/settle
+                            (fn [k & args]
+                              ;; a write made by a settle of the recover
+                              (when-not @in
+                                (kb/create-sentex k '(likes SnapMuffet SnapSettled) 'CxUniverse)
+                                (reset! in @saves))
+                              (apply real-settle k args))]
+                (recovery/recover kb))
+              (is (zero? @in) "no image was written inside the settle")
+              (is (= 1 @saves) "one refresh ran, after the recover")
+              (is (.exists (meta-file dir))))))))))
 
 (deftest a-fresh-image-is-not-rewritten-on-every-write
   (tu/with-snapshot-platform

@@ -17,11 +17,11 @@
 
   Fixture recipes:
 
-    ;; a shared KB loaded once (starter / CxCore), neutral per test
+    ;; a shared KB loaded once (starter / upper ontology), neutral per test
     (use-fixtures :once (tu/loaded tu/load-starter!))
     (use-fixtures :each (tu/neutral))
 
-    ;; a fresh KB rebuilt per test (empty or CxCore-loaded), neutral per test
+    ;; a fresh KB rebuilt per test (empty or upper-loaded), neutral per test
     (use-fixtures :each (tu/neutral-fresh tu/fresh))
 
     ;; an inline KB inside one deftest (varied baselines in one file)
@@ -653,8 +653,8 @@
   entries and installs the image.  The entries and the image are each a cache checked
   against the records they land beside — the index rebuilt, belief recovered, when they
   do not describe them — so an import produces what `load` produces.  Replaying the index
-  rather than rebuilding it takes a warm starter import from 135 ms to 94 ms, and a CxCore
-  one from 57 ms to 44 ms.
+  rather than rebuilding it takes a warm starter import from 135 ms to 94 ms, and an upper
+  ontology one from 57 ms to 44 ms.
 
   The space is cleared first, for `fresh`'s reason: it is opened `:recover? false` over
   databases a previous run may have populated, and a write into a KB whose belief was
@@ -708,10 +708,10 @@
   (v/import! kb @starter-dump {:belief? true})
   kb)
 
-;; ---- CxCore, built once and copied --------------------------------------
+;; ---- the upper ontology, built once and copied --------------------------
 
 (def core-build-space
-  "The space the CxCore dump is built on, `starter-build-space`'s counterpart: a plain
+  "The space the upper-ontology dump is built on, `starter-build-space`'s counterpart: a plain
   in-RAM KB of its own, never the shared scratch one, for the same reason — a `:once`
   fixture in another namespace holds `scratch-space` open and `fresh` wipes what it
   finds, so building here would wipe it.  Plain memory whatever storage the run selected,
@@ -721,24 +721,24 @@
    :recover? false :tms tms-kind})
 
 (def ^:private core-context-dump
-  "An export dump of the CxCore vocabulary context, built **once per JVM** and read back
-  by `load-core!`, mirroring `starter-dump`.
+  "An export dump of the upper ontology, built **once per JVM** and read back by
+  `load-core!`, mirroring `starter-dump`.
 
-  `core-context/load-into` re-asserts the whole `CxCore.txt` through the full write path,
+  `core-context/load-into` re-asserts every `kb/upper/` file through the full write path,
   and the `neutral-fresh` fixtures rebuild a fresh core KB per test, so that cost is paid
   once for every such test.  A restored dump reaches the same state (`build-dump`) —
-  `core_copy_test` pins that, the genlCx edge `load-into` wires first included, because
-  belief does not depend on the order the records were written."
+  `core_copy_test` pins that, because belief does not depend on the order the records
+  were written."
   (delay (build-dump "vaelii-core-" core-build-space core-context/load-into)))
 
 (defn load-core!
-  "Load the CxCore vocabulary into `kb` and return `kb` — `core-context/load-into`'s
+  "Load the upper ontology into `kb` and return `kb` — `core-context/load-into`'s
   result, restored from the dump `core-context-dump` builds once per JVM rather than
   re-asserted, as `load-starter!` does for the starter.
 
-  A test *about the load path itself* — what `load-into` asserts, in what order, or the
-  `(genlCx CxUniverse CxCore)` edge it wires first — calls `core-context/load-into`
-  directly and pays for it, since a restored dump answers a different question."
+  A test *about the load path itself* — what `load-into` asserts, or in what order —
+  calls `core-context/load-into` directly and pays for it, since a restored dump answers a
+  different question."
   [kb]
   (v/import! kb @core-context-dump {:belief? true})
   kb)
@@ -752,7 +752,8 @@
 
 (defn load-dumped!
   "Load into `kb` the KB `build` makes of an empty one, and return `kb` — restored from a
-  dump built once per JVM for `key` rather than rebuilt, as `load-core!` does for CxCore.
+  dump built once per JVM for `key` rather than rebuilt, as `load-core!` does for the upper
+  ontology.
 
     (defn- channel-kb []
       (tu/load-dumped! (tu/fresh) ::channel-kb
@@ -772,18 +773,19 @@
     kb))
 
 (defn load-core-with!
-  "Load CxCore and then the theory files `theories` names into `kb`, and return `kb` —
-  `core-context/load-into` followed by `seed/load-context` over each `[context dir]`
-  pair in order, restored through `load-dumped!`, one dump per distinct `theories`.
+  "Load the upper ontology and then the middle files `theories` names into `kb`, and
+  return `kb` — `core-context/load-into` followed by `seed/load-context` over each
+  `[context dir]` pair in order, restored through `load-dumped!`, one dump per distinct
+  `theories`.
 
     (use-fixtures :each (tu/neutral-fresh
                          #(doto (tu/fresh)
-                            (tu/load-core-with! '[[CxSpace \"upper\"] [CxTime \"upper\"]])
-                            (v/add-prover (space/spatial-prover)))))
+                            (tu/load-core-with! '[[CxChange \"middle\"]])
+                            (v/add-prover (point/point-prover)))))
 
-  A per-test fixture asserting CxCore and two `kb/upper` files cost 600-1,200 ms a test;
-  the restore costs what `load-core!`'s does, plus the theories' records.  A test about
-  loading a theory file calls `seed/load-context` directly."
+  A per-test fixture asserting the upper ontology and a theory file pays the whole load
+  per test; the restore costs what `load-core!`'s does, plus the theory's records.  A
+  test about loading a theory file calls `seed/load-context` directly."
   [kb theories]
   (let [theories (vec theories)]
     (load-dumped! kb [::theories theories]
@@ -1029,8 +1031,8 @@
   "Retract every premise the test added since `before` (a set of sentex ids), and every
   record it added that is not a network datum at all.  A roster declaration whose
   retraction `retract!` refuses an author (`checks/forcing-retraction-problem`) is
-  retracted too, since a test that loads CxCore into a scratch KB owes the baseline.
-  Dependency-directed retraction sweeps the derived consequences, so the KB
+  retracted too, since a test that loads the upper ontology into a scratch KB owes the
+  baseline.  Dependency-directed retraction sweeps the derived consequences, so the KB
   returns to its baseline.  Loops to a fixpoint in case teardown order matters."
   [kb before]
   (with-redefs [checks/forcing-retraction-problem (constantly nil)]
@@ -1180,8 +1182,8 @@
 
 (defn neutral-fresh
   "An `:each` fixture that builds a KB with `build-fn` (e.g. `tu/fresh`, or
-  `#(doto (tu/fresh) (tu/load-core!))` for one needing CxCore's vocabulary), binds it, and
-  guards net-neutrality per test.  A test *about* the CxCore load path builds with
+  `#(doto (tu/fresh) (tu/load-core!))` for one needing the upper ontology), binds it, and
+  guards net-neutrality per test.  A test *about* the upper load path builds with
   `#(doto (tu/fresh) (core-context/load-into))` instead, paying the load rather than
   restoring the dump."
   [build-fn]

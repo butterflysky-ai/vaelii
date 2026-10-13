@@ -21,13 +21,12 @@
             [vaelii.impl.qcn-kb :as qkb]
             [vaelii.test-util :as tu]))
 
-;; A fresh KB per test: the CxCore grammar, the CxTime vocabulary that states
-;; instant relations in it, and the prover registered.  The vocabulary is an upper context;
-;; the prover is opt-in, so registering it is what turns stored instant facts into a
-;; network.  The algebra tests below need none of it.
+;; A fresh KB per test: the upper layer, whose time.txt states the instant relations, and
+;; the prover registered.  The prover is opt-in, so registering it is what turns stored
+;; instant facts into a network.  The algebra tests below need none of it.
 (use-fixtures :each (tu/neutral-fresh
                      #(doto (tu/fresh)
-                        (tu/load-core-with! '[[CxTime "upper"]])
+                        (tu/load-core!)
                         (v/add-prover (pt/point-prover)))))
 
 (def ^:private C 'CxUniverse)
@@ -286,7 +285,7 @@
        only once it asks for it"))
 
 (tu/deftest-kb without-the-prover-only-the-declared-transitivity-answers
-  ;; CxTime declares `(transitive instantBefore)`, so the default registry composes a
+  ;; CxUniverse declares `(transitive instantBefore)`, so the default registry composes a
   ;; chain of strict orderings by walking it.  What the network adds is everything the
   ;; walk cannot reach: an ordering through an *equality*, and the derived relations that
   ;; name a disjunction of the base ones.

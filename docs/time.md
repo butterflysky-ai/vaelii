@@ -33,7 +33,7 @@ term carries its own, and the clock reads them off its fields.
 
 Every prover here is **opt-in**; none of the vocabulary is. One thing about instants does
 answer without a prover: `instantBefore` and `instantAfter` are declared **transitive** in
-`CxTime`, so a chain of strict orderings composes off the taxonomy alone
+`time.txt`, so a chain of strict orderings composes off the taxonomy alone
 ([taxonomy.md](taxonomy.md)) — and a forward join reads it, which is what `CxChange`'s
 inertia is built on. What the network adds over that is everything a walk over edges
 cannot reach: an ordering through an `instantEqual`, the three derived relations, and an
@@ -45,7 +45,8 @@ The unit is an **interval**, not an instant. A meeting, a reign, a journey — s
 with a start and an end — so two of them can meet, overlap or nest, which is exactly the
 structure a point calculus throws away. The interval relations are declared `(arg …
 temporal)` and the instant relations `(arg … time_point)`, `time_point` sitting
-under `temporal` (through `time`, which `time_point` and `time_interval` partition),
+under `temporal` (through `uninterrupted_time`, which `time_point` and `time_interval`
+partition, and `time`),
 so `startOf` and `endOf` bridge the two by declaration as well as by meaning. A
 temporal relation between two predicates is refused rather than stored. The algebra
 itself knows nothing of clocks or calendars — only order and containment; the calendar
@@ -97,10 +98,10 @@ Seven **derived** predicates each name a disjunction:
 usually mean by "before". `subintervalOf` contains `:equal`, so it holds of an interval
 and itself, where `properSubintervalOf` does not. The last two are exact complements.
 
-All twenty are declared `binary_predicate` in `resources/kb/upper/CxTime.txt`, beside the
-six instant predicates and the metric ones, each with its own `comment` sentex — an **upper**
-context rather than the vocabulary head, because they are *about* time and CxCore holds
-only the grammar they are stated in.
+All twenty are declared `binary_predicate` in `resources/kb/upper/time.txt`, beside the
+six instant predicates and the metric ones, each with its own `comment` sentex, in a domain file
+rather than `core.txt`, because they are *about* time and `core.txt` holds only the
+grammar they are stated in.
 
 ## The composition table, and why it is checked
 
@@ -212,7 +213,7 @@ coupling, and either copy is checkable against its own definitions.
 ## The points of a temporal thing
 
 Every temporal thing has six named points, each a structural `unreifiable_function`
-application declared in `CxTime` and handled in `vaelii.impl.timepoint`:
+application declared in `time.txt` and handled in `vaelii.impl.timepoint`:
 
 | Term | Names |
 |---|---|
@@ -308,6 +309,18 @@ What it does not do:
 - **The culprits name one derivation.** They are the support of the pair that emptied, which
   contains every fact whose removal alone restores consistency but may name more.
 
+## The time a thing occupies
+
+`(TimeOfFn X)` names the time X occupies: the moment or the stretches of time over which X
+exists, holds or happens. It is a `time`, and a `reifiable_function` with one value per
+temporal thing. `timeOf` is its corresponding predicate, so `(timeOf X T)` and
+`(TimeOfFn X)` name one time. A time is its own time: a rule in `time.txt` concludes
+`(timeOf T T)` of every `time` T, so `(TimeOfFn T)` is T.
+
+`time` divides into `uninterrupted_time`, a moment or one unbroken stretch, and
+`intermittent_time`, a time with a gap. `temporal` divides the same way into
+`uninterrupted` and `intermittent`.
+
 ## Naming an interval: the calendar constructors
 
 Everything above relates intervals a KB has *names* for — `Breakfast`, `Reign2`. Three
@@ -344,7 +357,7 @@ fields to read, so its endpoints are still the facts somebody states.
 ## Change over time: events, fluents, and inertia
 
 The algebras above order time. `CxChange` is what makes time *carry* anything: a simple
-event calculus, shipped as a **middle theory** — four rules over vocabulary `CxTime`
+event calculus, shipped as a **middle theory** — four rules over vocabulary `time.txt`
 declares, and data rather than code, so it is read and edited like the rest of the
 ontology. It lives here rather than on a page of its own for that reason: a theory the KB
 states in its own representation is not a subsystem.
@@ -425,7 +438,7 @@ shape `specified-violations` uses. See [equality.md](equality.md).
 
 ### What `clipped` can see
 
-`instantBefore` and `instantAfter` are declared **transitive** in `CxTime`, and a forward
+`instantBefore` and `instantAfter` are declared **transitive** in `time.txt`, and a forward
 join over an antecedent on a transitive predicate reads the closure as well as the stored
 edges ([taxonomy.md](taxonomy.md), [inference.md](inference.md)). So a narrative writes
 down the consecutive links and `clipped` sees the order they imply: three o'clock before
@@ -497,7 +510,7 @@ every other reasoner here (`add-reasoner kb :calendar`) and answering three fami
 ```
 
 **A moment is `(InstantFn Y M D h m s)` — six integer fields, always.** It is a
-`time_point` where the calendar constructors are `time_interval`s, declared in `CxTime`
+`time_point` where the calendar constructors are `time_interval`s, declared in `time.txt`
 beside them and `unreifiable_function` for their reason: the fields are what the ordering
 reads. Six fields and not a reduced-precision spelling, because a term is identified by
 its shape and one moment must have exactly **one** term — `"2000-01-01T00:00:00"` and
@@ -581,7 +594,7 @@ into the union, however complete it correctly claims to be over the network it r
 it as `:guarded-by #{:calendar}`.
 
 **Scoping** is one cached, belief-following taxonomy read, taken only after the goal's own
-structural test has passed: `(transitive instantBefore)` is `CxTime`'s declaration and
+structural test has passed: `(transitive instantBefore)` is `time.txt`'s declaration and
 nothing else states it, so the clock answers exactly where the vocabulary its goals are
 written in can be seen.
 

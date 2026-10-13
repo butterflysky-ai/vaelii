@@ -172,7 +172,7 @@ The denominator (`:names`) is every type-shaped name in the vocabulary, and by
 [naming.md](naming.md) that includes a bare lowercase word: `likes` is a legal predicate
 *and* a legal type name. A name `relation?` answers true for, by a stored arity of two
 or more or a `variable_arity` membership, is excluded from both names and edges, so a
-sub-relation edge such as CxCore's `(genl partition covering)` is not an island. A name
+sub-relation edge such as `core.txt`'s `(genl partition covering)` is not an island. A name
 with no stored arity remains a candidate, so an untyped root or disconnected unary
 island is not silently dropped.
 This is why the gap is the finding rather than either fraction on its own.
@@ -334,7 +334,7 @@ handled is the author's.
 The shipped ontology's own case is the **arity cycle**, and it is dropped from both
 directions. `(unary_predicate ?p) => (arity ?p 1)` beside `(binary_predicate ?p) =>
 (arity ?p 2)` would be a `:functional` clash on the `arity` table, and the antecedents are
-two types CxCore declares `disjoint` ([taxonomy.md](taxonomy.md)), so the pair never enters
+two types `core.txt` declares `disjoint` ([taxonomy.md](taxonomy.md)), so the pair never enters
 the reading. Read the other way round, `(arity ?p 1) => (unary_predicate ?p)` beside
 `(arity ?p 2) => (binary_predicate ?p)` is a `:disjoint` clash on the *conclusions*, and
 what drops it is the third rule-out above: one `?p` bound to two arities. The same rule-out

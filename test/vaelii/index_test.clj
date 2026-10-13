@@ -40,7 +40,7 @@
                         ;; interior node — its children are the contexts it is stored in
                         [bornIn tom paris]
                         [bornIn tom paris 'CxNaturalWorld]  ; the leaf: no children
-                        [bornIn tom paris 'CxCore]          ; absent: a real sentence,
+                        [bornIn tom paris 'CxUniverse]          ; absent: a real sentence,
                                                                  ; not in that context
                         [bornIn (tu/tmp-ind)]                    ; absent: no node at all
                         [(tu/tmp-pred)]]]
@@ -56,11 +56,11 @@
   (let [bornIn (tu/tmp-pred) tom (tu/tmp-ind) bob (tu/tmp-ind) paris (tu/tmp-ind)]
     (v/assert kb (list bornIn tom paris) 'CxNaturalWorld)
     (v/assert kb (list bornIn bob paris) 'CxNaturalWorld)
-    (v/assert kb (list bornIn tom paris) 'CxCore)
+    (v/assert kb (list bornIn tom paris) 'CxUniverse)
     (testing "context wildcard returns every context"
       (is (= 2 (count (v/sentexes-matching kb (list bornIn tom paris))))))
     (testing "explicit context narrows results"
-      (is (= 1 (count (v/sentexes-matching kb (list bornIn tom paris) 'CxCore)))))
+      (is (= 1 (count (v/sentexes-matching kb (list bornIn tom paris) 'CxUniverse)))))
     (testing "sentence variables fan out within a context"
       (is (= #{tom bob}
              (set (map (comp second :sentence) (v/sentexes-matching kb (list bornIn '?who paris) 'CxNaturalWorld))))))))
@@ -425,6 +425,48 @@
         "the columnar roots route a family the registry lacks")
     (tu/clear-kb! kb)))
 
+(defn- named-reading
+  "`[rel functor family trie]` per relation and roster functor: the `:tax-named` entries
+  `[ctx handle]` the family holds, and those the naming trie and the installed keys give."
+  [kb]
+  (let [ix (:index kb)]
+    (for [rel [:genl :genlCx :flat] f '[except defeat]]
+      [rel f
+       (into #{} (mapcat (fn [c] (map #(vector c %) (p/family-leaf ix :tax-named [rel f c]))))
+             (p/family-children ix :tax-named [rel f] p/every-context))
+       (into #{} (for [h (reads/as-stored-named-global ix f)
+                       :when (some #(= rel (kv/key-relation %)) (reads/as-stored-installed-keys ix h))
+                       [c hs] (reads/as-stored-naming-by-context ix f h)
+                       n hs]
+                   [c n]))])))
+
+(tu/deftest-kb the-named-supporter-family-agrees-with-the-naming-trie
+  ;; The family is written from both sides: the naming fact's index write reads its
+  ;; target's installed keys, and the taxonomy's supporter post and retire read the naming
+  ;; facts.  The orphaned except covers the retire side, and `reindex`, which indexes every
+  ;; record before it posts the supporters, the post side.
+  (tu/with-terms [gn_a gn_b gn_c gn_d GnX]
+    (let [ix      (:index kb)
+          cx      'CxNaturalWorld
+          agrees? (fn [label]
+                    (doseq [[rel f fam trie] (named-reading kb)]
+                      (is (= trie fam) (str label ", " rel " " f))))
+          ex      #(v/assert kb (list 'except (sx/sentex-handle %)) cx)
+          edge    (v/assert kb (list 'genl gn_a gn_b) cx)
+          member  (v/assert kb (list gn_a GnX) cx)
+          x-edge  (ex edge)]
+      (ex member)
+      (v/assert kb (list 'genl gn_c gn_d) cx)
+      (v/assert kb (list 'not (list 'genl gn_c gn_d)) cx {:strength :monotonic})
+      (agrees? "asserted")
+      (is (contains? (p/family-leaf ix :tax-named [:genl 'except cx]) x-edge))
+      (is (pos? (reads/stored-count-named-supporters-global ix :genl 'defeat)))
+      (v/retract! kb edge)
+      (agrees? "the except's target retracted")
+      (is (not (contains? (p/family-leaf ix :tax-named [:genl 'except cx]) x-edge)))
+      (v/reindex kb)
+      (agrees? "reindexed"))))
+
 ;; ---- the family methods ---------------------------------------------------
 
 (defmacro ^:private delegating-index
@@ -476,8 +518,8 @@
                                     (fn [kb]
                                       (tu/load-starter! kb)
                                       (tu/with-entailing
-                                        (v/assert kb (list 'arg rel 1 big_thing) 'CxCore)
-                                        (v/assert kb (list rel Ann Bob) 'CxCore)))))]
+                                        (v/assert kb (list 'arg rel 1 big_thing) 'CxUniverse)
+                                        (v/assert kb (list rel Ann Bob) 'CxUniverse)))))]
         (doseq [kb [plain wrapped]] (v/import! kb dump {:belief? true})))
       (let [want (family-reading plain)]
         (is (pos? (:edges want)))

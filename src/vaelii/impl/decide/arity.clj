@@ -9,6 +9,7 @@
             [vaelii.impl.journal :as journal]
             [vaelii.impl.jtms :as jtms]
             [vaelii.impl.naming :as nm]
+            [vaelii.impl.predicates :as predicates]
             [vaelii.impl.protocols :as p]
             [vaelii.impl.reads :as reads]
             [vaelii.impl.sentex :as sx]
@@ -40,7 +41,8 @@
 ;; costs a recompute and changes no answer.
 ;;
 ;; A `:monotonic` membership `(T P)` binds P's length when T reaches an exact-arity class
-;; through `:monotonic` `genl` edges a reader sees (`meta-visible`).  The candidates read
+;; through `:monotonic` `genl` edges (`meta-held`).  What binds a relation's length is one
+;; function, read the same at every context (`relation-length`).  The candidates read
 ;; the superset over every class: the entries hold the lengths each type reaches through
 ;; the unscoped closure under `[::meta T]`, and the types of P's stored memberships under
 ;; `[::types P]`; `::meta-by-type` names the functors whose candidates read a type's
@@ -117,8 +119,8 @@
   from `t` up to the class, an edge entering the walk when `ok?` takes one of its
   supporters `[h ctx]`.  An exact class `t` names its own length with no edge.  The walk
   enters only the types the unscoped closure carries to an exact class, and expands
-  parents and supporters in name order.  Unscoped, since `ok?` scopes each supporter: a
-  reader's admits only those its ancestor set states (`meta-visible`)."
+  parents and supporters in name order.  Unscoped; `ok?` decides each supporter
+  (`meta-held` admits the `:monotonic` ones)."
   [tax t ok?]
   (let [reaches? (fn [x] (or (contains? exact-classes x)
                              (some #(tax/genl?-global tax x %) exact-classes)))]
@@ -143,8 +145,8 @@
 
 (defn- unscoped-meta-paths
   "`meta-paths` of `t` over every edge of the unscoped closure, whatever its class: the
-  superset the candidates and the routes read, which each reader scopes to the
-  `:monotonic` edges it sees (`meta-visible`).  A class is read off the network and not
+  superset the candidates and the routes read, which `meta-held` cuts to the `:monotonic`
+  edges.  A class is read off the network and not
   the store, since a re-assert raises a stored record's class in place and a derived
   membership has no stored class."
   [tax t]
@@ -778,29 +780,45 @@
                 m))
             {} (when up (reads/as-stored-arity-bindings (:index kb) p up)))))
 
-(defn- meta-visible
-  "`{n #{h}}`: the exact lengths `q`'s metatype memberships bind it to at a reader with
-  ancestor set `up`, each with the memberships binding it.  A membership `(T q)` binds
-  when it is IN at `:monotonic`, stated in `up` and not `hidden?`, and `T` reaches an
-  exact-arity class through edges each with a supporter that is the same
-  (`meta-paths`).  Reads `q`'s memberships in every context and keeps those `up` holds.
-  Reads nothing for a `q` whose stored memberships bind no length (`meta-of`)."
-  [kb q up hidden?]
+(defn- held-bindings
+  "`{:exact {n #{h}} :min {m #{h}} :var #{h}}`: the stored bindings of `p` in every
+  context, each IN and not `hidden?`.  Every context, since a relation's length is read
+  the same at every context (`relation-length`)."
+  [kb p hidden?]
+  (let [tms (reasoning/tms kb)
+        idx (:index kb)]
+    (if-not (reads/stored-arity-bound? idx p)
+      {}
+      (reduce (fn [m [h kind v _]]
+                (if (and (jtms/in? tms h) (not (and hidden? (hidden? h))))
+                  (if (= :var kind)
+                    (update m :var (fnil conj #{}) h)
+                    (update-in m [kind v] (fnil conj #{}) h))
+                  m))
+              {} (reads/as-stored-arity-bindings-global idx p)))))
+
+(defn- meta-held
+  "`{n #{h}}`: the exact lengths `q`'s metatype memberships bind it to, each with the
+  memberships binding it.  A membership `(T q)` binds when it is IN at `:monotonic` and
+  not `hidden?`, and `T` reaches an exact-arity class through edges each with a
+  supporter that is the same (`meta-paths`), in any context, since a relation's length is
+  read the same at every context (`relation-length`).  Reads nothing for a `q` whose
+  stored memberships bind no length (`meta-of`)."
+  [kb q hidden?]
   (let [tax (reasoning/taxonomy kb)]
-    (if (or (nil? up) (empty? (first (meta-of kb tax q))))
+    (if (empty? (first (meta-of kb tax q)))
       {}
       (let [tms   (reasoning/tms kb)
             recs  (:records kb)
-            seen? (fn [[h c]] (and (or (nil? c) (contains? up c))
-                                   (= :monotonic (jtms/defeat-class tms h))
+            ok?   (fn [[h _]] (and (= :monotonic (jtms/defeat-class tms h))
                                    (not (and hidden? (hidden? h)))))
             memo  (volatile! {})
             lens  (fn [t] (or (get @memo t)
-                              (let [ls (keys (meta-paths tax t seen?))] (vswap! memo assoc t ls) ls)))]
+                              (let [ls (keys (meta-paths tax t ok?))] (vswap! memo assoc t ls) ls)))]
         (reduce (fn [m h]
                   (let [r (p/get-sentex recs h)]
                     (if-let [[t x] (membership-of r)]
-                      (if (and (= x q) (seen? [h (:context r)]))
+                      (if (and (= x q) (jtms/in? tms h) (ok? [h (:context r)]))
                         (reduce #(update %1 %2 (fnil conj #{}) h) m (lens t))
                         m)
                       m)))
@@ -824,73 +842,106 @@
                                    [h c path n])))
            vec))))
 
+(defn- shape-length
+  "The length an engine grammar term's `:shape` gives it (`predicates/shape-of`), with
+  no grounds: `{:exact n}` for a fixed argument list, `{:min n}` for one with an
+  `:optional` or `:variadic` tail; nil for a term with no shape."
+  [q]
+  (when-let [{:keys [args optional variadic]} (when (symbol? q) (predicates/shape-of q))]
+    (assoc (if (or optional variadic) {:min (count args)} {:exact (count args)})
+           :via q :grounds #{})))
+
+(defn- own-bindings
+  "`q`'s own bindings (`held-bindings`), its metatype memberships' lengths (`meta-held`)
+  merged into `:exact`."
+  [kb q hidden?]
+  (update (held-bindings kb q hidden?) :exact
+          #(not-empty (merge-with into % (meta-held kb q hidden?)))))
+
+(defn- reduce-own
+  "The binding `q`'s own bindings `own` give it: under `variable_arity` its single
+  `arityMin` floor, else its single exact length; nil for none, or for two."
+  [q own]
+  (cond
+    (seq (:var own))   (when (= 1 (count (:min own)))
+                         (let [[m hs] (first (:min own))] {:min m :via q :grounds hs}))
+    (seq (:exact own)) (when (= 1 (count (:exact own)))
+                         (let [[n hs] (first (:exact own))] {:exact n :via q :grounds hs}))))
+
+(defn released?
+  "Does a `variable_arity` binding of `q`, IN in any context, release it?  `relation-length`
+  answers `{:min m}` or nil for such a `q` and does not report the release, which
+  `admitsArgnum` and the integrity pass's undeclared-arity read beside it."
+  [kb q]
+  (boolean (seq (:var (held-bindings kb q nil)))))
+
 (defn- bound-above
-  "`(fn [q up])` → the predicates above `q`, `q` left out, storing an exact or
-  `variable_arity` binding, that a reader with ancestor set `up` reaches over the `genl`
-  edges stated in `up`: `q`'s global closure cut to those predicates
-  (`tax/genls-global-union`, which probes the bound predicates once per type above `q`
-  and reads the kinds of those it finds), each kept when `up` holds every context
-  asserting a `genl` edge or reaches it, read for the whole cut off one walk up from `q`
-  (`tax/genls-asserted-among` over `tax/asserting-contexts-in`).  The cut's memo lives as
-  long as the fn."
-  [kb tax]
+  "The predicates above `q`, `q` left out, storing an exact or `variable_arity` binding,
+  over the unscoped closure: a relation's length is read the same at every context
+  (docs/taxonomy.md, \"Arity\"), so the cut reads every `genl` edge whoever can see it.
+  `tax/genls-global-union` probes the bound predicates once per type above `q`."
+  [kb q]
   (let [idx    (:index kb)
         bound? (fn [p] (and (reads/stored-arity-bound? idx p)
                             (some (fn [[kind]] (not= :min kind))
-                                  (reads/as-stored-arity-binding-kinds idx p))))
-        any?   (delay (pos? (reads/stored-count-arity-bound idx)))
-        memo   (volatile! {})]
-    (fn [q up]
-      (let [cut   (if @any? (disj (tax/genls-global-union tax q (filter bound?) memo) q) #{})
-            scope (tax/asserting-contexts-in tax :genl up)]
-        (if (or (nil? scope) (empty? cut))
-          cut
-          (tax/genls-asserted-among tax q cut scope))))))
+                                  (reads/as-stored-arity-binding-kinds idx p))))]
+    (if (pos? (reads/stored-count-arity-bound idx))
+      (disj (tax/genls-global-union (reasoning/taxonomy kb) q (filter bound?) (volatile! {})) q)
+      #{})))
 
-(defn- reader-binding
-  "What binds `q`'s length at a reader with ancestor set `up`, as `{:exact n :grounds #{h}}`
-  or `{:min m :grounds #{h}}`, or nil.  `q`'s own bindings come first, its roster
-  bindings and its metatype memberships (`meta-visible`): a `variable_arity` membership
-  leaves only a single `arityMin` floor, one exact length binds it and two leave it
-  unbound.  A `q` with no own binding takes the one exact length the predicates
-  above it through edges stated in `up` agree on, unless one of them is `variable_arity`:
-  the bound predicates above it that `up` reaches (`above`, `bound-above`'s fn).  The
-  nogood's reading of a binding, not the believed arity (docs/taxonomy.md, \"Arity\")."
-  [kb above q up hidden?]
-  (let [own (update (visible-bindings kb q up hidden?) :exact
-                    #(not-empty (merge-with into % (meta-visible kb q up hidden?))))]
-    (cond
-      (seq (:var own))
-      (when (= 1 (count (:min own)))
-        (let [[m hs] (first (:min own))] {:min m :grounds hs}))
-
-      (seq (:exact own))
-      (when (= 1 (count (:exact own)))
-        (let [[n hs] (first (:exact own))] {:exact n :grounds hs}))
-
-      :else
-      ;; the predicates above grouped by the exact lengths they store, the smallest group
-      ;; first: a second length visible leaves `q` unbound, so the rest go unread
-      (let [idx    (:index kb)
-            cut    (above q up)
-            kinds  (into {} (map (fn [p] [p (reads/as-stored-arity-binding-kinds idx p)])) cut)
-            by-len (reduce (fn [m p] (reduce #(update %1 %2 (fnil conj []) p) m
-                                             (values-of (kinds p) :exact)))
-                           {} cut)
-            seen   (volatile! {})
-            vis    (fn [p] (if-let [e (find @seen p)]
-                             (val e)
-                             (let [b (visible-bindings kb p up hidden?)]
-                               (vswap! seen assoc p b) b)))
-            ns     (reduce (fn [acc [n ps]]
-                             (if (some #(contains? (:exact (vis %)) n) ps)
-                               (cond-> (conj acc n) (seq acc) reduced)
-                               acc))
-                           #{} (sort-by (comp count val) by-len))
-            n      (first ns)]
-        (when (and (= 1 (count ns))
-                   (not-any? #(and (contains? (kinds %) [:var nil]) (seq (:var (vis %)))) cut))
-          {:exact n :grounds (into #{} (mapcat #(get (:exact (vis %)) n)) (get by-len n))})))))
+(defn relation-length
+  "What binds `q`'s length, as `{:exact n :via p}` or `{:min m :via q}`, or nil, read the
+  same at every context: an engine term's `:shape` (`shape-length`), else `q`'s own
+  bindings (`reduce-own`), else the one exact length the bound predicates above it agree
+  on, none of them `variable_arity`, with `:via` the first of them by name.  `hidden?`
+  drops the handles a reader does not believe or see, or is nil.  With `grounds?`, the
+  result also carries `:grounds #{h}`: the bindings stating the length, an engine term's
+  own bindings stating its shape's length.  The rule is docs/taxonomy.md's \"Arity\"; the
+  argument-position check, `describe`, `admitsArgnum` and the integrity pass call it
+  without grounds, and the arity nogood with them."
+  ([kb q] (relation-length kb q nil false))
+  ([kb q hidden? grounds?]
+   (or (when-let [s (shape-length q)]
+         (if-not grounds?
+           (dissoc s :grounds)
+           ;; the shape decides; an own binding stating the shape's length is the ground a
+           ;; placed nogood rests on, and one stating another length binds nothing
+           (let [own (own-bindings kb q hidden?)]
+             (assoc s :grounds (or (if (:exact s)
+                                     (get-in own [:exact (:exact s)])
+                                     (get-in own [:min (:min s)]))
+                                   #{})))))
+       (let [own (own-bindings kb q hidden?)]
+         (if (or (seq (:var own)) (seq (:exact own)))
+           (cond-> (reduce-own q own) (not grounds?) (dissoc :grounds))
+           ;; the predicates above grouped by the exact lengths they store, each group in
+           ;; name order, the smallest group first: a second length leaves `q` unbound, so
+           ;; the rest go unread, and the first believed binding of a group names `:via`
+           (let [idx    (:index kb)
+                 cut    (bound-above kb q)
+                 kinds  (into {} (map (fn [p] [p (reads/as-stored-arity-binding-kinds idx p)])) cut)
+                 by-len (update-vals
+                         (reduce (fn [m p] (reduce #(update %1 %2 (fnil conj []) p) m
+                                                   (values-of (kinds p) :exact)))
+                                 {} cut)
+                         sort)
+                 seen   (volatile! {})
+                 held   (fn [p] (if-let [e (find @seen p)]
+                                  (val e)
+                                  (let [b (held-bindings kb p hidden?)]
+                                    (vswap! seen assoc p b) b)))
+                 holds? (fn [n p] (contains? (:exact (held p)) n))
+                 vias   (reduce (fn [acc [n ps]]
+                                  (if-let [p (first (filter #(holds? n %) ps))]
+                                    (cond-> (assoc acc n p) (seq acc) reduced)
+                                    acc))
+                                {} (sort-by (comp count val) by-len))]
+             (when (and (= 1 (count vias))
+                        (not-any? #(and (contains? (kinds %) [:var nil]) (seq (:var (held %)))) cut))
+               (let [[n via] (first vias)]
+                 (cond-> {:exact n :via via}
+                   grounds? (assoc :grounds (into #{} (mapcat #(get (:exact (held %)) n))
+                                                  (filter #(holds? n %) (get by-len n)))))))))))))
 
 (defn- breaks?
   "Does a tuple of `n` arguments break `binding`?"
@@ -898,13 +949,11 @@
   (boolean (or (and (:exact binding) (not= n (:exact binding)))
                (and (:min binding) (< n (:min binding))))))
 
-(defn- convicts-at?
-  "Does a reader with ancestor set `up` read a binding of `q` that a tuple of `n`
-  arguments breaks (`reader-binding`), with the binding `hb` among its grounds when `hb`
-  is given?  `above` is `bound-above`'s fn."
-  [kb above q n hb up hidden?]
-  (let [b (reader-binding kb above q up hidden?)]
-    (boolean (and b (breaks? b n) (or (nil? hb) (contains? (:grounds b) hb))))))
+(defn- convicts?
+  "Does a tuple of `n` arguments break the binding `b` (`relation-length`), with the
+  binding `hb` among its grounds when `hb` is given?"
+  [b n hb]
+  (boolean (and b (breaks? b n) (or (nil? hb) (contains? (:grounds b) hb)))))
 
 (defn- pair-at?
   "Does a reader with ancestor set `up` read the predicates `f` and `g` bound to two
@@ -1040,13 +1089,12 @@
   a tuple of shape `[q n]`, each own binding of `q` it breaks and each exact binding of a
   predicate above `q` (`w`, `decide/write-view`) it breaks, with the subsumption from `q`
   to that predicate, and each metatype membership of `q` whose length it breaks, with the
-  edges up to the exact-arity class among the choice's supporters (`meta-routes`); for a pair `[f g]`, the subsumption between the two.  A reader reads
-  the bindings it sees and believes, so a route convicts only where the reader reads its
-  binding as what binds `q` (`exempt-at?`).  While no binding the conviction reads is
-  hidden from any context (`hidden-anywhere?`), a reader below a placement context sees
-  the bindings it sees and more, and more bindings convict less, so a route is left out
-  at a placement context that reads no conviction through it (`convicts-at?`,
-  `pair-at?`)."
+  edges up to the exact-arity class among the choice's supporters (`meta-routes`); for a
+  pair `[f g]`, the subsumption between the two.  A route convicts only where the reader
+  reads its binding as what binds `q` (`exempt-at?`).  While no binding the conviction
+  reads is hidden from any context (`hidden-anywhere?`), a tuple's route is left out at
+  every placement context when `q`'s length (`relation-length`) does not convict through
+  it, and a pair's at a placement context that reads no two lengths (`pair-at?`)."
   [kb w _c {:keys [members shape pair]} hidden-anywhere?]
   (let [idx         (:index kb)
         up          (:context-up-global w)
@@ -1058,7 +1106,7 @@
       (let [[q n]   shape
             h       (first members)
             ps      (sort (disj (exact-above kb w q) q))
-            above   (bound-above kb (:tax w))
+            b       (delay (relation-length kb q nil true))
             mrs     (meta-routes kb (:tax w) q)
             ;; every binding of `q` and of a bound predicate above it, and every
             ;; membership and edge a metatype route of `q` rests on, which is what a
@@ -1071,8 +1119,7 @@
                                               (mapcat (fn [[hm _ path]] (cons hm (map first path))) mrs)))))
             route   (fn [hb choice links]
                       {:choices [choice] :links links
-                       :excluded-at (fn [pctx] (and (not @hidable)
-                                                    (not (convicts-at? kb above q n hb (up pctx) nil))))})]
+                       :excluded-at (fn [_] (and (not @hidable) (not (convicts? @b n hb))))})]
         (-> []
             (into (keep (fn [[hb kind v ctx]]
                           (when (or (and (= :exact kind) (not= n v)) (and (= :min kind) (> v n)))
@@ -1142,15 +1189,15 @@
 
 (defn exempt-at?
   "Does a reader with ancestor set `up` read no conviction of the arity nogood over the
-  handles `ms`: a candidate tuple whose length breaks no binding the reader reads
-  (`convicts-at?`), or one binding of each end of a pair the reader does not read as two
-  lengths (`pair-at?`).  `hidden?` names the handles the reader does not believe or see,
+  handles `ms`: a candidate tuple whose length breaks no binding of its functor
+  (`relation-length`, the same at every reader but for `hidden?`), or one binding of each
+  end of a pair the reader does not read as two lengths (`pair-at?`).  `hidden?` names the handles the reader does not believe or see,
   or is nil.  False for any other set."
   [kb c ms up hidden?]
   (boolean
    (case (kind-of kb c ms)
      :arity            (when-let [[q n] (shape-of kb (first ms))]
-                         (not (convicts-at? kb (bound-above kb (reasoning/taxonomy kb)) q n nil up hidden?)))
+                         (not (convicts? (relation-length kb q hidden? false) n nil)))
      :arity-descension (let [[f g] (map #(binding-pred kb %) ms)]
                          (not (pair-at? kb f g up hidden?)))
      nil)))

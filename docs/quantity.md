@@ -53,7 +53,7 @@ rule and a fact in a sibling of the table derive nothing
 split across contexts therefore derives only where one context sees every row a
 comparison used.
 
-**Three dimensions ship filled in.** `resources/kb/upper/CxMeasure.txt` states Length in
+**Three dimensions ship filled in.** `resources/kb/upper/measure.txt` states Length in
 `Meter`, Mass in `Kilogram` and Duration in `Second`, with the ordinary units of each,
 and `CxUniverse` sees it — so a KB that loads the starter compares measures without
 declaring anything first. The test for a shipped unit is that its factor is a
@@ -66,7 +66,7 @@ The table types its terms. `dimensionOf` declares its arguments `unit_of_measure
 `physical_dimension`, so `(dimensionOf Kilogram Mass)` derives `(unit_of_measure
 Kilogram)` and `(physical_dimension Mass)` ([argtypes.md](argtypes.md)). `QuantityFn` and
 `QuantityIntervalFn` declare `measure` as their result, and every shipped position that
-holds a measure (`weightOf`, `heightOf`, the five comparisons, CxTime's durations) is
+holds a measure (`weightOf`, `heightOf`, the five comparisons, `time.txt`'s durations) is
 declared `measure`. An application there whose function declares a result that does not
 reach `measure` is refused with `:arg-type`, as is a number or a string.
 
@@ -210,11 +210,11 @@ and still be believed the same.
 
 - `vaelii.impl.provers` — `QuantityProver`, `normalize-quantity`, `measure-comparisons`,
   `*quantity-tolerance*`. Registered in `default-provers`, so every KB has it.
-- `resources/kb/upper/CxMeasure.txt` — the vocabulary: `QuantityFn` /
+- `resources/kb/upper/measure.txt` — the vocabulary: `QuantityFn` /
   `QuantityIntervalFn` (`unreifiable_function`), `dimensionOf` / `conversionFactor` (the
   table predicates), and the five comparisons, each documented by a comment sentex. An
   *upper* context, not the vocabulary head: measurement is subject matter, and only the
-  grammar it is declared in (`unreifiable_function`, `binary_predicate`, …) is CxCore's.
+  grammar it is declared in (`unreifiable_function`, `binary_predicate`, …) is `core.txt`'s.
   The sign vocabulary shares the file ([sign.md](sign.md)) — same quantities, no
   figures — and shares nothing else: a measure is never read into a sign, and a sign is
   never rendered as a measure.

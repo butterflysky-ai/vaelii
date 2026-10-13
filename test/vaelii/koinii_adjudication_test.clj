@@ -7,7 +7,6 @@
   asserts/retracts and never touches settle."
   (:require [clojure.test :refer [deftest is testing use-fixtures]]
             [vaelii.core :as v]
-            [vaelii.host.core-context :as core-context]
             [vaelii.impl.sentex :as sx]
             [vaelii.koinii.adjudication :as adj]
             [vaelii.koinii.dispute :as d]
@@ -356,7 +355,7 @@
   (let [run (fn [order]
               (let [kb (doto (v/open-kb (update tu/plain-memory-space :space conj ::interleave
                                                 (hash order)))
-                         (tu/clear-kb!) (core-context/load-into))
+                         (tu/clear-kb!) (tu/load-core!))
                     edge! (fn [a] (v/assert kb (list 'genlCx 'CxDeploy (id/context-for a))
                                             'CxUniverse {:strength :monotonic}))
                     ph (atom nil)
@@ -639,7 +638,7 @@
   per assertion order, which would clear the shared space out from under another
   namespace's `:once` fixture."
   []
-  (doto (tu/isolated-fresh) (core-context/load-into)))
+  (doto (tu/isolated-fresh) (tu/load-core!)))
 
 (def ^:private contested-premise-preds
   "Five predicates whose alphabetical order is not the order the fixture asserts them in,
@@ -688,7 +687,7 @@
   rebuild one per ordering, which would clear the shared space out from under another
   namespace's `:once` fixture."
   []
-  (doto (tu/isolated-fresh) (core-context/load-into)))
+  (doto (tu/isolated-fresh) (tu/load-core!)))
 
 (defn- two-disputes!
   "Atlas holds P; Boreas and Ciel each hold ¬P, and `CxDeploy` sees all three.  So one

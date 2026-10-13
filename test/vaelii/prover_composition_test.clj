@@ -142,7 +142,8 @@
            (provers/shadowing-channels kb (list largerThan dog_t animal_t) ctx)))
     (testing "and it is scoped like every other declaration read"
       (tu/with-terms [CxOther]
-        (v/assert kb (list 'genlCx CxOther 'CxCore) 'CxCore)
+        ;; CxOther sits above CxUniverse, so it does not see the declaration
+        (v/assert kb (list 'genlCx 'CxUniverse CxOther) 'CxUniverse)
         (is (empty? (provers/shadowing-channels
                      kb (list largerThan dog_t animal_t) CxOther))
             "a context that cannot see the declaration is not shadowed by it")))))

@@ -90,7 +90,7 @@
 ;; ---- dwellings --------------------------------------------------------------
 ;; A dwelling is a residential unit: a house, an apartment, a room, not a city or a
 ;; country. An apartment and a room are parts of a building and not buildings, so a
-;; dwelling is a container, CxAbstract's, and container's disjoints carry it clear of
+;; dwelling is a container, abstract.txt's, and container's disjoints carry it clear of
 ;; organism, substance and person. A detached house is a dwelling and a building at
 ;; once, and a motorhome a dwelling and a vehicle (the orthogonals below). dwellsIn is a
 ;; spec of livesIn restricted to a human and a dwelling specifically; two different

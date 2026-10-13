@@ -13,7 +13,7 @@
 
   Why that shape and not a permission system: visibility here is *logical*, not
   administrative.  `genlCx` already decides what a context can see, and hanging the
-  sandbox at the bottom of the spindle gives exactly the asymmetry wanted — everything
+  sandbox at the bottom of the context hierarchy gives exactly the asymmetry wanted — everything
   flows in, nothing flows out — with no new concept and nothing to enforce.  A shipped
   rule firing over sandbox facts places its conclusion **in the sandbox**, because
   placement is the maximal common descendant of the rule's context and the antecedents'

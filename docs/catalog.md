@@ -29,7 +29,7 @@ A source is a description, not a KB. Six kinds:
 
 | kind | content | loader |
 |------|---------|--------|
-| `:core` | the CxCore vocabulary head alone | `vaelii.host.core-context` |
+| `:core` | the upper layer alone, in CxUniverse | `vaelii.host.core-context` |
 | `:starter` | the shipped schema-only ontology | `vaelii.host.starter` |
 | `:generated` | synthesized from numbers — see [generating one](#generating-a-kb) | `vaelii.host.io.generate` |
 | `:corpus` | a translated sentence corpus (OpenCyc) | a plugin's reader — [foreign.md](foreign.md) |
@@ -259,40 +259,70 @@ server's start offers the `:dir` field on the corpus and dump cards and the dest
 field on the export form, and lets both routes take one ([operations.md](operations.md)).
 The in-process `load-source`, `load-dir` and `export-entry!` take a `:dir` either way.
 
-## A loaded KB states this engine's spindle
+## A loaded KB states this engine's shipped contexts
 
 A store or a dump holds the starter ontology of the engine that built it, and the engine
-loading it ships its own. So a load of either **syncs the shipped spindle**
-(`vaelii.host.spindle/sync-spindle!`) before the entry reads `:done`: while the entry is
+loading it ships its own. So a load of either **syncs the shipped contexts**
+(`vaelii.host.sync/sync!`) before the entry reads `:done`: while the entry is
 still `:running`, which is what makes the browser's writes wait for it (`write-blocked?`).
 The other source kinds are built from this engine's files and are in sync already.
 
 - **What is shipped** is what `starter/load-into` stores in a scratch in-memory KB, each
-  premise attributed to the file whose load stored it, compared as the form a KB file
-  writes (`text/premise-entries`). A strength that differs is one form retracted and
-  another asserted, since `assert` only raises a premise's strength.
-- **CxCore and the `kb/upper/` and `kb/middle/` contexts are the engine's** and end up
-  stating exactly what it ships: a premise there that the engine does not ship is
-  retracted. A context an author wires into the spindle is not one of them and is not
-  read.
-- **The collectors are only added to.** CxUniverse gathers what the engine routes there
-  from every context, so its other content is not the engine's to retract; a shipped
-  sentence is looked up there by handle and asserted only when absent, so a collector
-  holding a corpus is never read whole.
-- **Only the layers a KB has.** A file whose context holds nothing is not loaded, and the
-  collector files and the `unary_predicate` batch follow the upper layer, so a core-only
-  KB stays core-only.
+  premise attributed to the load that stored it, compared as the form a KB file writes
+  (`text/premise-entries`). A strength that differs is one form retracted and another
+  asserted, since `assert` only raises a premise's strength.
+- **CxUniverse is locked to the shipped files.** Its premises end up exactly what the
+  upper files and the `unary_predicate` batch produce: a premise there that the engine
+  does not ship is retracted, whoever wrote it. Two kinds of sentex are exempt. A
+  `genlCx` premise is stored in CxUniverse whichever context states it, so an author's
+  edge stays. A sentex that is not a premise (a lifted `decontextualized_predicate` copy,
+  a rule firing) is no premise to compare. `assert` does not refuse a premise written into
+  CxUniverse; the next sync retracts it.
+- **The `kb/middle/` contexts are the engine's** and end up stating exactly what it
+  ships. A context an author wires into the topology is not one of them and is not read.
+- **Only the layers a KB has.** A middle file whose context holds nothing is not loaded,
+  and the upper layer and the `unary_predicate` batch are loaded only into a KB whose
+  CxUniverse holds a premise the upper load ships, so a vocabulary KB stays one.
+- **A shipped sentence outside an exact context is looked up by handle** and asserted only
+  when absent, so a context holding a corpus is never read whole.
 
-The report is filed on the entry as `:spindle` — `{:added :removed :refused}` — and
+The report is filed on the entry as `:sync` — `{:added :removed :refused}` — and
 logged. A shipped sentence the KB's own content refuses is listed under `:refused` rather
 than failing the load, and a sync that throws is filed as `{:error message}`: the KB
-loaded, and a spindle this engine could not bring current is a fact about it.
+loaded, and shipped contexts this engine could not bring current are a fact about it.
 
 **A KB that accepts no writes is not synced.** A store opened without a recover and a dump
 loaded with `:belief? :skip` or `:stored` keep what they hold. A store whose belief is
 rebuilt behind an installed image (`:recover? :background`, under `VAELII_DEV`) is synced
 when the rebuild finishes, by a writing job of its own (`:kind :sync`); a rebuild that
 fails leaves it unsynced, and the log says so.
+
+**The development browser syncs on a file edit.** Under `VAELII_DEV`, the first request
+after a file under `resources/kb/upper/` or `resources/kb/middle/` is saved, added or
+removed submits `sync-loaded!`: one `:sync` job that reads the shipped files once and
+syncs every in-process entry that accepts writes, the starter the browser opened on
+included, filing each report as `:sync`. While another job holds the writer the change
+stays pending, and a later request submits it. A served browser never watches the files.
+
+**The starter's edits are written back to the files.** Under `VAELII_DEV`, after each
+request that is not a GET, the premises the `starter` entry holds in CxUniverse and the
+middle contexts are compared with the last reading (`write-back!`, `sync/held`), and
+the difference becomes line edits to the shipped files (`sync/write-back!`):
+
+- a retracted premise deletes the form whose sentence matches, compared as the KB stores
+  it, so variable names and antecedent order do not decide the match;
+- a premise restated at another strength rewrites its one form in place;
+- an asserted premise is one line after the `(comment T …)` block of the term it is about
+  (a rule's consequent's, else the first argument's, else the functor's), in the file
+  holding that comment, or at the end of core.txt or the middle context's file when no
+  file defines the term.
+
+Every other line stays, comments and order included. The edit changes the files' stamps,
+so the next request syncs the other loaded KBs to them. Only the starter writes back. A
+`genlCx` edge in CxUniverse is not compared, and a retraction no file states (a member of
+the closing `unary_predicate` batch) is logged as skipped and restored by that sync. No
+comparison runs while a job holds the writer, and the reading is taken again when a file
+sync finishes, so a sync's own writes are never written back.
 
 ## Unloading never deletes an on-disk KB
 
@@ -320,7 +350,7 @@ racing:
 | refusal | who is holding it |
 |---------|-------------------|
 | `:still-stopping` | its own loader — cancellation is cooperative, so the stores are the loader's until its thread returns |
-| `:still-writing` | a job that claims the KB as its writer in the job registry — a chaining run or a spindle sync. The refusal names the job |
+| `:still-writing` | a job that claims the KB as its writer in the job registry — a chaining run or a sync of the shipped contexts. The refusal names the job |
 | `:still-exporting` | a dump walking it record by record, with no snapshot to walk instead ([`exporting-kb?`](#and-back-out-again)) |
 | `:unreleased` | nothing: the release itself threw |
 

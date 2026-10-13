@@ -418,8 +418,8 @@
 ;;
 ;; `(arg parentOf 3 person)` is admitted while `parentOf` has no declared length —
 ;; open-world, and the highest position a declaration names is a lower bound on the arity
-;; rather than a claim about it.  Then a length arrives, by any of the three routes
-;; `checks/declared-arity` reads, and the declaration is left constraining a position the
+;; rather than a claim about it.  Then a length arrives, by any of the routes
+;; `arity/relation-length` reads, and the declaration is left constraining a position the
 ;; predicate provably does not have.  It is not refused: refusing it would make the
 ;; *binding's* arrival order decide what the KB holds.  It simply stops meaning anything,
 ;; while the entry point refuses the identical sentence one line later.
@@ -450,8 +450,8 @@
   small — the whole bundled ontology has 298 — so reading all of them and asking each
   about its own predicate is cheaper than asking each predicate what declares it, and it
   does not grow with the spec subtree underneath.  What it does grow with is the hierarchy
-  *above*: `checks/declared-arity` is a map read for a predicate carrying a length of its
-  own and a walk of the supers for one that inherits its length, so the reading is
+  *above*: `arity/relation-length` is a binding read for a predicate carrying a length of
+  its own and a walk of the supers for one that inherits its length, so the reading is
   `O(declarations × super-predicates)` — the term the namespace's bound carries for it.
 
   Belief-filtered, unlike the extent counts beside it: a stored, disbelieved declaration
@@ -947,7 +947,7 @@
                                          (marks-over tax :asymmetric fb context))))
          (let [[x1 y1] (nm/args (:body a))
                [x2 y2] (nm/args (:body b))]
-           (when-let [s (res/unify (list x1 y1) (list y2 x2))]
+           (when-let [s (res/unify-args (list x1 y1) (list y2 x2))]
              (when (not= (res/substitute x1 s) (res/substitute y1 s))
                [:asymmetric s]))))))))
 

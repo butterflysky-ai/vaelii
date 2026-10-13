@@ -2,12 +2,12 @@
 ;; Copyright © 2026 Vaelii LLC and the Vaelii contributors.
 (ns vaelii.impl.asp.prover
   "A query-time prover for `(bravely S)` and `(cautiously S)` — brave/cautious reading
-  of the dilemmas the KB currently holds, answered as a read and never committed.
+  of the dilemmas the asking context reads, answered as a read and never committed.
 
   ## What it answers
 
-  `(cautiously S)` holds when `S` is in **every** optimal labeling of the current
-  dilemmas; `(bravely S)` when `S` is in **some**.  Over a coexisting `P`/`¬P` dilemma the
+  `(cautiously S)` holds when `S` is in **every** optimal labeling of the dilemmas the
+  asking context reads; `(bravely S)` when `S` is in **some**.  Over a coexisting `P`/`¬P` dilemma the
   engine declines to arbitrate (docs/exceptions.md), both sides are IN, and an ordinary
   `ask` reports both — so it cannot tell the *forced* belief from the *arbitrary* one.  A
   brave/cautious read can: in a Nixon diamond `(bravely (pacifist N))` holds and
@@ -49,10 +49,13 @@
   open design point, deferred until a use asks for it."
   (:require
    [vaelii.impl.asp.label :as label]
+   [vaelii.impl.except :as exc]
    [vaelii.impl.kb :as kb]
    [vaelii.impl.resolution :as res]
    [vaelii.impl.sentex :as sx]
-   [vaelii.impl.types.prover :as prover-types]))
+   [vaelii.impl.taxonomy :as tax]
+   [vaelii.impl.types.prover :as prover-types]
+   [vaelii.impl.types.reasoning :as reasoning]))
 
 (defn- modal-goal? [goal]
   (and (sequential? goal)
@@ -60,25 +63,35 @@
        (= 2 (count goal))
        (sx/ground-term? (second goal))))
 
-(defn- believed?
-  "Is the stored sentex for `s` believed as `context` reads it (`res/believed-at?`)?  The
-  brave/cautious answer for a datum no dilemma moves — every optimum agrees with belief
-  there — read at `ask`'s level (what is stored or cached, no rule expansion)."
+(defn- visible-handles
+  "The handles of `s` stored in `context`'s `genlCx` ancestor set that `context` believes
+  (`res/believed-at?`) and sees (`exc/hidden-fn`): what a ground `ask` of `s` reads at
+  `ask`'s level (what is stored, no rule expansion).  Empty at a variable context."
   [kb s context]
-  (boolean (when-let [h (kb/find-sentex-handle kb s context)]
-             (res/believed-at? kb h context))))
+  (when-not (sx/variable? context)
+    (let [hidden? (or (exc/hidden-fn kb context) (constantly false))]
+      (into [] (comp (keep #(kb/find-sentex-handle kb s %))
+                     (filter #(and (res/believed-at? kb % context) (not (hidden? %)))))
+            (tax/context-up (reasoning/taxonomy kb) context)))))
+
+(defn- class-at
+  "The class of `s` at `context`: the strongest (`:true` over `:supportable` over
+  `:false`) of its visible handles' classes (`label/classify-datum` at `context`), since
+  `s` holds in a labeling when one of them does.  A handle no dilemma the context reads
+  classifies is believed in every labeling, so it reads `:true`.  Nil when no handle is
+  visible."
+  [kb s context]
+  (let [cs (into #{} (map #(or (label/classify-datum kb % context) :true))
+                 (visible-handles kb s context))]
+    (some cs [:true :supportable :false])))
 
 (defn- holds?
-  "Does `(<modal> s)` hold in `context`?  `label/classify-datum` places the stored `s`
-  among the current dilemmas' optimal labelings — in every, in some, in none — and is nil
-  for a datum no dilemma moves, where the answer is ordinary belief."
+  "Does `(<modal> s)` hold in `context`?"
   [kb modal s context]
-  (when-let [h (kb/find-sentex-handle kb s context)]
-    (case (label/classify-datum kb h)
-      :true        true                          ; every resolution: brave & cautious
-      :supportable (= modal 'bravely)            ; some only: brave, not cautious
-      :false       false                         ; no resolution
-      (believed? kb s context))))                ; not contested: belief
+  (case (class-at kb s context)
+    :true        true                            ; every resolution: brave & cautious
+    :supportable (= modal 'bravely)              ; some only: brave, not cautious
+    false))                                      ; no resolution, or not believed
 
 (defrecord BraveCautiousProver []
   prover-types/Prover

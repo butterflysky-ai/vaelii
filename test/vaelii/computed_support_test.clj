@@ -32,13 +32,14 @@
             [vaelii.impl.stp :as stp]
             [vaelii.test-util :as tu]))
 
-;; A fresh KB per test: the CxCore grammar, CxMeasure (the measure structural NATs and the
-;; unit table), CxTime (temporalDistance, length, the interval relations), and all three
-;; opt-in provers registered — registering them is what turns stored facts into a
-;; computation, and the quantity prover ships in the default registry either way.
+;; A fresh KB per test: the upper layer and all three opt-in provers registered.  The
+;; upper layer's measure.txt holds the measure structural NATs and the unit table, and its
+;; time.txt holds temporalDistance, length and the interval relations.  Registering the
+;; provers is what turns stored facts into a computation, and the quantity prover ships in
+;; the default registry either way.
 (use-fixtures :each (tu/neutral-fresh
                      #(doto (tu/fresh)
-                        (tu/load-core-with! '[[CxMeasure "upper"] [CxTime "upper"]])
+                        (tu/load-core!)
                         (v/add-prover (stp/stp-prover))
                         (v/add-prover (dur/duration-prover))
                         (v/add-prover (iv/allen-prover)))))
@@ -260,7 +261,7 @@
 ;; ---- is the whale heavier than a ton --------------------------------------
 
 (defn- load-mass-table
-  "A two-unit table over **temporary** units.  The shipped CxMeasure already declares
+  "A two-unit table over **temporary** units.  The shipped measure.txt already declares
   grams and kilograms, and a test that retracted one of those would be taking away
   content the fixture loaded — a test invents what it intends to destroy."
   [kb small big dimension]

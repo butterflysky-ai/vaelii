@@ -15,6 +15,7 @@
             [vaelii.impl.caches :as caches]
             [vaelii.impl.config :as config]
             [vaelii.impl.decide :as decide]
+            [vaelii.impl.decide.arity :as arity]
             [vaelii.impl.except :as exc]
             [vaelii.impl.inherit :as inherit]
             [vaelii.impl.io.thaw :as safe]
@@ -32,7 +33,6 @@
             [vaelii.impl.strength :as strength]
             [vaelii.impl.taxonomy :as tax]
             [vaelii.impl.types.reasoning :as reasoning]
-            [vaelii.impl.violations :as violations]
             [vaelii.impl.wff :as wff]))
 
 ;; ---- invariants: naming + argument type declarations --------------------
@@ -101,13 +101,13 @@
   "The most specific built-in types known from a value.
 
   Most values have only their EDN kind. Integers additionally carry the sign-refined
-  types declared in CxCore. Zero belongs to both non-negative and non-positive; returning
+  types declared in core.txt. Zero belongs to both non-negative and non-positive; returning
   a set rather than forcing one artificial leaf keeps both argument constraints exact.
 
   **Read by both argument readings, which is why it is not named for either.**  `arg`
   types what an argument denotes and `quotedArg` the term written there, and for a
   *value* those coincide — a value denotes itself, which is the whole reason the EDN
-  kinds sit in the `genl` lattice at all (CxCore, and `vocabulary.clj`'s note on the
+  kinds sit in the `genl` lattice at all (core.txt, and `vocabulary.clj`'s note on the
   value kinds).  A sign is as decidable from `5` written in a position as from what
   `5` denotes, so a reading that admitted `integer` and refused `positive_integer` would
   not be more conservative, only wrong in one direction: `args-quoted-problem` read
@@ -413,7 +413,7 @@
   A **symbol** is typed by what somebody asserted, so the reading is open-world: it
   violates nothing until it holds a membership, and then only if none of them reaches
   `t`.  A **value** is typed by what it *is* — `value-kind` reads its EDN kind, and
-  those kinds sit in the `genl` lattice (CxCore) exactly so this comparison can be made.
+  those kinds sit in the `genl` lattice (core.txt) exactly so this comparison can be made.
   No assertion is involved and none is possible, so there is nothing to be open-world
   about: a string is a `string` and a `string` is not a `dog`, and saying so is the
   difference between a declaration that constrains a position and one that constrains
@@ -727,9 +727,9 @@
 
   **A deliberate global/scoped split inside one `cond`.**  The first floor asks what
   the argument *is* (could it ever be a type?) and stays **global**: a reified NAT's
-  minting edges land in `CxUniverse`, which the upper spindle's members sit above and
-  cannot see, so a scoped floor would convict an imported reified NAT used from
-  `CxMeasure` as \"an individual, so never a subtype\" — false.  The second
+  minting edges land in `CxUniverse`, which a context wired outside the shipped topology
+  cannot see, so a scoped floor would convict an imported reified NAT used from such a
+  context as \"an individual, so never a subtype\" — false.  The second
   floor is the **scoped** open-world excuse: an argument with no *visible* path
   into the hierarchy may simply have its edges out of sight, and a NAF check that
   convicted on invisible evidence would convict harder the less a context sees.
@@ -869,9 +869,9 @@
 
   **The individual floor is a global read (`tax/genl?-global`), for `genls-problem`'s
   reason (E17_ROSTER).**  The floor asks whether the argument could ever be a type at all;
-  a reified NAT's minting `genl` edges land in `CxUniverse`, which a member of the upper
-  spindle sits above and cannot see, so a scoped floor would convict an imported reified
-  NAT used from a narrow context as \"an individual, so never a subtype\" — false.  The
+  a reified NAT's minting `genl` edges land in `CxUniverse`, which a context wired outside
+  the shipped topology cannot see, so a scoped floor would convict an imported reified
+  NAT used from such a context as \"an individual, so never a subtype\" — false.  The
   subtype test proper stays scoped, the writer's own vantage, and convicts only under the
   constraint reading, as `genls-problem`'s does."
   [kb sentence context decls]
@@ -917,7 +917,7 @@
   `[start type via]` entries in content order — start 1 for `interArgs`, the declared
   start for `interArgAndRest` — with `via` the predicate the declaration is written of.
 
-  **One entry per constraint, whichever spelling states it.**  CxCore's two forward rules
+  **One entry per constraint, whichever spelling states it.**  core.txt's two forward rules
   derive `(interArgAndRest R 1 T)` from `(interArgs R T)` and `(interArgs R T)` from
   `(interArgAndRest R 1 T)`, so a KB that states either spelling holds both, and a KB
   without those rules holds the one it was told.  The entries are deduplicated on
@@ -1010,7 +1010,7 @@
 
   **`value-kinds`, not `value-kind`, and the difference is the sign-refined
   integers.**  `syntactic-type?` admits any type below a syntactic root, so
-  `positive_integer` — a part of CxCore's partitions of `integer` — is inside this
+  `positive_integer` — a part of core.txt's partitions of `integer` — is inside this
   check's domain and always was.  Judged by EDN kind alone the comparison ran the wrong
   way round, asking whether `integer` is below `positive_integer`, and refused every
   integer written in such a position (#55).  The shared reader answers the
@@ -1068,7 +1068,7 @@
 (defn- formula-head?
   "Does the compound `x`, written in an argument position, have a head the KB knows as a
   predicate — is it a `predication`, the other half of `non_atomic_expression`
-  (CxCore), rather than a function applied to terms?  A formula written as an argument is
+  (core.txt), rather than a function applied to terms?  A formula written as an argument is
   a sentence about its predicate's tuples, which that predicate's declarations do not
   type from here.  A head the KB has not classified is read as a function: its
   declarations are what it has, and a head with none convicts nothing.
@@ -1163,39 +1163,6 @@
   forcing it in would put that difference inside every reader of this map."
   '{arg genlArg, genlArg arg})
 
-(defn- tabled-arity
-  "The arity the `(arity P n)` **table** gives `pred` from `context`, or nil.
-
-  Read from the **taxonomy cache** (`tax/declared-arity`), which `(arity P n)`
-  maintains the way `(transitive P)` maintains its prop: this runs on every assertion,
-  and answering it from the index meant a retrieval and a filtered walk of every sentex
-  holding `pred` as its first argument — 16 candidates per assertion on an OpenCyc
-  load, 13.3M over it, nearly all finding nothing.  A declaration is not something to
-  re-derive per write.  One map read, which is why every arity question asks this one
-  first and the membership spelling second."
-  [kb pred context]
-  (let [n (tax/declared-arity (reasoning/taxonomy kb) pred context)]
-    (when (and (integer? n) (pos? n)) n)))
-
-(defn- membered-arity
-  "The arity `pred`'s own exact-class membership gives it, or nil — the second
-  spelling, read off the predicate's types (`types`, the shared per-assert reader), so it
-  costs the retrieval `arg` already needs for its arguments rather than one of its
-  own.  A retrieval where `tabled-arity` is a map read, which is the whole of why the two
-  are separate functions rather than one `or`: a caller asking about several predicates
-  wants the cheap half of the question asked of all of them first.
-
-  `first` over the roster is exact wherever CxCore is loaded: `(disjoint unary binary)`
-  and its two peers separate the relation-wide three and the six kind specializations
-  inherit that separation through their `genl` edges, so a relation reaches one number
-  however many of the nine spellings its closure holds.  The believed reading, through
-  any believed edge, not the arity nogood's (docs/taxonomy.md, \"Arity\")."
-  [types pred]
-  (let [cs (types pred)]
-    (first (for [[t n] tax/exact-arity-classes
-                 :when (kb/isa-among? cs t)]
-             n))))
-
 (defn- variable-arity?
   "Is `pred` declared `variable_arity`, from the vantage `types` reads with?
 
@@ -1204,39 +1171,6 @@
   between collections releases exactly as a directly asserted one does."
   [types pred]
   (kb/isa-among? (types pred) 'variable_arity))
-
-(defn- own-arity
-  "The arity `pred` **itself** is declared with, visible from `context`, or nil when the
-  KB has never said.  Both spellings, the table first because it is a map read, in the
-  believed reading (docs/taxonomy.md, \"Arity\")."
-  [kb pred context types]
-  (or (tabled-arity kb pred context)
-      (membered-arity types pred)))
-
-(defn- inherited-arity
-  "The arity `pred`'s **super-predicates** bind it to, as `[n via]`, or nil: the one
-  length every super-predicate visible from `context` that declares one agrees on, both
-  spellings read (`own-arity`), with `via` the content-first of them.  Nil when they
-  disagree, and when any super is `variable_arity`.  One membership read per super,
-  memoized per `types` reader."
-  [kb pred context types]
-  (let [tax    (reasoning/taxonomy kb)
-        supers (sort (disj (tax/genls tax pred context) pred))
-        pairs  (into [] (keep (fn [p] (when-let [n (own-arity kb p context types)] [p n])))
-                     supers)]
-    (when (and (seq pairs)
-               (= 1 (count (into #{} (map second) pairs)))
-               (not-any? #(variable-arity? types %) supers))
-      (let [[p n] (nth pairs 0)] [n p]))))
-
-(defn- declared-arity
-  "The arity binding `pred` in `context`, as `[n via]`, or nil when nothing does — its
-  own declaration where it has one (`via` is `pred`), else the one its super-predicates
-  agree on (`inherited-arity`)."
-  [kb pred context types]
-  (if-let [n (own-arity kb pred context types)]
-    [n pred]
-    (inherited-arity kb pred context types)))
 
 (defn- handle-namings
   "The handles of the matches that literally *say* `target`, in content order, else a
@@ -1295,8 +1229,8 @@
 
   Shared by every declaration kind, because `interArg` names **two** positions and both
   are the same mistake.  Open-world: a predicate whose arity the KB has never stated is
-  unconstrained — and the arity read is `declared-arity`'s, so a predicate that inherits
-  its length from a super-predicate has the position it lacks refused on the same
+  unconstrained — and the arity read is `arity/relation-length`, so a predicate that
+  inherits its length from a super-predicate has the position it lacks refused on the same
   grounds.
 
   **`variable_arity` releases it**, as it releases every other arm of the family.  Such a
@@ -1308,11 +1242,8 @@
 
   The release is read off **`pred`'s own memberships and nothing else**, which is
   `variable-arity?`'s definition and is the complete question here.  An inherited length
-  reaches this arm only through `inherited-arity`, which already declines to bind when any
-  super carries the mark — so a `via` that is not `pred` is a predicate the release was
-  asked of and refused, and asking it again would answer a settled question twice.  Asking
-  it of `via` *instead* is the reading that loses the case: the mark sits on the sub, which
-  is exactly where `inherited-arity` never looks.
+  reaches this arm only where no super carries the mark, since `relation-length` declines
+  to bind otherwise.
 
   `:via` names the predicate the length was read off.  **Both routes reach
   here** — a predicate held to a number it declared, and one held to a super's — so
@@ -1320,9 +1251,9 @@
   *takes* 2 arguments *through* `parentOf`.  Wording the second as a declaration would be
   false of a predicate nobody declared, and would send an author looking for one that does
   not exist."
-  [kb f pred n context types]
+  [kb f pred n types]
   (when (and (integer? n) (pos? n))
-    (when-let [[declared via] (declared-arity kb pred context types)]
+    (when-let [{declared :exact via :via} (arity/relation-length kb pred)]
       ;; the position the predicate does not have is the one the shared decision reads as
       ;; certainly-not-admitted — the same function `provers/AdmitsArgnumProver` answers, so
       ;; a position this arm refuses is one `(admitsArgnum pred n)` does not prove
@@ -1358,7 +1289,7 @@
   rule's ternary conclusion is convicted on the *derivation* path where a conviction
   is dropped and recorded rather than thrown, and the author is left holding a
   believed `arg1`/`arg2`/`arg3` fact whose real declaration the engine rejected — silently inert,
-  the exact trap CxCore's `quotedArg` note names.
+  the exact trap core.txt's `quotedArg` note names.
 
   Open-world throughout: each arm needs a declaration to contradict, so a predicate
   the KB has said nothing about is unconstrained."
@@ -1367,7 +1298,7 @@
     (cond
       (and ('{arg1 1, arg2 2, arg3 3} f) (= 2 (nm/arity sentence)) (symbol? pred))
       (let [pos ('{arg1 1, arg2 2, arg3 3} f)]
-        (or (some-> (arg-position-problem kb f pred pos context types)
+        (or (some-> (arg-position-problem kb f pred pos types)
                     (assoc :sentence sentence))
             (when (seq (res/matches-visible kb (list 'type_relation_predicate pred) context))
               {:type :arg-constraint-kind :sentence sentence :predicate pred
@@ -1376,8 +1307,8 @@
                              " (the binary projection of arg)")})))
 
       (and (= 'interArg f) (= 5 (nm/arity sentence)) (symbol? pred))
-      (some-> (or (arg-position-problem kb f pred n context types)
-                  (arg-position-problem kb f pred m context types)
+      (some-> (or (arg-position-problem kb f pred n types)
+                  (arg-position-problem kb f pred m types)
                   (when (seq (res/matches-visible kb (list 'type_relation_predicate pred) context))
                     {:type :arg-constraint-kind :predicate pred
                      :message (str pred " is declared type_relation_predicate, so its"
@@ -1385,8 +1316,8 @@
               (assoc :sentence sentence))
 
       (and (= 'argArg f) (= 3 (nm/arity sentence)) (symbol? pred))
-      (some-> (or (arg-position-problem kb f pred n context types)
-                  (arg-position-problem kb f pred (nth sentence 3) context types)
+      (some-> (or (arg-position-problem kb f pred n types)
+                  (arg-position-problem kb f pred (nth sentence 3) types)
                   (when (seq (res/matches-visible kb (list 'type_relation_predicate pred) context))
                     {:type :arg-constraint-kind :predicate pred
                      :message (str pred " is declared type_relation_predicate, so its"
@@ -1396,7 +1327,7 @@
       (and (contains? arg-constraint-kinds f) (= 3 (nm/arity sentence))
            (symbol? pred) (integer? n) (pos? n))
       (let [other (arg-constraint-kinds f)]
-        (or (some-> (arg-position-problem kb f pred n context types)
+        (or (some-> (arg-position-problem kb f pred n types)
                     (assoc :sentence sentence))
             (let [clash (if (= f 'arg) 'type_relation_predicate 'instance_relation_predicate)]
               (when (seq (res/matches-visible kb (list clash pred) context))
@@ -1930,7 +1861,7 @@
   *is* the sentence, so once one is stored it answers its own probe: asserting `(P a a)`
   a second time convicts it against the copy the first assert left, and content the KB
   already believes refuses rather than deduping to the handle it already has.  Asymmetry
-  does not hand you irreflexivity here — `CxCore.txt` says a self tuple is admitted, and
+  does not hand you irreflexivity here — `core.txt` says a self tuple is admitted, and
   `docs/taxonomy.md` and `docs/inherit.md` say it twice more — so admitting it once and
   refusing it forever after is neither reading.
 
@@ -2484,7 +2415,7 @@
   establishing it (`trigger-supports`, named under `:trigger`).  A suffix with no trigger
   draws nothing, which is `inter-arg-entailments`' reading of the trigger.  Each
   spelling's declaration supports its own derivation, so a stated declaration and its
-  CxCore-derived twin both justify the one record."
+  core.txt-derived twin both justify the one record."
   [kb sentence context types decls]
   (let [pred (nm/functor sentence)
         as   (vec (nm/args sentence))
@@ -3027,23 +2958,23 @@
   must be the same entrance."
   ([kb sentence context]
    (arg-position-violation kb sentence context (kb/membership-reader kb context)))
-  ([kb sentence context types]
+  ([kb sentence _context types]
    (let [chk            (checked-sentence kb sentence)
          [f pred n _ m] chk]
      (when (symbol? pred)
        (cond
          (and (= 'interArg f) (= 5 (nm/arity chk)))
-         (some-> (or (arg-position-problem kb f pred n context types)
-                     (arg-position-problem kb f pred m context types))
+         (some-> (or (arg-position-problem kb f pred n types)
+                     (arg-position-problem kb f pred m types))
                  (assoc :sentence chk))
 
          (and (= 'argArg f) (= 3 (nm/arity chk)))
-         (some-> (or (arg-position-problem kb f pred n context types)
-                     (arg-position-problem kb f pred (nth chk 3) context types))
+         (some-> (or (arg-position-problem kb f pred n types)
+                     (arg-position-problem kb f pred (nth chk 3) types))
                  (assoc :sentence chk))
 
          (and (contains? arg-constraint-kinds f) (= 3 (nm/arity chk)))
-         (some-> (arg-position-problem kb f pred n context types)
+         (some-> (arg-position-problem kb f pred n types)
                  (assoc :sentence chk)))))))
 
 (defn check-sentex-ground
@@ -3133,26 +3064,31 @@
 
 (defn forced-monotonic?
   "Is `literal` on the forced-monotonic roster (`decide/roster-literal?`, docs/nmtms.md,
-  \"The forced-monotonic roster\")."
-  [kb literal]
-  (decide/roster-literal? (reasoning/taxonomy kb) literal))
+  \"The forced-monotonic roster\"): over every reader, or under the roster reading `on?`."
+  ([kb literal] (decide/roster-literal? (reasoning/taxonomy kb) literal))
+  ([kb literal on?] (decide/roster-literal? (reasoning/taxonomy kb) literal on?)))
 
 (defn inert-denial?
-  "Is `sentence` a denial `(not S)` of a `forced-monotonic?` literal `S`.  The labeller
-  holds such a denial OUT (the `:out` forced set): it is never believed, forms no nogood
-  and fires no rule (docs/nmtms.md, \"The forced-monotonic roster\")."
+  "Is `sentence` a denial `(not S)` of a literal `S` on the global roster
+  (`decide/global-reading`).  The labeller holds such a denial OUT (the `:out` forced
+  set): it is never believed, forms no nogood and fires no rule.  A denial of a literal
+  on the roster by a declaration elsewhere is IN in the network, and a reader that sees
+  the declaration reads it inert (docs/nmtms.md, \"The forced-monotonic roster\")."
   [kb sentence]
-  (and (sx/negation? sentence) (forced-monotonic? kb (second sentence))))
+  (and (sx/negation? sentence)
+       (forced-monotonic? kb (second sentence) (decide/global-reading (reasoning/taxonomy kb)))))
 
 (defn off-roster-antecedents
   "The predicates of the stored rule `rule-sentex`'s antecedents that are not
-  `forced-monotonic?` literals, `unknown` antecedents aside, distinct and in antecedent
-  order: the predicates a `(forced_monotonic_predicate P)` declaration puts on the roster
-  for the rule's firings to conclude a roster literal."
-  [kb rule-sentex]
-  (into [] (comp (remove sx/unknown?) (remove #(forced-monotonic? kb %)) (map nm/functor)
-                 (distinct))
-        (:antecedent rule-sentex)))
+  `forced-monotonic?` literals (over every reader, or under the roster reading `on?`),
+  `unknown` antecedents aside, distinct and in antecedent order: the predicates a
+  `(forced_monotonic_predicate P)` declaration puts on the roster for the rule's firings
+  to conclude a roster literal."
+  ([kb rule-sentex] (off-roster-antecedents kb rule-sentex (partial decide/on-roster? (reasoning/taxonomy kb))))
+  ([kb rule-sentex on?]
+   (into [] (comp (remove sx/unknown?) (remove #(forced-monotonic? kb % on?)) (map nm/functor)
+                  (distinct))
+         (:antecedent rule-sentex))))
 
 (defn roster-rule?
   "Is the stored rule `rule-sentex` one whose firings conclude a roster literal as an
@@ -3169,27 +3105,42 @@
   concludes the ground sentence `conseq`, or nil when the firing is admitted.  A firing
   concluding a denial of a `forced-monotonic?` literal is convicted, and so is one
   concluding a roster literal unless its rule is a `roster-rule?` with no believed
-  `exceptWhen`.  A convicted firing is stored, held void (the `:void` forced set) and
-  reported, naming the rule's `off-roster-antecedents` (docs/nmtms.md, \"The
-  forced-monotonic roster\")."
+  `exceptWhen`.  A convicted firing is stored and held void (the `:void` forced set), and
+  the violation names the rule's `off-roster-antecedents` (docs/nmtms.md, \"The
+  forced-monotonic roster\").  The 3-arity reads the conclusion on the roster over every
+  reader: the entry `forced-conclusion-entries` reads for a firing void at some reader.
+  The 4-arity reads the conclusion under the roster reading `on?` (`network-void?`)."
+  ([kb rule-handle conseq]
+   (forced-conclusion-violation kb rule-handle conseq (partial decide/on-roster? (reasoning/taxonomy kb))))
+  ([kb rule-handle conseq on?]
+   (let [neg? (sx/negation? conseq)
+         body (if neg? (second conseq) conseq)]
+     (when (forced-monotonic? kb body on?)
+       (let [rsx (p/get-sentex (:records kb) rule-handle)]
+         (when (or neg? (nil? rsx) (not (roster-rule? kb rsx))
+                   (seq (provers/rule-exception-entries kb rule-handle)))
+           (let [off (if rsx (off-roster-antecedents kb rsx) [])]
+             {:violation :forced-conclusion
+              :detail    {:off-roster off
+                          :message    (str (pr-str conseq) " is not concluded: " (nm/functor body)
+                                           " is on the forced-monotonic roster, and a rule"
+                                           " concludes a roster literal only from roster"
+                                           " antecedents, with no unknown, exceptWhen or"
+                                           " set/defaultRule"
+                                           (when (seq off)
+                                             (str "; the antecedents off the roster are "
+                                                  (str/join ", " off))))}})))))))
+
+(defn network-void?
+  "Is a firing of the rule at `rule-handle` concluding `conseq` held void in the network
+  (the `:void` forced set): convicted with the conclusion read on the global roster
+  (`decide/global-reading`) and the antecedents on the union over every reader.  A
+  conclusion on the roster only by a declaration stated outside CxUniverse is valid in the
+  network, and the read walk voids the firing at a reader that sees the declaration
+  (`exc/roster-void`)."
   [kb rule-handle conseq]
-  (let [neg? (sx/negation? conseq)
-        body (if neg? (second conseq) conseq)]
-    (when (forced-monotonic? kb body)
-      (let [rsx (p/get-sentex (:records kb) rule-handle)]
-        (when (or neg? (nil? rsx) (not (roster-rule? kb rsx))
-                  (seq (provers/rule-exception-entries kb rule-handle)))
-          (let [off (if rsx (off-roster-antecedents kb rsx) [])]
-            {:violation :forced-conclusion
-             :detail    {:off-roster off
-                         :message    (str (pr-str conseq) " is not concluded: " (nm/functor body)
-                                          " is on the forced-monotonic roster, and a rule"
-                                          " concludes a roster literal only from roster"
-                                          " antecedents, with no unknown, exceptWhen or"
-                                          " set/defaultRule"
-                                          (when (seq off)
-                                            (str "; the antecedents off the roster are "
-                                                 (str/join ", " off))))}}))))))
+  (some? (forced-conclusion-violation kb rule-handle conseq
+                                      (decide/global-reading (reasoning/taxonomy kb)))))
 
 (defn forced-premise?
   "Does a premise mark on the stored sentex `sx` confer `:monotonic` in the labeller (the
@@ -3220,10 +3171,82 @@
     (let [sx (p/get-sentex (:records kb) h)]
       (when (rules/rule? sx) sx))))
 
+(defn- concluded-literal
+  "The literal the rule consequent `c` concludes, its `not` wrappers peeled."
+  [c]
+  (if (= 'not (nm/functor c)) (recur (second c)) c))
+
+(defn- declared-firings
+  "The ids of the firings of every stored rule that can conclude a predicate on the roster
+  by a declaration (`decide/declared`), or its denial, whose conclusion a reader that
+  sees an IN declaration of its predicate sees (`tax/contexts-seen-with-global`).  The
+  rules are those filed under the predicate's consequent key or the variable-consequent
+  key, and the rules under `not` whose concluded literal has that functor or a variable
+  one.  Read off the rule index and the unscoped `genlCx` closure in every context, since
+  `vaelii.core/violations` is a whole-KB report, so the cost is those rules' firings and
+  not the predicates' fact extent."
+  [kb]
+  (let [tax   (reasoning/taxonomy kb)
+        tms   (reasoning/tms kb)
+        decls (reduce-kv (fn [m [_ pred] hcs]
+                           (update m pred (fnil into #{})
+                                   (keep (fn [[h c]] (when (jtms/in? tms h) c))) hcs))
+                         {} (decide/declared tax))]
+    (when (seq decls)
+      (let [idx     (:index kb)
+            recs    (:records kb)
+            by-key  #(reads/as-stored-rules-by-consequent-global idx %)
+            negated (filter #(let [f (some->> (rule-sentex kb %) :consequent
+                                              concluded-literal nm/functor)]
+                               (or (sx/variable? f) (contains? decls f)))
+                            (by-key 'not))
+            rules   (-> #{}
+                        (into (mapcat by-key) (keys decls))
+                        (into (by-key p/var-consequent-key))
+                        (into negated))
+            ;; `[jid pred context]` of each firing concluding a declared predicate
+            firings (into [] (mapcat (fn [rh]
+                                       (keep #(let [j (jtms/justification tms %)
+                                                    c (when (= rh (:informant j))
+                                                        (p/get-sentex recs (:consequence j)))
+                                                    f (some-> c sx/sentence-of concluded-literal nm/functor)]
+                                                (when (contains? decls f) [% f (:context c)]))
+                                             (jtms/dependents tms rh))))
+                          rules)
+            seen    (into {} (map (fn [[f fs]]
+                                    (let [xs (into #{} (map peek) fs)]
+                                      [f (into #{} (mapcat #(tax/contexts-seen-with-global tax % xs))
+                                               (decls f))])))
+                          (group-by second firings))]
+        (into [] (keep (fn [[jid f x]] (when (contains? (seen f) x) jid))) firings)))))
+
+(defn forced-conclusion-entries
+  "The `:forced-conclusion` violations of the stored firings `forced-conclusion-violation`
+  convicts over every reader, read off the stored state: the firings the network holds
+  void (the `:void` forced set), and the `declared-firings`, which a reader that sees the
+  declaration reads void.  Each entry is the violation with `:sentence` the conclusion's
+  stored spelling, `:context` its context and `:rule` the rule's handle, and carries no
+  `:run`.  Equal entries are one; the order is content order of the conclusion, its
+  context and the rule's sentence, never a handle's."
+  [kb]
+  (let [tms  (reasoning/tms kb)
+        recs (:records kb)]
+    (->> (into (set (jtms/forced-members tms :void)) (declared-firings kb))
+         (into #{} (keep (fn [jid]
+                           (let [j  (jtms/justification tms jid)
+                                 rh (:informant j)
+                                 c  (some->> (:consequence j) (p/get-sentex recs))]
+                             (when (and c (integer? rh))
+                               (let [s (sx/sentence-of c)]
+                                 (some-> (forced-conclusion-violation kb rh s)
+                                         (assoc :sentence s :context (:context c) :rule rh))))))))
+         (nm/sort-by-content-key (fn [e] [(:sentence e) (:context e)
+                                          (some-> (p/get-sentex recs (:rule e)) sx/sentence-of)]))
+         vec)))
+
 (defn- forcing-moves
   "Add to `acc` the forced memberships that move for the stored sentex `sx` and for the
-  firings that conclude it or that its rule informs, as `{[kind on?] [id …]}`, and the
-  report of each firing newly held void under `[:report]`."
+  firings that conclude it or that its rule informs, as `{[kind on?] [id …]}`."
   [kb acc sx]
   (let [tms  (reasoning/tms kb)
         recs (:records kb)
@@ -3234,13 +3257,8 @@
                    acc
                    (update acc [kind on?] (fnil conj []) id))))
         void (fn [acc jid rh conclusion]
-               (let [v (forced-conclusion-violation kb rh (:sentence conclusion))
-                     acc (put acc :void jid v)]
-                 (if (and v (not (jtms/forced? tms :void jid)))
-                   (update acc [:report] (fnil conj [])
-                           (assoc v :sentence (:sentence conclusion)
-                                  :context (:context conclusion) :rule rh))
-                   acc)))
+               (put acc :void jid (and (forced-conclusion-violation kb rh (:sentence conclusion))
+                                       (network-void? kb rh (:sentence conclusion)))))
         acc  (put acc :mono h (forced-premise? sx))]
     (if (rules/rule? sx)
       ;; a firing is read only when its conclusion can be on the roster now, or when it
@@ -3269,27 +3287,37 @@
 
 (defn force-sentexes!
   "Rewrite the network's forced memberships for the stored sentexes `sxs` and the
-  firings each concludes or informs, from the roster as it stands, and report each firing
-  newly held void.  The relabel each set change runs is the whole recompute: nothing
-  stored is written or deleted.  Answers whether any membership moved."
+  firings each concludes or informs, from the roster as it stands.  It logs nothing: the
+  chainer logs a convicted firing once, as its justification is added.  The relabel each
+  set change runs is the whole recompute: nothing stored is written or deleted.  Answers
+  whether any membership moved."
   [kb sxs]
   (let [tms   (reasoning/tms kb)
         moves (reduce #(forcing-moves kb %1 %2) {} sxs)]
-    (doseq [[[kind on?] ids] (dissoc moves [:report])]
+    (doseq [[[kind on?] ids] moves]
       (jtms/set-forced tms kind ids on?))
-    (violations/report kb (get moves [:report]))
-    (boolean (seq (dissoc moves [:report])))))
+    (boolean (seq moves))))
 
 (defn force-reach!
-  "Rewrite the forced memberships over what `pred` reaches — every stored sentex
-  mentioning it (its literals, their denials, the rules reading or concluding it) and
-  their firings — after `pred` joins or leaves the roster (docs/nmtms.md, \"The
-  forced-monotonic roster\").  Answers the handles of the rules in that reach, which a
-  firing swept while it was held void is restored from by a re-join."
-  [kb pred]
-  (let [sxs (into [] (kb/find-sentexes kb pred))]
-    (force-sentexes! kb sxs)
-    (into [] (comp (filter rules/rule?) (map :id)) sxs)))
+  "Rewrite the forced memberships over what `pred` reaches after it joins or leaves the
+  roster (docs/nmtms.md, \"The forced-monotonic roster\"), and answer the handles of the
+  rules in that reach, which a firing swept while it was held void is restored from by a
+  re-join.  `global?` names a move of the global roster (`decide/global?`): the reach is
+  every stored sentex mentioning `pred` (its literals, their denials, the rules reading
+  or concluding it) and their firings.  A declaration elsewhere moves no denial's `:out`
+  membership, so its reach is the rules reading or concluding `pred`, the rules with a
+  variable consequent among them, and their firings: flat in `pred`'s facts.  Both read
+  every context, since the forced sets are network state, the union over every reader."
+  ([kb pred] (force-reach! kb pred true))
+  ([kb pred global?]
+   (let [idx (:index kb)
+         sxs (if global?
+               (into [] (kb/find-sentexes kb pred))
+               (into [] (comp (distinct) (keep #(p/get-sentex (:records kb) %)))
+                     (concat (reads/as-stored-rules-by-antecedent-global idx pred)
+                             (res/concluding-rule-handles kb pred))))]
+     (force-sentexes! kb sxs)
+     (into [] (comp (filter rules/rule?) (map :id)) sxs))))
 
 (defn force-roster!
   "Write every forced membership the stored content takes under the roster:
@@ -3305,7 +3333,8 @@
                          preds))]
     (force-sentexes! kb sxs)
     (doseq [{h :id s :sentence} sxs
-            :when (and (inert-denial? kb s) (not (jtms/premise? tms h))
+            :when (and (sx/negation? s) (forced-monotonic? kb (second s))
+                       (not (jtms/premise? tms h))
                        (empty? (jtms/supports tms h)))]
       (p/mark-premise (:records kb) h :default)
       (jtms/add-premise tms h :default))))
@@ -3762,7 +3791,7 @@
 ;; name kinds.  So a position is type-level when a `genlArg` names it **or** when its
 ;; predicate is a `type_relation_predicate` — which is how `genl`'s second argument is
 ;; constrained at all.  That position carries no declaration of its own, deliberately
-;; (see CxCore), and the relation kind is what says what it holds.
+;; (see core.txt), and the relation kind is what says what it holds.
 ;;
 ;; **Instance constraint against instance constraint, and nothing else.**  `(disjoint T
 ;; U)` says the two types share no instance, which is exactly what two such constraints

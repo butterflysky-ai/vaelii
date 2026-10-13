@@ -286,7 +286,7 @@
 
 (defn- descension-clashes
   "The members' sentences of every standing `:arity-descension` pair, as a set of sets.
-  Both readings: with CxCore's roster declarations the bindings are `:monotonic` and the
+  Both readings: with CxUniverse's roster declarations the bindings are `:monotonic` and the
   pair is a hard clash in `conflicts`, and on a bare KB they are `:default` and the pair
   is a dilemma in `contradictions`."
   [kb]
@@ -311,7 +311,7 @@
 (tu/deftest-kb a-signature-on-the-sub-predicate-must-match-the-supers
   ;; What the edge asserts is why: `(genl fatherOf parentOf)` says every `fatherOf` tuple
   ;; **is** a `parentOf` tuple, and tuples of different lengths are not the same tuples.
-  ;; Every member is on the forced-monotonic roster, so under CxCore the pair is a hard
+  ;; Every member is on the forced-monotonic roster, so under CxUniverse the pair is a hard
   ;; clash: stored and reported whichever of its three sentences arrives last.
   (let [ingredients [:edge :super-declaration :sub-declaration]]
     (doseq [last-in ingredients]

@@ -511,7 +511,7 @@
 (tu/deftest-kb recover-keeps-a-denial-of-an-equation-instance-inert
   ;; A denial of a roster literal is a record with no premise mark, and `recover` premises
   ;; what the store marks, so the denial stays inert after a restart and the equation
-  ;; rewrites the denied instance as it did before.  This KB loads no CxCore, so the
+  ;; rewrites the denied instance as it did before.  This KB loads no upper layer, so the
   ;; test puts `equals` on the roster itself.
   (tu/with-terms [pp gpp chainR Nn Mm]
     (v/assert kb '(forced_monotonic_predicate equals) 'CxUniverse)
@@ -532,7 +532,7 @@
         (is (= [true false false true true] (reads kb2)) "after recover")))))
 
 (tu/deftest-kb a-store-with-no-roster-declarations-recovers-under-the-engine-baseline
-  ;; this KB loads no CxCore and declares no roster: the engine's baseline alone holds a
+  ;; this KB loads no upper layer and declares no roster: the engine's baseline alone holds a
   ;; denial of an equality OUT, and a roster literal reads back at its written strength
   (tu/with-terms [likes Ann Bob]
     (let [same   (v/assert kb (list 'sameAs Ann Bob) 'CxUniverse)

@@ -12,7 +12,7 @@
 
 (use-fixtures :each (tu/neutral-fresh
                      #(doto (tu/fresh)
-                        (tu/load-core-with! '[[CxSpace "upper"]])
+                        (tu/load-core!)
                         (v/add-prover (dir/orientation-prover)))))
 
 (def ^:private C 'CxUniverse)

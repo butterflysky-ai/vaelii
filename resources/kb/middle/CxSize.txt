@@ -29,7 +29,7 @@
 ;; objects is a great many facts nobody asked for.
 ;;
 ;; The measures are not the only route in. `heavierThan` and `tallerThan` are declared
-;; transitive (CxMeasure), so two *stated* comparisons compose into a third by the
+;; transitive (measure.txt), so two *stated* comparisons compose into a third by the
 ;; closure prover with no weight or height anywhere — which is how a common-sense KB
 ;; usually knows an elephant outweighs a mouse. The two routes agree where both answer,
 ;; since a chain of strict measure comparisons is itself a strict measure comparison.

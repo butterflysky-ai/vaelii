@@ -14,7 +14,10 @@
 # (scripts/lib/start.sh).
 #
 # An edit under src shows on the next page refresh, and a KB loaded before it keeps
-# answering. This script is the only thing that turns hot reload on (VAELII_DEV=1 below);
+# answering. An edit to a file under resources/kb/upper/ or resources/kb/middle/ is
+# synced into every loaded KB by a job the next request starts, and a write to the
+# starter KB is written back into those files. This script is the only thing that turns
+# hot reload on (VAELII_DEV=1 below);
 # `lein browser` alone and a served process never reload. An edit inside a protocol,
 # record or type definition, or to a held namespace, takes a restart, and every page names
 # it until then (docs/web.md).

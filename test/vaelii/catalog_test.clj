@@ -1070,25 +1070,44 @@
         (cat/unload! "mine")
         (is (nil? (cat/entry "mine")))))))
 
-(deftest a-loaded-dump-has-its-shipped-spindle-brought-to-this-engine
-  ;; a starter KB whose CxCore holds a premise this engine does not ship, exported the
+(deftest every-loaded-kb-is-synced-by-one-job
+  ;; what the development browser submits when a shipped KB file changes on disk
+  (let [kb (doto (v/open-kb {:backend :memory :space (beside-the-block ::sync-loaded)
+                             :recover? false})
+             (tu/clear-kb!)
+             (tu/load-starter!))]
+    (try
+      (v/assert kb '(unary_predicate shipped_retired_kind) 'CxUniverse)
+      (cat/register! "mine" "My KB" kb {:source (cat/source "starter")})
+      (let [job (cat/sync-loaded!)]
+        (is (some? job))
+        (jobs/wait job 120000)
+        (is (= {:added 0 :removed 1 :refused []} (:sync (cat/entry "mine"))))
+        (is (nil? (v/handle-of kb '(unary_predicate shipped_retired_kind) 'CxUniverse))))
+      (cat/unload! "mine")
+      (testing "no entry, no job"
+        (is (nil? (cat/sync-loaded!))))
+      (finally (tu/clear-kb! kb)))))
+
+(deftest a-loaded-dump-has-its-shipped-contexts-brought-to-this-engine
+  ;; a starter KB whose CxUniverse holds a premise this engine does not ship, exported the
   ;; way an older build's KB would arrive: the load syncs it while the entry is running
-  (let [dir (str (System/getProperty "java.io.tmpdir") "/vaelii-catalog-spindle-" (System/nanoTime))
-        kb  (doto (v/open-kb {:backend :memory :space (beside-the-block ::spindle) :recover? false})
+  (let [dir (str (System/getProperty "java.io.tmpdir") "/vaelii-catalog-shipped-" (System/nanoTime))
+        kb  (doto (v/open-kb {:backend :memory :space (beside-the-block ::shipped) :recover? false})
               (tu/clear-kb!)
               (tu/load-starter!))]
     (try
-      (v/assert kb '(unary_predicate spindle_retired_kind) 'CxCore)
+      (v/assert kb '(unary_predicate shipped_retired_kind) 'CxUniverse)
       (v/export! kb dir {})
       (let [key (cat/load-dir dir {:belief? :rebuild})]
         ;; 15 min: the load imports a starter-sized dump and rebuilds its belief, and the
-        ;; spindle sync loads the starter again into a scratch KB (`spindle/shipped`)
+        ;; sync loads the starter again into a scratch KB (`sync/premises`)
         (is (wait-for 900000))
         (let [e      (cat/entry key)
               loaded (:kb e)]
           (is (= :done (:status (#'cat/with-job e))))
-          (is (= {:added 0 :removed 1 :refused []} (:spindle e)))
-          (is (nil? (v/handle-of loaded '(unary_predicate spindle_retired_kind) 'CxCore)))
+          (is (= {:added 0 :removed 1 :refused []} (:sync e)))
+          (is (nil? (v/handle-of loaded '(unary_predicate shipped_retired_kind) 'CxUniverse)))
           (cat/unload! key)))
       (finally
         (tu/clear-kb! kb)

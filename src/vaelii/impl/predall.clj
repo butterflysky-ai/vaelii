@@ -2,7 +2,7 @@
 ;; Copyright © 2026 Vaelii LLC and the Vaelii contributors.
 (ns vaelii.impl.predall
   "The *Specified* half of the predAll / predExists / predInstance / predSpecified matrix
-  (docs/predall.md, resources/kb/CxCore.txt).
+  (docs/predall.md, resources/kb/upper/core.txt).
 
   Reached from outside through `vaelii.core/specified-violations` and
   `vaelii.core/all-specified-violations`, which are thin delegations to the readers here.
@@ -22,7 +22,7 @@
   back the violations, the way a solve-time report does.
 
   **Indeterminate = the `indeterminate_term` category.**  A filler counts as determinate
-  unless it is a member of the extensible `indeterminate_term` collection (CxCore.txt).
+  unless it is a member of the extensible `indeterminate_term` collection (core.txt).
   Skolem constants are its built-in first member — a reified NAT whose expression is a
   `SkolemFn` application (docs/skolem.md), detected structurally because a skolem's
   membership is never a stored fact — and a further kind is added with
@@ -37,7 +37,7 @@
 
 (defn indeterminate-term?
   "Is `term` an **indeterminate** filler in `ctx` — a member of the extensible
-  `indeterminate_term` category (CxCore.txt)?  A skolem constant is the built-in first
+  `indeterminate_term` category (core.txt)?  A skolem constant is the built-in first
   member, read off its `SkolemFn` minting expression because a skolem's membership is
   never a stored fact; a further kind added with `(genl NewKind indeterminate_term)` is
   picked up through ordinary collection membership.
@@ -67,7 +67,7 @@
   `cp` whose declarations bind a `pred` tuple** (`res/constraining-predicates`: `pred`
   itself plus the super-predicates its `genl` closure reaches, the same union
   `checks/declaration-reader` realizes for the assert-time checker), plus one
-  `:type-position` entry when `pred` is a believed `type_relation_predicate` — CxCore's
+  `:type-position` entry when `pred` is a believed `type_relation_predicate` — core.txt's
   note beside `genl`: \"the position is not thereby unconstrained: genl is a
   type_relation_predicate, which says of every one of its positions what genlArg says
   of one.\"

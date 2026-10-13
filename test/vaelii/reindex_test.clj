@@ -6,10 +6,15 @@
   did before the index was destroyed."
   (:require [clojure.test :refer [deftest is testing]]
             [vaelii.core :as v]
+            [vaelii.impl.columnar :as columnar]
+            [vaelii.impl.memory :as mem]
             [vaelii.impl.protocols :as p]
             [vaelii.impl.reads :as reads]
             [vaelii.impl.reindex :as reindex]
-            [vaelii.test-util :as tu]))
+            [vaelii.impl.sentex :as sx]
+            [vaelii.test-util :as tu])
+  (:import (com.sun.management ThreadMXBean)
+           (java.lang.management ManagementFactory)))
 
 (deftest reindex-rebuilds-a-destroyed-index
   (tu/with-cleared-kb [kb tu/fresh]
@@ -65,3 +70,44 @@
         (v/recover kb)
         (testing "and both survive a rebuild from the records alone"
           (is (= before (snap))))))))
+
+;; ---- the allocation of an index write ----------------------------------------
+
+(def ^:private ^ThreadMXBean thread-mx (ManagementFactory/getThreadMXBean))
+
+(defn- bytes-per-sentex
+  "Bytes this thread allocates per sentex over `index-one!` of every `[sentex handle]` in
+  `sxs` into a cleared `store`, after four unmeasured passes.  The store is cleared again
+  before the result returns, so the test leaves its space as it found it."
+  [store sxs]
+  (let [pass (fn []
+               (p/clear-index! store)
+               (let [a (.getCurrentThreadAllocatedBytes thread-mx)]
+                 (doseq [[s h] sxs] (reindex/index-one! store s h))
+                 (- (.getCurrentThreadAllocatedBytes thread-mx) a)))]
+    (try
+      (dotimes [_ 4] (pass))
+      (quot (long (pass)) (count sxs))
+      (finally (p/clear-index! store)))))
+
+(deftest a-reindexed-sentex-allocates-no-op-vector-per-family
+  ;; `flat-family-adds` conjes each family's ops onto the store's one transient batch, so
+  ;; a write allocates no vector per family.  Bytes per sentex over this corpus are
+  ;; 27.5 KB on `KvIndexStore` over the memory backend and 18.6 KB on the columnar store
+  ;; on JDK 25 (compact object headers, project.clj), and 29.3 KB and 20.6 KB on JDK 17.
+  ;; The budgets are 34000 and 24000; a per-family vector costs 37.0 KB and 27.5 KB on
+  ;; JDK 25, over both.
+  (let [n   600
+        ind #(symbol (str "Ind" %))
+        sxs (into []
+                  (map-indexed (fn [i s] [s (inc i)]))
+                  (for [i (range n)
+                        s (cond-> [(sx/sentex (list 'dog (ind i)) 'CxUniverse)
+                                   (sx/sentex (list 'parentOf (ind i) (ind (mod (* 7 i) n))) 'CxUniverse)
+                                   (sx/sentex (list 'likes (ind i) (list 'friendOf (ind (inc i)))) 'CxUniverse)]
+                            (zero? (mod i 5)) (conj (sx/sentex (list 'not (list 'dog (ind i))) 'CxUniverse)))]
+                    s))]
+    (is (< (long (bytes-per-sentex (mem/memory-index-store {:space 83}) sxs)) 34000)
+        "KvIndexStore, bytes per sentex")
+    (is (< (long (bytes-per-sentex (columnar/columnar-index-store {:space 83}) sxs)) 24000)
+        "ColumnarIndexStore, bytes per sentex")))

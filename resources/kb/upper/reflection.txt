@@ -1,13 +1,12 @@
-;; CxReflection — the language the KB is written in, as something the KB can talk about:
+;; reflection.txt — the language the KB is written in, as something the KB can talk about:
 ;; the expression lattice (what a sentence is built out of, from symbols and values up to
 ;; formulas and sentences, cut by open/closed and well-formed/ill-formed) and the
 ;; use/mention vocabulary (proposition, means, denotes, expresses) that relates an
-;; expression to what it says or names. Sees CxCore; CxUniverse sees it, so a declaration
-;; over an expression kind is readable from every context below the upper spindle.
+;; expression to what it says or names. Loaded into CxUniverse with the rest of kb/upper/.
 ;;
-;; CxCore keeps the expression kinds the engine or CxCore's own declarations name — symbol,
-;; the value kinds, unrepresented_term, formula, sentence and non_atomic_term — and
-;; linguistic, which language sits under. This context places them in the lattice.
+;; core.txt keeps the expression kinds the engine or core.txt's own declarations name —
+;; symbol, the value kinds, unrepresented_term, formula, sentence and non_atomic_term — and
+;; linguistic, which language sits under. This file places them in the lattice.
 ;;
 ;; The engine reads a form's kinds off its spelling (provers/shape-kinds): a variable, a
 ;; symbol, a value, and for a compound open or closed, a formula under a connective or
@@ -16,13 +15,10 @@
 ;; declaration does not read them. Whether (R a) is a predication or a non_atomic_term is
 ;; R's stored kind, which the spelling does not say, and no reader decides it.
 
-(genlCx CxReflection CxCore)
-(genlCx CxUniverse CxReflection)
-
 ;; The ladder is the standard one, and the docs are held to it (docs/naming.md's reserved
 ;; words).  A PREDICATION is a predicate applied to terms.  A CLOSED_PREDICATION is a
 ;; closed predication.  A LITERAL is a predication or its negation.  formula and sentence
-;; are CxCore's.
+;; are core.txt's.
 ;;
 ;; A NON_ATOMIC_EXPRESSION is an expression with parts: an operator applied to arguments,
 ;; (op a1 a2 ...), the one compound form KB text writes.  A formula and a non_atomic_term

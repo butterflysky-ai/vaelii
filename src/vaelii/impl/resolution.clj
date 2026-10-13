@@ -31,19 +31,22 @@
 
 (def no-bindings {})
 
-;; unify and unify-var are mutually recursive (a bound variable is chased back
-;; through unify), so one forward declaration is genuinely required here.
-(declare unify-var)
+;; unify, unify-args and unify-var are mutually recursive (a term's arguments unify as a
+;; sequence, each element as a term, and a bound variable is chased back through unify),
+;; so one forward declaration is genuinely required here.
+(declare unify-args unify-var)
 
 (defn- dot-tail
   "The remaining sequence a dotted rest-variable binds to, as a canonical list."
   [y] (if (sequential? y) (apply list y) (list y)))
 
 (defn unify
-  "Unify x and y under `bindings`, returning an extended binding map or nil.
-  Supports dotted rest patterns: a sublist `(. ?rest)` binds `?rest` to the whole
-  remaining sequence, so `(?pred . ?args)` unifies with `(parentOf Tom Bob)` giving
-  `?pred=parentOf`, `?args=(Tom Bob)`."
+  "Unify terms x and y under `bindings`, returning an extended binding map or nil.
+  A `(Quote X)` form (`sx/quote-form?`) is a constant: it unifies with a variable or with
+  an equal form, and a variable inside it binds nothing.  Supports dotted rest patterns:
+  a sublist `(. ?rest)` binds `?rest` to the whole remaining sequence, so
+  `(?pred . ?args)` unifies with `(parentOf Tom Bob)` giving `?pred=parentOf`,
+  `?args=(Tom Bob)`."
   ([x y] (unify x y no-bindings))
   ([x y bindings]
    (cond
@@ -51,13 +54,26 @@
      (= x y)          bindings
      (sx/variable? x) (unify-var x y bindings)
      (sx/variable? y) (unify-var y x bindings)
-     (and (sequential? x) (= '. (first x))) (unify-var (second x) (dot-tail y) bindings)
-     (and (sequential? y) (= '. (first y))) (unify-var (second y) (dot-tail x) bindings)
-     (and (sequential? x) (sequential? y) (seq x) (seq y))
-     (unify (rest x) (rest y) (unify (first x) (first y) bindings))
-     (and (sequential? x) (sequential? y) (empty? x) (empty? y))
+     (or (sx/quote-form? x) (sx/quote-form? y)) nil
+     :else            (unify-args x y bindings))))
+
+(defn unify-args
+  "Unify two argument sequences element by element, each element as a term (`unify`).
+  The entry point for a caller holding argument lists, such as `(rest literal)`, rather
+  than terms: the list `(Quote X)` is a quoted form as a term and the symbol `Quote`
+  followed by X as an argument list."
+  ([xs ys] (unify-args xs ys no-bindings))
+  ([xs ys bindings]
+   (cond
+     (nil? bindings) nil
+     (= xs ys)       bindings
+     (and (sequential? xs) (= '. (first xs))) (unify-var (second xs) (dot-tail ys) bindings)
+     (and (sequential? ys) (= '. (first ys))) (unify-var (second ys) (dot-tail xs) bindings)
+     (and (sequential? xs) (sequential? ys) (seq xs) (seq ys))
+     (unify-args (rest xs) (rest ys) (unify (first xs) (first ys) bindings))
+     (and (sequential? xs) (sequential? ys) (empty? xs) (empty? ys))
      bindings
-     :else            nil)))
+     :else           nil)))
 
 (defn- occurs?
   "Does variable `v` occur in `x`, resolving `x`'s variables through `bindings`?  The
@@ -66,13 +82,15 @@
   acyclic bindings — loops on it.  Resolves each variable inline rather than
   substituting `x` whole first, so it needs no forward reference to `substitute` and
   stops at the first occurrence.  Terminates because every prior binding was itself
-  occurs-checked, so `bindings` is acyclic."
+  occurs-checked, so `bindings` is acyclic.  A `(Quote X)` form holds no occurrence,
+  since `unify` reads its variables as constants."
   [v x bindings]
   (cond
-    (sx/variable? x) (or (= v x)
-                         (when-let [b (get bindings x)] (occurs? v b bindings)))
-    (sequential? x)  (boolean (some #(occurs? v % bindings) x))
-    :else            false))
+    (sx/variable? x)     (or (= v x)
+                             (when-let [b (get bindings x)] (occurs? v b bindings)))
+    (sx/quote-form? x)   false
+    (sequential? x)      (boolean (some #(occurs? v % bindings) x))
+    :else                false))
 
 (defn- unify-var [v x bindings]
   (if-let [bound (get bindings v)]
@@ -85,7 +103,9 @@
 (defn substitute
   "Replace bound variables in a pattern with their values (recursively).  A dotted
   rest pattern `(head ... . ?rest)` is spliced: the substituted tail is concatenated
-  in, so `(?pred . ?args)` with `?args=(Tom Bob)` becomes `(parentOf Tom Bob)`.
+  in, so `(?pred . ?args)` with `?args=(Tom Bob)` becomes `(parentOf Tom Bob)`.  A
+  `(Quote X)` form comes back whole: a variable inside it is part of the quoted
+  expression, which `unify` never binds.
 
   **Eager, and a `PersistentList`.**  This is the innermost function on every join, every
   rule expansion and every proof hop, and what it builds goes straight into
@@ -100,6 +120,7 @@
     (sx/variable? pattern) (if-let [b (get bindings pattern)]
                              (substitute b bindings)
                              pattern)
+    (sx/quote-form? pattern) pattern
     (and (sequential? pattern) (some #{'.} pattern))
     (let [head (mapv #(substitute % bindings) (take-while #(not= '. %) pattern))
           tail (substitute (second (drop-while #(not= '. %) pattern)) bindings)]
@@ -391,7 +412,7 @@
            ff (when (sequential? f) (first f))]
        (if (and (symbol? af) (not (sx/variable? af)) (symbol? ff) (not= af ff)
                 (contains? (tax/genls (reasoning/taxonomy kb) af context) ff))
-         (unify (rest a) (rest f))                    ; genl of the body: unify the arguments
+         (unify-args (rest a) (rest f))               ; genl of the body: unify the arguments
          (unify antecedent fact)))
 
      (and (unary? antecedent) (unary? fact))
@@ -409,7 +430,7 @@
            ff (when (sequential? fact) (first fact))]
        (if (and (symbol? af) (not (sx/variable? af)) (symbol? ff) (not= af ff)
                 (contains? (tax/specs (reasoning/taxonomy kb) af context) ff))
-         (unify (rest antecedent) (rest fact))        ; sub-predicate: unify the arguments
+         (unify-args (rest antecedent) (rest fact))   ; sub-predicate: unify the arguments
          (unify antecedent fact))))))
 
 (defn subsuming-unify
@@ -454,7 +475,7 @@
               (symbol? cf) (not (sx/variable? cf))
               (not= gf cf)
               (contains? (reach (reasoning/taxonomy kb) gf context) cf))
-       (unify (rest g) (rest c) bindings)
+       (unify-args (rest g) (rest c) bindings)
        (unify goal consequent bindings)))))
 
 (defn concluding-rule-handles
@@ -1083,7 +1104,7 @@
 (defn uniform-marks?
   "Does every reader believe every mark in `entries` (`mark-entries`): each has a
   supporter `held-everywhere?`?  The four permuting marks are read from every context
-  (docs/contexts.md, \"A context outside the spindle\"), so only a defeat or an except
+  (docs/contexts.md, \"A context outside the topology\"), so only a defeat or an except
   makes two readers read one fact differently."
   [kb entries]
   (every? (fn [[_ sup]] (some #(held-everywhere? kb %) (keys sup))) entries))

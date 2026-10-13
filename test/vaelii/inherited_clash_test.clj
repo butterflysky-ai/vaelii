@@ -267,6 +267,45 @@
     (testing "and a resolved contradiction is reported by neither reading"
       (is (empty? (inherited-reports kb))))))
 
+(defn- orders
+  "Every ordering of `xs`."
+  [xs]
+  (if (empty? xs) [()] (for [x xs, more (orders (remove #{x} xs))] (cons x more))))
+
+(defn- placed-about
+  "The member sentences of each stored sentence of functor `f` that names a sentex about
+  `pred`, as a set of sets with `renames` applied."
+  [kb f pred renames]
+  (into #{}
+        (comp (map (fn [sx] (into #{} (keep #(some->> (v/handle-id %) (v/sentex kb) :sentence))
+                                  (rest (:sentence sx)))))
+              (filter (fn [ss] (some #(= pred (if (= 'not (first %)) (first (second %)) (first %))) ss)))
+              (map #(walk/postwalk-replace renames %)))
+        (v/sentexes-with-functor kb f)))
+
+(tu/deftest-kb a-declared-stored-claim-reads-and-stores-alike-in-every-arrival-order
+  ;; The known-true reading of an inherited negation clashes with a :default stored claim
+  ;; of `carriesLoad`, which a declaration in the clash's own context puts on the roster.
+  ;; The stored claim is never the loser there, so it stays believed, and the placed
+  ;; sentences are the same whether the declaration arrives first or last.
+  (let [readings
+        (vec (for [order (orders [:decl :general :stored])]
+               (tu/with-terms [carriesLoad hauler_kind cart_kind]
+                 (vocabulary! kb {:pred carriesLoad :hauler hauler_kind :cart cart_kind})
+                 (let [stored  (list carriesLoad cart_kind 'Bone1)
+                       renames {carriesLoad 'P hauler_kind 'H cart_kind 'C}
+                       writes  {:decl    #(v/assert kb (list 'forced_monotonic_predicate carriesLoad) U)
+                                :general #(v/assert kb (list 'not (list carriesLoad hauler_kind 'Bone1))
+                                                    U mono)
+                                :stored  #(v/assert kb stored U)}]
+                   (doseq [k order] ((writes k)))
+                   [(vec order)
+                    [(v/ask? kb stored U)
+                     (placed-about kb 'defeat carriesLoad renames)
+                     (placed-about kb 'contradicts carriesLoad renames)]]))))]
+    (is (= 1 (count (distinct (map second readings)))) (pr-str readings))
+    (is (true? (first (second (first readings)))) "the declared stored claim is believed")))
+
 (tu/deftest-kb two-known-true-claims-are-an-irreducible-conflict
   ;; Both stored claims known-true, and the reading between them too: nothing may be
   ;; defeated, so it is a clash the engine hands back — a contradiction like any other.

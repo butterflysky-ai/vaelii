@@ -5,7 +5,7 @@
 ;; one, and a context under both CxWell and this one reads the everyday theories at room
 ;; temperature.
 ;;
-;; CxAbstract places solid, liquid, gas and plasma under substance and separates them,
+;; abstract.txt places solid, liquid, gas and plasma under substance and separates them,
 ;; and says nothing about which substance is in which state. A substance's state depends
 ;; on its temperature and pressure, so the state belongs to a theory that fixes the
 ;; conditions. This theory fixes the ordinary ones: a room, a kitchen, a street on a mild

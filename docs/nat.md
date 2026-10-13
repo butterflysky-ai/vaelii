@@ -232,7 +232,7 @@ unreifiable NAT the calendar clock computed from the year's fields
 materialized result type, no handle, so there is no orphan question to ask about it and no
 retraction that could take it back. It is a value in a binding map and lives exactly as
 long as the answer does. Asserting a sentence that *contains* one is an ordinary assert,
-and `(result InstantFn time_point)` in `CxTime` is what types it there — the same one
+and `(result InstantFn time_point)` in `time.txt` is what types it there — the same one
 declaration binding the computed term and the typed one.
 
 ```clojure
@@ -330,7 +330,7 @@ correspondence has. A value in any other position needs the explicit form —
 `(functionCorrespondingPredicate StreetCornerFn streetCornerOf 1)`, so
 `(StreetCornerFn Xing North)` is the `Lot` of `(streetCornerOf Lot Xing North)`.
 
-The example is the shipped one: `resources/kb/upper/CxLife.txt` states `motherOf` and
+The example is the shipped one: `resources/kb/upper/life.txt` states `motherOf` and
 `fatherOf` with `MotherFn` and `FatherFn` beside them, so a KB that loads the starter can
 name somebody by their role before it knows their name.
 
@@ -586,7 +586,7 @@ comes first (`nat/reconcile-nats!`).
 - `vaelii.impl.wff` — `function-decl-problems`, `correspondence-problems`, the
   `:opaque` role a minted constant carries through the same-role check, and the
   `equality-problems` waiver for a compound-arg `rewriteOf`.
-- `resources/kb/CxCore.txt` — the seven NAT predicates, declared and documented.
+- `resources/kb/upper/core.txt` — the seven NAT predicates, declared and documented.
 
 ## What reification does not cover
 

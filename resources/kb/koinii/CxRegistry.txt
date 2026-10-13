@@ -1,5 +1,5 @@
 ;; CxRegistry — koinii's agent registry: the ground truth about which agents
-;; exist, what they are called, and how far each is trusted.  Sees CxCore for its
+;; exist, what they are called, and how far each is trusted.  Sees CxUniverse for its
 ;; vocabulary, and NOTHING sees it by default: it is the one context a governed
 ;; agent may NOT write, because the governed may not write the authority that
 ;; governs them (koinii design D4).  Every fact here is written by the out-of-band
@@ -11,7 +11,7 @@
 ;; Per-agent CONTEXTS carry "who said what"; this registry carries "who is who, and
 ;; how much their word weighs" for the adjudication policies to read.
 
-(genlCx CxRegistry CxCore)      ; CxRegistry speaks CxCore's vocabulary
+(genlCx CxRegistry CxUniverse)  ; CxRegistry speaks CxUniverse's vocabulary
 
 (comment agent
          "(agent ?agent) means that ?agent is a registered koinii participant. The membership mark of the registry: an id earns a place here only by an admin register-agent, so 'which agents exist' is the extent of this one predicate — a plain context-scoped read of CxRegistry. The id is a stable individual constant (CapitalCamelCase, e.g. AgentAtlas); its per-agent context is CxAtlas by convention (identity/context-for), so identity fixes where the agent may write.")

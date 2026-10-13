@@ -996,7 +996,7 @@ answers, one derived sentex per pair the closure already covers (see
 spelling that writes a rule down without running it, so a claim can sit on the record with
 no second engine computing it beside the closure.
 
-Which leaves each account free to take the cheaper spelling. `CxCore.txt` ships no inert
+Which leaves each account free to take the cheaper spelling. `core.txt` ships no inert
 rule: `genl`'s transitivity and the decontextualized-predicate lift are both carried by the
 `comment` on their predicate. Prose describing a closure is a smaller thing to keep true
 than a rule sentence nothing runs, and the argument above only says the account must be
@@ -1142,10 +1142,10 @@ justification per path through a hierarchy where paths multiply; the one named r
 re-derived through the survivors when it goes, is the design the entry above defends.
 Keeping **whatever arrives** reads no supports, and leaves `why` and
 `supporting-justifications` answering differently for one KB loaded in two orders: without
-the replacement, CxCore in authored order holds 2,084 justifications against 2,015 for its
+the replacement, `core.txt` in authored order holds 2,084 justifications against 2,015 for its
 own text export reloaded, and the starter 4,550 against 4,481, the 69 extra a second route
 each. The replacement reads a conclusion's supports only when a justification lands on a
-sentex already stored (1,506 times on the authored CxCore load, 3,386 on the starter),
+sentex already stored (1,506 times on the authored `core.txt` load, 3,386 on the starter),
 and drops 69 justifications on either.
 
 ### Routes in sibling contexts each carry a firing

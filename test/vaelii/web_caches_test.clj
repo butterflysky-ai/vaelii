@@ -147,14 +147,14 @@
     (is (= 405 (:status (GET "/caches/clear"))))))
 
 (deftest the-clear-says-what-it-dropped-and-leaves-belief-alone
-  (v/assert tu/*kb* '(genl dog animal) 'CxCore)
-  (doall (v/prove tu/*kb* '(genl dog ?x) 'CxCore))
+  (v/assert tu/*kb* '(genl dog animal) 'CxUniverse)
+  (doall (v/prove tu/*kb* '(genl dog ?x) 'CxUniverse))
   (let [{:keys [status body]} (POST "/caches/clear" {})]
     (is (= 200 status))
     (is (re-find #"Dropped" body))
     (is (re-find #"No belief moved" body))
     (is (re-find #"id=\"caches\"" body) "and answers with the page it changed"))
-  (is (v/ask? tu/*kb* '(genl dog animal) 'CxCore)
+  (is (v/ask? tu/*kb* '(genl dog animal) 'CxUniverse)
       "nothing that was believed stopped being believed")
   (testing "the copy names the rows a clear leaves alone rather than hard-coding them"
     (let [body (:body (GET "/caches"))

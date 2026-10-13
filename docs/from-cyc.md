@@ -24,6 +24,7 @@ third column is the one to read.
 | collection | a type, which is a **unary predicate** | `(dog Muffet)`, never `(isa Muffet Dog)` |
 | `genls` | `genl` | |
 | `genlPreds` | `genl` | one relation for both, because a type *is* a predicate here |
+| `TruthFunction` | `truth_valued_relation` | `core.txt`'s partitions follow Cyc's: `relation` into `function` and `truth_valued_relation`, and that into `predicate` and `logical_constant`, which holds `quantifier` and `logical_connective`. The name is Cyc's, not logic's: a truth function's value is fixed by its arguments' truth values, which holds of the connectives and of no predicate or quantifier |
 | `argIsa` | `arg` | positional typing as one ternary declaration: `(argIsa P 1 T)` → `(arg P 1 T)` |
 | `arg1Isa` | `arg1` | the binary projection of `arg` at position 1 — bridged to `arg` by rules and sharing its declaration checks, but relating **stored** declarations only; a generalized or inherited reading must be asked of `arg` |
 | `arg2Isa` | `arg2` | the projection at position 2, with the same bridging and the same stored-only caveat |
@@ -32,7 +33,7 @@ third column is the one to read.
 | rename | — | no equivalent. `sameAs` / `rewriteOf` **merge** two terms onto an elected representative and mark the displaced spelling superseded, which is a different act → [equality.md](equality.md) |
 
 The four spellings, because `assert` enforces them (→ [naming.md](naming.md)):
-`parentOf` is a predicate, `Fido` an individual, `physical_object` a type, `CxCore` a
+`parentOf` is a predicate, `Fido` an individual, `physical_object` a type, `CxUniverse` a
 context. A bare lowercase word like `dog` is both a predicate and a type name, and arity
 decides which; a multi-word name commits itself — an underscore to arity 1, an interior
 capital to arity 2 and above.
@@ -132,9 +133,8 @@ The content constraints above are a separate stage. `check` runs both.
 | in Cyc | here | what changes |
 |---|---|---|
 | `LogicalTruthMt` | — | no analogue; the logical truths are the engine's, not a context's |
-| `CoreCycLMt` | `CxCore` | the spindle head: the vocabulary code interprets |
-| `UniversalVocabularyMt` / `BaseKB` | `CxUniverse` | the mid anchor, and where a decontextualized claim lands |
-| `CurrentWorldDataCollectorMt` | `CxWell` | the collector — sees every shipped context but the opt-in theories, the `kb/middle/` files that state no `genlCx` edge from CxWell ([contexts.md](contexts.md)) |
+| `CoreCycLMt` / `UniversalVocabularyMt` / `BaseKB` | `CxUniverse` | the root: the vocabulary code interprets, the upper ontology, and where a decontextualized claim lands |
+| `CurrentWorldDataCollectorMt` | `CxWell` | sees every shipped context but the opt-in theories, the `kb/middle/` files that state no `genlCx` edge from CxWell ([contexts.md](contexts.md)) |
 | `InferencePSC` | `CxInference` | a **reading**, not a place: what one reader's ancestor set sees whole |
 | `EverythingPSC` | `CxEverything` | likewise, and blind to belief — a syntactic read of the store |
 

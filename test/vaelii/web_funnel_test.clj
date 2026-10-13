@@ -72,7 +72,7 @@
       (is (re-find #"fire" b)))))
 
 (deftest the-funnel-continues-like-every-other-list
-  ;; a page of 20 cards, so CxCore's forward rules and the three above take several pages,
+  ;; a page of 20 cards, so CxUniverse's forward rules and the three above take several pages,
   ;; and every page but the last ends in a sentinel
   (with-redefs [web/funnel-render-cap 20]
     (let [href  #(second (re-find #"hx-get=\"(/funnel/rows\?offset=\d+)\"" %))

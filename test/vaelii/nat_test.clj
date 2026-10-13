@@ -543,13 +543,15 @@
 
 ;; ---- 7. no-op cost -------------------------------------------------------
 
-(tu/deftest-kb with-no-reifiable-function-the-reify-pass-is-a-no-op
-  (tu/with-terms [FruitFn AppleTree]
-    (testing "the gate is off and a plain compound is stored verbatim"
-      (is (false? (nat/any-reifiable-functions? kb)))
-      ;; a compound argument with no reifiable_function declared is left structural
-      (let [h (v/assert kb (list 'grows (list FruitFn AppleTree) 'Spring) 'CxUniverse)]
-        (is (= (list 'grows (list FruitFn AppleTree) 'Spring) (:sentence (v/sentex kb h))))))))
+(deftest with-no-reifiable-function-the-reify-pass-is-a-no-op
+  ;; life.txt declares FatherFn reifiable, so the KB here is an empty one of its own.
+  (tu/with-cleared-kb [kb tu/isolated-fresh]
+    (tu/with-terms [FruitFn AppleTree]
+      (testing "the gate is off and a plain compound is stored verbatim"
+        (is (false? (nat/any-reifiable-functions? kb)))
+        ;; a compound argument with no reifiable_function declared is left structural
+        (let [h (v/assert kb (list 'grows (list FruitFn AppleTree) 'Spring) 'CxUniverse)]
+          (is (= (list 'grows (list FruitFn AppleTree) 'Spring) (:sentence (v/sentex kb h)))))))))
 
 ;; ---- 8. every read path asks the same question ---------------------------
 ;;

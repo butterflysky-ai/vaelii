@@ -23,7 +23,7 @@
             [vaelii.host.core-context :as core-context]))
 
 (defn- fresh-kb
-  "A KB with the CxCore vocabulary and nothing else.  The in-memory stores are
+  "A KB with the upper layer in CxUniverse and nothing else.  The in-memory stores are
   shared per space number, so `clear!` is what makes each row independent."
   []
   (let [kb (v/open-kb {:backend :memory :space 30 :recover? false})]

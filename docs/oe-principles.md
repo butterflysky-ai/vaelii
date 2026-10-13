@@ -33,7 +33,7 @@ Choose the closest existing parent, not a broad one that happens to be true. If 
 **genlPrinciple:** DRY
 If facts keep stating `(A P)` plus `(B P)` for the same P, and neither A nor B is a genl of the other, mint the intersection of A and B and use that. Stating a combination once beats repeating two facts everywhere.
 
-**Check first:** if one type is a genl of the other, stating both is a case of **strongest form**: drop the weaker fact. Example: CxCore has `(genl instance_relation_predicate binary_predicate)`, so `(binary_predicate P)` next to `(instance_relation_predicate P)` is redundant, not a reason to mint an intersection.
+**Check first:** if one type is a genl of the other, stating both is a case of **strongest form**: drop the weaker fact. Example: `core.txt` has `(genl instance_relation_predicate binary_predicate)`, so `(binary_predicate P)` next to `(instance_relation_predicate P)` is redundant, not a reason to mint an intersection.
 
 ## nesting values aren't individuals
 *If values want a hierarchy, they aren't individuals*
@@ -145,6 +145,10 @@ Every proposed term, even in a thought experiment, ships as a block: its metatyp
 ## ontology over quirk
 *Ship the right ontology over an engine quirk*
 When the right form (an intersection, a partition, a definitional rule, removing a redundant edge) collides with an engine quirk, test fragility or extra work, ship the right form and fix the engine or the tests. Workarounds that weaken the ontology need an explicit decision. A real engine bug that would corrupt answers is surfaced, not quietly worked around.
+
+## truth, not provability
+*Whether a sentence is true doesn't depend on how the engine proves it*
+A KB author states true facts in their natural form, without knowing anything about the inference engine. The truth of a sentence doesn't depend on the order its conjuncts are written in, or on the path the engine takes to prove it ([from-prolog.md](from-prolog.md#what-your-habits-will-do-here) covers clause order). Where the natural form costs too much or proves less, the gap is an engine limitation to surface and fix, not a reason to change what the KB says (see **ontology over quirk**). Example: a definition stated as two genl edges instead of an intersection proves that each member of the defined type is a member of both parents, but doesn't prove the converse, that a member of both parents is a member of the defined type. The missing converse is lost entailment, and the fix belongs in the engine. Failure to prove a sentence is not evidence of its negation.
 
 ## event arg1
 *The Davidsonian convention: the event goes in argument 1*

@@ -113,7 +113,8 @@ default-chain-opts                              ; the bounds a chain run takes w
                                                ; {:rule :sentence :believed? :placed :refused :refusals
                                                ; :status} — :fires / :blocked (with the reason) /
                                                ; :silent.  O(rules), off the ledger
-(violations kb) / (clear-violations! kb)         ; accumulating ledger of dropped derived conclusions (run-stamped, capped)
+(violations kb) / (clear-violations! kb)         ; accumulating ledger of dropped derived conclusions (run-stamped, capped),
+                                                ; then the :forced-conclusion entries read off the stored void firings
 (kb-quality kb opts)                            ; the seven readings about the *knowledge* —
                                                 ; {:rules :extents :chains :taxonomy :declarations
                                                 ;  :subsumption :clashes}, opts :limit /
@@ -297,7 +298,7 @@ default-chain-opts                              ; the bounds a chain run takes w
                                                ; is.  A convenience over asserting
                                                ; `(modal_predicate pred)`, so the grant follows
                                                ; retraction and is scoped by the context holding
-                                               ; it — `CxCore` by default (docs/belief.md) -> kb
+                                               ; it — `CxUniverse` by default (docs/belief.md) -> kb
 (add-reasoner kb :allen :rcc8)                 ; register shipped ones by name -> kb
 (reasoners)                                    ; the roster: the six algebras + :duration :metric-time
                                                ;   :sign :calendar, and :brave-cautious, the ASP
@@ -418,7 +419,7 @@ default-chain-opts                              ; the bounds a chain run takes w
                                                ; from the global closures, also reads :orthogonal
 (disjointness-audit kb [context])              ; subsumption-status over every unordered pair of
                                                ; the genl nodes visible from context (default
-                                               ; CxWell, the starter spindle's collector), less
+                                               ; CxWell), less
                                                ; each `relation?` there — {:types :pairs :by-status
                                                ; :pairs-data}; a type an opt-in theory alone
                                                ; declares is outside the sweep at the default
@@ -439,7 +440,8 @@ default-chain-opts                              ; the bounds a chain run takes w
                                                         ; stands between: a redundant stated edge is left out
 (genl? kb sub super [context])                          ; subtype test, scoped the same way
 (types kb) / (contexts kb)                              ; the nodes of each hierarchy
-(relation? kb term [context])                           ; a stored arity of 2+ or variable_arity:
+(relation? kb term [context])                           ; a stored arity of 2+ or variable_arity,
+                                                        ; else an inherited length of 2+:
                                                         ; a `types` node that is a relation, not a type
 (context-up kb c) / (context-down kb c) / (sees? kb k y); genlCx closures + visibility test
 (context-of-agent agent) / (agent-of-context ctx)       ; the Alice <-> CxAgentAlice agent
@@ -479,7 +481,8 @@ default-chain-opts                              ; the bounds a chain run takes w
                                                ; in the OpenCyc import is disjoint from 79,638 types
                                                ; and separated from 43; `thing` reaches 110,128
                                                ; subtypes and was told a handful
-                                               ; :predicate adds :arity :arg-declarations :props
+                                               ; :predicate adds :arity (inherited through genl
+                                               ;   included) :arity-via :arg-declarations :props
                                                ;   :inverse :extent-count and the four grants
                                                ;   :closed-extent? :abducible? :modal?
                                                ;   :decontextualized?
@@ -864,9 +867,13 @@ own option and reaches both halves; on the query, `(exceptWhen (set/monotonic Q)
 is the exception's alone ([exceptions.md](exceptions.md)). `{:context C}` narrows to one file
 and `{:ancestor-set C}` to `C` plus every context it sees.
 
-**Premises only, and no handles.** A derived sentex is what the engine concluded, so
-writing it would store as a premise what the KB believes as a conclusion; chaining puts it
-back at load. A premise that names a sentex *by handle* — an `(except H)`, a
+**Premises and inert sentexes, and no handles.** A derived sentex is what the engine
+concluded, so writing it would store as a premise what the KB believes as a conclusion;
+chaining puts it back at load. An inert sentex is written `(set/inert S)`, which
+`load-text!` stores through `assert-inert` ([kbs.md](kbs.md#text-you-exported-yourself)).
+Over a KB whose belief is not built, an inert sentex and a derived one read alike, so the
+export refuses `:unrecovered-kb` when the store holds a sentex that is neither a premise
+nor a TMS node. A premise that names a sentex *by handle* — an `(except H)`, a
 `target_following_predicate` meta — has no text form at all and is counted in `:skipped`:
 the number is a fact about this store. For those, and for handle identity in general, the
 entry point is `export!`.
@@ -1256,7 +1263,7 @@ take back. Usually that means destroying or removing stored knowledge, and on
 | `edit!` | its `:remove` half runs the same teardown `retract!` does, so a batch that adds and removes is as irreversible as its removals |
 | `edit-with-consequences!` | the same write, reporting what it turned out to mean |
 | `clear!` | wipes every record and index entry |
-| `clear-violations!` | empties the dropped-conclusion ledger (the drops are final either way) |
+| `clear-violations!` | empties the dropped-conclusion ledger (the drops are final either way); the `:forced-conclusion` entries `violations` reads off the stored firings stay |
 | `abduce-discard!` | drops an abduction's scratch context and everything it licensed |
 | `reset-settle-stats!` | clears the settle instrumentation and its histogram |
 | `bulk-assert-facts!` | only adds — but on a fast path whose two preconditions the *caller* owns, so a violated one is a store the checks would have refused |
@@ -1282,7 +1289,8 @@ Assert known-true facts with `{:strength :monotonic}`; the default is `:default`
 (most of a common-sense KB), and a default is defeasible at the edges.
 
 `opts` on assert: `{:chain? false}` skips forward chaining, and computes none of the
-seeds it would chain from, `{:max-depth n}` bounds it. `vaelii.host.core-context/load-into` asserts the CxCore vocabulary — every special
+seeds it would chain from, `{:max-depth n}` bounds it. `vaelii.host.core-context/load-into` asserts the upper layer into CxUniverse: every
+file under `resources/kb/upper/`, with `core.txt` the vocabulary — every special
 predicate the engine interprets (types/contexts, arg/genlArg/interArg,
 disjoint/disjoint_metatype,
 implies + the `set/*Rule` wrappers, the transitive/symmetric/reflexive/functional/
@@ -1290,35 +1298,36 @@ inverse/decontextualized_predicate metadata, `not`, `contradicts`, `ist`, and th
 predicate meta-ontology (`predicate` ⊃ unary/binary/ternary + the algebraic
 subtypes)), each documented by a `(comment <term> "...")` sentex so the KB
 documents itself in its own representation (`core-context/comment-of` reads them back),
-plus the metadata⇒predicate-type rules. `vaelii.host.starter/load-into` builds a
+plus the metadata⇒predicate-type rules, and one file per domain beside it.
+`vaelii.host.starter/load-into` builds a
 **schema-only** common-sense KB on top — types, relation definitions, and theory
 rules, but **no individuals or facts**. Its declarative content lives as plain text
-under `resources/kb/`, one file per context, read by `vaelii.host.seed`
+under `resources/kb/`, read by `vaelii.host.seed`
 (`read-sentences` / `load-context`, via `clojure.edn`, so a KB file is data and can
 never run code). Every sentence about a term is grouped **term-centrically** (blocks in
 natural sort order), and every context file is **discovered on the classpath and loaded
-on kb start** (`seed/layer-contexts`), so adding a KB is dropping a `Cx<Name>.txt`
-file — no code change. What stays in `starter.clj` is the *order the layers* load in
-and the one computed batch (every type is a `unary_predicate`, placed in CxCore).
-The context topology is **two three-layer spindles stacked** — a spindle being a head
-every member sees, members that see the head and not each other, and a collector that
-sees every member — most general (top) to most specific (bottom).
+on kb start** (`seed/layer-files`), so adding a KB is dropping a file — no code
+change. What stays in `starter.clj` is the *order the layers* load in and the one
+computed batch (every type is a `unary_predicate`, placed in CxUniverse). The context
+topology is three levels, most general (top) to most specific (bottom).
 
-The **upper spindle** is headed by **CxCore** (the vocabulary head, every context
-sees it); its members are `resources/kb/upper/` (`CxAbstract` = the kinds hanging off the
-skeleton CxCore holds, body parts and substances, `partOf`/`locatedIn`/`madeOf`, and the
-two **type-level** relations `largerThan`/`partType`; `CxOrganism` = the biological
-taxonomy + disjointness; `CxLife` = organism relations and states; `CxSociety` = social
-relations; `CxMeasure` = the theory of measurement; `CxReflection` = the
-expression lattice and the use/mention vocabulary; `CxSpace` = the four spatial calculi of
-[space.md](space.md); `CxTime` = Allen's interval relations, the point algebra, the
-calendar constructors and the event/fluent vocabulary); its collector is **CxUniverse**,
-free for lifted universal facts.
+**CxUniverse** is the root, seen by every context the topology wires in. It holds the
+upper layer: `core.txt`, the vocabulary and the top of the ontology; `abstract.txt`, the
+kinds below the skeleton `core.txt` holds, body parts and substances,
+`partOf`/`locatedIn`/`madeOf`, and the two **type-level** relations
+`largerThan`/`partType`; `organism.txt`, the biological taxonomy and its disjointness;
+`life.txt`, the organism relations and states; `society.txt`, the social relations;
+`measure.txt`, the theory of measurement; `reflection.txt`, the expression lattice and
+the use/mention vocabulary; `space.txt`, the four spatial calculi of
+[space.md](space.md); `time.txt`, Allen's interval relations, the point algebra, the
+calendar constructors and the event/fluent vocabulary. It is also where lifted universal
+facts are stored. `vaelii.host.sync/sync!` locks CxUniverse's premises to the shipped
+files, every `genlCx` edge excepted ([contexts.md](contexts.md#the-context-topology)).
 
-The **middle spindle** is headed by that same CxUniverse; its members are `kb/middle/`
-(`CxKinship`, `CxMereology`, `CxBiology`, `CxChange`, `CxSocial` — the rules;
-`CxAnatomy` and `CxSize` — claims about kinds); its collector is **CxWell**, which
-transitively sees the whole ontology but four opt-in theories.
+The **middle contexts** are `kb/middle/`, each seeing CxUniverse (`CxKinship`,
+`CxMereology`, `CxBiology`, `CxChange`, `CxSocial` — the rules; `CxAnatomy` and `CxSize`
+— claims about kinds), and **CxWell** sees the seven, so it transitively sees the whole
+ontology but four opt-in theories.
 `CxNormalPhysicalConditions`, the states of matter at room temperature,
 `CxComputing`, the relations over software tools, media resources and DNS names
 with the kinds they are typed over, and `CxPerception`, the perception relations,
@@ -1328,11 +1337,11 @@ carrying `CxSocial`'s own relations to a context placed under it;
 `<Theory>Extension` names a theory that extends an existing starter theory with
 vocabulary most contexts under the base theory have no occasion to see.
 
-The upper spindle's members say what things **are**, always true, like `genl`; the
-middle spindle's members say how they **interrelate**, where several overlapping accounts can coexist.
-Each member file wires itself to its own head and collector, so the topology is data; a
-CxCore-only KB is a head with no spindle under it, and a user adds a member to either
-spindle.
+The upper layer says what things **are**, always true, like `genl`; the middle contexts
+say how they **interrelate**, where several overlapping accounts can coexist. Each middle
+file wires itself in with its own `genlCx` edges, so the topology is data. A vocabulary
+KB holds the upper layer alone, and a user adds a context of their own above CxUniverse
+or below it.
 The middle theories are the defeasible defaults that state their own exception with
 `exceptWhen` (birds fly except penguins; animals breathe air except fish; organisms
 are alive until they are dead and awake until they are asleep; a metal is solid at room

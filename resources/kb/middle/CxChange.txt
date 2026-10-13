@@ -1,5 +1,5 @@
 ;; CxChange — the theory of change: a state persists until something ends it. A simple
-;; event calculus over CxTime's vocabulary and the point algebra's ordering of instants.
+;; event calculus over time.txt's vocabulary and the point algebra's ordering of instants.
 ;; Sees the shared upper ontology via CxUniverse; CxWell sees it.
 ;;
 ;; A narrative states four things: that an event happened at an instant, which fluents it
@@ -24,7 +24,7 @@
 ;; is no cycle through negation, and the assert-time check (docs/exceptions.md) passes
 ;; without the theory having to be written around it.
 ;;
-;; What clipped can see is the order the KB's instantBefore EDGES imply. CxTime declares
+;; What clipped can see is the order the KB's instantBefore EDGES imply. time.txt declares
 ;; instantBefore transitive, and a forward join over an antecedent on a transitive
 ;; predicate reads the closure beside the stored facts (docs/taxonomy.md), so a narrative
 ;; writes down the consecutive links and inertia reads the order they give. The chain of

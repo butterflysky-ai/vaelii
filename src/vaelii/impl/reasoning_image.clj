@@ -24,7 +24,7 @@
 
   The two layout numbers, a records fingerprint, the source identity's digest, and the
   policies that move belief: `config/assertive-arg-types?`, and the forced-monotonic
-  roster the stored declarations give (`declared-roster`).  The
+  roster the stored declarations give and where each is stated (`declared-roster`).  The
   records fingerprint differs by place, because each place is checked against something
   different.  A disk image carries the record store's `reasoning-fingerprint`, read off the
   slots without decoding a record.  A dump's image carries content fingerprints of the
@@ -191,17 +191,18 @@
 
 (defn declared-roster
   "The forced-monotonic roster `kb`'s stored declarations give, as a sorted vector of
-  `[declaration-functor predicate]` pairs: what the image's forced sets were computed
-  under (docs/nmtms.md, \"The forced-monotonic roster\").  Read off the index and the
-  records, so an image is checked against it before any belief is installed."
+  `[declaration-functor predicate context]` triples: what the image's forced sets were
+  computed under, the context deciding whether a declaration is global (docs/nmtms.md,
+  \"The forced-monotonic roster\").  Read off the index and the records, so an image is
+  checked against it before any belief is installed."
   [kb]
   (into []
         (comp (mapcat #(reads/as-stored-with-term (:index kb) %))
               (keep #(p/get-sentex (:records kb) %))
-              (map :sentence)
-              (filter #(and (sequential? %) (= 2 (count %))
-                            (contains? roster-declarations (first %)) (symbol? (second %))))
-              (map vec)
+              (filter #(let [s (:sentence %)]
+                         (and (sequential? s) (= 2 (count s))
+                              (contains? roster-declarations (first s)) (symbol? (second s)))))
+              (map #(conj (vec (:sentence %)) (:context %)))
               (distinct))
         (sort roster-declarations)))
 

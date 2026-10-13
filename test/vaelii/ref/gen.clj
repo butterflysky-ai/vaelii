@@ -472,6 +472,41 @@
            {:sentence (list ta ind) :context k :strength (strength rng)}
            {:sentence (list tu ind) :context lo :strength (strength rng)}])))))
 
+(defn- declared-below
+  "The writes that put a type on the roster by a declaration below the context its
+  memberships are stated in (docs/reference.md D17), or nil when the pools hold fewer than
+  two contexts or the two types drawn are related by a written edge.  For two contexts
+  `hi` before `lo` in the pool, two types `ta` and `tb`, and an individual `I`: `(genlCx
+  lo hi)`, `(disjoint ta tb)`, `(ta I)` and `(tb I)` in `hi`, and
+  `(forced_monotonic_predicate ta)` in `lo`; with a second individual `J` no drawn write
+  names under `ta`, a `:monotonic` `(not (ta J))` and a `(ta J)` in `hi`.  `lo` reads
+  `(tb I)` defeated and the denial inert; `hi` reads a dilemma and `(ta J)` defeated.  Half
+  the draws state the declaration in `CxUniverse` and add `(genlCx hi CxUniverse)`, so both
+  contexts read the declaration (docs/reference.md D17).  A drawn rule may read or conclude
+  `ta`."
+  [rng {:keys [contexts types individuals]} facts]
+  (when (>= (count contexts) 2)
+    (let [[lo hi] (type-pair rng contexts)
+          edges   (type-edges facts)
+          [ta tb] (type-pair rng types)]
+      (when-not (or (contains? (up-closure edges [ta]) tb) (contains? (up-closure edges [tb]) ta))
+        (let [[i & more] (shuffled (.nextLong ^Random rng) individuals)
+              ;; the denial pair names an individual no drawn write names under `ta`
+              j          (first (remove (fn [x] (some #(#{(list ta x) (list 'not (list ta x))}
+                                                        (:sentence %))
+                                                      facts))
+                                        more))
+              core?      (chance rng 0.5)
+              w          (fn [s c st] {:sentence s :context c :strength st})]
+          (cond-> [(w (list 'genlCx lo hi) 'CxUniverse :monotonic)
+                   (w (list* 'disjoint (sort [ta tb])) hi :monotonic)
+                   (w (list ta i) hi :default)
+                   (w (list tb i) hi :default)
+                   (w (list 'forced_monotonic_predicate ta) (if core? 'CxUniverse lo) :default)]
+            core? (conj (w (list 'genlCx hi 'CxUniverse) 'CxUniverse :monotonic))
+            j (into [(w (list 'not (list ta j)) hi :monotonic)
+                     (w (list ta j) hi :default)])))))))
+
 (defn gen-world
   "A random world for `seed`, inside the v1 fragment.  The same seed gives the same
   structure; every term carries a fresh gensym tail, so two calls never share a term.
@@ -483,7 +518,8 @@
   rules come from `rule-writes`; half the worlds holding a guarded rule add the writes of
   `guarded-clash`, a quarter of the worlds the writes of `release-below`, a third the
   writes of `collision`, and a third of the worlds holding a guarded rule the writes of
-  `blocker-below`, each less any `[sentence context]` pair already drawn.  Every write of
+  `blocker-below`, and a quarter of the worlds the writes of `declared-below`, each less
+  any `[sentence context]` pair already drawn.  Every write of
   `vaelii.ref.world/forced-monotonic` is never a loser, a `genlCx` write is read
   `:monotonic`, and a denial of one is inert.
   `:contexts` holds every generated context plus `CxUniverse` when an edge names it."
@@ -509,12 +545,15 @@
         coll   (when (chance rng 0.33) (collision rng pools facts))
         ;; and this after that
         under  (when (chance rng 0.33) (blocker-below rng pools rules))
+        ;; and this after that
+        decl   (when (chance rng 0.25) (declared-below rng pools facts))
         seen   (into #{} (map (juxt :sentence :context)) facts)
         writes (-> facts
                    (into (remove #(seen [(:sentence %) (:context %)])) clash)
                    (into (remove #(seen [(:sentence %) (:context %)])) below)
                    (into (remove #(seen [(:sentence %) (:context %)])) coll)
                    (into (remove #(seen [(:sentence %) (:context %)])) under)
+                   (into (remove #(seen [(:sentence %) (:context %)])) decl)
                    (into rules))]
     {:contexts (into (set (:contexts pools)) (world-contexts writes))
      :writes   writes}))
@@ -557,14 +596,15 @@
 
 (def ^:private roster-context
   "The context the roster declarations of a world KB are stored in: one no world context
-  sees, so no comparison reads them.  The engine reads the roster globally."
+  sees, so no comparison reads them.  Each names a baseline member, which every reader
+  reads on the roster wherever its declaration is stated (`decide/global?`)."
   'CxRefRoster)
 
 (defn load-world!
   "A fresh KB on a space of its own, opened with `opts`, holding the
   `forced_monotonic_predicate` declaration of `genlCx` and of every functor in
   `menu-roster-functors` and the `(forced_monotonic_between_predicates genl)` declaration
-  (CxCore declares them, and a world KB loads no CxCore), then the
+  (core.txt declares them, and a world KB loads no upper layer), then the
   writes of `order` (a vector of the world's writes) asserted in that order.  A write
   `assert` refuses with an `ex-info` is recorded as
   `{:refused write :type (:type ex-data) :message …}` and loading goes on; any other

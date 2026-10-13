@@ -1,21 +1,18 @@
-;; CxCore — Vaelii's vocabulary context: the engine-interpreted special
-;; predicates (types, contexts, rules, metadata, evaluables) and the predicate
-;; meta-ontology, each documented via a comment sentex. Schema only — the domain
-;; relations, individuals, and facts live in other contexts.
+;; core.txt — Vaelii's vocabulary, loaded into CxUniverse with every other file in
+;; kb/upper/: the engine-interpreted special predicates (types, contexts, rules, metadata,
+;; evaluables), the predicate meta-ontology and the top of the ontology, each term
+;; documented via a comment sentex. Schema only — individuals and facts live in other
+;; contexts.
 ;;
-;; The test for belonging here is **grammar, not subject matter**: a term earns a place
-;; only if it is vocabulary several upper-spindle members state their content *in*.
-;; binary_predicate, arg, genl and unreifiable_function are grammar — every domain
-;; declares its relations, constraints, types and functions with them. dimensionOf and
-;; partOfRegion are not: they are *about* something (measurement, space), so they live
-;; in the one upper context that owns that subject (kb/upper/CxMeasure.txt,
-;; kb/upper/CxSpace.txt). A term whose only user is a single upper context belongs
-;; in that context, whatever interprets it — being read by a prover does not make a term
-;; part of the grammar.
-;;
-;; What that buys is separability, not omission: the starter loads every upper context
-;; it finds, but a KB assembled from CxCore plus the layers it wants carries only
-;; the subjects it reasons about, and nothing here has to change to add or drop one.
+;; The test for belonging in this file is **grammar, not subject matter**: a term is here
+;; only if several domain files state their content *in* it. binary_predicate, arg, genl
+;; and unreifiable_function are grammar — every domain declares its relations,
+;; constraints, types and functions with them. dimensionOf and partOfRegion are not: they
+;; are *about* something (measurement, space), so they live in the domain file that owns
+;; that subject (kb/upper/measure.txt, kb/upper/space.txt). A term whose only user is one
+;; domain file belongs in that file, whatever interprets it — being read by a prover does
+;; not make a term part of the grammar. The terms this file comments are the population
+;; vocabulary/roster answers for.
 
 (comment abducible_predicate
          "(abducible_predicate ?predicate) means that a (?predicate …) sentence may be hypothesized. When a backward proof dead-ends on one, abduce may assume it rather than fail. A grant, and the only thing that makes a predicate abducible: an undeclared one is never assumed, since an abducer that will hypothesize anything explains everything and is worth nothing. Read from the asking context's genlCx ancestor set rather than universally, so it is a policy of the context that gives it — one theory may be willing to assume what another, reading the same vocabulary, will not.")
@@ -196,8 +193,7 @@
 (defnSufficient non_positive_integer (and (integer ?x) (lessThan ?x 1)))
 (defnNecessary  non_positive_integer (and (integer ?x) (lessThan ?x 1)))
 ;; Each value kind is a type: a one-place predicate whose instances are the values of
-;; that kind.  Stated here, beside the kinds, so a KB that loads CxCore alone reads their
-;; arity as kb/relation-arity reads it.
+;; that kind.  Stated here, beside the kinds.
 (unary_predicate string)
 (unary_predicate number)
 (unary_predicate integer)
@@ -210,28 +206,19 @@
 (unary_predicate character)
 (unary_predicate symbol)
 
-;; The upper-ontology skeleton: the collections a band context has to be able to
-;; SEE in order to place its own types under the root.  They sit here rather than in
-;; CxAbstract because the band's contexts are siblings and no sibling sees another: with
-;; organism defined in CxAbstract, the edge placing animal under organism in CxOrganism
-;; left animal unable to reach thing FROM CXORGANISM, so every arg constraint written
-;; there convicted nothing in its own context.  A term extended from more than one band
-;; context belongs above them all, which is here.
-;;
+;; The top of the ontology: the collections the domain files place their own types under.
 ;; Nothing in the engine reads any of them by name — they are classified inert in
-;; vaelii.impl.predicates for that reason.  What they are is the top of the ontology,
-;; and the grammar head is where every context can reach it.  A kind hanging off them
-;; stays in the band, as (partition tangible made natural) stays in CxAbstract.  The edge of a
-;; kind that a second band context declares an argument over sits here, because the
-;; declaring context does not see the band context that comments the kind.  biological
-;; is here because both organism and body_part extend it, so organism reaches tangible
-;; through it from every band context.
+;; vaelii.impl.predicates for that reason.  A kind hanging off them is stated in its
+;; domain file, as (partition tangible made natural) is in abstract.txt.  biological is
+;; here because organism (organism.txt) and body_part (abstract.txt) both extend it.
 (comment intangible "Something with no mass: a region, a shadow, a number, a relation, a time. It may have a location — a region of space is spatiotemporal and intangible both.")
-(comment spatial "Something with a location in some space, physical or mathematical. The line y=x is located in the Cartesian plane and a square of an abstract chessboard on that board, though neither is located anywhere in the world; a point has a location and no extent, and is spatial too. Everything spatiotemporal is spatial; spatial and aspatial partition thing. The four spatial calculi relate what is spatial, in whichever space a context is about.")
+(comment spatial "Something with a location in some space, physical or mathematical. The line y=x is located in the Cartesian plane and a square of an abstract chessboard on that board, though neither is located anywhere in the world; a point has a location and no extent, and is spatial too. Time is not one of these spaces; being in time is what temporal says. Everything spatiotemporal is spatial; spatial and aspatial partition thing. The four spatial calculi relate what is spatial, in whichever space a context is about.")
 (comment spatiotemporal "Something with a location in space and time — a physical object, but also a region or a place, which occupy space without being made of anything. Below both spatial and temporal.")
 (comment temporal "Something that happens or exists in time. Physical objects, events, and situations are all temporal.")
-(comment aspatial "Not located in any space: no location in any space, physical or mathematical. None of CxSpace's calculi relate to it.")
-(comment atemporal "Not located in time. Numbers, relations and the other kinds below nowhere_never are atemporal; a fluent is intangible but not atemporal, since it holds over time.")
+(comment aspatial "Not located in any space: no location in any space, physical or mathematical. None of the spatial calculi relate to it.")
+(comment uninterrupted "Something temporal that is present at every moment between its start and its end: a moment, a year, a meeting, a held state. The complement of intermittent within temporal; the two partition temporal.")
+(comment intermittent "Something temporal with a gap: there is a moment between its start and its end at which it is absent. The writing of a novel, a trial with its recesses, a World Series, a bicycle taken apart and put back together. The complement of uninterrupted within temporal.")
+(comment atemporal "Not located in time. Numbers, relations and the other kinds below nowhere_never are atemporal; a fluent is not atemporal, since it holds over time.")
 (comment tangible "Something with mass. Having mass, it necessarily has a location in space and time too, so it is spatiotemporal.")
 (comment organism "Something alive in its own right: it is born, grows, reproduces, and (by default) dies.")
 (comment biological "A tangible that is an organism or part of one.")
@@ -246,38 +233,74 @@
 (genl spatiotemporal temporal)
 (genl tangible spatiotemporal)
 (genl biological tangible)
-;; Stated although CxAbstract's separating roster installs it: CxOrganism does not see CxAbstract.
+;; A separating roster installs its parts' taxonomy edges and stores no genl sentence, so
+;; the two edges below are stated beside (separating biological organism body_part) in
+;; abstract.txt and (separating organism animal plant) in organism.txt.
 (genl organism biological)
+(genl animal organism)
 ;; Mass entails a location in space and in time, so what has no location in any space,
 ;; or none in time, has no mass.
 (genl aspatial intangible)
 (genl atemporal intangible)
 (genl nowhere_never aspatial)
 (genl nowhere_never atemporal)
-(genl animal organism)
 (genl food tangible)
 ;; A language is in no space and at no time.
 (genl language linguistic)
 ;; An organization has no location in any space; its members and its buildings have one.
 (genl organization aspatial)
 (genl person tangible)
-;; A time is a moment or a stretch, never both: an instant has no extent.  CxAbstract
-;; comments the three types and places time under acausal; these edges and the partition
-;; sit here because CxTime, which does not see CxAbstract, types its calendar results
-;; time_interval and its moments time_point.  The partition installs each part's genl
-;; edge to time, so time_point and time_interval reach temporal and aspatial through it.
+;; A time is uninterrupted or intermittent, and an uninterrupted time is a moment or a
+;; stretch, never both: an instant has no extent.  abstract.txt comments the five types and
+;; places time under acausal; time.txt types its calendar results time_interval and its
+;; moments time_point.  Each partition installs its parts' genl edges to the whole,
+;; so time_point and time_interval reach time, temporal and aspatial through
+;; uninterrupted_time.  The intersections make a time that is uninterrupted an
+;; uninterrupted_time and a time that is intermittent an intermittent_time.
 (genl time temporal)
 (genl time aspatial)
-(set/monotonic (partition time time_point time_interval))
-;; A situation either holds unchanged or changes, never both and never neither.
-;; CxAbstract comments the three types; the edge and the partition sit here because
-;; CxLife, which does not see CxAbstract, declares event as the genlArg of capabilityType
-;; and hasCapability.  The partition installs both genl edges and the separation, and adds
-;; the coverage, so a situation denied being an event is concluded a static_situation.
+(set/monotonic (partition time uninterrupted_time intermittent_time))
+(intersection uninterrupted_time uninterrupted time)
+(intersection intermittent_time intermittent time)
+(set/monotonic (partition uninterrupted_time time_point time_interval))
+;; A situation holds or happens, over any extent, never both and never neither: it is a
+;; fluent or a happening.  An uninterrupted_situation is a situation that is uninterrupted.
+;; A static_situation is an uninterrupted fluent, and an event an uninterrupted happening.
+;; The intersections separate the two but do not cover uninterrupted_situation, so the
+;; partition of uninterrupted_situation is stated, and a situation denied being an event
+;; is concluded a static_situation.  abstract.txt comments situation,
+;; uninterrupted_situation, static_situation and event, and time.txt comments fluent and
+;; happening.
 (genl situation temporal)
-(set/monotonic (partition situation static_situation event))
-;; A meeting happens somewhere, and a contract expiring happens nowhere in particular.
-(orthogonal situation spatial)
+(set/monotonic (partition situation fluent happening))
+(intersection uninterrupted_situation uninterrupted situation)
+(intersection static_situation uninterrupted fluent)
+(intersection event uninterrupted happening)
+(set/monotonic (partition uninterrupted_situation static_situation event))
+;; A situation may have a place: a boulder rolling, thin ice.  orthogonal is not
+;; inherited, so the pair is stated for uninterrupted_situation as well.
+(set/monotonic (orthogonal situation spatial))
+(set/monotonic (orthogonal uninterrupted_situation spatial))
+(set/monotonic (orthogonal situation spatiotemporal))
+(set/monotonic (orthogonal happening spatial))
+;; A situation or a held state may be located nowhere: a debt owed, a treaty in force.
+;; A cat on a mat is a held state with a place.
+(set/monotonic (orthogonal situation aspatial))
+(set/monotonic (orthogonal static_situation spatial))
+(set/monotonic (orthogonal static_situation aspatial))
+;; An event may be located or not: the battle of Waterloo is located, and a contract
+;; expiring at midnight is not.
+(set/monotonic (orthogonal event spatial))
+(set/monotonic (orthogonal event aspatial))
+;; A battle and a cat on a mat are spatiotemporal; a contract expiring and a treaty in
+;; force are not.  orthogonal is not inherited, so each kind's pair is stated.
+(set/monotonic (orthogonal event spatiotemporal))
+(set/monotonic (orthogonal static_situation spatiotemporal))
+;; A situation is not the matter in it.
+(set/monotonic (disjoint tangible situation))
+;; The partition of thing into tangible and intangible does not derive a genl edge from
+;; the disjointness, so the edge is stated.
+(set/monotonic (genl situation intangible))
 ;; Each skeleton collection is a type, a one-place predicate.
 (unary_predicate intangible)
 (unary_predicate spatial)
@@ -285,10 +308,14 @@
 (unary_predicate temporal)
 (unary_predicate aspatial)
 (unary_predicate atemporal)
+(unary_predicate uninterrupted)
+(unary_predicate intermittent)
 (unary_predicate tangible)
 (unary_predicate biological)
 (unary_predicate organism)
 (unary_predicate nowhere_never)
+(unary_predicate causal)
+(unary_predicate acausal)
 (unary_predicate context)
 (unary_predicate language)
 (unary_predicate animal)
@@ -296,20 +323,25 @@
 (unary_predicate organization)
 (unary_predicate person)
 (unary_predicate time)
+(unary_predicate uninterrupted_time)
+(unary_predicate intermittent_time)
 (unary_predicate time_point)
 (unary_predicate time_interval)
 (unary_predicate situation)
+(unary_predicate fluent)
+(unary_predicate happening)
+(unary_predicate uninterrupted_situation)
 (unary_predicate static_situation)
 (unary_predicate event)
 (unary_predicate measure)
 
-;; The expression kinds the engine and CxCore's own declarations name: formula, sentence and
+;; The expression kinds the engine and this file's own declarations name: formula, sentence and
 ;; non_atomic_term, beside symbol and the value kinds above.  A FORMULA is a predication, a
 ;; logical operator applied to formulas, or a quantifier binding variables in one.  A
 ;; SENTENCE is a closed formula, which is what every stored sentex holds, since
 ;; checks/check-ground refuses an open non-rule sentence and a rule's variables are
 ;; implicitly universal.  The rest of the expression lattice, and where these three sit in
-;; it, is CxReflection's.
+;; it, is reflection.txt's.
 ;;
 ;; DOCUMENTARY: nothing in the engine reads these.  An argument declaration over one
 ;; types no compound, because a compound argument has no knowable kind —
@@ -323,9 +355,8 @@
 (unary_predicate formula)
 (unary_predicate sentence)
 (unary_predicate non_atomic_term)
-;; Implementation: CxReflection places the three under expression, so under linguistic.
-;; CxCore's own declarations type positions over them, and a context that sees CxCore
-;; alone reads them through these edges.
+;; reflection.txt places the three under expression, so under linguistic.  This file's own
+;; declarations type positions over them.
 (genl formula linguistic)
 (genl sentence formula)
 (genl non_atomic_term linguistic)
@@ -341,16 +372,16 @@
 (arg argN 2 non_negative_integer)
 (quotedArg argN 3 formula)
 
-;; measure names what a QuantityFn or QuantityIntervalFn application denotes, and CxMeasure
-;; states it as their result.  CxMeasure (weightOf, heightOf, the five comparisons) and
-;; CxTime (length, temporalDistance, overlapDuration, totalDuration) both declare an
-;; argument position over it, and neither of the two sees the other, so the type sits here
-;; with the skeleton it hangs from.
+;; measure names what a QuantityFn or QuantityIntervalFn application denotes, and
+;; measure.txt states it as their result.  measure.txt (weightOf, heightOf, the five
+;; comparisons) and time.txt (length, temporalDistance, overlapDuration, totalDuration) both
+;; declare an argument position over it, so the type is stated here with the top of the
+;; ontology it hangs from.
 (comment measure "A magnitude in a unit: (QuantityFn 5 Kilogram) or (QuantityIntervalFn 1 2 Meter). What a weight, a height, a duration or a temporal distance is stated as. See docs/quantity.md.")
 (genl measure nowhere_never)
 
 ;; linguistic is what has its being in a system of signs: a language, and every expression
-;; written in one.  CxCore holds it because language, which the band contexts type
+;; written in one.  This file states it because language, which several domain files type
 ;; arguments over, sits under it.
 (comment linguistic "A language, or an expression written in one: what has its being in a system of signs. The line that the equation y=x describes and the mass (QuantityFn 5 Kilogram) denotes are nowhere_never but not linguistic; the written equation and the written term are.")
 (genl linguistic nowhere_never)
@@ -359,9 +390,9 @@
 (set/monotonic (disjoint linguistic relation))
 (unary_predicate linguistic)
 
-;; unrepresented_term holds the value kinds.  Implementation: CxReflection places it under
-;; expression, so under linguistic; a band context does not see CxReflection, and the edge
-;; below is what lets it read every value kind as nowhere_never and disjoint from relation.
+;; unrepresented_term holds the value kinds.  reflection.txt places it under expression, so
+;; under linguistic, and the edge below reads every value kind as nowhere_never and
+;; disjoint from relation.
 ;; The relation disjoint is what lets a rule be refused for feeding a text-valued argument
 ;; into a position that holds a type: every type is a unary_predicate, so the type position
 ;; asks for a predicate, and one variable cannot be both at once.  The disjointness on
@@ -369,8 +400,7 @@
 (comment unrepresented_term "An expression that cannot be further decomposed in the KB — strings, numbers, keywords, booleans, characters.")
 (unary_predicate unrepresented_term)
 (genl unrepresented_term linguistic)
-;; Implementation: symbol is placed the same way, so a context that sees CxCore alone
-;; reads (disjoint symbol predicate).
+;; symbol is placed the same way, so (disjoint symbol predicate) holds.
 (genl symbol linguistic)
 (genl boolean unrepresented_term)
 (genl character unrepresented_term)
@@ -650,9 +680,9 @@
 
 ;; The meta-ontology rules below conclude into the ORDINARY placement — the maximal
 ;; context that sees the rule and the declaration — and not into a named one.  Every
-;; context sees CxCore, so a declaration made here still concludes here; one made
-;; in a context concludes there, where its author put it.  Naming CxCore would
-;; publish it: a private (symmetric myRel) would become vocabulary the whole KB reads,
+;; context below CxUniverse sees CxUniverse, so a declaration in CxUniverse still concludes
+;; there; one made in a context concludes there, where its author put it.  Naming CxUniverse
+;; would publish it: a private (symmetric myRel) would become vocabulary the whole KB reads,
 ;; while (has-prop? kb :symmetric myRel ctx) — asked of the same declaration from the
 ;; same context — answered false.  One KB cannot say both.
 
@@ -817,8 +847,8 @@
 (comment nonempty
          "(nonempty ?type) means that ?type has at least one instance. A nonempty claim holds for the context it is stated in, as an empty claim does. empty and nonempty partition unary_predicate, so one type stated both empty and nonempty in contexts one reader sees is a disjointness clash.")
 (set/monotonic (partition unary_predicate empty nonempty))
-(variable_order_type empty)
-(variable_order_type nonempty)
+(set/monotonic (variable_order_type empty))
+(set/monotonic (variable_order_type nonempty))
 (at_least_metatype empty)
 (at_least_metatype nonempty)
 ;; Vacuous by design: thing is already a genl of every type, so these name no new genl
@@ -1138,20 +1168,36 @@
 (forced_monotonic_predicate covering)
 (forced_monotonic_predicate partition)
 (forced_monotonic_predicate sibling_disjoint)
+;; Each arity binding is also decontextualized: its copy in CxUniverse makes a
+;; relation's length read the same at every context (docs/contexts.md).
 (forced_monotonic_predicate arity)
+(set/monotonic (decontextualized_predicate arity))
 (forced_monotonic_predicate unary)
+(set/monotonic (decontextualized_predicate unary))
 (forced_monotonic_predicate binary)
+(set/monotonic (decontextualized_predicate binary))
 (forced_monotonic_predicate ternary)
+(set/monotonic (decontextualized_predicate ternary))
 (forced_monotonic_predicate unary_predicate)
+(set/monotonic (decontextualized_predicate unary_predicate))
 (forced_monotonic_predicate binary_predicate)
+(set/monotonic (decontextualized_predicate binary_predicate))
 (forced_monotonic_predicate ternary_predicate)
+(set/monotonic (decontextualized_predicate ternary_predicate))
 (forced_monotonic_predicate unary_function)
+(set/monotonic (decontextualized_predicate unary_function))
 (forced_monotonic_predicate binary_function)
+(set/monotonic (decontextualized_predicate binary_function))
 (forced_monotonic_predicate ternary_function)
+(set/monotonic (decontextualized_predicate ternary_function))
 (forced_monotonic_predicate variable_arity)
+(set/monotonic (decontextualized_predicate variable_arity))
 (forced_monotonic_predicate variable_arity_predicate)
+(set/monotonic (decontextualized_predicate variable_arity_predicate))
 (forced_monotonic_predicate variable_arity_function)
+(set/monotonic (decontextualized_predicate variable_arity_function))
 (forced_monotonic_predicate arityMin)
+(set/monotonic (decontextualized_predicate arityMin))
 (forced_monotonic_predicate except)
 (forced_monotonic_predicate rewriteOf)
 (forced_monotonic_predicate sameAs)
@@ -1321,10 +1367,22 @@
 (arg genlCx 2 context)
 (forced_decontextualized_predicate genlCx)
 
-;; `(genlCx CxUniverse CxCore)` belongs to this vocabulary and is NOT
-;; written here: `core-context/load-into` asserts it before reading the file, because a
-;; `decontextualized_predicate` lift needs the two contexts comparable *while* the file
-;; is still being read.  See the docstring there.
+;; The shipped contexts.  Every genlCx edge is stored in CxUniverse, and (arg genlCx 1
+;; context) and (arg genlCx 2 context) type both of its arguments, so the memberships are
+;; stated here.
+(context CxAnatomy)
+(context CxBiology)
+(context CxChange)
+(context CxComputing)
+(context CxKinship)
+(context CxMereology)
+(context CxNormalPhysicalConditions)
+(context CxPerception)
+(context CxSize)
+(context CxSocial)
+(context CxSocialExtension)
+(context CxUniverse)
+(context CxWell)
 
 (comment greaterThan
          "(greaterThan ?number1 ?number2 …) means that the numbers descend. Variable arity, so (greaterThan 3 2 1) states the chain 3 > 2 > 1. Evaluable: computed on demand from ground numbers, never stored. Canonicalizes to lessThan with the arguments reversed, so only the < direction is ever stored and a greaterThan goal is still answerable.")
@@ -1397,16 +1455,16 @@
 (set/monotonic (disjoint measure relation))
 ;; relation holds functions, binary predicates and types alike, so its members are of
 ;; more than one order: a variable_order_type, which is a unary_predicate.
-(variable_order_type relation)
+(set/monotonic (variable_order_type relation))
 
 (comment function            "The type of all functions — the reifiable and unreifiable heads a non-atomic term is built from. A function is a relation, and is not a predicate: it denotes or evaluates to a value where a predicate holds or fails.")
 ;; A function is an individual operator, never a type, so function is a first-order
 ;; type, as binary_predicate is.
-(type function)
+(set/monotonic (type function))
 
 (comment predicate           "The type of all predicates — the relations and types used in sentences. A predicate is a relation.")
 ;; predicate holds binary predicates and types alike: a variable_order_type.
-(variable_order_type predicate)
+(set/monotonic (variable_order_type predicate))
 
 (comment truth_valued_relation "The type of all relations whose applications are true or false: the predicates and the logical constants. Cyc's TruthFunction, not logic's truth function: a truth function's value is fixed by the truth values of its arguments, which holds of and, or, not and implies and of no predicate or quantifier.")
 (comment logical_constant    "The type of all quantifiers and logical connectives — the relations whose meaning the logic fixes, where a predicate's meaning is the domain's. A logical constant is a truth_valued_relation and is not a predicate.")
@@ -1414,10 +1472,10 @@
 (comment quantifier          "The type of all relations that bind variables in a formula, the application being a formula in which those variables are no longer free. A quantifier is a logical constant and is not a logical connective.")
 ;; truth_valued_relation holds the predicates, and so binary predicates and types alike:
 ;; a variable_order_type, as predicate is.
-(variable_order_type truth_valued_relation)
+(set/monotonic (variable_order_type truth_valued_relation))
 ;; A logical constant is an individual operator such as and or not, never a type, so
 ;; logical_constant is a first-order type, as function is.
-(type logical_constant)
+(set/monotonic (type logical_constant))
 ;; function and truth_valued_relation reach relation, logical_constant and predicate reach
 ;; truth_valued_relation, and quantifier and logical_connective reach logical_constant,
 ;; through the three partitions below, each of which installs its parts' edges to the
@@ -1436,8 +1494,8 @@
 (set/monotonic (partition logical_constant quantifier logical_connective))
 ;; A quantifier and a connective are individual operators, never types, so each kind is
 ;; a first-order type, as logical_constant is.
-(type quantifier)
-(type logical_connective)
+(set/monotonic (type quantifier))
+(set/monotonic (type logical_connective))
 
 (comment forall
          "(forall ?var (implies ?antecedent ?consequent)) means the universal. Rule sugar: the engine desugars it to the nested NAF (unknown (thereExists ?var (and ?antecedent (unknown ?consequent)))) and hands that back to the registry, so the quantified goal and a rule antecedent on the same shape are answered by one mechanism. See docs/naf.md.")
@@ -1479,7 +1537,7 @@
 (relation_kind type_relation_predicate)
 ;; A metatype's typeGenl target is a first-order type — (interArg typeGenl 1 metatype 2 type).
 ;; binary_predicate's instances are individual predicates, so it is a `type`.
-(type binary_predicate)
+(set/monotonic (type binary_predicate))
 
 (comment set/backwardRule
          "(set/backwardRule ?rule) means that ?rule is asserted backward-only. Used in backward proof and indexed by its consequent predicate, never forward-chained. A virtual wrapper interpreted on assert, never stored as a fact of its own.")
@@ -1492,6 +1550,9 @@
 
 (comment set/inertRule
          "(set/inertRule ?rule) means that ?rule is asserted inert. Stored and documented but never used for inference in either direction, which is how a rule stating something the engine implements in code gets written down where a reader will find it. A virtual wrapper interpreted on assert.")
+
+(comment set/inert
+         "(set/inert ?sentence) means that ?sentence is stored inert, through assert-inert: indexed, durable and browsable, but not a premise, so ?sentence is never believed, never chained and never scanned for contradictions. A set/inertRule rule is a different inertness: the rule is believed and fires in neither direction. set/inert refuses a rule, and set/inertRule is the form for one. The text KB format reads set/inert around a whole form, and assert does not read it. A virtual wrapper interpreted by the text loader, never stored as a fact of its own. See docs/kbs.md.")
 
 (comment set/forwardOnlyRule
          "(set/forwardOnlyRule ?rule) means that ?rule forward-chains and is never used in backward proof. It is indexed by its antecedent predicates, and its direction is :forward-only. A rule that forward-chains and also answers backward proof is set/forwardRule instead. A virtual wrapper interpreted on assert: it sets the direction field on the rule sentex and is never stored as a fact of its own.")
@@ -1515,7 +1576,7 @@
          "(sibling_disjoint ?collection) means that any two specializations of ?collection — the types below it under genl — share no instance, unless one is itself a genl of the other. The clique is consulted rather than stored, exactly as disjoint_metatype's is: no (disjoint …) sentex per pair, dropping the mark releases every pair at once, and a specialization arriving as a later genl edge is separated the moment it is believed. The genl-relatedness exception is what keeps a specialization disjoint from its siblings without being separated from its own supertypes, which are specializations of ?collection too; it is read over the whole KB, the way (disjoint a b) refuses a genl-related pair. Whether those specializations cover ?collection is a separate claim this one does not make, and covering states it over a named roster.")
 (unary_predicate sibling_disjoint)
 (at_least_metatype sibling_disjoint)
-(genl sibling_disjoint unary_predicate)
+(set/monotonic (genl sibling_disjoint unary_predicate))
 (genlArg sibling_disjoint 1 thing)
 
 (comment symmetric
@@ -1629,7 +1690,7 @@
          "The root type: every type genls up to thing, so every typed individual is a thing.")
 ;; thing holds individuals and types alike: a variable_order_type, which is a
 ;; unary_predicate.
-(variable_order_type thing)
+(set/monotonic (variable_order_type thing))
 
 (comment transitive
          "(transitive ?predicate) means that ?predicate is transitive, so (?predicate a b) and (?predicate b c) imply (?predicate a c). Answered by a generic closure prover rather than materialized, since writing the closure out is quadratic in the extent and nobody asserted it. Declared of ancestorOf and partOf, for instance. Also a type: (transitive P) classifies P as a binary_predicate, so a KB can be queried for the transitive predicates.")
@@ -1711,7 +1772,7 @@
 (genl unary_predicate fixed_arity_predicate)
 ;; unary_predicate holds first-order types such as dog and metatypes such as type: a
 ;; variable_order_type, which is itself a specialization of unary_predicate.
-(variable_order_type unary_predicate)
+(set/monotonic (variable_order_type unary_predicate))
 
 (set/monotonic (genl binary_predicate binary))
 (genl binary_predicate fixed_arity_predicate)
@@ -1719,7 +1780,7 @@
 (genl ternary_predicate fixed_arity_predicate)
 ;; ternary_predicate's instances are individual predicates, so it is a `type`, as
 ;; binary_predicate is.
-(type ternary_predicate)
+(set/monotonic (type ternary_predicate))
 
 (genl unary_function fixed_arity_function)
 (genl binary_function fixed_arity_function)
@@ -1830,13 +1891,13 @@
 (at_least_metatype disjoint_metatype)
 ;; Stated rather than left to (arg typeGenl 1 at_least_metatype) to mint, so the typeGenl
 ;; facts below satisfy their declaration under the constraint-only reading as well.
-(at_least_metatype metatype)
-(at_least_metatype meta_metatype)
+(set/monotonic (at_least_metatype metatype))
+(set/monotonic (at_least_metatype meta_metatype))
 (set/monotonic (disjoint_metatype type_type_by_order))
-(genl at_least_metatype unary_predicate)
-(genl disjoint_metatype at_least_metatype)
-(genl meta_metatype at_least_metatype)
-(genl metatype at_least_metatype)
+(set/monotonic (genl at_least_metatype unary_predicate))
+(set/monotonic (genl disjoint_metatype at_least_metatype))
+(set/monotonic (genl meta_metatype at_least_metatype))
+(set/monotonic (genl metatype at_least_metatype))
 ;; A unary predicate holds members of one order or of any order: the partition separates
 ;; fixed_order_type from variable_order_type and installs each genl edge to unary_predicate.
 (set/monotonic (partition unary_predicate fixed_order_type variable_order_type))
@@ -1849,9 +1910,9 @@
 (type_type_by_order type)
 (type_type_by_order metatype)
 (type_type_by_order meta_metatype)
-(genl type fixed_order_type)
-(genl metatype fixed_order_type)
-(genl meta_metatype fixed_order_type)
+(set/monotonic (genl type fixed_order_type))
+(set/monotonic (genl metatype fixed_order_type))
+(set/monotonic (genl meta_metatype fixed_order_type))
 (typeGenl disjoint_metatype at_least_metatype)
 (typeGenl meta_metatype metatype)
 (typeGenl metatype type)
@@ -1862,9 +1923,9 @@
 ;; Every at_least_metatype names a type its instances specialize, and every unary_predicate names a genl.
 (predAllSpecified typeGenl at_least_metatype)
 (predAllSpecified genl unary_predicate)
-(variable_order_type at_least_metatype)
-(variable_order_type fixed_order_type)
-(variable_order_type variable_order_type)
+(set/monotonic (variable_order_type at_least_metatype))
+(set/monotonic (variable_order_type fixed_order_type))
+(set/monotonic (variable_order_type variable_order_type))
 ;; A food can be an organism: an oyster eaten live.
 (orthogonal food organism)
 ;; A type of any order may have no instance or may have one.
@@ -1899,17 +1960,30 @@
 ;; overlap with neither side subsuming the other; not every cross-axis pair does, since
 ;; tangible is below spatiotemporal and aspatial below intangible.  Stated, each pair reads
 ;; :orthogonal without waiting for a shared instance.  A witness of the overlap per pair, and of neither side holding the other:
-;; a rock is spatial and temporal; the line y=x is only spatial; a fluent is only temporal.
+;; a rock is spatial and temporal; the line y=x is only spatial; a time is only temporal.
 (set/monotonic (orthogonal spatial temporal))
-;; a number is aspatial and atemporal (nowhere_never); a fluent is aspatial and temporal.
+;; a number is aspatial and atemporal (nowhere_never); a time is aspatial and temporal.
 (set/monotonic (orthogonal aspatial atemporal))
 ;; the line y=x is spatial and atemporal, located in the Cartesian plane and in no time.
 (set/monotonic (orthogonal spatial atemporal))
-;; a fluent is aspatial and temporal: it holds over time and is located in no space.
+;; a time is aspatial and temporal: it is in time and located in no space.
 (set/monotonic (orthogonal aspatial temporal))
 ;; a region of space is intangible and spatial.
 (set/monotonic (orthogonal intangible spatial))
-;; a fluent is intangible and temporal.
+;; a time is intangible and temporal.
 (set/monotonic (orthogonal intangible temporal))
 ;; a region of space is intangible and spatiotemporal, occupying space without mass.
 (set/monotonic (orthogonal intangible spatiotemporal))
+;; A temporal thing is present at every moment between its start and its end, or it has a
+;; gap.  The partition installs both parts' edges to temporal.
+(set/monotonic (partition temporal uninterrupted intermittent))
+;; A tangible is uninterrupted by default.  The edge is a default because a tangible
+;; can be intermittent, e.g. a watch taken apart and rebuilt.
+(genl tangible uninterrupted)
+;; A thing either can be a cause or cannot, and a cause is in time.  abstract.txt comments
+;; causal and acausal; the partition and the edges are stated here with the other three
+;; partitions of thing.  The partitions separate atemporal from causal but install no genl edge
+;; from atemporal to acausal, so that edge is stated.
+(set/monotonic (partition thing causal acausal))
+(genl causal temporal)
+(genl atemporal acausal)

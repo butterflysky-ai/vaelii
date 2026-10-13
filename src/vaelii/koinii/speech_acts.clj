@@ -39,8 +39,9 @@
 (defn load-speech-acts
   "Load the CxSpeechActs vocabulary into `kb` from resources/kb/koinii/CxSpeechActs.txt.
   Koinii KB files are not auto-discovered (the starter walks only upper/ and middle/),
-  so this explicit loader is how the context comes into being.  Requires CxCore already
-  loaded (CxSpeechActs wires `(genlCx CxSpeechActs CxCore)`).  Returns kb."
+  so this explicit loader is how the context comes into being.  Requires the upper
+  ontology already loaded (CxSpeechActs wires `(genlCx CxSpeechActs CxUniverse)`).
+  Returns kb."
   [kb]
   (id/load-seed-context kb 'CxSpeechActs))
 

@@ -26,6 +26,9 @@
     targets' down-closures.
   * Nogoods placed below their ingredients over one shared subsumption read its routes
     once per pass.
+  * A nogood whose subsumption is one edge, seen where its members are or the only edge
+    out of its functor, is placed with no witness walk or route search, and a placement
+    pass holds the routes of one batch of nogoods at a time.
   * A settle's tuple placement reads the `genl` edges' lower ends against the marks with
     one closure per marked predicate, however many edges the settle relabels.
   * The arity placement reads its candidates' functors against those lower ends with no
@@ -41,6 +44,7 @@
             [vaelii.impl.decide.negation :as negation]
             [vaelii.impl.jtms :as jtms]
             [vaelii.impl.naming :as nm]
+            [vaelii.impl.protocols :as p]
             [vaelii.impl.reads :as reads]
             [vaelii.impl.sentex :as sx]
             [vaelii.impl.settle-phases :as phases]
@@ -633,3 +637,96 @@
           ;; one search per placement pass that reads them, where each nogood read its own
           (is (<= searches 2) (str searches " route searches for " n " nogoods"))))
       (finally (tu/clear-kb! kb)))))
+
+(defn- arity-world!
+  "In one deferred settle, `n` ternary tuples of their own predicate under each of three
+  shapes of subsumption to a predicate bound to two arguments: `sraQ_i` with one edge to
+  sraTop in CxUniverse, `srbQ_i` with its only edge, to srbTop, in CxSrbD, and `srcQ_i`
+  over srcMid in CxSrbD.  CxUniverse sees the first edge, so those nogoods place there; it
+  sees neither of the others, so those descend to CxSrbD."
+  [kb n]
+  (let [m {:strength :monotonic}]
+    (v/assert kb '(genlCx CxSrbD CxUniverse) 'CxUniverse m)
+    (v/with-deferred-settle kb
+      (doseq [top '[sraTop srbTop srcTop]] (v/assert kb (list 'arity top 2) 'CxUniverse m))
+      (v/assert kb '(genl srcMid srcTop) 'CxSrbD m)
+      (dotimes [i n]
+        (let [[a b c] (map #(symbol (str % i)) ["sraQ" "srbQ" "srcQ"])]
+          (v/assert kb (list 'genl a 'sraTop) 'CxUniverse m)
+          (v/assert kb (list 'genl b 'srbTop) 'CxSrbD m)
+          (v/assert kb (list 'genl c 'srcMid) 'CxSrbD m)
+          (doseq [q [a b c]] (v/assert kb (list q 'SraA 'SraB 'SraC) 'CxUniverse {})))))))
+
+(deftest an-arity-placement-over-one-edge-runs-no-witness-walk-or-route-search
+  (let [kb (tu/isolated-fresh)
+        k  20]
+    (try
+      (tu/with-shipped-config
+        (let [walks    (atom {})
+              count-in (fn [v k] (let [orig @v] [v (fn [& args] (swap! walks update k (fnil inc 0)) (apply orig args))]))]
+          (with-redefs-fn (into {} [(count-in #'tax/bfs-witness-path :bfs) (count-in #'tax/uncovered-routes :search)])
+            #(arity-world! kb k))
+          (let [placed (v/sentexes-with-functor kb 'contradicts)]
+            (is (= (* 3 k) (count placed)))
+            (is (= {'CxUniverse k 'CxSrbD (* 2 k)} (frequencies (map :context placed)))))
+          ;; CxUniverse sees no edge out of srbQ_i or srcQ_i, and srcQ_i's routes climb two
+          ;; edges, so its search alone is run
+          (is (zero? (get @walks :bfs 0)) (str @walks))
+          (is (= k (get @walks :search 0)) (str @walks))))
+      (finally (tu/clear-kb! kb)))))
+
+(deftest a-placement-pass-holds-the-routes-of-one-batch
+  (let [kb      (tu/isolated-fresh)
+        k       20
+        open    (atom 0)
+        most    (atom 0)
+        batch   (resolve 'vaelii.impl.chain/plan-batch)
+        planned @#'chain/route-placements
+        written @#'chain/place-justified!]
+    (try
+      (tu/with-shipped-config
+        (with-redefs-fn (cond-> {#'chain/route-placements (fn [& args] (swap! most max (swap! open inc)) (apply planned args))
+                                 #'chain/place-justified! (fn [& args] (swap! open dec) (apply written args))}
+                          batch (assoc batch 8))
+          #(arity-world! kb k))
+        (is (= (* 3 k) (count (v/sentexes-with-functor kb 'contradicts))))
+        (is (<= @most 8) (str @most " nogoods planned and unwritten at once")))
+      (finally (tu/clear-kb! kb)))))
+
+(defn- placement-digest
+  "Every placed `contradicts` and `defeat` of `kb`: sentence, context, belief, and each
+  justification's informant and antecedents, by content."
+  [kb]
+  (let [tms (reasoning/tms kb)
+        ct  (fn [h] (let [s (p/get-sentex (:records kb) h)] (pr-str [(:sentence s) (:context s)])))]
+    (sort (for [f '[contradicts defeat] s (v/sentexes-with-functor kb f)]
+            (pr-str [(ct (:id s)) (v/in? kb (:id s))
+                     (sort (map (fn [j] (let [j (jtms/justification tms j)]
+                                          (pr-str [(:informant j) (sort (map ct (:antecedents j)))])))
+                                (jtms/supports tms (:id s))))])))))
+
+(deftest the-shortcuts-and-batches-place-what-the-whole-plan-and-the-walks-place
+  ;; the world above, two supporters on some edges and a second route on some, placed
+  ;; with every shortcut and a batch of 4, and with the walks taken and one plan
+  (let [world! (fn [kb]
+                 (arity-world! kb 12)
+                 (v/with-deferred-settle kb
+                   (dotimes [i 6]
+                     (v/assert kb (list 'genl (symbol (str "sraQ" i)) 'sraTop) 'CxSrbD {})
+                     (v/assert kb (list 'genl (symbol (str "srbQ" i)) 'srcMid) 'CxUniverse {:strength :monotonic}))))
+        run    (fn [redefs]
+                 (let [kb (tu/isolated-fresh)]
+                   (try
+                     (tu/with-shipped-config
+                       (with-redefs-fn redefs #(world! kb))
+                       (placement-digest kb))
+                     (finally (tu/clear-kb! kb)))))
+        batch  (resolve 'vaelii.impl.chain/plan-batch)
+        direct (resolve 'vaelii.impl.taxonomy/direct-witness)
+        every  (resolve 'vaelii.impl.taxonomy/every-uncovered-route)
+        plain  (run (cond-> {}
+                      direct (assoc direct (constantly nil))
+                      every  (assoc every @#'tax/uncovered-routes)
+                      batch  (assoc batch Integer/MAX_VALUE)))]
+    (is (< 40 (count plain)))
+    (is (= plain (run (cond-> {} batch (assoc batch 4)))))))

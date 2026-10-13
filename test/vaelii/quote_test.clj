@@ -11,7 +11,6 @@
   (:require [clojure.test :refer [deftest is testing use-fixtures]]
             [vaelii.core :as v]
             [vaelii.host.core-context :as core-context]
-            [vaelii.host.seed :as seed]
             [vaelii.impl.kb :as kb]
             [vaelii.impl.nat :as nat]
             [vaelii.impl.sentex :as sx]
@@ -19,10 +18,10 @@
             [vaelii.impl.types.reasoning :as reasoning]
             [vaelii.test-util :as tu]))
 
-;; CxCore and CxReflection, whose expression lattice the shape classification answers in
+;; The fixture loads the upper layer, whose reflection.txt holds the expression lattice the
+;; shape classification answers in.
 (use-fixtures :once (tu/loaded #(doto %
-                                  (core-context/load-into)
-                                  (seed/load-context 'CxReflection "upper"))))
+                                  (core-context/load-into))))
 (use-fixtures :each (tu/neutral))
 
 (defn- declare-quote!
@@ -67,7 +66,7 @@
       (is (v/disjoint? kb 'symbol 'predicate)))))
 
 ;; ---- shape classification: what (Quote X) IS follows from X, not a declaration -----
-;; CxCore's `Quote` comment says Quote takes no result, arg or metatype declaration: what
+;; CxUniverse's `Quote` comment says Quote takes no result, arg or metatype declaration: what
 ;; kind of expression `(Quote X)` is follows from X's shape (`provers/shape-kinds`).
 ;; `Quote` is unreifiable here, so a ground quoted form reaches the prover as written; a
 ;; reifiable one is read back through its constant's `termOfUnit` (the next test).
@@ -82,7 +81,7 @@
              ['integer 5 true "a quoted integer is an integer, a value denoting itself"]
              ['non_atomic_expression (list dog 'Muffet) true "(dog Muffet)'s shape being one"]
              ['symbol (list dog 'Muffet) false "a compound's shape is not atomic"]
-             ;; the expression ?x is open, CxReflection's variable being an
+             ;; the expression ?x is open, reflection.txt's variable being an
              ;; open_expression; the sentence around (Quote ?x) is closed (`sx/closed?`)
              ['variable '?x true "?x is a variable"]
              ['wff_expression '?x true "an atomic_expression is a wff_expression"]
@@ -178,6 +177,22 @@
       (testing "the quoted rule form stores as a closed sentence"
         (is (some? stored))))))
 
+;; A query's ?x and the ?x inside a stored (Quote …) are different things: the query's is
+;; a variable, the stored one is part of a constant.  Matching once bound the query's ?x
+;; to the quoted ?x, and resolving {?x ?x} overflowed the stack (vaelii/vaelii#167).
+(tu/deftest-kb a-quoted-variable-matches-only-the-same-quoted-variable
+  (tu/with-terms [awesome_rule]
+    (v/assert kb (list 'unary_predicate awesome_rule) 'CxUniverse)
+    (let [quoted (fn [v] (list 'Quote (list 'implies (list 'poodle v) (list 'dog v))))]
+      (v/assert kb (list awesome_rule (quoted '?x)) 'CxUniverse)
+      (is (true? (v/ask? kb (list awesome_rule (quoted '?x)) 'CxUniverse))
+          "the stored spelling, its variable named as the query's")
+      (is (false? (v/ask? kb (list awesome_rule (quoted '?y)) 'CxUniverse))
+          "(Quote … ?y …) is a different expression")
+      (is (false? (v/ask? kb (list awesome_rule (quoted 'Muffet)) 'CxUniverse))
+          "a quoted variable is not bound by a constant")
+      (is (= [{'?r (quoted '?x)}] (v/ask kb (list awesome_rule '?r) 'CxUniverse))))))
+
 (tu/deftest-kb sameas-does-not-fold-a-quoted-term
   ;; The opacity: merging the *referents* Muffet and Fluffet leaves the two *terms* — and
   ;; so the two reified quoted constants — distinct, because a mention tracks identity of
@@ -271,7 +286,7 @@
             "the head of the chain still resolves the retired spelling")))))
 
 ;; ---- orthogonality: quoting is not reifiability --------------------------
-;; The comment on the prop and CxCore both say quoting governs argument opacity, not
+;; The comment on the prop and CxUniverse both say quoting governs argument opacity, not
 ;; whether the application is minted: `Quasiquote` is unreifiable AND quoting.  So the
 ;; combination the reifiable `Quote` tests never reach is a mention that stays structural
 ;; — never minted — yet whose referents an identity merge still may not fold.

@@ -72,13 +72,13 @@
     (let [k (mint kb (list MtFn Story1))]
       (testing "the NAT compound spelling — reified first, then refused"
         (is (= :not-well-formed
-               (refusal #(v/assert kb (list 'genlCx (list MtFn Story1) 'CxCore) 'CxUniverse)))))
+               (refusal #(v/assert kb (list 'genlCx (list MtFn Story1) 'CxUniverse) 'CxUniverse)))))
       (testing "the pre-minted constant spelling"
         (is (= :not-well-formed
-               (refusal #(v/assert kb (list 'genlCx k 'CxCore) 'CxUniverse)))))
+               (refusal #(v/assert kb (list 'genlCx k 'CxUniverse) 'CxUniverse)))))
       (testing "and as the super, either way round"
         (is (= :not-well-formed
-               (refusal #(v/assert kb (list 'genlCx 'CxCore k) 'CxUniverse))))))))
+               (refusal #(v/assert kb (list 'genlCx 'CxUniverse k) 'CxUniverse))))))))
 
 ;; ---- gate 2: a reified NAT cannot name the context a sentex is in ---------
 
@@ -119,5 +119,5 @@
         (is (= [{'?x Ann}] (v/ask kb-off (list likes Tom '?x) k))))
       (testing "but the symbol is no node of the hierarchy and sees nothing"
         (is (not (contains? (set (v/contexts kb)) k)))
-        (is (not (v/sees? kb k 'CxCore))
-            "an island: it does not even see the spindle head every real context sees")))))
+        (is (not (v/sees? kb k 'CxUniverse))
+            "an island: it does not even see CxUniverse, which every real context sees")))))

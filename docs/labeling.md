@@ -273,13 +273,27 @@ S)` prover answers that question as a read.
 (v/ask? kb '(cautiously (pacifist Nixon)) 'CxUniverse)   ; => false — not in every optimum
 ```
 
-`(cautiously S)` holds when `S` is in **every** optimal labeling of the current dilemmas,
-`(bravely S)` when `S` is in **some** — the cautious and brave halves of one classification
-the prover reads through `label/classify-datum`: the solve-free JTMS bracket below, with
-or without a backend. Over a datum no dilemma moves — neither a
+`(cautiously S)` holds when `S` is in **every** optimal labeling of the dilemmas the asking
+context reads, `(bravely S)` when `S` is in **some** — the cautious and brave halves of one
+classification the prover reads through `label/classify-datum`: the solve-free JTMS bracket
+below, with or without a backend. Over a datum no dilemma moves — neither a
 member nor derived from one — both reduce to ordinary belief, since every resolution agrees
 there. The read **commits nothing**: after asking, belief, `contradictions` and
 `last-program` are exactly as they were.
+
+**The classification is per asking context.** The prover reads `S` as a ground `ask` does:
+the sentexes of `S` stored in the context's `genlCx` ancestor set that the context believes
+(`res/believed-at?`) and sees (`exc/hidden-fn`). A sentex a placed defeat hides from the
+context is not read there, though it is IN in the network. Each of those sentexes is
+classified against the dilemmas `contradictions` reports to the same context
+(`clashes/contradictions-at`), so a dilemma placed in a context the reader does not see
+classifies nothing for it. `S` stored in two visible contexts is two sentexes, and `S` holds
+in a labeling when either does, so its class is the strongest of theirs: `:true` over
+`:supportable` over `:false`. A believed sentex that no dilemma of the context moves is
+believed in every labeling, so it reads `:true`. In the Nixon diamond over time (`temporal_diamond_test`),
+`(pacifist Dick1)` is stored in the life and the republican denial in the term: the youth,
+the life and the retirement read no dilemma and answer both modalities true, and the term
+reads the dilemma and answers each side brave and not cautious.
 
 A backend refines only a **`:refinable`** member: one in a cluster the bracket did not
 enumerate, whose members move none of each other — where a `Program`, which encodes no
@@ -289,8 +303,10 @@ naming it, directly or through a chain. The optima of dilemmas that share no mem
 combination of each component's optima, and a member's class over the whole program is its
 class over its component. The whole program's optima multiply across independent dilemmas
 (twenty Nixon diamonds have 2^20), and one component's do not. Each classification is held
-on the KB until the change clock moves, so two asks with no write between them classify
-once (`lein perf`'s `brave-ask-between-writes`).
+on the KB per asking context until the change clock moves, so two asks with no write between
+them classify once (`lein perf`'s `brave-ask-between-writes`), and an ask after a write reads
+none of the dilemmas placed in contexts the asking context does not see
+(`cautious-ask-beside-unseen-dilemmas`).
 
 Three limits, none silent:
 

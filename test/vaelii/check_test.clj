@@ -35,10 +35,10 @@
     (tu/with-terms [dog cat Muffet CxThe]
       ;; the disjointness constrains where it is visible, so the asserting context
       ;; is wired below the declaring one
-      (v/assert kb (list 'genlCx CxThe 'CxCore) 'CxCore)
-      (v/assert kb (list 'genl dog 'animal) 'CxCore)
-      (v/assert kb (list 'genl cat 'animal) 'CxCore)
-      (v/assert kb (list 'disjoint dog cat) 'CxCore)
+      (v/assert kb (list 'genlCx CxThe 'CxUniverse) 'CxUniverse)
+      (v/assert kb (list 'genl dog 'animal) 'CxUniverse)
+      (v/assert kb (list 'genl cat 'animal) 'CxUniverse)
+      (v/assert kb (list 'disjoint dog cat) 'CxUniverse)
       (v/assert kb (list dog Muffet) CxThe)
       (doseq [[label sentence context expected]
               [["a bad context"        (list dog Muffet) 'notacontext          :naming]
@@ -505,10 +505,10 @@
        ;; type; as it stands the kind reaches `thing` and not the constraint, which is
        ;; the visible-evidence-in-the-wrong-place case genlArg convicts
        (tu/with-terms [relOf a_kind an_animal Rex CxThe]
-         (v/assert kb (list 'genlCx CxThe 'CxCore) 'CxCore)
-         (v/assert kb (list 'genl an_animal 'thing) 'CxCore)
-         (v/assert kb (list 'genl a_kind 'thing) 'CxCore)
-         (v/assert kb (list 'genlArg relOf 1 an_animal) 'CxCore)
+         (v/assert kb (list 'genlCx CxThe 'CxUniverse) 'CxUniverse)
+         (v/assert kb (list 'genl an_animal 'thing) 'CxUniverse)
+         (v/assert kb (list 'genl a_kind 'thing) 'CxUniverse)
+         (v/assert kb (list 'genlArg relOf 1 an_animal) 'CxUniverse)
          (let [ps (v/check-edit kb {:add [[(list 'genl a_kind an_animal) CxThe]
                                           [(list relOf a_kind Rex) CxThe]]})]
            (is (= [{:in :add :index 1 :type :arg-genl}]
@@ -541,14 +541,14 @@
     (tu/without-entailing
      (tu/with-neutral-kb [kb kb-with-starter]
        (tu/with-terms [relOf t_first t_second t_plain Muffet Alice CxThe]
-         (v/assert kb (list 'genlCx CxThe 'CxCore) 'CxCore)
+         (v/assert kb (list 'genlCx CxThe 'CxUniverse) 'CxUniverse)
          (doseq [t [t_first t_second t_plain]]
-           (v/assert kb (list 'genl t 'thing) 'CxCore))
+           (v/assert kb (list 'genl t 'thing) 'CxUniverse))
          (let [d1     (list 'arg relOf 1 t_first)
                d2     (list 'arg relOf 2 t_second)
                winner (first (sort-by pr-str [d1 d2]))]
            (doseq [d (if flip? [d2 d1] [d1 d2])]
-             (v/assert kb d 'CxCore))
+             (v/assert kb d 'CxUniverse))
            (v/assert kb (list t_plain Muffet) CxThe)
            (v/assert kb (list t_plain Alice) CxThe)
            (let [ps (v/check kb (list relOf Muffet Alice) CxThe)

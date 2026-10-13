@@ -27,7 +27,7 @@
   (:import [org.eclipse.jetty.server Server]))
 
 (defn- channel-kb
-  "A fresh CxCore KB with the koinii speech-act vocabulary loaded — the deployment's
+  "A fresh vocabulary KB with the koinii speech-act vocabulary loaded — the deployment's
   substrate: the reply verbs' `target_following_predicate` marks must be in force for a
   reply to cascade."
   []
@@ -616,7 +616,7 @@
   ;; exactly as one placed by `join` is — the entry point reads a fact somebody wrote, not a
   ;; shape it infers from the lattice.
   (let [medium (ch/local kb)]
-    (id/agent-context kb 'CxDeploy 'AgentAtlas)      ; the bare placement, rooted CxCore
+    (id/agent-context kb 'CxDeploy 'AgentAtlas)      ; the bare placement, rooted CxUniverse
     (sa/speaker-context kb 'CxDeploy 'AgentBoreas)   ; the speech-act placement
     (doseq [victim '[CxAtlas CxBoreas]]
       (testing (str "grafting under " victim)
@@ -636,12 +636,12 @@
   ;; the vocabulary the join itself speaks, and a channel rolled up under a wider context
   ;; AFTER agents are already on it.
   (let [medium (ch/local kb)]
-    (testing "a `:speaks CxCore` join, on a channel already rooted at CxCore and rolled up"
-      (v/assert kb '(genlCx CxDeploy CxCore) 'CxUniverse {:strength :monotonic})
+    (testing "a `:speaks CxUniverse` join, on a channel already rooted at CxUniverse and rolled up"
+      (v/assert kb '(genlCx CxDeploy CxUniverse) 'CxUniverse {:strength :monotonic})
       (v/assert kb '(genlCx CxOrg CxDeploy) 'CxUniverse {:strength :monotonic})
-      (let [atlas (ch/join medium 'CxDeploy 'AgentAtlas {:speaks 'CxCore})]
+      (let [atlas (ch/join medium 'CxDeploy 'AgentAtlas {:speaks 'CxUniverse})]
         (is (= 'CxAtlas (:context atlas)))
-        (is (v/sees? kb 'CxAtlas 'CxCore) "rooted where the override said")))
+        (is (v/sees? kb 'CxAtlas 'CxUniverse) "rooted where the override said")))
     (testing "and ordinary edges landing later change nothing for the next agent"
       (v/assert kb '(genlCx CxDeploy CxSpeechActs) 'CxUniverse {:strength :monotonic})
       (v/assert kb '(genlCx CxUpper CxDeploy) 'CxUniverse {:strength :monotonic})

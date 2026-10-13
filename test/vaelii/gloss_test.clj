@@ -87,7 +87,7 @@
     ;; anticipate
     (tu/with-terms [glides Zork]
       (v/assert kb (list 'comment glides (str "(" glides " ?animal) means that the ?animal glides."))
-                'CxCore)
+                'CxUniverse)
       (let [t (:text (gloss/text kb (list glides Zork)))]
         (is (str/includes? t (str Zork " glides")))
         (is (not (str/includes? t (str "the " Zork))))))))

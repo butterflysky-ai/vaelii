@@ -355,6 +355,13 @@
   (prof/record-read :predicate-extent)
   (p/family-leaf index :shape-lengths [f]))
 
+(defn stored-count-shape-tuples-global
+  "How many **stored** positive facts of functor `f` hold `n` arguments, in every
+  context: one count read."
+  [index f n]
+  (prof/record-read :predicate-extent)
+  (long (p/family-count index :shape-tuple [f n] p/every-context)))
+
 (defn as-stored-shape-tuples-global
   "The handles of the **stored** positive facts of functor `f` holding `n` arguments, in
   every context, belief unread."
@@ -651,13 +658,6 @@
   (prof/record-read :mint)
   (p/family-handles index :mint [term] p/every-context))
 
-(defn stored-mint?
-  "Is record `h` filed as a mint about `term` in context `c`?  One membership test."
-  [index term c h]
-  (read-at! c)
-  (prof/record-read :mint)
-  (boolean (p/family-member? index :mint [term c] h)))
-
 (defn as-stored-mint-contexts-global
   "The contexts some filed mint is stored in, as a set."
   [index]
@@ -793,6 +793,14 @@
   [index h]
   (prof/record-read :tax-support)
   (p/family-leaf index :tax-installs [h]))
+
+(defn stored-count-named-supporters-global
+  "How many positive `(functor (sentexHandle H))` facts are **stored** in every context,
+  `functor` `except` or `defeat`, whose H installs a taxonomy key of relation `rel`
+  (`kv/key-relation`): one count read on the `:tax-named` family, belief unread."
+  [index rel functor]
+  (prof/record-read :tax-named)
+  (long (p/family-count index :tax-named [rel functor] p/every-context)))
 
 (defn as-stored-supporter-map
   "Every taxonomy key with a **stored** supporter, as `{k {handle ctx}}`, by a walk of every

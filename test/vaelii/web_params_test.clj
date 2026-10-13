@@ -77,9 +77,9 @@
    ["POST /demo first"    #(POST "/demo" {"do" "start" "first" "abc"})     "first" "abc"]
    ["POST /demo do"       #(POST "/demo" {"do" "bogus"})                   "do" "bogus"]
    ["POST /reasoning id"  #(POST "/reasoning" {"id" "bogus"})              "id" "bogus"]
-   ["POST /edit"          #(POST "/edit" {"handles" "abc" "text" "CxCore\n(genl dog animal)"})
+   ["POST /edit"          #(POST "/edit" {"handles" "abc" "text" "CxUniverse\n(genl dog animal)"})
     "handles" "abc"]
-   ["POST /edit/preview"  #(POST "/edit/preview" {"handles" "abc" "text" "CxCore\n(genl dog animal)"})
+   ["POST /edit/preview"  #(POST "/edit/preview" {"handles" "abc" "text" "CxUniverse\n(genl dog animal)"})
     "handles" "abc"]
    ["POST /retract"       #(POST "/retract" {"handles" "abc"})             "handles" "abc"]
    ["POST /kbs/export variant"     #(POST "/kbs/export" {"dir" "/nonexistent-x" "variant" "xyz"})
@@ -121,10 +121,10 @@
 
 (deftest nothing-is-written-on-a-value-the-route-could-not-read
   (tu/with-terms [tmpkind]
-    (let [text (str "CxCore\n(genl " tmpkind " thing)")]
+    (let [text (str "CxUniverse\n(genl " tmpkind " thing)")]
       (testing "a handle list with an element that does not read asserts nothing"
         (is (= 400 (:status (POST "/edit" {"handles" "abc" "text" text}))))
-        (is (nil? (v/handle-of tu/*kb* (list 'genl tmpkind 'thing) 'CxCore))))
+        (is (nil? (v/handle-of tu/*kb* (list 'genl tmpkind 'thing) 'CxUniverse))))
       (testing "and a handle that reads and names nothing stored is the unknown-handle
                 problem, not a new sentence"
         (let [{:keys [status body]} (POST "/edit" {"handles" "999999999" "text" text})]
@@ -132,7 +132,7 @@
           (is (str/includes? body "unknown-handle"))
           (is (str/includes? body "Nothing was written"))
           (is (not (str/includes? body "Saved"))))
-        (is (nil? (v/handle-of tu/*kb* (list 'genl tmpkind 'thing) 'CxCore))))
+        (is (nil? (v/handle-of tu/*kb* (list 'genl tmpkind 'thing) 'CxUniverse))))
       (testing "the preview says what the save would"
         (is (str/includes? (:body (POST "/edit/preview" {"handles" "999999999" "text" text}))
                            "unknown-handle"))))))
@@ -156,7 +156,7 @@
                         ["/tree/rows"   {:rel "genl" :node "thing"}]
                         ["/front/rows"  {:section "predicates"}]
                         ["/stats/rows"  {:section "contexts"}]
-                        ["/levels/rows" {:q "(genl ?x thing)" :ctx "CxCore" :level "1"}]
+                        ["/levels/rows" {:q "(genl ?x thing)" :ctx "CxUniverse" :level "1"}]
                         ["/funnel/rows" {}]]
           offset ["abc" "-5"]]
     (testing (str uri " offset=" offset)

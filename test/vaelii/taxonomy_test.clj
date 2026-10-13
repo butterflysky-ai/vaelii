@@ -984,7 +984,7 @@
 (deftest genlCx-visibility
   (let [t (tax/create-taxonomy)]
     (tax/add-genlCx t 'CxBio 'CxUniverse 1)
-    (tax/add-genlCx t 'CxCore 'CxUniverse 2)
+    (tax/add-genlCx t 'CxChem 'CxUniverse 2)
     (testing "a specific context sees the general one"
       (is (tax/sees? t 'CxBio 'CxUniverse))
       (is (not (tax/sees? t 'CxUniverse 'CxBio))))))
@@ -992,24 +992,24 @@
 (deftest placement
   (let [t (tax/create-taxonomy)]
     (tax/add-genlCx t 'CxBio 'CxUniverse 1)
-    (tax/add-genlCx t 'CxCore 'CxUniverse 2)
+    (tax/add-genlCx t 'CxChem 'CxUniverse 2)
     (testing "rule + facts all in the top context place at the top"
       (is (= '#{CxUniverse} (tax/maximal-common-descendant-contexts t '[CxUniverse CxUniverse]))))
     (testing "universal rule + specific facts place in the specific context"
       (is (= '#{CxBio} (tax/maximal-common-descendant-contexts t '[CxUniverse CxBio]))))
     (testing "incomparable contexts have no common view"
-      (is (= #{} (tax/maximal-common-descendant-contexts t '[CxBio CxCore]))))))
+      (is (= #{} (tax/maximal-common-descendant-contexts t '[CxBio CxChem]))))))
 
 (deftest placement-through-the-seeing-member
   ;; a member of `ctxs` that sees every other member is the unique maximum, answered
   ;; by sees? probes alone; the closure fallback must agree wherever both apply.
   (let [t (tax/create-taxonomy)]
     (tax/add-genlCx t 'CxBio 'CxUniverse 1)
-    (tax/add-genlCx t 'CxCore 'CxUniverse 2)
+    (tax/add-genlCx t 'CxChem 'CxUniverse 2)
     (tax/add-genlCx t 'CxWell 'CxBio 3)
-    (tax/add-genlCx t 'CxWell 'CxCore 4)
+    (tax/add-genlCx t 'CxWell 'CxChem 4)
     (tax/add-genlCx t 'CxLeft 'CxBio 5)
-    (tax/add-genlCx t 'CxLeft 'CxCore 6)
+    (tax/add-genlCx t 'CxLeft 'CxChem 6)
     (testing "a chain places at its most specific member"
       (is (= '#{CxWell} (tax/maximal-common-descendant-contexts
                          t '[CxUniverse CxBio CxWell]))))
@@ -1018,9 +1018,9 @@
                         t '[CxBio CxBio CxUniverse]))))
     (testing "incomparable maxima both survive the fallback"
       ;; Well and Left each see both siblings, neither sees the other — no seeing
-      ;; member exists among [Bio Core], so this is the closure path
+      ;; member exists among [Bio Chem], so this is the closure path
       (is (= '#{CxWell CxLeft}
-             (tax/maximal-common-descendant-contexts t '[CxBio CxCore]))))))
+             (tax/maximal-common-descendant-contexts t '[CxBio CxChem]))))))
 
 (deftest placement-over-mutually-visible-contexts
   ;; Two contexts in a `genlCx` cycle are equally general, so each is an ancestor
@@ -1070,16 +1070,16 @@
   ;; ask existence — pinned shape by shape, then against the full function wholesale.
   (let [t (tax/create-taxonomy)]
     (tax/add-genlCx t 'CxBio 'CxUniverse 1)
-    (tax/add-genlCx t 'CxCore 'CxUniverse 2)
+    (tax/add-genlCx t 'CxChem 'CxUniverse 2)
     (tax/add-genlCx t 'CxWell 'CxBio 3)
-    (tax/add-genlCx t 'CxWell 'CxCore 4)
+    (tax/add-genlCx t 'CxWell 'CxChem 4)
     (tax/add-genlCx t 'CxDeep 'CxWell 5)
     (tax/add-genlCx t 'CxOrphan 'CxElsewhere 6)
     (testing "a comparable pair answers through the seeing member"
       (is (tax/common-descendant? t '[CxUniverse CxBio]))
       (is (tax/common-descendant? t '[CxBio CxDeep])))
     (testing "incomparable siblings share their child"
-      (is (tax/common-descendant? t '[CxBio CxCore])))
+      (is (tax/common-descendant? t '[CxBio CxChem])))
     (testing "no context sees both arms of a disconnected pair"
       (is (not (tax/common-descendant? t '[CxBio CxOrphan])))
       (is (not (tax/common-descendant? t '[CxUniverse CxElsewhere CxOrphan]))))
@@ -1622,4 +1622,81 @@
             (is (= want (tax/with-neighbours (atom {})
                           (fn [] (tax/reach-support t :genl sub super nil cls) (walk))))
                 (str "trial " trial " " sub " " super))))))
+    (is (pos? @found) "some pairs have routes")))
+
+(deftest a-walk-from-a-source-one-edge-from-its-target-names-what-the-full-walk-names
+  ;; random graphs of 50 types, edges in four contexts, some with two supporters of two
+  ;; classes, and many sources one edge from their target: the witness and every
+  ;; uncovered route, read from three vantages, with the one-edge answers and without
+  (let [rnd   (java.util.Random. 5001)
+        ;; seeded, so the cases asked, and the assertion count, are the same every run
+        pick  (fn [n xs] (let [l (java.util.ArrayList. ^java.util.Collection (sort xs))]
+                           (java.util.Collections/shuffle l rnd)
+                           (take n l)))
+        short (atom 0)
+        cls   #(if (even? %) :monotonic :default)]
+    (dotimes [trial 8]
+      (let [t   (tax/create-taxonomy)
+            ts  (mapv #(symbol (str "dw" %)) (range 50))
+            cxs [nil 'CxDwA 'CxDwB 'CxDwC]]
+        (tax/add-genlCx t 'CxDwA 'CxUniverse 1)
+        (tax/add-genlCx t 'CxDwB 'CxUniverse 2)
+        (tax/add-genlCx t 'CxDwC 'CxDwA 3)
+        (dotimes [h 120]
+          (let [i (.nextInt rnd 50) j (.nextInt rnd 50)]
+            (when (and (not= i j) (or (< i j) (zero? (.nextInt rnd 10))))
+              (tax/add-genl t (ts i) (ts j) (+ 10 h) (cxs (.nextInt rnd 4)))
+              (when (zero? (.nextInt rnd 3))
+                (tax/add-genl t (ts i) (ts j) (+ 1000 h) (cxs (.nextInt rnd 4)))))))
+        (doseq [sub   (pick 25 ts)
+                super (pick 3 (tax/direct-genls-global t sub))
+                ctx   [nil 'CxDwA 'CxDwC]
+                :when (not= sub super)]
+          (let [walk #(tax/with-neighbours (atom {})
+                        (fn [] [(tax/reach-support t :genl sub super ctx)
+                                (tax/reach-support t :genl sub super ctx cls)
+                                (tax/reach-supports t :genl sub super ctx cls)
+                                (tax/general-reach-supports t :genl sub super ctx)]))
+                want (with-redefs [tax/direct-witness        (constantly nil)
+                                   tax/every-uncovered-route @#'tax/uncovered-routes]
+                       (walk))]
+            (swap! short inc)
+            (is (= want (walk)) (str "trial " trial " " sub " " super " " ctx))))))
+    (is (pos? @short) "some sources sit one edge from a target")))
+
+(deftest the-routes-a-search-keeps-do-not-depend-on-edges-off-every-route
+  ;; random graphs of 40 types, edges in four contexts and half with a second supporter,
+  ;; then the same graphs with three dead-end parents added to every type: the edges off
+  ;; every route enter the queue and move nothing a route search returns
+  (let [build (fn [seed dead?]
+                (let [rnd (java.util.Random. seed)
+                      t   (tax/create-taxonomy)
+                      ts  (mapv #(symbol (str "lk" %)) (range 40))
+                      cxs [nil 'CxLkA 'CxLkB 'CxLkC]]
+                  (tax/add-genlCx t 'CxLkA 'CxUniverse 1)
+                  (tax/add-genlCx t 'CxLkB 'CxUniverse 2)
+                  (tax/add-genlCx t 'CxLkC 'CxLkA 3)
+                  (dotimes [h 150]
+                    (let [i (.nextInt rnd 40) j (.nextInt rnd 40)]
+                      (when (< i j)
+                        (tax/add-genl t (ts i) (ts j) (+ 10 h) (cxs (.nextInt rnd 4)))
+                        (when (zero? (.nextInt rnd 2))
+                          (tax/add-genl t (ts i) (ts j) (+ 1000 h) (cxs (.nextInt rnd 4)))))))
+                  (when dead?
+                    (dotimes [i 40]
+                      (dotimes [d 3]
+                        (tax/add-genl t (ts i) (symbol (str "lkdead" i "x" d)) (+ 5000 (* 3 i) d) (cxs d)))))
+                  [t ts]))
+        cls   #(if (even? %) :monotonic :default)
+        found (atom 0)]
+    (doseq [seed (range 10)]
+      (let [[t ts] (build seed false)
+            [t2]   (build seed true)]
+        (doseq [i (range 15) j (range 25 40)
+                :let [a (ts i) b (ts j)
+                      r (tax/reach-supports t :genl a b nil cls)]]
+          (when (seq r) (swap! found inc))
+          (is (= r (tax/reach-supports t2 :genl a b nil cls)) (str "seed " seed " " a " " b))
+          (is (= (tax/general-reach-supports t :genl a b nil) (tax/general-reach-supports t2 :genl a b nil))
+              (str "seed " seed " " a " " b)))))
     (is (pos? @found) "some pairs have routes")))

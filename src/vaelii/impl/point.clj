@@ -55,7 +55,7 @@
   reads a thing against a moment off it: yes, no, or unknown where the moment falls
   inside a range a bound leaves open.
 
-  The vocabulary ships in `kb/upper/CxTime.txt` beside the interval relations.  The
+  The vocabulary ships in `kb/upper/time.txt` beside the interval relations.  The
   prover is **opt-in** on top of it: register it with `vaelii.core/add-prover`, and until
   then a KB stores and retrieves instant relations as ordinary facts without paying for the
   network."

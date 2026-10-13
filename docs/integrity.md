@@ -398,7 +398,7 @@ and the KB states no marker that tells the two apart. The sweep reads one sign i
 The heuristic is a sign, not a proof. A default may be deliberate before anything
 overrides it, and a contrary claim may override a default that was written by accident.
 
-A reviewer records a decision on any suggestion with `declined_rule_macro`, a CxCore
+A reviewer records a decision on any suggestion with `declined_rule_macro`, a `core.txt`
 predicate over the suggested declaration:
 
 ```clojure
@@ -427,7 +427,7 @@ The further conditions are where a declaration reads differently from a rule:
   such an `R` is not reported.
 - **A rule that concludes a term the engine interprets materializes it.** A stored
   `(symmetric P)` sets the property the canonical argument order reads, and a membership
-  `genl` inherits does not, as the `equivalence_relation` comment in CxCore records. A
+  `genl` inherits does not, as the `equivalence_relation` comment in `core.txt` records. A
   rule shaped as `genl` whose consequent predicate is in the engine's grammar
   (`vaelii.impl.predicates`) is therefore not reported.
 - **A mark fixes an arity.** `symmetric` and `transitive` classify their predicate as a
@@ -468,30 +468,34 @@ after the orthogonal-over-separation category.
 ## What an undeclared-arity finding means
 
 Every type is a unary predicate, and a predicate `genl` edge relates two predicates of
-one arity. A term at either end of a `genl` edge with no arity the KB states is a type or
-a predicate nobody declared. A rule guarded on `(unary ?t)` or `(unary_predicate ?t)`
+one arity. A term at either end of a `genl` edge that no length binds is a type or a
+predicate nobody declared. A rule guarded on `(unary ?t)` or `(unary_predicate ?t)`
 reads such a term as no type and skips it, and nothing on the write path reports the
 missing declaration. So the sweep reads each node of the visible `genl` edges:
 
 ```clojure
 ;; (unary_predicate placed_kind)
-;; (genl stray_kind placed_kind)
+;; (genl below_kind placed_kind)
+;; (genl stray_kind loose_kind)
 {:status :gap
  :candidate-count 0
  :undeclared-arity
- [{:term stray_kind}]}
+ [{:term loose_kind} {:term stray_kind}]}
 ```
 
-One finding is reported for each node, in print order. A node has an arity when the
-audit context sees one of the declarations `kb/relation-arity` reads, an `(arity P n)`
-declaration or a membership in an exact-arity class (`unary_predicate`,
-`binary_predicate`, `unary_function`, and the others of `tax/exact-arity-classes`), or a
-membership in `variable_arity`. A membership is read through the `genl` closure of its
-class, so a membership in a specialization of `unary_predicate` states arity one.
+One finding is reported for each node, in print order. A node has an arity when
+`arity/relation-length` binds it to an exact length or a `variable_arity` membership
+releases it (`arity/released?`), read the same at every context
+([taxonomy.md](taxonomy.md#arity)): an `(arity P n)` declaration, a membership in an
+exact-arity class (`unary_predicate`, `binary_predicate`, `unary_function`, and the
+others of `sx/exact-arity-classes`), a `:monotonic` membership in a type that reaches one
+through `:monotonic` `genl` edges, or a `variable_arity`, `variable_arity_predicate` or
+`variable_arity_function` membership, each stated in any context, or the one exact length
+the bound predicates above the node agree on. A node below a bound predicate is therefore
+not a finding.
 
-CxCore declares an arity for every type it places under `thing`, so a KB that loads
-CxCore alone has no finding. The starter loader (`vaelii.host.starter/load-into`) asserts
-`(unary_predicate X)` in CxCore for every subtype `X` of `thing` after the KB files load,
+`core.txt` declares an arity for every type it places under `thing`. The starter loader
+(`vaelii.host.starter/load-into`) asserts `(unary_predicate X)` in CxUniverse for every subtype `X` of `thing` after the KB files load,
 which declares the 87 types of the upper and middle files that state no arity of their
 own, so the shipped starter has no finding either.
 

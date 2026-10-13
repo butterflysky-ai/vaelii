@@ -119,8 +119,10 @@
   bindings: the count trie `:arity-binding` over `[pred kind value ctx]`, with
   `[:arity-binding-kinds pred]` and `[:arity-bound]` above its nodes.  13 replaces the
   shape counter with the count trie `:shape-tuple` over `[f n ctx]`, the positive facts of
-  functor `f` holding `n` arguments, with `[:shape-lengths f]` above its nodes."
-  13)
+  functor `f` holding `n` arguments, with `[:shape-lengths f]` above its nodes.  14 adds
+  the count trie `:tax-named` over `[rel functor ctx]`, the positive `except` and `defeat`
+  facts naming a stored supporter of a taxonomy relation."
+  14)
 
 (defn apply-op
   "Apply one `kv-batch` write op to map `m`, returning `[m' reply]`.  Only
@@ -228,6 +230,9 @@
                                            (sole "except's exceptWhen re-check on a fact or an edge")))
      :tax-support (ctrie :taxonomy supporters)
      :tax-installs (roster :taxonomy supporters)
+     :tax-named (ctrie :sentex {:class :access-path
+                                :class-evidence {:oracle '[vaelii.index-test/the-named-supporter-family-agrees-with-the-naming-trie]
+                                                 :via [:trie :tax-installs]}})
      :mint (ctrie :justification (assoc mints :root :mint-terms))
      :mint-terms (roster :justification mints)
      :mint-in (ctrie :justification mints)
@@ -260,7 +265,7 @@
 (defn- ctx-key  [c]     [:context-root c])
 
 ;; ---- the count tries that end in the context -----------------------------
-;; Twelve families share one shape: a count trie whose last level is the context.  A
+;; Thirteen families share one shape: a count trie whose last level is the context.  A
 ;; `node` is the path above the context, and each node is three keys under the family's
 ;; `tag` — its count (how many handles sit under it, in every context), its children (the
 ;; contexts that state one) and, per child, the leaf holding that context's handles:
@@ -281,6 +286,9 @@
 ;;                                             `:min` or `:var`, value nil for `:var`
 ;;   :tax-support       node k                 the supporters of taxonomy key `k`, which
 ;;                                             the taxonomy writers post (below)
+;;   :tax-named         node [rel f]           the positive `(f (sentexHandle H))` facts,
+;;                                             `f` `except` or `defeat`, whose H installs
+;;                                             a key of relation `rel` (`key-relation`)
 ;;   :mint              node [term]            the mints about `term`
 ;;   :mint-in           node []                every mint
 ;;
@@ -465,16 +473,6 @@
 ;; name and the index write remains a single batch.  Only *symbols* are rostered: a
 ;; ground compound keys the term index too, but it is a sentence fragment, not a name.
 
-(defn roster-adds
-  "The write ops entering `terms` (one sentex's, from `sentex-terms`) in the roster —
-  read BEFORE their postings are written, so a name is entered exactly by the first
-  sentex to mention it."
-  [backend terms]
-  (into [] (comp (filter symbol?)
-                 (remove (fn [t] (pos? (long (kv-count backend (term-key t))))))
-                 (map (fn [t] [:add-to-set roster-key t])))
-        terms))
-
 (defn roster-retires
   "The write ops retiring the names in `terms` that `handle` is the last mention of —
   read BEFORE their postings are removed, so a name dies exactly when its posting is
@@ -540,12 +538,6 @@
                        [:decrement (node-count-key tag node)])]
               lone? (conj [:remove-from-set (node-ctxs-key tag node) c]))}))
 
-(defn- node-adds
-  "Write ops entering `sentex`'s context under each of its `fact-nodes`."
-  [sentex]
-  (let [c (:context sentex)]
-    (into [] (mapcat (fn [[tag node]] (node-add tag node c))) (fact-nodes sentex))))
-
 (defn- node-retires
   "`node-retire` for each of `sentex`'s `fact-nodes`."
   [backend sentex handle]
@@ -576,8 +568,10 @@
         preds))
 
 (defn slot-adds
-  "Write ops entering a sentex's predicates in their slots - read BEFORE the postings
-  are written, so a predicate is entered exactly by the fact that creates its node.
+  "Conj onto the transient `ops` the write ops entering a sentex's predicates in their
+  slots, one per `[:argument-root [pred pos term]]` of `fnodes` (`fact-nodes`) whose node
+  holds no context yet - read BEFORE the postings are written, so a predicate is entered
+  exactly by the fact that creates its node.  Returns `ops`.
 
   The unary roster is the exception and takes no read at all: its entry is written by
   every unary fact rather than by the first, because the node that guards the others is
@@ -588,18 +582,22 @@
   joins `unary-multi-key` when the entry is its second predicate, which two reads of the
   unary roster decide, and `unary-kept-key` under each predicate it then holds
   (`kept-adds`)."
-  [backend sentex]
-  (let [ops (into [] (comp (filter (fn [node] (zero? (long (kv-count backend (arg-ctxs-key node))))))
-                           (map (fn [[pred pos t]] [:add-to-set (slot-key pos t) pred])))
-                  (arg-slots sentex))]
+  [ops backend sentex fnodes]
+  (let [ops (reduce (fn [ops [tag node]]
+                      (if (and (identical? :argument-root tag)
+                               (zero? (long (kv-count backend (arg-ctxs-key node)))))
+                        (let [[pred pos t] node] (conj! ops [:add-to-set (slot-key pos t) pred]))
+                        ops))
+                    ops fnodes)]
     (if-let [[pred t] (unary-slot sentex)]
       (let [k (unary-slot-key t)
-            n (long (kv-count backend k))]
+            n (long (kv-count backend k))
+            ops (conj! ops [:add-to-set k pred])]
         (if (and (pos? n) (not (kv-member? backend k pred)))
-          (-> (conj ops [:add-to-set k pred])
-              (into (kept-adds backend t (cond-> [pred] (== 1 n) (into (kv-members backend k)))))
-              (cond-> (== 1 n) (conj [:add-to-set unary-multi-key t])))
-          (conj ops [:add-to-set k pred])))
+          (as-> ops ops
+            (reduce conj! ops (kept-adds backend t (cond-> [pred] (== 1 n) (into (kv-members backend k)))))
+            (cond-> ops (== 1 n) (conj! [:add-to-set unary-multi-key t])))
+          ops))
       ops)))
 
 (defn- slot-retires
@@ -645,10 +643,12 @@
     :else           (Long/parseLong (str reply))))
 
 (defn- shape-adds
-  "Write ops entering `sentex`'s length in its functor's lengths.  No read."
-  [sentex]
-  (when-let [[f n] (fact-shape sentex)]
-    [[:add-to-set (shape-lengths-key f) n]]))
+  "Conj onto the transient `ops` the write op entering `sentex`'s length in its functor's
+  lengths.  No read."
+  [ops sentex]
+  (if-let [[f n] (fact-shape sentex)]
+    (conj! ops [:add-to-set (shape-lengths-key f) n])
+    ops))
 
 (defn- binding-adds
   "Write ops entering a length binding's `[kind value]` in its predicate's kinds where
@@ -788,6 +788,49 @@
           (and (== 1 (long (kv-count backend k))) (kv-member? backend k t))
           (conj [:remove-from-set unary-denied-types-key pred]))))))
 
+(defn key-relation
+  "The taxonomy relation key `k` (`[:genl a b]`, `[:genlCx a b]`, a flat-cache key)
+  belongs to: `:genl`, `:genlCx`, or `:flat` for every flat-cache key."
+  [k]
+  (let [r (nth k 0)] (if (or (= :genl r) (= :genlCx r)) r :flat)))
+
+(defn- named-supporter
+  "`[functor target]` when `sentex` is a positive `(functor (sentexHandle target))` fact
+  with `functor` `except` or `defeat`, else nil: the facts the `:tax-named` family files."
+  [sentex]
+  (let [s (:sentence sentex)]
+    (when (and (nil? (:antecedent sentex)) (seq? s) (= 2 (count s))
+               (or (= sx/except-functor (first s)) (= sx/defeat-functor (first s))))
+      (when-let [h (sx/handle-id (second s))] [(first s) h]))))
+
+(defn- named-relations
+  "The relations (`key-relation`) of the taxonomy keys `h` installs, read off
+  `[:tax-installs h]`."
+  [backend h]
+  (into #{} (map key-relation) (kv-members backend [:tax-installs h])))
+
+(defn- named-adds
+  "Write ops entering the fact `sentex`, stored under `handle`, under `[rel f]` in the
+  `:tax-named` family for each relation its target supports, read before the write."
+  [backend sentex handle]
+  (when-let [[f h] (named-supporter sentex)]
+    (let [c (:context sentex)]
+      (into [] (mapcat (fn [rel] (into [[:add-to-set (node-leaf-key :tax-named [rel f] c) handle]]
+                                       (node-add :tax-named [rel f] c))))
+            (named-relations backend h)))))
+
+(defn- named-retires
+  "Write ops taking the fact `sentex`, stored under `handle`, out of the `:tax-named`
+  family, read before the write.  A leaf not holding `handle` takes no op: the taxonomy
+  retires an entry whose target stops supporting the relation (`tax/retire!`)."
+  [backend sentex handle]
+  (when-let [[f h] (named-supporter sentex)]
+    (let [c (:context sentex)]
+      (into [] (comp (filter #(kv-member? backend (node-leaf-key :tax-named [% f] c) handle))
+                     (mapcat (fn [rel] (into [[:remove-from-set (node-leaf-key :tax-named [rel f] c) handle]]
+                                             (:ops (node-retire backend :tax-named [rel f] c handle))))))
+            (named-relations backend h)))))
+
 (defn trie-reads
   "The two trie reads the opposed family's writes take, over `count-at` (prefix ->
   count) and `children` and `leaf` (prefix -> set): `:count`, and `:leaves`, the
@@ -803,9 +846,9 @@
 ;; everything under it identically: the inverted term index, the context root, the
 ;; predicate extent, the argument trie, the term roster and the argument-slot roster are
 ;; `key -> set` and `key -> count` families over one backend.  The two builders below
-;; produce that half of a write — the ops and the per-family counts together — and each
-;; store concatenates its own trie ops around the ops and hands the counts to the profile
-;; tally with its own `:levels` (and `:dead` on the retire).  One definition fixes three things across the
+;; produce that half of a write — the ops and the per-family counts together.  Each store
+;; conjes its own trie ops, then the adds' ops, and hands the counts to the profile tally
+;; with its own `:levels` (and `:dead` on the retire).  One definition fixes three things across the
 ;; two stores: which families a sentex enters, the order its ops land in, and the numbers
 ;; the tally reports.  The order belongs to the definition because `assert_cost_test` pins
 ;; the per-family read/write counts one assert costs, on either store.  `:roots` counts
@@ -814,32 +857,55 @@
 ;; takes.
 
 (defn flat-family-adds
-  "`{:ops [...] :counts {:terms n :roots n :roster n :slots n}}` — the non-trie write ops
-  entering `sentex` under `handle`, and the number of ops each family takes.
+  "`{:ops ops :counts {:terms n :roots n :roster n :slots n}}` — conjes onto the transient
+  `ops` the non-trie write ops entering `sentex` under `handle`, and reports the number
+  of ops each family took.  `:ops` is the transient `conj!` returned: the caller keeps
+  using it, and seals it with `persistent!`.
 
-  Both roster reads run here, before the caller batches the ops, so a name enters the
-  term roster and a predicate enters its argument slot exactly on the first sentex to
-  carry it."
-  [backend trie sentex handle]
-  (let [terms   (sentex-terms sentex)
-        roots   (root-keys sentex)                      ; derived from the sentex alone
-        nodes   (node-adds sentex)                      ; likewise
-        roster  (roster-adds backend terms)             ; reads the pre-write postings
-        slots   (-> (slot-adds backend sentex) (into (shape-adds sentex)) ; likewise
-                    (into (binding-adds backend sentex))
-                    (into (denied-adds backend trie sentex)))              ; and the trie
-        opposed (opposed-adds backend trie sentex handle)] ; likewise, and the trie
-    {:ops    (-> []
-                 (into (map (fn [t] [:add-to-set (term-key t) handle])) terms)
-                 (into (map (fn [k] [:add-to-set k handle])) roots)
-                 (into nodes)
-                 (into opposed)
-                 (into roster)
-                 (into slots))
-     :counts {:terms  (count terms)
-              :roots  (+ (count roots) (count nodes) (count opposed))
-              :roster (count roster)
-              :slots  (count slots)}}))
+  The families conj straight onto `ops`, so no vector is built per family or per sentex;
+  the order is terms, roots, nodes, opposed, named, roster, slots, and `assert_cost_test`
+  pins the per-family counts.  Every read runs here, before the caller batches the ops, so
+  a name enters the term roster and a predicate enters its argument slot exactly on the
+  first sentex to carry it."
+  [ops backend trie sentex handle]
+  (let [c       (:context sentex)
+        fnodes  (fact-nodes sentex)                     ; derived from the sentex alone
+        n0      (count ops)
+        ;; terms, and the names among them no stored sentex mentions yet (reads the
+        ;; pre-write postings), which enter the roster after the opposed and named ops
+        [ops fresh]
+        (loop [s (seq (sentex-terms sentex)) ops ops fresh nil]
+          (if s
+            (let [t (first s) k (term-key t)]
+              (recur (next s) (conj! ops [:add-to-set k handle])
+                     (if (and (symbol? t) (not (pos? (long (kv-count backend k)))))
+                       (conj fresh t)
+                       fresh)))
+            [ops fresh]))
+        n1      (count ops)
+        ops     (reduce (fn [ops [tag node]] (conj! ops [:add-to-set (node-leaf-key tag node c) handle]))
+                        (conj! ops [:add-to-set (ctx-key c) handle])
+                        fnodes)
+        ops     (reduce (fn [ops [tag node]]
+                          (-> ops
+                              (conj! [:add-to-set (node-ctxs-key tag node) c])
+                              (conj! [:increment (node-count-key tag node)])))
+                        ops fnodes)
+        ops     (reduce conj! ops (opposed-adds backend trie sentex handle)) ; reads the trie
+        ops     (reduce conj! ops (named-adds backend sentex handle))        ; reads the target's installs
+        n2      (count ops)
+        ops     (reduce (fn [ops t] (conj! ops [:add-to-set roster-key t])) ops fresh)
+        n3      (count ops)
+        ops     (-> ops
+                    (slot-adds backend sentex fnodes)                         ; reads the pre-write postings
+                    (shape-adds sentex)
+                    (as-> ops (reduce conj! ops (binding-adds backend sentex)))
+                    (as-> ops (reduce conj! ops (denied-adds backend trie sentex))))] ; the trie
+    {:ops    ops
+     :counts {:terms  (- (long n1) (long n0))
+              :roots  (- (long n2) (long n1))
+              :roster (- (long n3) (long n2))
+              :slots  (- (long (count ops)) (long n3))}}))
 
 (defn flat-family-retires
   "`{:ops [...] :counts {:terms n :roots n :roster n :slots n}}` — the mirror of
@@ -855,15 +921,16 @@
         retires (node-retires backend sentex handle)    ; reads the pre-write postings
         nodes   (into [] (mapcat :ops) retires)
         opposed (opposed-retires backend trie sentex handle) ; likewise, and the trie
+        named   (named-retires backend sentex handle)   ; likewise, and the target's installs
         roster  (roster-retires backend terms handle)   ; likewise
         slots   (-> (slot-retires backend sentex retires) (into (shape-retires retires))
                     (into (binding-retires backend retires))
                     (into (denied-retires backend trie sentex)))]
     {:ops    (concat (map (fn [t] [:remove-from-set (term-key t) handle]) terms)
                      (map (fn [k] [:remove-from-set k handle]) roots)
-                     nodes opposed roster slots)
+                     nodes opposed named roster slots)
      :counts {:terms  (count terms)
-              :roots  (+ (count roots) (count nodes) (count opposed))
+              :roots  (+ (count roots) (count nodes) (count opposed) (count named))
               :roster (count roster)
               :slots  (count slots)}}))
 
@@ -1192,18 +1259,19 @@
   (index-sentex [_ sentex handle]
     (let [pth  (sx/path sentex)
           n    (count pth)
-          flat (flat-family-adds backend (kv-trie backend) sentex handle)] ; reads the pre-write postings
+          ;; the trie ops, then the families' (`flat-family-adds` reads the pre-write
+          ;; postings), then the batch seal, last on purpose — `sealed-prefix` says why
+          trie (reduce (fn [ops i]
+                         (let [prefix (subvec pth 0 i)]
+                           (-> ops
+                               (conj! [:increment (count-key prefix)])
+                               (conj! (if (< i n)
+                                        [:add-to-set (set-key prefix)  (nth pth i)] ; child edge
+                                        [:add-to-set (leaf-key prefix) handle])))))  ; leaf handle
+                       (transient []) (range (inc n)))
+          flat (flat-family-adds trie backend (kv-trie backend) sentex handle)]
       (kv-batch backend
-                (-> (reduce (fn [ops i]
-                              (let [prefix (subvec pth 0 i)]
-                                (-> ops
-                                    (conj! [:increment (count-key prefix)])
-                                    (conj! (if (< i n)
-                                             [:add-to-set (set-key prefix)  (nth pth i)] ; child edge
-                                             [:add-to-set (leaf-key prefix) handle])))))  ; leaf handle
-                            (transient []) (range (inc n)))
-                    (as-> ops (reduce conj! ops (:ops flat)))
-                    ;; the batch seal, last on purpose — `sealed-prefix` says why
+                (-> (:ops flat)
                     (conj! [:increment (count-key sealed-prefix)])
                     persistent!))
       ;; what this assert cost the index, per family, when somebody is asking

@@ -27,11 +27,11 @@
 ;; policies that resolve a dispute are vaelii.koinii.adjudication's.  The action
 ;; dimension (request / propose / accept) maps onto A2A, not this vocabulary (D5).
 ;;
-;; Sees CxCore for its vocabulary.  Actor ids are the individuals registered in
+;; Sees CxUniverse for its vocabulary.  Actor ids are the individuals registered in
 ;; CxRegistry; the arg to `agent` documents that, and is inert here
 ;; (open-world) until a context that also sees the registry activates it.
 
-(genlCx CxSpeechActs CxCore)      ; CxSpeechActs speaks CxCore's vocabulary
+(genlCx CxSpeechActs CxUniverse)  ; CxSpeechActs speaks CxUniverse's vocabulary
 
 ;; ---- origination: the claim (or query node) plus provenance IS the act ----
 
@@ -50,7 +50,7 @@
 ;; ---- response acts: meta-sentexes on their target, target_following_predicate ----
 
 (comment answers
-         "(answers ?agent ?content (sentexHandle ?target)) is ?agent's answer ?content to the query sentex ?target, a META-SENTEX naming ?target by handle. Declared target_following_predicate: retract ?target and this answer is torn down with it. The answerer's identity comes from THIS sentex's context and provenance, not from the query it answers. ?content is the answer term, left untyped; the handle arg is left untyped since the target can be any sentex. Carries no relation_kind mark: instance_relation_predicate classifies a two-place claim between individuals (CxCore), and this is three-place over an agent, a term and a handle.")
+         "(answers ?agent ?content (sentexHandle ?target)) is ?agent's answer ?content to the query sentex ?target, a META-SENTEX naming ?target by handle. Declared target_following_predicate: retract ?target and this answer is torn down with it. The answerer's identity comes from THIS sentex's context and provenance, not from the query it answers. ?content is the answer term, left untyped; the handle arg is left untyped since the target can be any sentex. Carries no relation_kind mark: instance_relation_predicate classifies a two-place claim between individuals (CxUniverse), and this is three-place over an agent, a term and a handle.")
 (ternary_predicate answers)
 (arg answers 1 agent)
 (target_following_predicate answers)
@@ -116,7 +116,7 @@
 ;; ---- placement: the mark every koinii placement writes ----
 
 (comment agentContext
-         "(agentContext ?context ?agent) means that ?context is ?agent's own per-agent context. Written into ?context itself by identity/place-agent-context, the one placement channel/join, speech-acts/speaker-context and identity/agent-context all go through, so a reader tells an agent's context from a channel by a stored fact rather than by its spelling or its genlCx edges. Declared here, which a context rooted under CxSpeechActs sees; identity/agent-context roots the agent's context under CxCore alone, and there the mark is stored with no declaration in view.")
+         "(agentContext ?context ?agent) means that ?context is ?agent's own per-agent context. Written into ?context itself by identity/place-agent-context, the one placement channel/join, speech-acts/speaker-context and identity/agent-context all go through, so a reader tells an agent's context from a channel by a stored fact rather than by its spelling or its genlCx edges. Declared here, which a context rooted under CxSpeechActs sees; identity/agent-context roots the agent's context under CxUniverse alone, and there the mark is stored with no declaration in view.")
 (binary_predicate agentContext)
 (set/monotonic (instance_relation_predicate agentContext))
 (quotedArg agentContext 1 symbol)

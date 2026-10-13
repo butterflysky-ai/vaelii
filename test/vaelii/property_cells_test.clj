@@ -30,7 +30,7 @@
     (v/assert kb (list 'genlCx c C) C {:strength :monotonic})))
 
 (defn- probe-kb
-  "A second KB on its own space, cleared and with CxCore loaded."
+  "A second KB on its own space, cleared and with the upper layer loaded."
   [tag]
   (doto (v/open-kb (update tu/plain-memory-space :space conj ::probe tag))
     (tu/clear-kb!)

@@ -386,6 +386,7 @@
   (-restrength-informant [this informant strength]
     (with-write lock (restrength-informant! this informant strength)) nil)
   (-forced? [this kind x] (opt-read lock (rb-has? (held-forced this kind) x)))
+  (-forced-members [this kind] (with-read lock (rb-set (held-forced this kind))))
   (-set-forced [this kind xs on?] (with-write lock (set-forced! this kind xs on?)) nil)
   (-relabel [this] (with-write lock (relabel-all! this)) nil)
   (-set-blocked [this jids] (with-write lock (set-blocked! this jids)) nil)

@@ -69,7 +69,7 @@ no backward goal asks for a rule.
 
 `set/forwardOnlyRule` is the fourth direction: it forward-chains but is **never** used in
 backward proof (engines `#{:forward}`, `rules/backward-sentex?` false). Tests use it to exercise
-forward chaining in isolation, and **the shipped ontology uses it once**: CxCore's
+forward chaining in isolation, and **the shipped ontology uses it once**: `core.txt`'s
 `(commutative ?p) ∧ (arity ?p 2) ⇒ (symmetric ?p)` bridge, whose backward use would pose
 its own antecedent as a goal. Every other ontology rule that materializes is
 `set/forwardRule`, which stays backward-usable too.
@@ -83,7 +83,7 @@ which chainer will *use* what the index already holds.
 believed like any other rule and posted under all of its predicates, so it is findable
 by its terms and readable in the browser; what it never does is fire. That is how a
 rule the engine does *not* execute is still written down where a reader looks for it —
-CxCore's two rules equating `commutative` with `(commutativeInArgAndRest ?p 1)`, a
+`core.txt`'s two rules equating `commutative` with `(commutativeInArgAndRest ?p 1)`, a
 relationship the taxonomy's commuting table implements in code
 ([taxonomy.md](taxonomy.md)). Two consequences follow: an inert rule is the one
 rule shape whose *antecedent* predicate may be a **variable**, exempt from the
@@ -177,7 +177,7 @@ joins the justification and not the placement: the firing is placed by the rule 
 facts it matched (`chain/placement-antecedents`), because the store reads the mark from
 every context, and a context that sees no statement of it places the firing where it
 places one over a fact stored in the order the rule reads
-([contexts.md](contexts.md#a-context-outside-the-spindle)). The mark costs a firing no
+([contexts.md](contexts.md#a-context-outside-the-topology)). The mark costs a firing no
 index read, since the statements come off the taxonomy's supporter sets (`firing_cost_test`'s symmetric-trigger workload). The comparison runs
 only for an antecedent whose sub-predicate closure carries a permuting mark
 (`chain/permuting-antecedent?`), and at a trigger only for a fact whose own predicate
@@ -201,7 +201,7 @@ among its antecedents never brings that conclusion IN and confers no class above
 fact's. `derive-conclusion` drops the conclusion before placement, and `fire-rules-for`
 skips the join when the trigger binding alone fixes the conclusion to the arriving
 datum. The starter and the test-world, with `(intersection nowhere_never aspatial
-atemporal)` and `(intersection spatiotemporal spatial temporal)` asserted in CxCore, store
+atemporal)` and `(intersection spatiotemporal spatial temporal)` asserted in `core.txt`, store
 5,306 justifications this way against 8,983, with the same sentexes and the same belief
 (`starter_test/no-stored-justification-holds-its-own-conclusion-among-its-antecedents`).
 The comparison is on the substituted sentence, so a symmetric conclusion spelled as the
@@ -584,7 +584,7 @@ forward chaining agree about the rule.
   binder (`open-ends`). A literal whose variables the other antecedents all bind is
   joined after every planned literal (`chain/planned-join`), so it tests two bound ends
   and never enumerates the types separated from one of them.
-- **CxCore's emptiness rule reads `(disjoint ?type ?type)`.** A type below two separated
+- **`core.txt`'s emptiness rule reads `(disjoint ?type ?type)`.** A type below two separated
   types is disjoint from itself, so the rule tests one type per `unary` binding, where a
   pair of `genl` literals would test every pair of its supertypes.
 - **A firing rests on one route.** Each route yields its own firing. The declarations the
@@ -621,7 +621,7 @@ forward chaining agree about the rule.
 `closure_join_test` pins the five separation spellings, the two bounded arms, the
 withdrawal by the roster and by an edge, the exception, a `genl` edge between two marked
 types arriving and leaving, and the arrival orders;
-`emptiness_test` pins CxCore's rule over a partition.
+`emptiness_test` pins `core.txt`'s rule over a partition.
 
 ## Backward chaining
 
@@ -2071,6 +2071,28 @@ arbitrary predicate and its whole argument list. No rule in the shipped ontology
 one; `decontextualized_predicate`'s lift, which ranges over every argument list, is
 implemented in code rather than as a rule (see [contexts.md](contexts.md)).
 
+## Quoted forms in unification
+
+`unify` reads a `(Quote X)` form (`sx/quote-form?`) as a constant, the reading `sx/closed?`
+gives it ([argtypes.md](argtypes.md#what-a-quoted-form-is)). A quoted form unifies with a
+variable or with an equal form, and a variable inside it binds nothing. A stored
+`(awesome_rule (Quote (implies (poodle ?x) (dog ?x))))` answers that spelling only: the
+canonical form stores the `?y` spelling and the `Muffet` instance as two other sentexes,
+and neither query matches it. `substitute` returns a quoted form whole, the occurs check
+does not look inside one, and the literal cache's renaming leaves one as written. A query
+variable that shares a name with a quoted variable is therefore never bound to it.
+`unify-args` unifies two argument lists, in which the list `(Quote X)` is the symbol
+`Quote` followed by X; a caller holding `(rest literal)` calls it instead of `unify`.
+
+`Quasiquote` is not read as a constant, because a firing binds its `Unquote` holes
+(`vaelii.impl.quasiquote`). A stored rule's `?var0 ?var1 …` numbering
+(`sx/canonicalize-rule`) renames the variables inside a quoted form as well as outside
+it, so a quoted variable in a rule matches under its `?varN` spelling and not under the
+author's.
+
+`quote_test/a-quoted-variable-matches-only-the-same-quoted-variable` and
+`resolution_test/a-quoted-form-is-a-constant-to-unify-and-substitute` pin these.
+
 ## The pluggable prover engine (`vaelii.impl.provers`, `ask`)
 
 `ask` answers a goal through a registry of **provers**. Each prover declares:
@@ -2156,7 +2178,7 @@ Built-in provers (`default-provers`, held per-KB in an atom):
 - **The algebraic predicate types are not a prover.** Each mark — `symmetric`,
   `transitive`, `asymmetric`, `reflexive`, `functional` — is a single predicate that does
   both jobs: it maintains its taxonomy property (canonicalization, the generic provers)
-  **and**, through `(genl symmetric binary_predicate)` in CxCore, is a queryable
+  **and**, through `(genl symmetric binary_predicate)` in `core.txt`, is a queryable
   `binary_predicate` type. There is no derived `…Predicate` twin. So `(symmetric ?p)` is
   answered by ordinary retrieval of the stored mark (the `FactProver`), scoped to the
   asking vantage like every read; `isa? siblingOf symmetric` and `isa? siblingOf
@@ -2275,8 +2297,11 @@ Built-in provers (`default-provers`, held per-KB in an atom):
   machinery. `:compute`, partial (50) — it augments the stored declaration `FactProver`
   already answers. See [argtypes.md](argtypes.md).
 - **AdmitsArgnumProver** — `(admitsArgnum P n)`, whether a well-formed application of `P`
-  has a positive position `n`, computed from `P`'s declared `arity` and its `variable_arity`
-  mark (`admits-position?`) rather than read from a stored fact — the one query reader of
+  has a positive position `n`, computed from `P`'s length, inherited through `genl`
+  included (`arity/relation-length`, [taxonomy.md](taxonomy.md#arity)), and its
+  `variable_arity` release (`arity/released?`), both read the same at every context
+  (`admits-position?`)
+  rather than read from a stored fact — the one query reader of
   `admitsArgnum`. Ground relation and position only. `:lookup`, complete (100).
 - **FactProver** — index matches (`matches-visible`). Partial (50).
 

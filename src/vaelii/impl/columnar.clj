@@ -121,9 +121,9 @@
   ;; as KvIndexStore, so the delegated reads below stay consistent)
   (index-sentex [_ sentex handle]
     (let [pth  (sx/path sentex)
-          flat (kv/flat-family-adds roots (trie-reads trie) sentex handle)] ; reads the pre-write postings
+          flat (kv/flat-family-adds (transient []) roots (trie-reads trie) sentex handle)] ; reads the pre-write postings
       (t-insert! trie pth handle)
-      (p/kv-batch roots (:ops flat))
+      (p/kv-batch roots (persistent! (:ops flat)))
       ;; the same tally `KvIndexStore` keeps, because this store writes the index itself
       ;; rather than through it — an instrument that went quiet on the backend the
       ;; density work exists for would report a KB that never writes an index.  The four

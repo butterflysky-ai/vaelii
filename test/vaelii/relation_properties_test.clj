@@ -13,10 +13,10 @@
     **together**, as the one nogood whose members are three rather than two
     (docs/nmtms.md).  Its classification and `(disjoint transitive anti_transitive)` are
     enforced beside that.
-  * **`equivalence_relation`** — no engine code: three CxCore forward rules derive
+  * **`equivalence_relation`** — no engine code: three CxUniverse forward rules derive
     `symmetric`, `transitive` and `reflexive`, each enforced in turn.
 
-  A CxCore-loaded KB on the collapsed single-predicate model (an algebraic property is one
+  A vocabulary KB on the collapsed single-predicate model (an algebraic property is one
   predicate, not a mark and a twin): each new property is one predicate with `(genl X
   binary_predicate)`, and the lattice sits on the bare marks — so the SHIPPED declarations
   are what is tested, not a hand-built fixture that could drift from the file."
@@ -109,7 +109,7 @@
       (is (believed-at? kb (list before Alice Bob) U)))))
 
 (tu/deftest-kb a-mark-stated-beside-its-excepted-derivation-convicts-at-the-excepting-reader
-  ;;   CxUniverse  (injection ageRel) monotonic, from which CxCore derives (functional ageRel)
+  ;;   CxUniverse  (injection ageRel) monotonic; a core.txt rule derives (functional ageRel)
   ;;     └─ CxHid  (ageRel Tom 1) default  (ageRel Tom 2) monotonic  (except (injection ageRel))
   ;; CxHid reads no mark while the derivation alone states it.  The mark stated as well
   ;; convicts the pair there, and the placement reads the network: the default filler its
@@ -249,7 +249,7 @@
 
 (tu/deftest-kb a-self-tuple-of-an-antisymmetric-predicate-is-admitted
   ;; Its converse is itself and (equals a a) is trivial, so nothing merges and nothing
-  ;; refuses — the CxCore comment's promise.
+  ;; refuses — the CxUniverse comment's promise.
   (tu/with-terms [atOrAbove Alice]
     (v/assert kb (list 'anti_symmetric atOrAbove) U)
     (is (v/assert kb (list atOrAbove Alice Alice) U))
@@ -279,7 +279,7 @@
 (tu/deftest-kb a-converse-pair-is-decided-at-the-joint-reader-and-nowhere-above-it
   ;; One direction in `CxA`, the other in `CxB`, and `CxJ` below both: `CxJ` reads the
   ;; nogood and takes the `:default` member OUT, and `CxA` reads no converse, whatever
-  ;; the order the facts and the reader's edges arrive in.  CxCore lifts the mark to
+  ;; the order the facts and the reader's edges arrive in.  CxUniverse lifts the mark to
   ;; CxUniverse, so every context reads it.
   (tu/with-terms [atOrAbove CxA CxB CxJ]
     (v/assert kb (list 'genlCx CxA U) U)
@@ -585,7 +585,7 @@
         (is (not (v/ask? kb (list 'transitive sameAgeAs) U)))
         (is (not (v/ask? kb (list 'reflexive sameAgeAs) U)))))))
 
-;;; ── the property lattice, shipped in CxCore ───────────────────────────
+;;; ── the property lattice, shipped in CxUniverse ───────────────────────────
 
 (tu/deftest-kb asymmetric-classifies-as-irreflexive-and-antisymmetric
   ;; The shipped genl edges on the bare marks (issue #14's original spelling): every

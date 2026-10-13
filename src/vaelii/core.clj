@@ -36,6 +36,7 @@
             [vaelii.impl.clashes :as clashes]
             [vaelii.impl.config :as config]
             [vaelii.impl.decide :as decide]
+            [vaelii.impl.decide.arity :as arity]
             [vaelii.impl.disk.backend :as disk]
             [vaelii.impl.except :as exc]
             [vaelii.impl.feed :as feed]
@@ -868,7 +869,8 @@
 (defn relation?
   "Is `term` a relation of two or more places by what the KB stores of it, visible from
   `context` (default `?ctx`, every context): an `(arity P n)` declaration or exact-arity
-  class membership of two or more, or a `variable_arity` membership.  A `genl` edge between
+  class membership of two or more, or a `variable_arity` membership, or, where none of these
+  answers, a length of two or more inherited through `genl`.  A `genl` edge between
   two relations puts both in `types`; such a node is a relation and not a type, and a node
   with an arity of one or none is a type.  No spelling is read.  docs/taxonomy.md."
   ([kb term] (relation? kb term '?ctx))
@@ -916,9 +918,10 @@
   With a `context`, the declaration must be visible from it — except `:symmetric` and
   `:commutative`, which sort a sentex's arguments and are read from every context, so a
   context answers whether it believes a statement, which a `defeat` or an `except` it
-  sees takes away, and the two roster kinds
-  (`:forced-monotonic`, `:forced-between-predicates`), which answer the engine's baseline
-  as well as the declarations, from any context alike (docs/nmtms.md).
+  sees takes away.  The two roster kinds (`:forced-monotonic`,
+  `:forced-between-predicates`) answer the global roster, the engine's baseline, from
+  every context, and a declaration in any context from the contexts that see it
+  (docs/nmtms.md).
 
   The 3-arity reads the KB-wide declarations, as `disjoint?`'s does."
   ([kb kind pred]
@@ -926,9 +929,10 @@
      (decide/on-roster? (reasoning/taxonomy kb) kind pred)
      (tax/has-prop? (reasoning/taxonomy kb) kind pred)))
   ([kb kind pred context]
-   (if (decide/roster-kinds kind)
-     (decide/on-roster? (reasoning/taxonomy kb) kind pred)
-     (tax/has-prop? (reasoning/taxonomy kb) kind pred context))))
+   (let [tax (reasoning/taxonomy kb)]
+     (if (decide/roster-kinds kind)
+       (or (decide/global? tax kind pred) (tax/has-prop? tax kind pred context))
+       (tax/has-prop? tax kind pred context)))))
 
 (defn props
   "The set of predicates carrying metadata property `kind` (see `has-prop?`).
@@ -985,13 +989,13 @@
   read the mark).
 
   **Nil is not \"nothing reads it\".**  The question is asked of the engine's own grammar
-  — the terms `CxCore` declares — so an ordinary domain predicate is simply not in
+  — the terms core.txt comments — so an ordinary domain predicate is simply not in
   scope.  `vocabulary-audit` classifies every declared term, and reports one this leaves
   unclassified."
   [term] (vocab/classify term))
 
 (defn vocabulary-audit
-  "Every term `CxCore` declares in `kb`, classified — `{:enforced [[term why] …]
+  "Every term core.txt comments in `kb`, classified — `{:enforced [[term why] …]
   :inert [[term why] …] :unclassified [term …] :retired [term …] :contradicted [term
   …]}`.
 
@@ -1188,8 +1192,8 @@
     bulk premise carries none.
 
   It stores, indexes and believes the same sentex for the same fact, with one exception:
-  the argument-type entailments a fact draws from the declarations already stored ride
-  on `constraint-checks` and are skipped with it (docs/argtypes.md).  `record-arg-types`
+  no argument-type entailment is drawn, neither the fact's own nor what a declaration or
+  a `genl` edge draws over the stored facts (docs/argtypes.md).  `record-arg-types`
   records them afterwards, and a KB loaded this way answers as a per-fact load does once
   it has run.  Bind it only around a load whose facts are known
   well-formed and pairwise distinct; normal `assert` (the default) keeps every
@@ -1696,7 +1700,7 @@
   where it was written and drew the entailments a fact in that context draws — so the
   KB a load ends with depended on whether the declaration or the fact arrived first.
   `text/load-entries!` moves the context topology ahead of everything else, which put
-  every `genlCx` edge a text load reads ahead of CxCore's own declaration.
+  every `genlCx` edge a text load reads ahead of core.txt's own declaration.
 
   Premises only: a derived `(P …)` placed outside CxUniverse is placed by the rule that
   concluded it, and is re-placed when that derivation is re-run.  The extent is
@@ -3327,6 +3331,22 @@
                    " is a variable, which names every context.  Name the context, or ask"
                    " sentexes-matching, which reads a variable context")}))
 
+(defn- exceptWhen-handle
+  "The handle of the meta-sentex the `exceptWhen` halves `exc` and `inner`
+  (`rules/split-exceptWhen`) store in `context`, or nil: the rule found as `assert`
+  stores it, and the exception aligned to it as `assert` aligns it
+  (`entry/aligned-exception`).  nil for a rule `assert` stores as several, whose
+  exceptions are one meta-sentex each."
+  [kb exc inner context]
+  (let [[h vm] (if (sx/sentex-handle? inner)
+                 (let [h (sx/handle-id inner)] [h (:varmap (p/get-sentex (:records kb) h))])
+                 (let [[form more] (rules/expand-rule inner)]
+                   (when-not more
+                     (when-let [h (kb/find-sentex-handle kb form context)]
+                       [h (:varmap (res/kb-sentex kb (rules/inner-rule form) context))]))))]
+    (when vm
+      (kb/find-sentex-handle kb (sx/exceptWhen-meta (entry/aligned-exception exc vm) h) context))))
+
 (defn handle-of
   "The handle of the sentex already storing `sentence` in `context`, or **nil**.
 
@@ -3343,6 +3363,10 @@
   stored as, `(siblingOf Ann Bob)` and `(siblingOf Bob Ann)` alike — the sort is what the
   store and the lookup both go through, and a row written before the `(symmetric P)`
   declaration was re-spelled by it (docs/canonicalization.md).
+
+  An `(exceptWhen <query> <rule>)` sentence answers the handle of the exception's own
+  meta-sentex, the handle `assert` returns for it, so `retract!` on it removes the
+  exception and leaves the rule (docs/exceptions.md).
 
   Being ist's counterpart, it reads an `(ist Ctx S)` sentence the way `ist` writes one:
   S is looked up in Ctx, which wins over `context` (`ist-goal`).  A ground reifiable NAT
@@ -3368,7 +3392,10 @@
     (let [s (nat/maybe-reify-for-read kb sentence context)]
       ;; spelled as `context` reads it: a permuting mark it does not believe sorts nothing
       (binding [res/*spelled-by* (res/reader-spelled-by kb s context)]
-        (kb/find-sentex-handle kb s context)))))
+        (let [[exc inner] (rules/split-exceptWhen (first (sx/peel-exception-strength s)))]
+          (if exc
+            (exceptWhen-handle kb exc inner context)
+            (kb/find-sentex-handle kb s context)))))))
 
 (defn handles
   "Every live sentex handle in the KB — premises and anything forward-derived alike,
@@ -4353,7 +4380,7 @@
         ;; A shared subtype counts only when it is not provably empty: a type below two
         ;; separated types, which `disjoint?` reports separated from itself, or
         ;; a type for which a facts-only read answers `(empty c)`.  `wff` refuses a stated
-        ;; `(disjoint c c)`.  A facts-only read answers a stated claim and one CxCore's
+        ;; `(disjoint c c)`.  A facts-only read answers a stated claim and one core.txt's
         ;; `transitiveInArg` declarations carry along `genl`.  A shared subtype with a
         ;; known `(nonempty c)` is the witness; the others mark
         ;; the pair as an overlap with no witness.  Of several, the one with the most
@@ -4391,7 +4418,7 @@
   a pair with no provable relationship yields the empty set.
 
   `genl?` reads the global cached closure. `disjoint?` and the `:orthogonal` witnesses
-  are read from `context` (default `CxUniverse`, the upper spindle's collector), because
+  are read from `context` (default `CxUniverse`, the root context), because
   a read sees only its own context and that context's `genlCx` ancestors, and a
   `siblingDisjointException` exempts its pair only where it is seen; a caller whose
   declarations or instances live in a narrower context passes it so they are visible.
@@ -4447,7 +4474,7 @@
   taxonomy and disjoint declarations leave open — pinned facts-only (`{:max-depth 0}`),
   so the N² sweep expands no rule.
   `context` is the vantage the swept type set, `disjoint?` and the `:orthogonal`
-  witnesses are all read from (default `CxWell`, the starter spindle's collector — every
+  witnesses are all read from (default `CxWell`, which sees every non-opt-in middle context — every
   context below it, and no opt-in theory). A type a context sees only through an
   opt-in theory `context` does not see is outside both the sweep and the coverage it
   reports, by construction: visibility is one reading, not two. Each entry carries both
@@ -4643,14 +4670,14 @@
   by proving `sentence` in `agent`'s context, exactly as `believes` is (see
   docs/belief.md).  A thin convenience over asserting the `(modal_predicate pred)` marker
   — the grant is an ordinary belief, so it follows retraction and, read scoped, is a
-  *policy of the context* that holds it: with no `context` it is granted in `CxCore`
+  *policy of the context* that holds it: with no `context` it is granted in `CxUniverse`
   where the default `believes` grant lives, so every ordinary query context sees it;
   pass a `context` to scope the grant to the theory that wants it.  Returns `kb`.
 
   Bare, like every other adder on this surface: it asserts one marker sentex and
   `retract!` of that marker takes the grant back, so there is nothing here the KB cannot
   undo (the `!` roster is in docs/api.md)."
-  ([kb pred] (register-modal-predicate kb pred 'CxCore))
+  ([kb pred] (register-modal-predicate kb pred sx/root-context))
   ([kb pred context] (assert kb (list 'modal_predicate pred) context) kb))
 
 ;; ---- the optional reasoners ---------------------------------------------
@@ -5443,7 +5470,7 @@
   | entry | means | detail |
   |---|---|---|
   | `:non-confluent` | two schematic equations disagree about a shared term; the normal form stays deterministic, so nothing is dropped | `:with` `:message` |
-  | `:forced-conclusion` | a firing concluding a literal on the forced-monotonic roster, or its denial, from a rule that is not all roster antecedents with no `unknown`, `exceptWhen` or `set/defaultRule`: the firing is stored and held void, so it supports nothing, and `:off-roster` names the rule's antecedent predicates off the roster (docs/nmtms.md) | `:off-roster` `:message` |
+  | `:forced-conclusion` | a stored firing concluding a literal on the forced-monotonic roster, or its denial, from a rule that is not all roster antecedents with no `unknown`, `exceptWhen` or `set/defaultRule`: the firing is held void at some reader, so it supports nothing there, and `:off-roster` names the rule's antecedent predicates off the roster (docs/nmtms.md).  Read off the stored firings at each call, not filed: the entry stands while the firing is stored and convicted, `:sentence` is the conclusion's stored spelling, and the entry carries no `:run` | `:off-roster` `:message` |
   | `:aggregate` | an aggregate prover cannot reduce an extent — values that are not numbers of one dimension, or bounds only partially ordered.  Filed once per distinct error, since a count is recomputed rather than cached | `:message` `:values` |
   | `:qualitative-inconsistency` | the qualitative network visible from a context is unsatisfiable, so no goal of that calculus is answered there | `:calculus` `:message` `:nodes` `:pairs` `:sources` |
   | `:metric-temporal-mixed-dimensions` | the `temporalDistance` facts visible from a context span more than one dimension, so it gets no metric network at all | `:message` `:dimensions` `:units` |
@@ -5480,13 +5507,18 @@
   The ledger **accumulates** — each entry carries the `:run` id of the chaining run
   that filed it, so a bulk load's drops are still here at the end — and is capped at
   the newest 1000.  Every drop is also logged at `:warn` as it happens.  Retracting
-  the ingredient of an entry does not withdraw it.  `clear-violations!` empties it."
+  the ingredient of an entry does not withdraw it.  `clear-violations!` empties it.
+  The `:forced-conclusion` entries follow the ledger's, in content order, and are read
+  off the stored firings (`checks/forced-conclusion-entries`): neither the cap nor
+  `clear-violations!` removes one."
   [kb]
-  @(reasoning/violations kb))
+  (into @(reasoning/violations kb) (checks/forced-conclusion-entries kb)))
 
 (defn clear-violations!
   "Empty the accumulated dropped-conclusion ledger.  `!` because it destroys the
-  diagnostic record — the drops themselves are long final."
+  diagnostic record — the drops themselves are long final.  The `:forced-conclusion`
+  entries `violations` reads off the stored firings stay, since they are stored state
+  and not ledger entries."
   [kb]
   (reset! (reasoning/violations kb) []) kb)
 
@@ -6452,7 +6484,7 @@
 
   | `:role` | also carries |
   |---|---|
-  | `:predicate` | `:arity` (nil where the KB has been told two), `:arg-declarations`, `:props`, `:inverse`, `:extent-count`, and the four grants `:closed-extent?` `:abducible?` `:modal?` `:decontextualized?` |
+  | `:predicate` | `:arity`, the exact length that binds it, its own or one inherited through `genl` (nil where none binds or the KB has been told two), `:arity-via`, the predicate that length is bound on, `:arg-declarations`, `:props`, `:inverse`, `:extent-count`, and the four grants `:closed-extent?` `:abducible?` `:modal?` `:decontextualized?` |
   | `:type` | `:predicates-for-type` — which predicates' argument declarations admit it — and `:instance-count` |
   | `:individual` | `:types` (asserted, not their supertypes) and `:predicates`, the predicates it appears under with a count each |
   | `:context` | `:up` / `:down` (the `genlCx` ancestor sets), `:sentex-count`, and `:computed-spec-of` where the context is a reified NAT |
@@ -6465,7 +6497,7 @@
 
   **Everything declaration-shaped is read from `context`'s `genlCx` ancestor set**, never from
   the whole KB: an `arg` declaration, a `modal_predicate` grant and a `comment` are each a
-  policy of the context that states them, so `describe` at `CxWell` and at `CxCore` are
+  policy of the context that states them, so `describe` at `CxWell` and at `CxUniverse` are
   two different — and both correct — answers.  The taxonomy closures are scoped the same
   way.  `?ctx`, the default, reads every context, which is the whole-KB view the browser
   shows.
@@ -6525,18 +6557,20 @@
                 :disjoint-maximal (bounded-terms (set ptns) limit)}]
      (case role
        :predicate
-       (assoc base
-              :arity             (kb/relation-arity kb term (when (scoped-read? context) context))
-              :arg-declarations  (declarations-on kb term context)
-              :props             (into (sorted-set)
-                                       (filter #(has-prop? kb % term context))
-                                       describe-props)
-              :inverse           (inverse-of kb term context)
-              :extent-count      (count-with-functor kb term)
-              :closed-extent?    (has-prop? kb :closed-extent term context)
-              :abducible?        (has-prop? kb :abducible term context)
-              :modal?            (granted? kb 'modal_predicate term context)
-              :decontextualized? (has-prop? kb :decontextualized term context))
+       (let [len (arity/relation-length kb term)]
+         (assoc base
+                :arity             (:exact len)
+                :arity-via         (when (:exact len) (:via len))
+                :arg-declarations  (declarations-on kb term context)
+                :props             (into (sorted-set)
+                                         (filter #(has-prop? kb % term context))
+                                         describe-props)
+                :inverse           (inverse-of kb term context)
+                :extent-count      (count-with-functor kb term)
+                :closed-extent?    (has-prop? kb :closed-extent term context)
+                :abducible?        (has-prop? kb :abducible term context)
+                :modal?            (granted? kb 'modal_predicate term context)
+                :decontextualized? (has-prop? kb :decontextualized term context)))
 
        :type
        (assoc base
@@ -6793,11 +6827,14 @@
                                       :context (:context o) :vantage (:context (sentex kb d))
                                       :defeat d}))
                                  (exc/defeats-hiding kb handle (:context sx))))
-      ;; held OUT by the labeller: a denial of a roster literal (docs/nmtms.md)
-      (jtms/forced? (reasoning/tms kb) :out handle)
+      ;; held OUT by the labeller, or read inert at its own context: a denial of a
+      ;; roster literal (docs/nmtms.md)
+      (or (jtms/forced? (reasoning/tms kb) :out handle)
+          (exc/roster-inert-at? kb handle (:context sx)))
       (assoc base :believed? false :reason :inert)
       :else
-      (let [void?   #(jtms/forced? (reasoning/tms kb) :void (:id %))
+      (let [rvoid   (set (exc/roster-void-at kb handle (:context sx)))
+            void?   #(or (jtms/forced? (reasoning/tms kb) :void (:id %)) (contains? rvoid (:id %)))
             js      (supporting-justifications kb handle)
             support (vec (for [j (remove void? js)]
                            {:justification (:id j)
@@ -6811,7 +6848,10 @@
                                     (let [r (sentex kb (:informant j))]
                                       {:justification (:id j) :informant (:informant j)
                                        :rule          (readable-sentence r)
-                                       :off-roster    (checks/off-roster-antecedents kb r)}))
+                                       :off-roster    (if (contains? rvoid (:id j))
+                                                        (checks/off-roster-antecedents
+                                                         kb r (exc/roster-reading kb (:context sx)))
+                                                        (checks/off-roster-antecedents kb r))}))
                                   void))
           (assoc base :believed? false :reason :unsupported
                  :premise? (premise? kb handle) :support support))))))
@@ -7039,8 +7079,8 @@
   | `:superseded` | an equality merge restated it under its class representative; it lost no argument and retracting the equality gives it straight back | `:superseded-by` `:rewrites` |
   | `:defeated` | the target of a placed `defeat` in force at its own context, whose handles `:defeats` names and whose nogoods convict through the declarations `:grounds` names, as a clash report's do | `:contradicted-by` `:defeats` `:grounds` |
   | `:withdrawn` | IN in the network, and not believed at its own context because every justification rests on a handle a placed `defeat` in force there hides; each `:withdrawn-by` entry names that handle, its context, the `:defeat` and the defeat's context under `:vantage` (docs/nmtms.md) | `:withdrawn-by` |
-  | `:inert` | a denial of a literal on the forced-monotonic roster, stored and held OUT (docs/nmtms.md) | — |
-  | `:forced-conclusion` | not a premise, and a supporting justification is a firing held void for concluding a roster literal from antecedents off the roster (docs/nmtms.md). Each `:convicted` entry names the `:rule` and the antecedent predicates `:off-roster` that a `forced_monotonic_predicate` declaration puts on the roster; `:support` lists the other justifications as `:unsupported` does | `:convicted` `:support` |
+  | `:inert` | a denial of a literal on the forced-monotonic roster as its own context reads it, stored and held OUT there (docs/nmtms.md) | — |
+  | `:forced-conclusion` | not a premise, and a supporting justification is a firing held void, at its own context, for concluding a roster literal from antecedents off the roster (docs/nmtms.md). Each `:convicted` entry names the `:rule` and the antecedent predicates `:off-roster` that a `forced_monotonic_predicate` declaration puts on the roster; `:support` lists the other justifications as `:unsupported` does | `:convicted` `:support` |
   | `:unsupported` | not a premise, and every supporting justification has an antecedent that is OUT | `:support` with `:missing` |
   | `:excepted` | *(sentence arity only)* a rule applied and its `exceptWhen` query held, so it concluded nothing | `:rule` `:exception` `:via` |
   | `:closed-extent` | *(sentence arity only)* nothing stored or derived says so, **and** `(closed_extent_predicate P)` is visible here — so the KB is not silent about it, it says the extent is complete and this is not in it | — |
@@ -8037,32 +8077,36 @@
 ;; inverse changed with a flag would be two entry points wearing one name.
 
 (defn export-text!
-  "Write `kb`'s premises as a **text KB** — one `<Context>.txt` per context, in exactly
-  the format the shipped ontology is authored in and `load-text!` reads — and return a
-  summary:
+  "Write `kb`'s premises and inert sentexes as a **text KB** — one `<Context>.txt` per
+  context, in exactly the format the shipped ontology is authored in and `load-text!`
+  reads — and return a summary:
 
-      {:contexts n :sentences n :skipped n :files [\"CxCore.txt\" …]
+      {:contexts n :sentences n :skipped n :files [\"CxUniverse.txt\" …]
        :bytes n :elapsed-ms n :dir \"…\"}
 
   `opts` narrows what is written: `{:context C}` for that one context's file, `{:ancestor-set C}`
   for `C` and every context it **sees** — the slice a reload needs for `C`'s own content
-  to mean what it meant.  Neither, and every context holding a premise is written.  A key
-  this fn does not read is refused (`:unknown-option`), since a misspelt narrowing writes
-  the whole KB under a summary that looks right.  `dir` must be absent or empty.
+  to mean what it meant.  Neither, and every context holding a premise or an inert sentex
+  is written.  A key this fn does not read is refused (`:unknown-option`), since a
+  misspelt narrowing writes the whole KB under a summary that looks right.  `dir` must be
+  absent or empty.
 
-  **Premises only.**  A derived sentex is what the engine concluded, so writing it would
+  **No derived sentex.**  A derived sentex is what the engine concluded, so writing it would
   store as a premise what the KB believes as a conclusion, and the reload would hold it
   against the retraction of everything it followed from.  Chaining puts it back, which is
   the point.  Each premise keeps its `:strength` — `:monotonic` as a `(set/monotonic S)`
   wrapper, `:default` as nothing, the entry point's own fallback — and each rule its
   `set/*Rule` / `set/defaultRule` wrappers and its `exceptWhen`, so a reload yields the
-  same canonical sentexes at the same strengths and the same beliefs.
+  same canonical sentexes at the same strengths and the same beliefs.  An inert sentex
+  (`assert-inert`) is written as `(set/inert S)`, which `load-text!` stores inert again.
+  Telling an inert sentex from a derived one reads the TMS, so a KB whose belief is not
+  built refuses the export (`:unrecovered-kb`) when it stores a sentex that is neither.
 
   **Content order, never handle order**, and no timestamp or writer in the text: two KBs
   holding the same knowledge write byte-identical files whatever order they were built in
   (docs/defenses.md).
 
-  `:skipped` counts the premises there is no text for — an `(except H)` or another meta
+  `:skipped` counts the records there is no text for — an `(except H)` or another meta
   naming a sentex **by handle**, which is a fact about this store and means something
   else, or nothing, in the KB that reads the file back.  For those, and for handle
   identity in general, the entry point is `export!`.
@@ -8076,7 +8120,7 @@
   "Read a **text KB** into `kb` — a directory of `Cx….txt` files, or one such file — and
   return a summary:
 
-      {:contexts n :sentences n :files [\"CxCore.txt\" …] :elapsed-ms n :path \"…\"}
+      {:contexts n :sentences n :files [\"CxUniverse.txt\" …] :elapsed-ms n :path \"…\"}
 
   The inverse of `export-text!`, and the entry point `lein cli load` is.  **The file name is the
   context**: `CxKinship.txt` asserts into `CxKinship`, and a sentence for another context
@@ -8086,10 +8130,10 @@
 
   Every form is asserted through the ordinary write path — same checks, same
   canonicalization, same chaining — so this is `assert` over a file rather than a restore,
-  and the KB it lands in need not be empty.  One form is not a sentence and is peeled
-  first: `(set/monotonic S)`, which asserts `S` known-true, since a strength is an option
-  on the assertion and has nowhere in an s-expression to go.  `:default` is written as
-  nothing, being the entry point's own fallback.
+  and the KB it lands in need not be empty.  Two forms are not sentences and are peeled
+  first: `(set/monotonic S)` asserts `S` known-true, and `(set/inert S)` stores `S`
+  through `assert-inert`, which refuses a rule.  `:default` is written as nothing, being
+  the entry point's own fallback.
 
   A whole directory is **one order-insensitive pass**: a form refused because content
   further down has not arrived yet is retried, since file names sort alphabetically and
@@ -8106,6 +8150,7 @@
   (let [t0 (System/nanoTime)
         {:keys [files entries path]} (text/entries source)
         n  (text/load-entries! (fn [sentence context o] (assert kb sentence context (or o {})))
+                               (fn [sentence context] (assert-inert kb sentence context))
                                entries)]
     {:contexts   (count (distinct (map second entries)))
      :sentences  n

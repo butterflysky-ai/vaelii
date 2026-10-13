@@ -233,6 +233,20 @@ config_owed_for_path() {
     |src/vaelii/impl/rewrite.clj \
     |src/vaelii/impl/caches.clj \
     |src/vaelii/impl/literal_cache.clj)  printf 'routine' ;;
+    # the roster and the verdict every belief read decides a placed nogood by, and the
+    # candidate families the placement detectors read through the index
+    src/vaelii/impl/decide.clj \
+    |src/vaelii/impl/decide/*)           printf 'routine' ;;
+    # the dropped-conclusion ledger: the chainer, the prover registry, the settle and the
+    # check paths file into it, so it owes what those writers owe
+    src/vaelii/impl/violations.clj)      printf 'routine' ;;
+    # the two choke points every store and every removal passes through, which run the
+    # special-predicate arms and post the exceptWhen re-check: every backend stores
+    # through them and every sweep reads what they leave
+    src/vaelii/impl/integrate.clj)       printf 'routine' ;;
+    # the public API every configuration's suite calls; `violations` there joins the
+    # ledger to the `:forced-conclusion` entries read off the stored void firings
+    src/vaelii/core.clj)                 printf 'routine' ;;
     # the roster itself, and the harness that installs the switches: a change here
     # changes what every other run MEANS, so it owes all of them
     scripts/lib/suite-configs.sh \

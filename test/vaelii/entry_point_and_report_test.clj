@@ -392,7 +392,7 @@
               "the length came through the super, and both halves say so"))))))
 
 (deftest two-declared-arities-across-one-edge-read-the-same-whichever-arrives-last
-  ;; The pair is a nogood of the two declarations (a hard clash under CxCore, whose
+  ;; The pair is a nogood of the two declarations (a hard clash under CxUniverse, whose
   ;; roster stores both `:monotonic`), and the report is a fact about the pair rather than
   ;; about the arrival.
   (tu/with-terms [parentOf fatherOf]

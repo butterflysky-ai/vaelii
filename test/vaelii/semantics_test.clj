@@ -70,7 +70,6 @@
   (let [parentOf (tu/tmp-pred) grandparentOf (tu/tmp-pred)
         tom (tu/tmp-ind) bob (tu/tmp-ind) ann (tu/tmp-ind)]
     (v/assert kb (list 'genlCx 'CxBio 'CxUniverse) 'CxUniverse)
-    (v/assert kb (list 'genlCx 'CxCore 'CxUniverse) 'CxUniverse)
     (v/assert-rule kb [(list parentOf '?x '?y) (list parentOf '?y '?z)] (list grandparentOf '?x '?z)
                    'CxUniverse {:direction :forward :chain? false})            ; universal rule
     (v/assert kb (list parentOf tom bob) 'CxBio)             ; specific facts

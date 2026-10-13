@@ -26,8 +26,8 @@ with forward/backward inference and JTMS truth maintenance.
 
 ## Quick start
 
-As a dependency — Leiningen `[com.vaelii/vaelii "0.25.0"]`, or deps.edn
-`com.vaelii/vaelii {:mvn/version "0.25.0"}` — from [Clojars](https://clojars.org/com.vaelii/vaelii).
+As a dependency — Leiningen `[com.vaelii/vaelii "0.26.0"]`, or deps.edn
+`com.vaelii/vaelii {:mvn/version "0.26.0"}` — from [Clojars](https://clojars.org/com.vaelii/vaelii).
 To work on it instead:
 
 ```sh
@@ -92,6 +92,13 @@ Transitivity is not done with rules. The `genl` closure over types and the `genl
 closure over contexts are cached and recomputed when an edge changes, as is the equality
 partition behind `rewriteOf` / `sameAs` / `equals`.
 
+The shipped ontology holds in three tiers of contexts. CxUniverse holds the whole upper
+ontology, every file under `resources/kb/upper/`. Each middle theory under
+`resources/kb/middle/` is a context below CxUniverse, and CxWell sees every middle
+theory. A sync keeps CxUniverse's premises to what the shipped files state, so an
+author's content goes into a context of its own
+([contexts.md](docs/contexts.md#the-context-topology)).
+
 Five properties hold across the engine:
 
 - **Order independence** — the same knowledge in any order yields the same beliefs. Belief
@@ -128,7 +135,7 @@ conclusion) — all cross-linked.
 
 ## Loading a bigger KB
 
-The browser loads more than the starter: the core vocabulary alone, a generated corpus of
+The browser loads more than the starter: the upper vocabulary alone, a generated corpus of
 a chosen shape, a vaelii export dump, an on-disk store, or a translated OpenCyc KB. Drop
 one under `~/.vaelii/kbs/` and it appears on the `/kbs` page with no restart, loading in
 the background and browsable before it finishes.

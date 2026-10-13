@@ -64,15 +64,12 @@
 
 (defn- authored-sentences
   "Every sentence the shipped ontology's own source files contain, paired with the context
-  whose file holds it — `CxCore.txt` plus every discovered file under `kb/upper/` and
-  `kb/middle/`.  Read from the classpath the way the starter reads them, so a file added
-  to a layer is swept with no edit here."
+  the starter loads it into: CxUniverse for every file under `kb/upper/`, and its own
+  context for a file under `kb/middle/`.  Read from the classpath the way the starter
+  reads them, so a file added to a layer is swept with no edit here."
   []
-  (concat (for [s (seed/read-sentences 'CxCore nil)] ['CxCore s])
-          (for [dir ["upper" "middle"]
-                c   (seed/layer-contexts dir)
-                s   (seed/read-sentences c dir)]
-            [c s])))
+  (concat (for [f (core-context/upper-files)    s (seed/read-sentences f "upper")]  ['CxUniverse s])
+          (for [c (seed/layer-contexts "middle") s (seed/read-sentences c "middle")] [c s])))
 
 (tu/deftest-kb every-sentence-the-starter-ships-is-well-formed-once-it-is-all-loaded
   ;; **Loading is not checking**, and the gap between the two is where the shipped
@@ -143,22 +140,16 @@
           {}
           pairs))
 
-(deftest a-term-two-spindle-members-touch-is-defined-in-the-head
-  ;; A spindle is a **head** every member sees, **members** that see the head and not
-  ;; each other, and a **collector** that sees every member (docs/contexts.md).  So a
-  ;; term defined in one member and extended from a second is a term the extending
-  ;; member cannot see, and that is a defect rather than untidiness: with `organism`
-  ;; defined in CxAbstract, `(genl animal organism)` written in CxOrganism left
-  ;; `animal` unable to reach `thing` FROM CxOrganism, so every `arg` constraint written
-  ;; there convicted nothing in its own context and `isa?` answered false about a type
-  ;; the file defines.
+(deftest a-term-two-middle-contexts-touch-is-defined-in-cxuniverse
+  ;; Every middle context sees CxUniverse and not, in general, another middle context.  A
+  ;; term defined in one middle context and extended from a second is a term the extending
+  ;; context cannot see, and that is a defect: a `(genl animal organism)` written where
+  ;; `organism` is not visible leaves `animal` unable to reach `thing` from there, so every
+  ;; `arg` constraint written there convicts nothing in its own context.
   ;;
-  ;; The rule, and what this holds: a term more than one member of a spindle defines or
-  ;; extends belongs at or above that spindle's head — CxCore for the upper spindle, and
-  ;; for the middle spindle CxUniverse or anything CxUniverse sees, which is the whole
-  ;; upper spindle it collects.  Using another member's term is not caught here and is a
-  ;; separate question; *extending* one is what breaks a closure.  A file under `kb/middle/`
-  ;; that sees another (CxSocialExtension sees CxSocial) is not a member beside it, so a
+  ;; A term more than one middle context defines or extends belongs in CxUniverse.  Using
+  ;; another context's term is not caught here; *extending* one breaks a closure.  A middle
+  ;; context that sees another (CxSocialExtension sees CxSocial) is not beside it, so a
   ;; term the two touch passes when one context touching it is seen by every other.
   (let [pairs      (authored-sentences)
         up         (reduce (fn [m [_ s]]
@@ -170,22 +161,27 @@
                      (into #{c} (mapcat sees) (up c)))
         one-seen   (fn [cs] (some (fn [d] (every? #(contains? (sees %) d) cs)) cs))
         from       (fn [ctxs] (fn [[c _]] (contains? ctxs c)))
-        members    (fn [dir] (set (seed/layer-contexts dir)))
-        upper      (members "upper")
-        middle     (members "middle")
-        in-head    (set (keys (touched-terms (filter (from #{'CxCore}) pairs))))
-        in-upper   (set (keys (touched-terms (filter (from upper) pairs))))]
-    (is (seq upper) "the spindles were read")
-    (doseq [[spindle ctxs visible]
-            [["upper" upper in-head] ["middle" middle (into in-head in-upper)]]]
-      (let [shared (for [[t cs] (touched-terms (filter (from ctxs) pairs))
-                         :when  (and (< 1 (count cs)) (not (contains? visible t))
+        middle     (set (seed/layer-contexts "middle"))
+        in-root    (set (keys (touched-terms (filter (from #{'CxUniverse}) pairs))))
+        shared     (for [[t cs] (touched-terms (filter (from middle) pairs))
+                         :when  (and (< 1 (count cs)) (not (contains? in-root t))
                                      (not (one-seen cs)))]
                      [t (sort cs)])]
-        (is (empty? (sort shared))
-            (str "two members of the " spindle " spindle define or extend these, and no"
-                 " context at or above their head defines the term — push it up to the"
-                 " head: " (pr-str (sort shared))))))))
+    (is (seq middle) "the middle contexts were read")
+    (is (empty? (sort shared))
+        (str "two middle contexts define or extend these, and CxUniverse does not define"
+             " the term: move it to an upper file: " (pr-str (sort shared))))))
+
+(tu/deftest-kb the-starter-stores-nothing-in-a-context-the-upper-layer-does-not-have
+  ;; The upper files load into CxUniverse, so no sentex sits in a per-file context and no
+  ;; `genlCx` edge names one.
+  (let [gone '#{CxCore CxAbstract CxLife CxMeasure CxOrganism CxReflection CxSociety
+                CxSpace CxTime}
+        sxs  (map #(v/sentex kb %) (v/handles kb))]
+    (is (empty? (filter (comp gone :context) sxs)))
+    (is (empty? (for [s sxs :let [f (:sentence s)]
+                      :when (and (seq? f) (= 'genlCx (first f)) (some gone (rest f)))]
+                  f)))))
 
 (tu/deftest-kb starter-loads-and-reasons
   (testing "the universal rule fires on natural-world facts, landing in CxNaturalWorld"
@@ -281,7 +277,7 @@
 
 (tu/deftest-kb a-unit-table-entry-types-its-unit-and-its-dimension
   ;; `(dimensionOf Kilogram Mass)` proves `(unit_of_measure Kilogram)` and
-  ;; `(physical_dimension Mass)` from CxMeasure's declarations under either reading, and
+  ;; `(physical_dimension Mass)` from CxUniverse's declarations under either reading, and
   ;; stores no `(thing Kilogram)`
   (let [entries (v/sentexes-with-functor kb 'dimensionOf {:believed? true})]
     (is (seq entries))

@@ -105,7 +105,7 @@ see.
 
 The companion rule fires on a condition that is **stored and believed**. A condition
 built out of *computed* predicates is neither: `(defnSufficient positive_integer (and
-(integer ?x) (greaterThan ?x 0)))` — CxCore's own worked example — rests on checks the
+(integer ?x) (greaterThan ?x 0)))` — `core.txt`'s own worked example — rests on checks the
 evaluables answer rather than on facts anybody asserted. No conjunct of it is a stored
 literal that binds `?x`, so the join has nothing to compute `integer` against, and a
 sufficient condition of that shape expands to **no** companion rule (the rule
@@ -195,7 +195,7 @@ or a `disjoint` declaration and an explicit `not` for a genuine exclusion
 
 ## The vocabulary
 
-`defnNecessary` / `defnSufficient` / `defnIff` are declared in `CxCore` as binary
+`defnNecessary` / `defnSufficient` / `defnIff` are declared in `core.txt` as binary
 predicates. The first argument names a collection (a kind, so `genlArg … 1 thing`); the
 second is the condition sentence, a term (`arg … 2 thing`). They relate a kind to a
 sentence, so they are mixed and marked neither `instance_relation_predicate` nor

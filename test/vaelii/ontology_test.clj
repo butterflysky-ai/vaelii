@@ -18,6 +18,7 @@
   (:require [clojure.java.io :as io]
             [clojure.test :refer [deftest is testing use-fixtures]]
             [vaelii.core :as v]
+            [vaelii.host.core-context :as core-context]
             [vaelii.impl.io.text :as text]
             [vaelii.impl.predicates :as pr]
             [vaelii.test-util :as tu]
@@ -27,6 +28,11 @@
 (use-fixtures :each (tu/neutral))
 
 (def ^:private B 'CxBiology)
+
+(defn- upper-forms
+  "Every form the upper files state, in loader order."
+  []
+  (mapcat #(text/read-forms (io/file "resources/kb/upper" %)) (core-context/upper-files)))
 (def ^:private N 'CxNaturalWorld)
 
 ;; ---- an ability is an event kind related to a kind, not spelled as a predicate -------
@@ -150,7 +156,7 @@
     (testing "so declaring the pairing would mark the mixed half — typeToInstancePred
             types its second argument an instance half, and derives that mark"
       (tu/with-terms [CxPairing]
-        (v/assert kb (list 'genlCx CxPairing 'CxLife) 'CxUniverse)
+        (v/assert kb (list 'genlCx CxPairing 'CxUniverse) 'CxUniverse)
         (v/assert kb '(typeToInstancePred capabilityType hasCapability) CxPairing)
         (is (v/isa? kb 'hasCapability 'instance_relation_predicate CxPairing))))
     (testing "and neither reading answers the other's question"
@@ -197,7 +203,7 @@
     '[genl 2]  "the root: (genlArg genl 2 thing) would entail (genl thing thing), refused as irreflexive"
     '[comment 1] "the commented term: a type, a predicate, an individual or a context, so no type below thing covers it"}
    ;; slots that hold a term of any kind, which no type below thing covers
-   {'[believes 1]           "a believer, whose types CxCore cannot see"
+   {'[believes 1]           "a believer, whose type the upper ontology does not name"
     '[evaluate 2]           "an evaluate expression: a number or an application"
     '[likes 2]              "what a person likes"
     '[termOfUnit 1]         "the reified constant of a termOfUnit"
@@ -207,11 +213,11 @@
     '[seeAlso 2]            "a cross-referenced term"
     '[doneBy 2]             "an event's doer: a person, an animal, a machine or a process"
     '[performedBy 2]        "an event's doer: a person, an animal, a machine or a process"
-    '[perceives 1]          "a perceiver, whose types CxCore cannot see"
-    '[sees 1]               "a perceiver, whose types CxCore cannot see"
-    '[seeImage 1]           "a perceiver, whose types CxCore cannot see"
+    '[perceives 1]          "a perceiver, whose type the upper ontology does not name"
+    '[sees 1]               "a perceiver, whose type the upper ontology does not name"
+    '[seeImage 1]           "a perceiver, whose type the upper ontology does not name"
     '[seeImage 2]           "the image perceived: a thing of any kind"
-    '[watchVideo 1]         "a perceiver, whose types CxCore cannot see"
+    '[watchVideo 1]         "a perceiver, whose type the upper ontology does not name"
     '[watchVideo 2]         "the video perceived: a thing of any kind"
     '[agentHasTool 1]       "what a tool is available to, whose types the upper ontology does not name"
     '[toolArgType 3]        "the type a tool's argument takes: a type of any kind"
@@ -280,7 +286,7 @@
   ;; convicts nothing and mints a record per instance under `*assertive-arg-types?*` is
   ;; not a debt to collect, so the demand stops at arity 2 (docs/argtypes.md).  A unary
   ;; predicate whose position is the only check it has still declares one — the eight
-  ;; state predicates in CxLife and CxTime do — and this test does not ask it to.
+  ;; state predicates in the upper layer do — and this test does not ask it to.
   (let [files    (->> (file-seq (io/file "resources/kb"))
                       (filter #(.endsWith (.getName ^java.io.File %) ".txt")))
         sents    (mapcat text/read-forms files)
@@ -364,7 +370,7 @@
 ;; ---- what is a type, and what is only a property ------------------------
 
 (def ^:private biology-properties
-  "The seven CxLife properties placed under the kind each is said of."
+  "The seven life.txt properties placed under the kind each is said of."
   '{alive biological, dead biological, mortal organism,
     asleep animal, awake animal, breathes_air animal, warm_blooded animal})
 
@@ -430,7 +436,7 @@
   (is (v/isa? kb 'sibling_disjoint 'at_least_metatype)))
 
 (tu/deftest-kb the-starter-states-its-typeGenl-and-genl-requirements
-  ;; CxCore requires every at_least_metatype to name a typeGenl and every unary_predicate
+  ;; CxUniverse requires every at_least_metatype to name a typeGenl and every unary_predicate
   ;; to name a genl.
   (doseq [[pred indep] '[[typeGenl at_least_metatype] [genl unary_predicate]]]
     (is (v/ask? kb (list 'predAllSpecified pred indep) 'CxUniverse)
@@ -445,7 +451,7 @@
 
 (tu/deftest-kb empty-and-nonempty-state-typeGenl-so-the-audit-does-not-report-them
   ;; empty and nonempty are at_least_metatype (above) with no stated typeGenl until
-  ;; CxCore states (typeGenl empty thing) and (typeGenl nonempty thing) beside their
+  ;; CxUniverse states (typeGenl empty thing) and (typeGenl nonempty thing) beside their
   ;; declaration — vacuous, since thing is already a genl of every type, and inert,
   ;; since typeGenl has no inference path.
   (testing "the two typeGenl facts are present"
@@ -466,18 +472,13 @@
 (def ^:private type-relating-predicates
   "The predicates whose every argument is a TYPE (or a predicate) the claim relates, so the
   claim is meaningful only in a context that sees all of them at once.  A `genl`, `disjoint`,
-  `orthogonal`, `intersection` or `typeGenl` between two members' terms therefore belongs at
-  the context
-  that sees both — the collector (CxUniverse for the upper spindle), never the head, which
-  sees no member (docs/contexts.md, and the rule `resources/kb/CxUniverse.txt`'s own header
-  states).
+  `orthogonal`, `intersection` or `typeGenl` between two contexts' terms therefore belongs at
+  a context that sees both.
 
   `arg` / `genlArg` / `quotedArg` / `result` / `interArg` and the relation-metadata marks are
   deliberately NOT here: they constrain a relation's OWN argument or classify the relation
-  itself, and the type they name is checked from the DATA context that asserts a tuple — every
-  data context sits below the collector and sees the whole upper spindle — so a member
-  declaring `(arg parentOf 1 animal)` over CxOrganism's `animal` is checked where it bites and
-  is not misplaced."
+  itself, and the type they name is checked from the DATA context that asserts a tuple —
+  every data context sits below CxUniverse and sees the whole upper layer."
   '#{genl disjoint typeGenl genlInverse intersection partitionedByType
      covering separating partition orthogonal})
 
@@ -489,18 +490,16 @@
   ;; separate or subsume the two types in that context, and names a term that context does
   ;; not root.
   ;;
-  ;; The spindle is what makes this possible.  CxCore, the head, sees no member
-  ;; (docs/contexts.md), so `(typeGenl stuff_type_by_substance substance)` in CxCore over a
-  ;; `substance` defined in CxAbstract stores clean — an undeclared symbol cannot violate an
-  ;; assert-time check (open-world, docs/taxonomy.md) — and the claim lands in a context that
-  ;; cannot read its own subject.  A relation between two members' terms therefore belongs at
-  ;; or above the collector that sees both.
+  ;; A middle context sees CxUniverse and not, in general, another middle context, so a claim
+  ;; in one middle context over a type another defines stores clean (an undeclared symbol
+  ;; cannot violate an assert-time check: open-world, docs/taxonomy.md) and lands in a context
+  ;; that cannot read its own subject.
   ;;
-  ;; Read off the text files the starter actually loads — `CxCore.txt`, `upper/`, `middle/`
-  ;; and the collector `CxUniverse.txt` (`vaelii.host.starter`) — because the claim is about
-  ;; what those contexts *write*, not what the engine derives or the starter publishes
-  ;; (`(unary_predicate T)` is asserted into CxCore for every subtype of `thing`, and the
-  ;; arity rules conclude from those in CxCore too; both are deliberate).  The loaded KB
+  ;; Read off the text files the starter actually loads (`upper/` into CxUniverse, `middle/`
+  ;; into each file's context, `vaelii.host.starter`) because the claim is about what those
+  ;; contexts *write*, not what the engine derives or the starter publishes
+  ;; (`(unary_predicate T)` is asserted into CxUniverse for every subtype of `thing`, and the
+  ;; arity rules conclude from those in CxUniverse too; both are deliberate).  The loaded KB
   ;; still answers rooting, since `v/genl?` scoped to a context is the exact visibility the
   ;; write side checks against.
   (let [anywhere (fn [t]   (v/genl? kb t 'thing))          ; reaches the root from some context
@@ -516,12 +515,10 @@
                       [(nth form 2) (nth form 1)]
                       [form fctx]))
         names    (fn [sentence] (distinct (filter symbol? (tree-seq seq? seq sentence))))
-        files    (list* (io/file "resources/kb/CxCore.txt") (io/file "resources/kb/CxUniverse.txt")
-                        (filter text/kb-file? (mapcat #(file-seq (io/file (str "resources/kb/" %)))
-                                                      ["upper" "middle"])))
+        files    (concat (for [f (core-context/upper-files)] [(io/file "resources/kb/upper" f) 'CxUniverse])
+                         (for [f (text/kb-files (io/file "resources/kb/middle"))] [f (text/context-of f)]))
         forms    (->> files
-                      (mapcat (fn [f] (let [c (text/context-of f)]
-                                        (map #(vector % c) (text/read-forms f)))))
+                      (mapcat (fn [[f c]] (map #(vector % c) (text/read-forms f))))
                       (map resolve*)
                       (filter (fn [[s _]] (relating? s))))
         blind    (for [[s c] forms
@@ -531,67 +528,13 @@
     (is (seq forms) "the shipped context files were found and read")
     (is (empty? blind)
         (str "type relations written where a term they name is invisible — move each to a "
-             "context that sees the named types (or root the types at/above the head):\n"
+             "context that sees the named types (or define the types in an upper file):\n"
              (apply str (interpose "\n"
                                    (for [b blind]
                                      (str "  " (:context b) " asserts " (pr-str (:sentence b))
                                           "\n    cannot see " (pr-str (:cannot-see b))
                                           " — defined in " (pr-str (:move-to b))
                                           ", so move the assertion there"))))))))
-
-(def ^:private head-terms-one-member-may-keep
-  "CxCore inert terms only one spindle member references today, kept in the head on
-  purpose — each with the reason.  A term absent from this roster that only one member uses
-  fails the test below; a term here that gains a second member user fails it too, so the
-  roster stays a list of reasons rather than a list of debts."
-  '{typeToInstancePred "a relation-linking predicate the head declares as vocabulary; only CxAbstract uses it (partType / partOf) today"})
-
-(tu/deftest-kb head-vocabulary-a-single-member-uses-belongs-in-that-member
-  ;; The inverse of `no-authored-type-relation-names-a-term-its-own-context-cannot-see`.
-  ;; CxCore, the head, holds a term because more than one spindle member has to SEE it — a
-  ;; member sees the head and not its siblings, so a term two members share lives in the head
-  ;; (docs/contexts.md).  A CxCore ontology term that only ONE member ever references does not
-  ;; earn that placement: it could live in that member, and holding it in the head widens the
-  ;; shared vocabulary for no reader that needs it there.  This names each such term and the
-  ;; single member to move it to.
-  ;;
-  ;; Scope: the INERT vocabulary CxCore declares (`v/vocabulary-audit`'s `:inert`) — the
-  ;; ontology terms the engine reads by no name.  An `:enforced` term (a code path reads it by
-  ;; name) stays in the head whatever its members, so it is out of scope.  A term no member
-  ;; references — used only by CxCore's own structure — is head vocabulary, not a member's, so
-  ;; it is not flagged; only a count of exactly one member is.
-  ;;
-  ;; A term CxCore itself references from another term (a subtype, a disjoint partner, an arg
-  ;; type, a rule that names it) cannot move down: the head would then reference a term it
-  ;; cannot see.  `core-structural-use?` reads that off the head's own sentexes — the term
-  ;; appears as a functor or an argument past the subject (the second element), rather than
-  ;; only as the subject of its own declaration — and holds such a term in the head.
-  (let [members  (set (map text/context-of
-                           (mapcat #(filter text/kb-file? (file-seq (io/file (str "resources/kb/" %))))
-                                   ["upper" "middle"])))
-        ;; authored use only: a rule's conclusion placed in a member names the term there
-        ;; without anybody having written it, and moving the term down would not move it
-        users    (fn [t] (distinct (filter members (map :context (filter #(v/premise? kb (:id %))
-                                                                         (v/find-sentexes kb t))))))
-        core-structural-use?
-        (fn [t] (some (fn [sx]
-                        (let [s (:sentence sx)]
-                          (and (seq? s) (not= 'comment (first s))
-                               (some #{t} (cons (first s) (drop 2 s))))))
-                      (filter #(= 'CxCore (:context %)) (v/find-sentexes kb t))))
-        loners   (for [[t _why] (:inert (v/vocabulary-audit kb))
-                       :let  [ms (users t)]
-                       :when (and (= 1 (count ms))
-                                  (not (core-structural-use? t))
-                                  (not (contains? head-terms-one-member-may-keep t)))]
-                   {:term t :used-only-by (first ms)})]
-    (is (empty? loners)
-        (str "CxCore ontology terms only one member uses — move each to that member (or add "
-             "it to `head-terms-one-member-may-keep` with a reason):\n"
-             (apply str (interpose "\n"
-                                   (for [c loners]
-                                     (str "  " (:term c) " — used only by " (:used-only-by c)
-                                          ", so move it there"))))))))
 
 (tu/deftest-kb every-type-a-loaded-membership-names-is-named-by-another-sentence
   ;; A membership in a type no other sentence names reaches no genl edge, argument
@@ -616,10 +559,10 @@
   ;; only because somebody wrote it twice at two levels of the hierarchy.
   ;;
   ;; The arity generator is the case that tests the claim.  It stamps one rule per
-  ;; `relationTypeByArity` fact, and CxCore ships three — over `unary`, `binary` and
+  ;; `relationTypeByArity` fact, and CxUniverse ships three — over `unary`, `binary` and
   ;; `ternary`.  A `(predicateTypeByArity unary_predicate 1)` fact beside them would
   ;; stamp a fourth firing wherever the first already fires, since `unary_predicate`
-  ;; is a `unary`; CxCore states that membership with a `genl` edge instead, so the
+  ;; is a `unary`; CxUniverse states that membership with a `genl` edge instead, so the
   ;; reading stays at zero and a mapping table that grew a redundant member would
   ;; show up here.
   (let [q (:subsumption (v/kb-quality kb {:limit 100}))]
@@ -633,16 +576,16 @@
   ;; mapping fact over a type and a second over its subtype mint two rules, and the
   ;; narrower one fires nowhere the broader does not.
   (tu/with-terms [broad_type narrow_type outcome_type generatesType]
-    (v/assert kb (list 'genl broad_type 'thing) 'CxCore)
-    (v/assert kb (list 'genl narrow_type broad_type) 'CxCore)
-    (v/assert kb (list 'genl outcome_type 'thing) 'CxCore)
+    (v/assert kb (list 'genl broad_type 'thing) 'CxUniverse)
+    (v/assert kb (list 'genl narrow_type broad_type) 'CxUniverse)
+    (v/assert kb (list 'genl outcome_type 'thing) 'CxUniverse)
     (v/assert kb (list 'implies (list generatesType '?type)
-                       (list 'implies (list '?type '?x) (list outcome_type '?x))) 'CxCore {:direction :forward})
+                       (list 'implies (list '?type '?x) (list outcome_type '?x))) 'CxUniverse {:direction :forward})
     (doseq [type [broad_type narrow_type]]
-      (v/assert kb (list generatesType type) 'CxCore))
+      (v/assert kb (list generatesType type) 'CxUniverse))
     (let [rule (fn [type] (list 'implies (list type '?x) (list outcome_type '?x)))
-          pair [(v/handle-of kb (rule broad_type) 'CxCore)
-                (v/handle-of kb (rule narrow_type) 'CxCore)]
+          pair [(v/handle-of kb (rule broad_type) 'CxUniverse)
+                (v/handle-of kb (rule narrow_type) 'CxUniverse)]
           q (:subsumption (v/kb-quality kb {:limit 100}))]
       (is (every? some? pair) "both rules are stamped")
       (is (not (:truncated? q)))
@@ -783,18 +726,21 @@
 
 (tu/deftest-kb a-time-is-in-time-and-in-no-space-and-causes-nothing
   ;; A date cannot be a cause: the year 2000 broke nothing — two-digit years did, at the
-  ;; rollover.  `time` is temporal, aspatial and acausal, and time_point and time_interval
-  ;; partition it, so a moment and a stretch are all three and never each other.  A
+  ;; rollover.  `time` is temporal, aspatial and acausal, uninterrupted_time and
+  ;; intermittent_time partition it, and time_point and time_interval partition
+  ;; uninterrupted_time, so a moment and a stretch are all three and never each other.  A
   ;; calendar term is never minted, so its result type is read where it is checked: an
   ;; argument typed with a kind no result type reaches refuses it, one it reaches admits it.
   (testing "both parts reach time, and time_point still reaches temporal through it"
+    (is (v/genl? kb 'time_point 'uninterrupted_time N))
+    (is (v/genl? kb 'time_interval 'uninterrupted_time N))
     (is (v/genl? kb 'time_point 'time N))
     (is (v/genl? kb 'time_interval 'time N))
     (is (v/genl? kb 'time_point 'temporal N)))
   (testing "an instant is not a stretch, and neither is something that happens in time"
     (is (v/disjoint? kb 'time_point 'time_interval N))
     (is (v/disjoint? kb 'time_interval 'event N)))
-  (testing "and the collector relates a stretch to the dimension it is measured in"
+  (testing "and CxUniverse relates a stretch to the dimension it is measured in"
     (is (v/ask? kb '(termsRelated time_interval Duration) 'CxUniverse)))
   (tu/with-terms [acausalProbe aspatialProbe temporalProbe momentProbe]
     (doseq [[p t] [[acausalProbe 'acausal] [aspatialProbe 'aspatial] [temporalProbe 'temporal]
@@ -816,8 +762,8 @@
       (is (= :stored (refusal kb (list acausalProbe '(StartFn (YearFn 2000))) N)))
       (is (= :stored (refusal kb (list aspatialProbe '(StartFn (YearFn 2000))) N))))))
 
-(def ^:private cxtime-calendar-facts
-  "Facts CxTime states over calendar terms and moments: a stretch contains a stretch, a
+(def ^:private time-calendar-facts
+  "Facts time.txt states over calendar terms and moments: a stretch contains a stretch, a
   stretch contains a moment, and a calendar moment equals a moment spelled with
   InstantFn."
   '[(contains (YearFn 2000) (MonthFn 2000 1))
@@ -825,31 +771,120 @@
     (contains (YearFn 2000) (InstantFn 2000 3 1 0 0 0))
     (instantEqual (StartFn (YearFn 2000)) (InstantFn 2000 1 1 0 0 0))])
 
-(tu/deftest-kb a-band-context-reads-the-time-partition-without-cxabstract
-  ;; CxTime types its calendar results time_interval and its moments time_point, and does
-  ;; not see CxAbstract, so CxCore holds time's edges to temporal and aspatial and the
-  ;; partition.  The partition derives each part's edge to time, so CxCore states none.
-  (testing "in CxTime a moment and a stretch are temporal, aspatial and never each other"
+(tu/deftest-kb cxuniverse-reads-the-time-partition
+  ;; time.txt types its calendar results time_interval and its moments time_point.  Each
+  ;; partition derives its parts' edges to the whole, so no upper file states them.
+  (testing "in CxUniverse a moment and a stretch are temporal, aspatial and never each other"
     (doseq [t '[time_point time_interval]
-            up '[time temporal aspatial]]
-      (is (true? (v/genl? kb t up 'CxTime)) (str t " must reach " up " in CxTime")))
-    (is (true? (v/disjoint? kb 'time_point 'time_interval 'CxTime))))
-  (testing "CxCore states no edge the partition derives"
-    (let [stated (set (map (comp first text/peel-strength)
-                           (text/read-forms (io/file "resources/kb/CxCore.txt"))))]
-      (doseq [s '[(genl time_point temporal) (genl time_point time) (genl time_interval time)]]
+            up '[uninterrupted_time uninterrupted time temporal aspatial]]
+      (is (true? (v/genl? kb t up 'CxUniverse)) (str t " must reach " up " in CxUniverse")))
+    (is (true? (v/disjoint? kb 'time_point 'time_interval 'CxUniverse))))
+  (testing "no upper file states an edge the partition derives"
+    (let [stated (set (map (comp first text/peel-form)
+                           (upper-forms)))]
+      (doseq [s '[(genl time_point temporal) (genl time_point uninterrupted_time)
+                  (genl time_interval uninterrupted_time) (genl uninterrupted_time time)
+                  (genl intermittent_time time)]]
         (is (not (contains? stated s)) (str (pr-str s) " is derived from the partition")))))
-  (testing "CxTime stores its calendar facts under both argument-type readings"
-    (doseq [s cxtime-calendar-facts]
-      (is (= :stored (tu/with-entailing (refusal kb s 'CxTime))) (pr-str s))
-      (is (= :stored (tu/without-entailing (refusal kb s 'CxTime))) (pr-str s)))))
+  (testing "CxUniverse stores its calendar facts under both argument-type readings"
+    (doseq [s time-calendar-facts]
+      (is (= :stored (tu/with-entailing (refusal kb s 'CxUniverse))) (pr-str s))
+      (is (= :stored (tu/without-entailing (refusal kb s 'CxUniverse))) (pr-str s)))))
+
+;; ---- whether a temporal thing has a gap ------------------------------------
+;; uninterrupted and intermittent partition temporal: a thing is present at every moment
+;; between its start and its end, or there is a moment between them at which it is not.
+
+(tu/deftest-kb uninterrupted-and-intermittent-partition-temporal
+  (doseq [ctx '[CxUniverse]]
+    (testing (str ctx)
+      (is (true? (v/genl? kb 'uninterrupted 'temporal ctx)))
+      (is (true? (v/genl? kb 'intermittent 'temporal ctx)))
+      (is (true? (v/disjoint? kb 'uninterrupted 'intermittent ctx)))))
+  (testing "a temporal thing denied being uninterrupted is intermittent — the coverage half"
+    (tu/with-terms [Trial]
+      (v/assert kb (list 'temporal Trial) 'CxUniverse)
+      (v/assert kb (list 'not (list 'uninterrupted Trial)) 'CxUniverse)
+      (is (true? (v/ask? kb (list 'intermittent Trial) 'CxUniverse))))))
+
+(tu/deftest-kb a-tangible-is-uninterrupted-by-default
+  ;; A rock is present at every moment between its start and its end.  A watch taken
+  ;; apart and rebuilt is not, and stating so is allowed.
+  (is (true? (v/genl? kb 'tangible 'uninterrupted 'CxUniverse)))
+  (is (empty? (filter #(= :monotonic (:strength %))
+                      (v/sentexes-matching kb '(genl tangible uninterrupted) 'CxUniverse)))
+      "the edge is a default")
+  (tu/with-terms [Rock Watch]
+    (v/assert kb (list 'stone Rock) 'CxUniverse)
+    (is (true? (v/ask? kb (list 'uninterrupted Rock) 'CxUniverse)))
+    (v/assert kb (list 'tangible Watch) 'CxUniverse)
+    (is (some? (v/assert kb (list 'intermittent Watch) 'CxUniverse)) "the write is stored")
+    (is (true? (v/ask? kb (list 'intermittent Watch) 'CxUniverse)))))
+
+(tu/deftest-kb the-watch-of-theseus-is-intermittent
+  ;; A watch taken apart and rebuilt exists intermittently, so its exception is stated
+  ;; monotonically and defeats the default edge from tangible to uninterrupted.
+  (let [clashes (fn [w] (count (filter #(some #{w} (flatten (map :sentence (:sides %))))
+                                       (v/contradictions kb))))]
+    (testing "a tangible with no stated exception is uninterrupted by default"
+      (tu/with-terms [Rock]
+        (v/assert kb (list 'tangible Rock) 'CxUniverse)
+        (is (true? (v/ask? kb (list 'uninterrupted Rock) 'CxUniverse)))))
+    (testing "the tangible membership first, then the monotonic exception"
+      (tu/with-terms [WatchOfTheseus]
+        (v/assert kb (list 'tangible WatchOfTheseus) 'CxUniverse)
+        (v/assert kb (list 'intermittent WatchOfTheseus) 'CxUniverse {:strength :monotonic})
+        (is (true? (v/ask? kb (list 'intermittent WatchOfTheseus) 'CxUniverse)))
+        (is (false? (v/ask? kb (list 'uninterrupted WatchOfTheseus) 'CxUniverse)))
+        (is (zero? (clashes WatchOfTheseus)))))
+    (testing "the monotonic exception first, then the tangible membership"
+      (tu/with-terms [WatchOfTheseus]
+        (v/assert kb (list 'intermittent WatchOfTheseus) 'CxUniverse {:strength :monotonic})
+        (v/assert kb (list 'tangible WatchOfTheseus) 'CxUniverse)
+        (is (true? (v/ask? kb (list 'intermittent WatchOfTheseus) 'CxUniverse)))
+        (is (false? (v/ask? kb (list 'uninterrupted WatchOfTheseus) 'CxUniverse)))
+        (is (zero? (clashes WatchOfTheseus)))))))
+
+(tu/deftest-kb a-time-is-uninterrupted-or-intermittent
+  ;; A week's evenings are a time with gaps; a moment and a stretch are times with none.
+  (doseq [ctx '[CxUniverse]]
+    (testing (str ctx)
+      (is (true? (v/genl? kb 'uninterrupted_time 'uninterrupted ctx)))
+      (is (true? (v/genl? kb 'intermittent_time 'intermittent ctx)))
+      (is (true? (v/genl? kb 'intermittent_time 'time ctx)))
+      (is (true? (v/disjoint? kb 'uninterrupted_time 'intermittent_time ctx)))
+      (is (true? (v/disjoint? kb 'intermittent_time 'time_interval ctx)))))
+  (testing "a time denied being uninterrupted is an intermittent_time"
+    (tu/with-terms [Evenings]
+      (v/assert kb (list 'time Evenings) 'CxUniverse)
+      (v/assert kb (list 'not (list 'uninterrupted Evenings)) 'CxUniverse)
+      (is (true? (v/ask? kb (list 'intermittent_time Evenings) 'CxUniverse)))))
+  (testing "and an uninterrupted time is an uninterrupted_time"
+    (tu/with-terms [Afternoon]
+      (v/assert kb (list 'time Afternoon) 'CxUniverse)
+      (v/assert kb (list 'uninterrupted Afternoon) 'CxUniverse)
+      (is (true? (v/ask? kb (list 'uninterrupted_time Afternoon) 'CxUniverse))))))
+
+(tu/deftest-kb a-temporal-thing-has-a-time-and-a-time-is-its-own
+  (testing "TimeOfFn ships with its corresponding predicate"
+    (is (true? (v/ask? kb '(functionCorrespondingPredicate TimeOfFn timeOf) 'CxUniverse)))
+    (is (true? (v/ask? kb '(reifiable_function TimeOfFn) 'CxUniverse)))
+    (is (true? (v/ask? kb '(arg TimeOfFn 1 temporal) 'CxUniverse)))
+    (is (true? (v/ask? kb '(result TimeOfFn time) 'CxUniverse)))
+    (is (true? (v/ask? kb '(arg timeOf 1 temporal) 'CxUniverse)))
+    (is (true? (v/ask? kb '(arg timeOf 2 time) 'CxUniverse))))
+  (testing "a time is its own time, so the function names it"
+    (tu/with-terms [Afternoon]
+      (v/assert kb (list 'time_interval Afternoon) 'CxUniverse)
+      (is (true? (v/ask? kb (list 'timeOf Afternoon Afternoon) 'CxUniverse)))
+      (is (true? (v/ask? kb (list 'time_interval (list 'TimeOfFn Afternoon)) 'CxUniverse))))))
 
 ;; ---- the upper divisions by location and by mass --------------------------
 ;; Two partitions of `thing`.  `spatial` / `aspatial` divides by a location in SOME space —
 ;; physical space, or a mathematical one, where a line or a square of an abstract board
 ;; has a location and none in the world.  `tangible` / `intangible` divides by mass.
 ;; `spatiotemporal` is below `spatial` and `temporal`: what has a location in space and
-;; time.  CxCore states the two edges as `genl` edges and not as an intersection, so a
+;; time.  CxUniverse states the two edges as `genl` edges and not as an intersection, so a
 ;; thing stated spatial and temporal is not concluded spatiotemporal; `nowhere_never` is
 ;; placed below `aspatial` and `atemporal` the same way.  The spatial calculi relate
 ;; anything spatial.  A region is the case the two partitions cross on: spatiotemporal,
@@ -983,12 +1018,11 @@
       (is (true? (v/disjoint? kb a b)) (str a " and " b " must be disjoint")))))
 
 (tu/deftest-kb what-the-partitions-entail-is-derived-and-not-stated
-  ;; Each of these was stated in CxCore before the partitions, and each is entailed by
-  ;; them: a part of a partition is under its whole, and the parts are disjoint, which
-  ;; descends to predicate through truth_valued_relation.  A fact entailed by a stated
-  ;; fact is not stated as well, so CxCore carries none of the three.
-  (let [stated (set (map (comp first text/peel-strength)
-                         (text/read-forms (io/file "resources/kb/CxCore.txt"))))]
+  ;; Each of these is entailed by the partitions: a part of a partition is under its whole,
+  ;; and the parts are disjoint, which descends to predicate through truth_valued_relation.  A fact entailed by a stated
+  ;; fact is not stated as well, so CxUniverse carries none of the three.
+  (let [stated (set (map (comp first text/peel-form)
+                         (upper-forms)))]
     (doseq [s '[(genl function relation) (genl predicate relation)
                 (disjoint function predicate) (disjoint predicate function)]]
       (is (not (contains? stated s)) (str (pr-str s) " is entailed by the partitions"))))
@@ -1014,7 +1048,7 @@
     (is (nil? (:not-under-thing (v/kb-integrity kb #{'not 'implies} 'CxWell))))))
 
 (tu/deftest-kb the-quantifiers-are-quantifiers-and-not-connectives
-  ;; OE 6: forall, thereExists and exists are declared quantifier instances in CxCore —
+  ;; OE 6: forall, thereExists and exists are declared quantifier instances in CxUniverse —
   ;; where the engine reads each as a query operator or rule-firing sugar rather than as
   ;; a predicate with its own facts (forall desugars to a nested unknown, docs/naf.md;
   ;; thereExists is the query existential, docs/naf.md; exists is a head existential
@@ -1029,7 +1063,7 @@
     (is (v/ask? kb (list 'not (list 'quantifier 'Muffet)) 'CxUniverse)))
   (testing "forall is not a logical_connective"
     (is (v/ask? kb (list 'not (list 'logical_connective 'forall)) 'CxUniverse)))
-  (testing "sign_value is closed-extent too (CxMeasure, beside its three instances)"
+  (testing "sign_value is closed-extent too (measure.txt, beside its three instances)"
     (is (v/ask? kb (list 'not (list 'sign_value 'Muffet)) 'CxUniverse))))
 
 (tu/deftest-kb what-has-no-place-in-space-or-time-has-no-mass
@@ -1041,33 +1075,142 @@
     (is (true? (v/ask? kb (list 'intangible Prime) 'CxUniverse)))
     (is (true? (tu/stored-in-clash? kb (list 'tangible Prime) 'CxUniverse)))))
 
+(tu/deftest-kb a-fluent-may-be-located
+  ;; A boulder rolling and thin ice are held states with a place, so nothing separates
+  ;; fluent from spatial.
+  (is (not (v/disjoint? kb 'fluent 'spatial 'CxUniverse)))
+  (is (not (v/genl? kb 'fluent 'aspatial 'CxUniverse)))
+  (tu/with-terms [ThinIce]
+    (v/assert kb (list 'fluent ThinIce) 'CxUniverse)
+    (is (not (tu/stored-in-clash? kb (list 'spatial ThinIce) 'CxUniverse)))))
+
+(tu/deftest-kb a-quantity-is-in-time-causes-nothing-and-is-no-situation
+  ;; A water level is a magnitude that changes over time.  It causes nothing itself, and
+  ;; the level being 3 m is a fluent about it rather than the quantity.
+  (doseq [ctx '[CxUniverse]]
+    (testing (str ctx)
+      (is (true? (v/genl? kb 'quantity 'temporal ctx)))
+      (is (true? (v/genl? kb 'quantity 'acausal ctx)))
+      (is (true? (v/disjoint? kb 'quantity 'situation ctx)))
+      (is (true? (v/disjoint? kb 'quantity 'fluent ctx)))))
+  (tu/with-terms [WaterLevel]
+    (v/assert kb (list 'quantity WaterLevel) 'CxUniverse)
+    (is (true? (tu/stored-in-clash? kb (list 'fluent WaterLevel) 'CxUniverse)))))
+
+(tu/deftest-kb a-sign-value-is-in-no-space-and-at-no-time
+  (is (true? (v/genl? kb 'sign_value 'nowhere_never 'CxUniverse)))
+  (doseq [t '[aspatial atemporal intangible]]
+    (is (true? (v/ask? kb (list t 'SignPositive) 'CxUniverse)) (str "SignPositive is " t))))
+
+(defn- located-or-not
+  "Each [kind side witness] row: the pair is stated orthogonal in CxUniverse, reads
+  :orthogonal, and an individual of the kind that is also of the side is no clash."
+  [kb rows]
+  (doseq [[a b witness] rows]
+    (testing (str a " and " b)
+      (is (some #(v/premise? kb (:id %)) (v/sentexes-matching kb (list 'orthogonal a b) 'CxUniverse))
+          (str "(orthogonal " a " " b ") is stated"))
+      (is (= :orthogonal (v/subsumption-status kb a b)))
+      (let [w (tu/fresh-term :individual witness)]
+        (v/assert kb (list a w) 'CxUniverse)
+        (is (not (tu/stored-in-clash? kb (list b w) 'CxUniverse)) (str "a " a " that is " b))))))
+
+(tu/deftest-kb a-situation-or-a-held-state-may-be-located-nowhere
+  ;; A debt owed or a treaty in force is located nowhere; a cat on a mat is located.
+  (located-or-not kb '[[situation aspatial Debt1]
+                       [static_situation spatial CatOnMat1]
+                       [static_situation aspatial TreatyInForce1]]))
+
+(tu/deftest-kb an-event-is-temporal-and-may-or-may-not-be-located
+  ;; The battle of Waterloo is located; a contract expiring at midnight is not.
+  (is (true? (v/genl? kb 'event 'temporal 'CxUniverse)) "an event is temporal through situation")
+  (is (not-any? #(v/premise? kb (:id %)) (v/sentexes-matching kb '(genl event temporal) '?ctx))
+      "and the edge is not stated")
+  (located-or-not kb '[[event spatial Waterloo1] [event aspatial ContractExpiry1]]))
+
+(tu/deftest-kb an-event-and-a-held-state-may-or-may-not-be-spatiotemporal
+  ;; A battle is an event and spatiotemporal, and a contract expiring is an event and not.
+  ;; A cat on a mat is a held state and spatiotemporal, and a treaty in force is one and not.
+  (located-or-not kb '[[event spatiotemporal Battle2]
+                       [static_situation spatiotemporal CatOnMat2]]))
+
+;; ---- hollow: what a thing is shaped like, not what it is for ---------------
+;; `hollow` holds of a thing while it has an interior space that other things can occupy.
+;; It says nothing about what the thing is used for.  A container is made and hollow.
+
+(tu/deftest-kb hollow-is-a-shape-located-in-space-and-time
+  (is (true? (v/genl? kb 'hollow 'spatiotemporal 'CxUniverse)))
+  (is (seq (v/sentexes-matching kb '(comment hollow ?text) 'CxUniverse)))
+  (testing "a cup, a pitcher plant and a cupped hand are hollow; stuff is not"
+    (is (= :orthogonal (v/subsumption-status kb 'hollow 'made)))
+    (is (= :orthogonal (v/subsumption-status kb 'hollow 'organism)))
+    (is (= :orthogonal (v/subsumption-status kb 'hollow 'body_part)))
+    (is (true? (v/disjoint? kb 'hollow 'substance)))
+    (is (true? (v/disjoint? kb 'hollow 'nowhere_never))))
+  (testing "a hollow organism is no clash"
+    (tu/with-terms [PitcherPlant]
+      (v/assert kb (list 'organism PitcherPlant) 'CxUniverse)
+      (is (not (tu/stored-in-clash? kb (list 'hollow PitcherPlant) 'CxUniverse))))))
+
+(tu/deftest-kb a-biological-thing-can-be-hollow
+  ;; A pitcher plant and a lab-grown bladder are biological and hollow.  A cup and a cave
+  ;; are hollow and not biological, and a leaf is biological and not hollow.
+  (is (some #(v/premise? kb (:id %)) (v/sentexes-matching kb '(orthogonal biological hollow) 'CxUniverse)))
+  (is (= :orthogonal (v/subsumption-status kb 'biological 'hollow)))
+  (tu/with-terms [LabBladder1]
+    (v/assert kb (list 'body_part LabBladder1) 'CxUniverse)
+    (is (not (tu/stored-in-clash? kb (list 'hollow LabBladder1) 'CxUniverse)))
+    (is (true? (v/ask? kb (list 'hollow LabBladder1) 'CxUniverse)))))
+
+(tu/deftest-kb a-container-is-made-and-hollow
+  (doseq [t '[made hollow]]
+    (is (some #(v/premise? kb (:id %)) (v/sentexes-matching kb (list 'genl 'container t) 'CxUniverse))
+        (str "(genl container " t ") is stated"))
+    (is (true? (v/genl? kb 'building t 'CxUniverse)) (str "building genl " t " through container")))
+  (testing "a container stays clear of organism, person and substance"
+    (doseq [t '[organism person substance]]
+      (is (true? (v/disjoint? kb 'container t)) (str "container and " t))))
+  (testing "a made hollow organism is no clash, and is not concluded a container"
+    ;; A potted pitcher plant is made, hollow and an organism.
+    (tu/with-terms [PottedPitcherPlant]
+      (v/assert kb (list 'organism PottedPitcherPlant) 'CxUniverse)
+      (v/assert kb (list 'made PottedPitcherPlant) 'CxUniverse)
+      (is (not (tu/stored-in-clash? kb (list 'hollow PottedPitcherPlant) 'CxUniverse)))
+      (is (not (true? (v/ask? kb (list 'container PottedPitcherPlant) 'CxUniverse)))))))
+
+(tu/deftest-kb a-spatial-event-is-an-event-located-in-some-space
+  (is (seq (v/sentexes-matching kb '(comment spatial_event ?text) 'CxUniverse)))
+  (doseq [t '[event spatial spatiotemporal temporal situation]]
+    (is (true? (v/genl? kb 'spatial_event t 'CxUniverse)) (str "spatial_event genl " t)))
+  (tu/with-terms [Smelting1 Waterloo1]
+    (v/assert kb (list 'spatial_event Smelting1) 'CxUniverse)
+    (is (true? (v/ask? kb (list 'spatiotemporal Smelting1) 'CxUniverse)))
+    (v/assert kb (list 'event Waterloo1) 'CxUniverse)
+    (v/assert kb (list 'spatial Waterloo1) 'CxUniverse)
+    (is (true? (v/ask? kb (list 'spatial_event Waterloo1) 'CxUniverse))
+        "an event located in some space is a spatial event")))
+
 (def ^:private aspatial-kinds
-  "The kinds with no location in any space, each with the contexts that read it as
-  aspatial.  `context` and `language` are read from two band contexts besides CxCore,
-  which see CxCore's `expression` lattice and `language` edge."
-  '{quantity      [CxMeasure]
-    fluent        [CxTime]
-    organization  [CxCore CxSociety]
-    context       [CxCore CxSpace CxSociety]
-    language      [CxCore CxSpace CxSociety]})
+  "The kinds with no location in any space."
+  '#{quantity organization context language})
 
 (tu/deftest-kb a-kind-with-no-location-in-any-space-is-disjoint-from-spatial
-  (doseq [[kind ctxs] aspatial-kinds
-          ctx         (conj ctxs 'CxUniverse)
-          located     '[spatial spatiotemporal]]
+  (doseq [kind    (sort aspatial-kinds)
+          ctx     '[CxUniverse CxWell]
+          located '[spatial spatiotemporal]]
     (is (true? (v/disjoint? kb kind located ctx)) (str kind " and " located " in " ctx)))
-  (testing "a spatial relation between a fluent and an organization derives two clashes"
+  (testing "a spatial relation between a quantity and an organization derives two clashes"
     ;; Pinned to the entailing reading: the clash sides are the minted (spatial X), and
     ;; the constraint-only reading refuses the northOf instead.
     (tu/with-entailing
-      (tu/with-terms [LampLit AcmeCo]
-        (v/assert kb (list 'fluent LampLit) 'CxUniverse)
+      (tu/with-terms [WaterLevel AcmeCo]
+        (v/assert kb (list 'quantity WaterLevel) 'CxUniverse)
         (v/assert kb (list 'organization AcmeCo) 'CxUniverse)
-        (v/assert kb (list 'northOf LampLit AcmeCo) 'CxUniverse)
+        (v/assert kb (list 'northOf WaterLevel AcmeCo) 'CxUniverse)
         (let [clashes (into #{} (comp (filter #(= :disjoint (:kind %)))
                                       (map #(into #{} (map :sentence) (:sides %))))
                             (v/contradictions kb))]
-          (is (contains? clashes #{(list 'fluent LampLit) (list 'spatial LampLit)}))
+          (is (contains? clashes #{(list 'quantity WaterLevel) (list 'spatial WaterLevel)}))
           (is (contains? clashes #{(list 'organization AcmeCo) (list 'spatial AcmeCo)}))))))
   (testing "and a dog stays disjoint from a number and a relation"
     (is (true? (v/disjoint? kb 'dog 'number)))
@@ -1086,7 +1229,7 @@
     (is (not (v/ask? kb (list 'tangible Meadow) 'CxUniverse)))))
 
 (tu/deftest-kb a-partition-is-stated-a-cover-and-a-separation
-  ;; Every partition is a cover and a separation, so CxCore says so with two sub-relation
+  ;; Every partition is a cover and a separation, so CxUniverse says so with two sub-relation
   ;; edges.  What they add is a query for the weaker spelling answering the stronger one,
   ;; and nothing the other way.
   (doseq [super '[covering separating]]
@@ -1113,64 +1256,68 @@
   an intersection installs an edge to each of its types, genl is transitive, and a
   disjointness descends a genl edge — so a stated sentence repeating one of those is not
   written."
-  '[[genl aspatial thing CxCore "partition thing spatial aspatial"]
-    [disjoint spatiotemporal aspatial CxCore "spatiotemporal genl spatial; partition thing spatial aspatial"]
-    [genl intangible thing CxCore "partition thing tangible intangible"]
-    [genl nowhere_never intangible CxCore "nowhere_never genl aspatial genl intangible"]
-    [genl organization intangible CxCore "organization genl aspatial genl intangible"]
-    [genl context intangible CxCore "context genl nowhere_never genl aspatial genl intangible"]
-    [genl language intangible CxCore "language genl nowhere_never genl aspatial genl intangible"]
-    [genl number thing CxCore "number genl unrepresented_term genl linguistic genl nowhere_never genl aspatial; partition thing spatial aspatial"]
-    [genl keyword thing CxCore "keyword genl unrepresented_term genl linguistic genl nowhere_never genl aspatial; partition thing spatial aspatial"]
-    [genl boolean thing CxCore "boolean genl unrepresented_term genl linguistic genl nowhere_never genl aspatial; partition thing spatial aspatial"]
-    [genl character thing CxCore "character genl unrepresented_term genl linguistic genl nowhere_never genl aspatial; partition thing spatial aspatial"]
-    [genl denotational_term thing CxReflection "denotational_term genl closed_expression genl expression genl linguistic genl nowhere_never genl aspatial; partition thing spatial aspatial"]
-    [genl formula thing CxCore "formula genl linguistic genl nowhere_never genl aspatial; partition thing spatial aspatial"]
-    [genl quantity intangible CxMeasure "quantity genl aspatial genl intangible"]
-    [genl fluent intangible CxTime "fluent genl aspatial genl intangible"]
-    [genl temporal thing CxCore "partition thing temporal atemporal"]
-    [genl atemporal thing CxCore "partition thing temporal atemporal"]
-    [disjoint temporal atemporal CxCore "partition thing temporal atemporal"]
-    [genl spatiotemporal thing CxCore "spatiotemporal genl spatial, spatial genl thing (partition)"]
-    [genl organism tangible CxCore "organism genl biological genl tangible"]
-    [genl body_part tangible CxAbstract "body_part genl biological genl tangible"]
-    [genl body_part biological CxAbstract "separating biological organism body_part"]
-    [disjoint organism substance CxAbstract "organism genl biological; disjoint biological substance"]
-    [disjoint substance body_part CxAbstract "body_part genl biological; disjoint biological substance"]
-    [genl tangible temporal CxAbstract "tangible genl spatiotemporal genl temporal"]
-    [disjoint tangible intangible CxAbstract "partition thing tangible intangible"]
-    [disjoint organization substance CxAbstract "organization genl aspatial genl intangible, substance genl tangible; partition thing tangible intangible"]
-    [disjoint language substance CxAbstract "language genl nowhere_never genl aspatial genl intangible, substance genl tangible; partition thing tangible intangible"]
+  '[[genl aspatial thing CxUniverse "partition thing spatial aspatial"]
+    [disjoint spatiotemporal aspatial CxUniverse "spatiotemporal genl spatial; partition thing spatial aspatial"]
+    [genl intangible thing CxUniverse "partition thing tangible intangible"]
+    [genl nowhere_never intangible CxUniverse "nowhere_never genl aspatial genl intangible"]
+    [genl organization intangible CxUniverse "organization genl aspatial genl intangible"]
+    [genl context intangible CxUniverse "context genl nowhere_never genl aspatial genl intangible"]
+    [genl language intangible CxUniverse "language genl nowhere_never genl aspatial genl intangible"]
+    [genl number thing CxUniverse "number genl unrepresented_term genl linguistic genl nowhere_never genl aspatial; partition thing spatial aspatial"]
+    [genl keyword thing CxUniverse "keyword genl unrepresented_term genl linguistic genl nowhere_never genl aspatial; partition thing spatial aspatial"]
+    [genl boolean thing CxUniverse "boolean genl unrepresented_term genl linguistic genl nowhere_never genl aspatial; partition thing spatial aspatial"]
+    [genl character thing CxUniverse "character genl unrepresented_term genl linguistic genl nowhere_never genl aspatial; partition thing spatial aspatial"]
+    [genl denotational_term thing CxUniverse "denotational_term genl closed_expression genl expression genl linguistic genl nowhere_never genl aspatial; partition thing spatial aspatial"]
+    [genl formula thing CxUniverse "formula genl linguistic genl nowhere_never genl aspatial; partition thing spatial aspatial"]
+    [genl quantity intangible CxUniverse "quantity genl aspatial genl intangible"]
+    [genl temporal thing CxUniverse "partition thing temporal atemporal"]
+    [genl atemporal thing CxUniverse "partition thing temporal atemporal"]
+    [disjoint temporal atemporal CxUniverse "partition thing temporal atemporal"]
+    [genl causal thing CxUniverse "partition thing causal acausal"]
+    [genl acausal thing CxUniverse "partition thing causal acausal"]
+    [disjoint causal acausal CxUniverse "partition thing causal acausal"]
+    [genl sign_value thing CxUniverse "sign_value genl nowhere_never genl intangible genl thing"]
+    [genl spatiotemporal thing CxUniverse "spatiotemporal genl spatial, spatial genl thing (partition)"]
+    [genl organism tangible CxUniverse "organism genl biological genl tangible"]
+    [genl body_part tangible CxUniverse "body_part genl biological genl tangible"]
+    [genl body_part biological CxUniverse "separating biological organism body_part"]
+    [disjoint organism substance CxUniverse "organism genl biological; disjoint biological substance"]
+    [disjoint substance body_part CxUniverse "body_part genl biological; disjoint biological substance"]
+    [genl tangible temporal CxUniverse "tangible genl spatiotemporal genl temporal"]
+    [disjoint tangible intangible CxUniverse "partition thing tangible intangible"]
+    [disjoint organization substance CxUniverse "organization genl aspatial genl intangible, substance genl tangible; partition thing tangible intangible"]
+    [disjoint language substance CxUniverse "language genl nowhere_never genl aspatial genl intangible, substance genl tangible; partition thing tangible intangible"]
     [disjoint organization animal CxUniverse "organization genl aspatial genl intangible, animal genl organism genl biological genl tangible; partition thing tangible intangible"]
-    [genl string intangible CxAbstract "string genl unrepresented_term genl linguistic genl nowhere_never genl intangible"]
-    [genl number intangible CxAbstract "number genl unrepresented_term genl linguistic genl nowhere_never genl intangible"]
-    [genl keyword intangible CxAbstract "keyword genl unrepresented_term genl linguistic genl nowhere_never genl intangible"]
-    [genl boolean intangible CxAbstract "boolean genl unrepresented_term genl linguistic genl nowhere_never genl intangible"]
-    [genl character intangible CxAbstract "character genl unrepresented_term genl linguistic genl nowhere_never genl intangible"]
-    [genl building made CxAbstract "building genl container genl made"]
-    [genl made tangible CxAbstract "partition tangible made natural"]
-    [genl natural tangible CxAbstract "partition tangible made natural"]
-    [genl formation tangible CxAbstract "formation genl natural genl tangible"]
-    [disjoint formation made CxAbstract "formation genl natural; partition tangible made natural"]
-    [disjoint formation organism CxAbstract "organism genl biological; separating tangible formation biological"]
-    [disjoint formation body_part CxAbstract "body_part genl biological; separating tangible formation biological"]
-    [genl asymmetric binary_predicate CxCore "asymmetric genl anti_symmetric genl binary_predicate"]
-    [disjoint string predicate CxAbstract "string genl unrepresented_term, predicate genl relation; unrepresented_term genl linguistic; disjoint linguistic relation"]
-    [disjoint number predicate CxAbstract "number genl unrepresented_term, predicate genl relation; unrepresented_term genl linguistic; disjoint linguistic relation"]
-    [disjoint keyword predicate CxAbstract "keyword genl unrepresented_term, predicate genl relation; unrepresented_term genl linguistic; disjoint linguistic relation"]
-    [disjoint boolean predicate CxAbstract "boolean genl unrepresented_term, predicate genl relation; unrepresented_term genl linguistic; disjoint linguistic relation"]
-    [disjoint character predicate CxAbstract "character genl unrepresented_term, predicate genl relation; unrepresented_term genl linguistic; disjoint linguistic relation"]
-    [disjoint glass_stuff stone CxAbstract "disjoint_metatype stuff_type_by_substance"]
-    [disjoint metal glass_stuff CxAbstract "disjoint_metatype stuff_type_by_substance"]
-    [disjoint metal stone CxAbstract "disjoint_metatype stuff_type_by_substance"]
-    [disjoint metal wood CxAbstract "disjoint_metatype stuff_type_by_substance"]
-    [disjoint wood glass_stuff CxAbstract "disjoint_metatype stuff_type_by_substance"]
-    [disjoint wood stone CxAbstract "disjoint_metatype stuff_type_by_substance"]
-    [genl reifiable_function function CxCore "partition function reifiable_function unreifiable_function"]
-    [genl unreifiable_function function CxCore "partition function reifiable_function unreifiable_function"]
-    [genl fixed_order_type unary_predicate CxCore "partition unary_predicate fixed_order_type variable_order_type"]
-    [genl variable_order_type unary_predicate CxCore "partition unary_predicate fixed_order_type variable_order_type"]
-    [genl equivalence_relation binary_predicate CxCore "intersection equivalence_relation reflexive symmetric transitive; reflexive genl binary_predicate"]])
+    [genl string intangible CxUniverse "string genl unrepresented_term genl linguistic genl nowhere_never genl intangible"]
+    [genl number intangible CxUniverse "number genl unrepresented_term genl linguistic genl nowhere_never genl intangible"]
+    [genl keyword intangible CxUniverse "keyword genl unrepresented_term genl linguistic genl nowhere_never genl intangible"]
+    [genl boolean intangible CxUniverse "boolean genl unrepresented_term genl linguistic genl nowhere_never genl intangible"]
+    [genl character intangible CxUniverse "character genl unrepresented_term genl linguistic genl nowhere_never genl intangible"]
+    [genl building made CxUniverse "building genl container genl made"]
+    [genl building hollow CxUniverse "building genl container genl hollow"]
+    [genl made tangible CxUniverse "partition tangible made natural"]
+    [genl natural tangible CxUniverse "partition tangible made natural"]
+    [genl formation tangible CxUniverse "formation genl natural genl tangible"]
+    [disjoint formation made CxUniverse "formation genl natural; partition tangible made natural"]
+    [disjoint formation organism CxUniverse "organism genl biological; separating tangible formation biological"]
+    [disjoint formation body_part CxUniverse "body_part genl biological; separating tangible formation biological"]
+    [genl asymmetric binary_predicate CxUniverse "asymmetric genl anti_symmetric genl binary_predicate"]
+    [disjoint string predicate CxUniverse "string genl unrepresented_term, predicate genl relation; unrepresented_term genl linguistic; disjoint linguistic relation"]
+    [disjoint number predicate CxUniverse "number genl unrepresented_term, predicate genl relation; unrepresented_term genl linguistic; disjoint linguistic relation"]
+    [disjoint keyword predicate CxUniverse "keyword genl unrepresented_term, predicate genl relation; unrepresented_term genl linguistic; disjoint linguistic relation"]
+    [disjoint boolean predicate CxUniverse "boolean genl unrepresented_term, predicate genl relation; unrepresented_term genl linguistic; disjoint linguistic relation"]
+    [disjoint character predicate CxUniverse "character genl unrepresented_term, predicate genl relation; unrepresented_term genl linguistic; disjoint linguistic relation"]
+    [disjoint glass_stuff stone CxUniverse "disjoint_metatype stuff_type_by_substance"]
+    [disjoint metal glass_stuff CxUniverse "disjoint_metatype stuff_type_by_substance"]
+    [disjoint metal stone CxUniverse "disjoint_metatype stuff_type_by_substance"]
+    [disjoint metal wood CxUniverse "disjoint_metatype stuff_type_by_substance"]
+    [disjoint wood glass_stuff CxUniverse "disjoint_metatype stuff_type_by_substance"]
+    [disjoint wood stone CxUniverse "disjoint_metatype stuff_type_by_substance"]
+    [genl reifiable_function function CxUniverse "partition function reifiable_function unreifiable_function"]
+    [genl unreifiable_function function CxUniverse "partition function reifiable_function unreifiable_function"]
+    [genl fixed_order_type unary_predicate CxUniverse "partition unary_predicate fixed_order_type variable_order_type"]
+    [genl variable_order_type unary_predicate CxUniverse "partition unary_predicate fixed_order_type variable_order_type"]
+    [genl equivalence_relation binary_predicate CxUniverse "intersection equivalence_relation reflexive symmetric transitive; reflexive genl binary_predicate"]])
 
 (tu/deftest-kb the-kb-states-no-relation-it-already-derives
   ;; Each relation is read from the context that held the removed sentence, so a removal
@@ -1248,8 +1395,8 @@
     (is (true? (v/genl? kb t 'biological)) (str t " is biological"))
     (is (true? (v/genl? kb t 'tangible)) (str t " is tangible through biological")))
   (is (true? (v/genl? kb 'biological 'tangible)))
-  (testing "a kind CxOrganism places reaches tangible from CxOrganism itself"
-    (is (true? (v/genl? kb 'animal 'tangible 'CxOrganism))))
+  (testing "a kind organism.txt places reaches tangible in CxUniverse"
+    (is (true? (v/genl? kb 'animal 'tangible 'CxUniverse))))
   (tu/with-terms [Gizzard]
     (v/assert kb (list 'body_part Gizzard) 'CxUniverse)
     (is (true? (v/ask? kb (list 'biological Gizzard) 'CxUniverse)))
@@ -1325,24 +1472,24 @@
     (is (true? (v/ask? kb (list 'function relatesTo) 'CxUniverse)))))
 
 (tu/deftest-kb reifiable-and-unreifiable-partition-function
-  (is (true? (v/disjoint? kb 'reifiable_function 'unreifiable_function 'CxCore)))
-  (is (true? (v/genl? kb 'reifiable_function 'function 'CxCore)))
-  (is (true? (v/genl? kb 'unreifiable_function 'function 'CxCore)))
+  (is (true? (v/disjoint? kb 'reifiable_function 'unreifiable_function 'CxUniverse)))
+  (is (true? (v/genl? kb 'reifiable_function 'function 'CxUniverse)))
+  (is (true? (v/genl? kb 'unreifiable_function 'function 'CxUniverse)))
   (testing "the separation is not quoting_function's: that mark crosses both parts"
     (is (not (v/disjoint? kb 'quoting_function 'reifiable_function)))
     (is (not (v/disjoint? kb 'quoting_function 'unreifiable_function)))))
 
 (tu/deftest-kb fixed-and-variable-order-partition-unary-predicate
-  (is (true? (v/disjoint? kb 'fixed_order_type 'variable_order_type 'CxCore)))
-  (is (true? (v/genl? kb 'fixed_order_type 'unary_predicate 'CxCore)))
-  (is (true? (v/genl? kb 'variable_order_type 'unary_predicate 'CxCore)))
+  (is (true? (v/disjoint? kb 'fixed_order_type 'variable_order_type 'CxUniverse)))
+  (is (true? (v/genl? kb 'fixed_order_type 'unary_predicate 'CxUniverse)))
+  (is (true? (v/genl? kb 'variable_order_type 'unary_predicate 'CxUniverse)))
   (testing "so a type of one order is never of variable order"
-    (is (true? (v/disjoint? kb 'metatype 'variable_order_type 'CxCore)))))
+    (is (true? (v/disjoint? kb 'metatype 'variable_order_type 'CxUniverse)))))
 
 (tu/deftest-kb an-equivalence-relation-is-the-intersection-of-its-three-marks
-  (is (true? (v/genl? kb 'equivalence_relation 'reflexive 'CxCore)))
-  (is (true? (v/genl? kb 'equivalence_relation 'symmetric 'CxCore)))
-  (is (true? (v/genl? kb 'equivalence_relation 'transitive 'CxCore)))
+  (is (true? (v/genl? kb 'equivalence_relation 'reflexive 'CxUniverse)))
+  (is (true? (v/genl? kb 'equivalence_relation 'symmetric 'CxUniverse)))
+  (is (true? (v/genl? kb 'equivalence_relation 'transitive 'CxUniverse)))
   (testing "a predicate carrying all three marks is concluded an equivalence_relation"
     (tu/with-terms [sameShadeAs]
       (doseq [m '[reflexive symmetric transitive]]
@@ -1356,11 +1503,13 @@
 
 ;; ---- situations: change divides them ---------------------------------------
 
-(tu/deftest-kb static-situations-and-events-partition-situation
+(tu/deftest-kb static-situations-and-events-partition-uninterrupted-situation
+  ;; The intersections defining static_situation and event separate them; the stated
+  ;; partition of uninterrupted_situation adds the coverage.
   (is (true? (v/disjoint? kb 'static_situation 'event)))
-  (testing "a situation that is not an event is a static_situation — the coverage half"
+  (testing "an uninterrupted situation that is not an event is a static_situation — the coverage half"
     (tu/with-terms [Drought]
-      (v/assert kb (list 'situation Drought) 'CxUniverse)
+      (v/assert kb (list 'uninterrupted_situation Drought) 'CxUniverse)
       (v/assert kb (list 'not (list 'event Drought)) 'CxUniverse)
       (is (true? (v/ask? kb (list 'static_situation Drought) 'CxUniverse))))))
 
@@ -1408,8 +1557,8 @@
 (tu/deftest-kb the-folk-taxonomy-settles-every-pair-of-organism-kinds
   ;; Every pair of the kinds below organism is subsumption-related or separated.  grass is
   ;; a plant_class beside tree and flower, so it is apart from each and from oak and rose.
-  ;; The seven biology properties CxLife places under biological, organism and animal are states
-  ;; and capacities of an organism rather than kinds of one, so they are left out: each
+  ;; The seven biology properties life.txt places under biological, organism and animal are
+  ;; states and capacities of an organism rather than kinds of one, so they are left out: each
   ;; crosses the folk taxonomy, and its pairs with it stay unknown.
   (let [props   '#{alive dead mortal asleep awake breathes_air warm_blooded}
         org     (set (remove props (filter #(v/genl? kb % 'organism) (v/types kb))))
@@ -1425,7 +1574,7 @@
 ;; concluding a roster literal from one alone fires as a roster rule.
 
 (tu/deftest-kb a-folk-species-membership-is-held-monotonic
-  (is (= :monotonic (v/defeat-class kb (v/handle-of kb '(folk_species dog) 'CxOrganism))))
+  (is (= :monotonic (v/defeat-class kb (v/handle-of kb '(folk_species dog) 'CxUniverse))))
   (testing "a denial of one is held OUT"
     (let [d (v/assert kb '(not (folk_species dog)) 'CxUniverse)]
       (is (not (v/in? kb d)))
@@ -1450,11 +1599,11 @@
   (is (empty? (v/sentexes-matching kb '(comment artifact ?text) '?ctx)))
   (is (empty? (v/sentexes-matching kb '(genl artifact ?type) '?ctx)))
   (is (empty? (v/sentexes-matching kb '(genl ?type artifact) '?ctx)))
-  (is (= 1 (count (v/sentexes-matching kb '(comment made ?text) 'CxAbstract))))
+  (is (= 1 (count (v/sentexes-matching kb '(comment made ?text) 'CxUniverse))))
   (doseq [t '[building clothing container furniture machine tool vehicle]]
-    (is (true? (v/genl? kb t 'made 'CxAbstract)) (str t " is made")))
+    (is (true? (v/genl? kb t 'made 'CxUniverse)) (str t " is made")))
   (doseq [t '[clothing container furniture machine tool vehicle]]
-    (is (some #(v/premise? kb (:id %)) (v/sentexes-matching kb (list 'genl t 'made) 'CxAbstract))
+    (is (some #(v/premise? kb (:id %)) (v/sentexes-matching kb (list 'genl t 'made) 'CxUniverse))
         (str "(genl " t " made) is stated"))))
 
 ;; ---- made and natural ------------------------------------------------------
@@ -1463,9 +1612,9 @@
 
 (tu/deftest-kb made-and-natural-partition-tangible
   (is (true? (v/disjoint? kb 'made 'natural)))
-  (is (true? (v/genl? kb 'made 'tangible 'CxAbstract)))
-  (is (true? (v/genl? kb 'natural 'tangible 'CxAbstract)))
-  (is (= 1 (count (v/sentexes-matching kb '(comment natural ?text) 'CxAbstract))))
+  (is (true? (v/genl? kb 'made 'tangible 'CxUniverse)))
+  (is (true? (v/genl? kb 'natural 'tangible 'CxUniverse)))
+  (is (= 1 (count (v/sentexes-matching kb '(comment natural ?text) 'CxUniverse))))
   (testing "a tangible cannot be both"
     (tu/with-terms [Hybrid1]
       (v/assert kb (list 'made Hybrid1) 'CxUniverse)
@@ -1477,8 +1626,8 @@
       (is (true? (v/ask? kb (list 'natural Pebble1) 'CxUniverse))))))
 
 (tu/deftest-kb a-formation-is-natural-and-never-made
-  (is (true? (v/genl? kb 'formation 'natural 'CxAbstract)))
-  (is (= 1 (count (v/sentexes-matching kb '(comment formation ?text) 'CxAbstract))))
+  (is (true? (v/genl? kb 'formation 'natural 'CxUniverse)))
+  (is (= 1 (count (v/sentexes-matching kb '(comment formation ?text) 'CxUniverse))))
   (tu/with-terms [Rock1]
     (v/assert kb (list 'formation Rock1) 'CxUniverse)
     (is (true? (v/ask? kb (list 'natural Rock1) 'CxUniverse)))
@@ -1531,7 +1680,7 @@
 (tu/deftest-kb what-cuts-across-made-and-natural-is-stated-orthogonal
   (doseq [[a b witness] cross-cutting]
     (testing (str a " and " b)
-      (is (some #(v/premise? kb (:id %)) (v/sentexes-matching kb (list 'orthogonal a b) 'CxAbstract))
+      (is (some #(v/premise? kb (:id %)) (v/sentexes-matching kb (list 'orthogonal a b) 'CxUniverse))
           (str "(orthogonal " a " " b ") is stated"))
       (is (= :orthogonal (v/subsumption-status kb a b)) "the pair reads orthogonal")
       (is (not (v/disjoint? kb a b)))

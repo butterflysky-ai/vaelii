@@ -13,7 +13,6 @@
             [vaelii.browser.jobs :as jobs]
             [vaelii.browser.web :as web]
             [vaelii.core :as v]
-            [vaelii.host.core-context :as core-context]
             [vaelii.host.io.generate :as generate]
             [vaelii.impl.kb :as kb]
             [vaelii.test-util :as tu])
@@ -27,7 +26,7 @@
 (use-fixtures :each
   (fn [f]
     (catalog/reset-registry!)
-    (let [kb (doto (tu/fresh) core-context/load-into)]
+    (let [kb (doto (tu/fresh) tu/load-core!)]
       (catalog/register! "base" "Base KB" kb {:source (catalog/source "core")})
       (binding [tu/*kb* kb, *app* (web/app (catalog/holder kb))]
         (try (f) (finally (catalog/reset-registry!) (tu/clear-kb! kb)))))))
@@ -193,7 +192,7 @@
                                 "facts" "6" "rules" "1" "predicates" "4" "layers" "2"
                                 "contexts" "1" "branching" "3" "forward" "0"
                                 "defeasible" "0" "antecedents" "2" "seed" "1"
-                                "base" "starter"})]
+                                "base" "core"})]
       (settled)
       (is (= 200 (:status ok)))
       (is (some? (catalog/entry "generated#1")) "a spelling the option offers loads"))))
@@ -218,7 +217,7 @@
   ;; where it fires) and asks which KB took the fact.  Written through the second deref,
   ;; the fact lands on a KB the refusal never judged — one whose loader may be this
   ;; process's writer.
-  (let [other (doto (tu/isolated-fresh) core-context/load-into)
+  (let [other (doto (tu/isolated-fresh) tu/load-core!)
         ctx   (tu/tmp-ctx "Switch")
         s     (list 'likes 'Tom 'Ann)]
     (catalog/register! "other" "Other KB" other {:source (catalog/source "core")})
@@ -238,7 +237,7 @@
   ;; `(active-kb-name)` reports the refusal against whatever `/kbs/activate` pointed at
   ;; while the page was being built — which, on this path, is by construction the one KB
   ;; the refusal is not about.  Each arm lands the switch inside its own read.
-  (let [other (doto (tu/isolated-fresh) core-context/load-into)
+  (let [other (doto (tu/isolated-fresh) tu/load-core!)
         ctx   (tu/tmp-ctx "Named")
         s     (list 'likes 'Tom 'Ann)
         POST! #(:body (POST "/assert" {"text" (pr-str s) "ctx" (str ctx)}))
@@ -291,7 +290,7 @@
   (tu/with-terms [dog Rex CxDiffEntry]
     (let [other (tu/isolated-fresh)]
       (try
-        (core-context/load-into other)
+        (tu/load-core! other)
         (v/assert other (list dog Rex) CxDiffEntry)
         (catalog/register! "other" "Other KB" other)
         (let [entries (count (catalog/entries))

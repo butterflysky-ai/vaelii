@@ -16,7 +16,7 @@
 | individual | CapitalCamelCase | `[A-Z][A-Za-z0-9]*` (not a context) | `Muffet`, `Tom` |
 | type | snake_case, a **unary** predicate | `[a-z][a-z0-9_]*` | `dog`, `physical_object` |
 | **sense** | a type, plus the disambiguator saying *which* sense | `[a-z._][…]*-[a-z0-9][…]*` | `abrasive-grit`, `abandonment-romantic` |
-| context | `Cx` prefix, then CapitalCamelCase | `Cx[A-Z][A-Za-z0-9]*` | `CxUniverse`, `CxCore` |
+| context | `Cx` prefix, then CapitalCamelCase | `Cx[A-Z][A-Za-z0-9]*` | `CxUniverse`, `CxWell` |
 | **lexeme** | the `lex` **namespace**; the name is not ours to spell | `(namespace x)` = `"lex"` | `lex/fool's_gold` |
 
 ## Notes
@@ -367,9 +367,9 @@ an open predication and a positive literal and *not* a sentence, while `(P Alice
 closed predication and a positive literal. A possibly-open goal is a **pattern**, never a
 sentence. A **wff** is a well-formed formula, one whose every operator has as many
 arguments as its arity allows; an **ill-formed** formula is one that is not. A variable is
-free unless a quantifier binds it or it sits inside a `(Quote …)`. CxReflection names each
+free unless a quantifier binds it or it sits inside a `(Quote …)`. `reflection.txt` names each
 rung as a collection: `predication`, `closed_predication`, `open_predication`, `literal`,
-`wff`, `ill_formed`; CxCore names `formula` and `sentence`.
+`wff`, `ill_formed`; `core.txt` names `formula` and `sentence`.
 
 A **qualified compound is a different word.** *Stack frame*, *binding frame*, *keyword
 literal*, *string literal*, *character literal* and *regex literal* are ordinary

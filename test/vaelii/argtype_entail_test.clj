@@ -60,7 +60,7 @@
 
 (defn- a-context
   "Hang `ctx` under CxUniverse, so what is declared universally is visible from
-  it.  A `fresh` KB has no spindle, and a context wired to nothing sees nothing —
+  it.  A `fresh` KB has no context edges, and a context wired to nothing sees nothing —
   which would make every argument outside the hierarchy and every test here trivially
   true."
   [kb ctx]
@@ -1024,6 +1024,22 @@
         "the bulk load skips the derivations")
     (is (= [per-fact per-fact] (loaded-reading true)))))
 
+(tu/deftest-kb a-bulk-loaded-declaration-and-edge-draw-nothing-until-recorded
+  ;; The fact is stored first, so the declaration and the predicate edge are the arrivals
+  ;; that draw `(tt Bee)` and `(sub Bee)`.
+  (let [reading (fn [record?]
+                  (tu/with-neutral-kb [kb tu/fresh]
+                    (let [{:keys [tt sub achieves Ann Bee CxDown] :as t} (chain-terms)]
+                      (with-entailing
+                        (v/assert kb (list achieves Ann Bee) CxDown)
+                        (binding [v/*bulk-load?* true]
+                          (doseq [[_ s c] (chain-premises t)] (v/assert kb s c)))
+                        (when record? (v/record-arg-types kb))
+                        {:tt  (some? (v/handle-of kb (list tt Bee) CxDown))
+                         :sub (some? (v/handle-of kb (list sub Bee) CxDown))}))))]
+    (is (= {:tt false :sub false} (reading false)))
+    (is (= {:tt true :sub true} (reading true)))))
+
 (tu/deftest-kb record-arg-types-is-idempotent
   (tu/with-neutral-kb [kb tu/fresh]
     (let [{:keys [achieves Ann Bee CxDown] :as t} (chain-terms)]
@@ -1519,11 +1535,50 @@
 
 ;; ---- a relation named where a type is declared ----------------------------
 ;;
-;; CxCore declares every argument of the separation family a subtype of `thing`
+;; CxUniverse declares every argument of the separation family a subtype of `thing`
 ;; (`(genlArg disjoint 1 thing)`, `(argAndRestGenl partition 2 thing)`), and
 ;; `(unary_predicate thing)` binds `thing` to one argument.  A relation named in one of them
 ;; is minted below `thing`, so it meets the arity content stored of it.  Each case
 ;; states those declarations by hand over a fresh KB, in every arrival order.
+
+(defn- support-by-content
+  "The justifications of `sentence` in `ctx`, each as its informant (a rule read as its
+  sentence) and the sentences of its antecedents, nil for an antecedent with no record."
+  [kb sentence ctx]
+  (let [read #(some-> (v/sentex kb %) v/sentence-of)]
+    (set (for [j (some->> (v/handle-of kb sentence ctx) (v/supporting-justifications kb))]
+           [(if (integer? (:informant j)) (read (:informant j)) (:informant j))
+            (into #{} (map read) (:antecedents j))]))))
+
+(tu/deftest-kb a-symmetric-mark-arriving-after-its-facts-leaves-the-mints-of-the-mark-arriving-first
+  ;; The mark arriving last re-spells a row written the other way round, and folds the two
+  ;; rows two rules concluded, one per spelling (`integrate/move-row!`).  Each mint then
+  ;; rests on the declaration of the position the stored spelling holds its argument at,
+  ;; and no justification names the folded row.
+  (doseq [shape [:written-reversed :both-spellings-concluded]]
+    (tu/with-terms [rel a_kind b_kind t1 t2]
+      (let [facts (case shape
+                    :written-reversed [(list rel b_kind a_kind)]
+                    :both-spellings-concluded
+                    [(list 'set/forwardRule (list 'implies (list t1 '?x) (list rel '?x a_kind)))
+                     (list 'set/forwardRule (list 'implies (list t2 '?x) (list rel a_kind '?x)))
+                     (list t1 b_kind) (list t2 b_kind)])
+            run   (fn [mark-first?]
+                    (tu/with-neutral-kb [kb tu/fresh]
+                      (with-entailing
+                        (let [mark #(v/assert kb (list 'symmetric rel) 'CxUniverse)]
+                          (when mark-first? (mark))
+                          (doseq [s (concat (for [n [1 2]] (list 'genlArg rel n 'thing)) facts)]
+                            (v/assert kb s 'CxUniverse))
+                          (when-not mark-first? (mark)))
+                        (into {} (for [x [a_kind b_kind]]
+                                   [x (support-by-content kb (list 'genl x 'thing) 'CxUniverse)])))))
+            early (run true)
+            late  (run false)]
+        (testing (name shape)
+          (is (every? seq (vals early)))
+          (is (= early late))
+          (is (not-any? #(contains? (second %) nil) (mapcat val late))))))))
 
 (defn- separation-row
   "The belief and the clash grounds the separation `sep` leaves over the tuple `fact` of a
@@ -1675,6 +1730,33 @@
         "and no order keeps the type the specific membership already says")
     (is (every? (comp :dog second) results)
         "which is the membership every order does keep")))
+
+(tu/deftest-kb a-record-a-rule-concludes-takes-the-withheld-mints-in-every-order
+  ;; The route through `mid` says `(genl kind thing)`, so the mint `(kindOf kind Zoo)`
+  ;; draws is withheld while no record holds it.  `(marker kind)` concludes the record by
+  ;; rule, and one firing later `(nested kind Zoo)` mints onto it, so a mint justification
+  ;; concludes the record when the settle reads it.  The record takes the justification of
+  ;; each fact that entails it, the withheld one included, whichever arrives first.
+  (tu/with-terms [kindOf nested mid kind marker marker2 Zoo]
+    (let [results
+          (for [order (permutations [:route :fact :marker])]
+            (tu/with-neutral-kb [kb tu/fresh]
+              (with-pruning
+                (doseq [s [(list 'genlArg kindOf 1 'thing) (list 'genlArg nested 1 'thing)
+                           (list 'set/forwardRule (list 'implies (list marker '?x) (list 'genl '?x 'thing)))
+                           (list 'set/forwardRule (list 'implies (list marker '?x) (list marker2 '?x)))
+                           (list 'set/forwardRule (list 'implies (list marker2 '?x) (list nested '?x Zoo)))]]
+                  (v/assert kb s 'CxUniverse))
+                (doseq [step order]
+                  (case step
+                    :route  (doseq [s [(list 'genl mid 'thing) (list 'genl kind mid)]]
+                              (v/assert kb s 'CxUniverse))
+                    :fact   (v/assert kb (list kindOf kind Zoo) 'CxUniverse)
+                    :marker (v/assert kb (list marker kind) 'CxUniverse)))
+                [order (support-by-content kb (list 'genl kind 'thing) 'CxUniverse)])))]
+      (is (some #(= 'genlArg (first %)) (second (first results))))
+      (is (= 1 (count (set (map second results))))
+          (str "the record's justifications varied by arrival order: " (pr-str results))))))
 
 (tu/deftest-kb every-arrival-order-prunes-the-same-way-under-a-cover
   ;; The edge that puts `dog` under `animal` is a cover's: withheld in every order while

@@ -58,8 +58,8 @@
               facet vocabulary does not reach yet.
     :enforced prose naming the code path that reads the term — what a KB author is told
               by `core/interpreted` when they ask whether a declaration does anything.
-              Carried by the terms CxCore comments and by no others, which is why an
-              entry without it is not a defect: the grammar terms CxCore does not
+              Carried by the terms core.txt comments and by no others, which is why an
+              entry without it is not a defect: the grammar terms core.txt does not
               comment are outside the question rather than unanswered.
     :inert    prose recording that nothing reads the term **and that this is a
               decision**.  Written by the `inert` constructor, which sets the facet with
@@ -91,7 +91,7 @@
   **Order is content.**  `entries` is a vector, not a map, because `special/entries` is
   ordered and `rebuild-taxonomy` replays it top to bottom with a rebuild arm allowed to
   read what an earlier one wrote.  The table's functors come first, in the table's own
-  order; the rest of CxCore's grammar follows.")
+  order; the rest of core.txt's grammar follows.")
 
 ;; ---- the closed vocabularies ---------------------------------------------
 
@@ -282,7 +282,7 @@
   about one whole, so the roster is part of the key rather than something accumulated
   under the whole."
   [target & {:keys [facets notes opposing-read] :or {facets #{}}}]
-  (cond-> {:shape   {:args [:type] :variadic :type}
+  (cond-> {:shape   {:args [:type :type :type] :variadic :type}
            :storage [:roster target]
            :checked true
            :facets  (conj facets :cached :derived)
@@ -313,7 +313,7 @@
     notes (assoc :notes notes)))
 
 (defn- collection
-  "A CxCore term that is never a sentence functor — a type, read by name by some check.
+  "A core.txt term that is never a sentence functor — a type, read by name by some check.
   It has no shape: a membership's shape is not per-term data."
   [& {:keys [facets notes] :or {facets #{}}}]
   (cond-> {:shape nil :storage [:none] :checked false :facets facets :family nil}
@@ -339,7 +339,7 @@
   `roster` reads that off `:facets`, so a term the engine demonstrably reads cannot be
   called inert by writing different prose beside it.
 
-  Nil-tolerant, because the question is only asked about terms CxCore comments: the
+  Nil-tolerant, because the question is only asked about terms core.txt comments: the
   grammar terms it does not comment (the query operators other than `different`) pass
   through unchanged, and `vocabulary/audit` is what notices a
   term the *ontology* names and this file answers for with nothing."
@@ -584,28 +584,28 @@
       (enforced {:shape {:args [:relation :integer]} :storage [:none] :checked false
                  :family nil :facets #{:reach :convicts}
                  :notes (str "floors a variable_arity relation: a shorter tuple is a one-member"
-                             " nogood the settle places. Ordinary CxCore rules"
+                             " nogood the settle places. Ordinary core.txt rules"
                              " also derive the at_least_binary and at_least_ternary classifications.")}
                 "chain/place-arities! floors a variable-arity tuple at the minimum")]
      ['relationTypeByArity
       (enforced {:shape {:args [:type :integer]} :storage [:none] :checked false
                  :family nil :facets #{}
-                 :notes "the relation-wide mappings are the premises of one CxCore generator that stamps, per mapping fact, the rule deriving a relation's exact arity from its type."}
-                "one CxCore generator stamps the per-type exact-arity rules")]
+                 :notes "the relation-wide mappings are the premises of one core.txt generator that stamps, per mapping fact, the rule deriving a relation's exact arity from its type."}
+                "one core.txt generator stamps the per-type exact-arity rules")]
      ['predicateTypeByArity
       (enforced {:shape {:args [:type :integer]} :storage [:none] :checked false
                  :family nil :facets #{}
                  :notes (str "a genl specialization of relationTypeByArity; a fact of"
-                             " its own is a relationTypeByArity fact by ordinary CxCore"
-                             " inference, and CxCore ships none — the shipped predicate"
+                             " its own is a relationTypeByArity fact by ordinary core.txt"
+                             " inference, and core.txt ships none — the shipped predicate"
                              " types reach the relation-wide mapping by genl instead.")}
                 "genl specialization of relationTypeByArity")]
      ['functionTypeByArity
       (enforced {:shape {:args [:type :integer]} :storage [:none] :checked false
                  :family nil :facets #{}
                  :notes (str "a genl specialization of relationTypeByArity; a fact of"
-                             " its own is a relationTypeByArity fact by ordinary CxCore"
-                             " inference, and CxCore ships none — the shipped function"
+                             " its own is a relationTypeByArity fact by ordinary core.txt"
+                             " inference, and core.txt ships none — the shipped function"
                              " types reach the relation-wide mapping by genl instead.")}
                 "genl specialization of relationTypeByArity")]
      ['admitsArgnum
@@ -660,7 +660,7 @@
                 (str "sentex/sort-commuting-args at the assert entry point, and"
                      " integrate/commute-existing for the facts already stored"))]
      ['commutativeInArgs
-      (enforced {:shape   {:args [:relation] :variadic :position}
+      (enforced {:shape   {:args [:relation :position :position] :variadic :position}
                  :storage [:pred-commuting :commuting]
                  :checked true
                  :facets  #{:cached :derived :reach :answers}
@@ -896,7 +896,7 @@
                                         " special/declaration-subjects and posts no re-check —"
                                         " the reason args records.")}
                                   :notes (str "the every-position form of interArgAndRest, and"
-                                              " interArgAndRest at start 1: CxCore's two"
+                                              " interArgAndRest at start 1: core.txt's two"
                                               " forward rules derive each spelling from the"
                                               " other, and the check reads both as one"
                                               " declaration.  Its type is trigger and target"
@@ -1009,17 +1009,17 @@
 
      ;; ---- a definitional collection relation over kinds -------------------
      ['intersection
-      (enforced {:shape {:args [] :variadic :type} :storage [:none] :checked false
+      (enforced {:shape {:args [:type :type :type] :variadic :type} :storage [:none] :checked false
                  :family nil :facets #{}
-                 :notes (str "a definitional collection relation: its facts drive CxCore"
+                 :notes (str "a definitional collection relation: its facts drive core.txt"
                              " rules that make the combined kind genl each type it"
                              " intersects and conclude membership from the conjuncts.")}
-                (str "ordinary CxCore rule inference — (intersection ?combined . ?types)"
+                (str "ordinary core.txt rule inference — (intersection ?combined . ?types)"
                      " drives the intersection -> genl rules and a membership generator"
                      " (binary and ternary; general arity pends list-membership vocabulary)"))]
 
      ;; ---- the query operators --------------------------------------------
-     ['different   (enforced (operator {:args [] :variadic :term}
+     ['different   (enforced (operator {:args [:term :term] :variadic :term}
                                        :notes (str "answered from the equality closure. Being"
                                                    " deferred is all it shares with the"
                                                    " comparisons: it is not transitive, so it"
@@ -1028,7 +1028,7 @@
                                   " answered from the equality closure under the unique-name"
                                   " assumption"))]
      ['unknown     (operator {:args [:sentence]})]
-     ['thereExists (enforced (operator {:args [:sentence]})
+     ['thereExists (enforced (operator {:args [:term :sentence]})
                              "provers/ThereExistsProver — a ground existential, binding its variable(s) against the body and projecting the binder out")]
      ['forall      (enforced (operator {:args [:term :sentence]}
                                        :notes "sugar for a nested unknown, desugared at the rule entry point.")
@@ -1055,7 +1055,7 @@
 
     ;; ======================================================================
     ;; Everything below heads no entry in `special/entries`. It is the rest of
-    ;; CxCore's grammar — the terms `vocabulary/roster` answers for and the
+    ;; core.txt's grammar — the terms `vocabulary/roster` answers for and the
     ;; table does not.
     ;; ======================================================================
 
@@ -1097,20 +1097,20 @@
            [non_negative_integer "checks/value-kinds — zero and positive integer values satisfy an arg declaration naming it"]
            [non_positive_integer "checks/value-kinds — zero and negative integer values satisfy an arg declaration naming it"]])
 
-    ;; ---- the expression kinds CxCore keeps --------------------------------
-    ;; The expression kinds CxCore's own declarations or the band contexts name;
-    ;; CxReflection holds the rest of the expression lattice and places these in it.
+    ;; ---- the expression kinds core.txt keeps ------------------------------
+    ;; The expression kinds core.txt's own declarations or the domain files name;
+    ;; reflection.txt holds the rest of the expression lattice and places these in it.
     ;; `provers/ExpressionKindProver` answers each of a quoted form, and forward chaining
     ;; discharges an antecedent on one through it (`provers/expression-kind-predicates`).
     (map (fn [[t why]]
            [t (enforced (collection :notes why)
                         "impl/provers.clj — shape-kinds, expression-kind-predicates, ExpressionKindProver")])
-         '[[unrepresented_term "the expression kind the value kinds sit under, placed under linguistic so a context that sees CxCore alone reads every value kind as nowhere_never and disjoint from relation. A quoted value reaches it through genl."]
+         '[[unrepresented_term "the expression kind the value kinds sit under, placed under linguistic so every value kind reads as nowhere_never and disjoint from relation. A quoted value reaches it through genl."]
            [formula "a predication, an operator applied to formulas, or a quantifier binding variables in one. A quoted form under a connective or quantifier head reaches it."]
            [sentence "a closed formula, which checks/check-ground enforces on the way in. shape-kinds names it of a closed quoted form under a connective or quantifier head."]
            [non_atomic_term "a function applied to as many closed terms as it takes — the NAT of docs/nat.md, named as a collection. Reification reads the declaration on the function, never this; ExpressionKindProver answers it of a quoted form."]])
     (map (fn [[t why]] [t (inert (collection :notes why) why)])
-         '[[linguistic "documentary: a language, or an expression written in one — what has its being in a system of signs. CxCore holds it because language sits under it; nothing reads it by name."]])
+         '[[linguistic "documentary: a language, or an expression written in one — what has its being in a system of signs. core.txt states it because language sits under it; nothing reads it by name."]])
 
     ;; ---- Quote: syncategorematic, read by name in impl/quasiquote.clj -----
     [['Quote (enforced (collection
@@ -1120,7 +1120,7 @@
                                     " E) mention from a reduced ground Quasiquote. Takes no"
                                     " arg, result or metatype declaration of its own: what"
                                     " kind of expression (Quote X) is follows from X's shape,"
-                                    " per its CxCore comment."))
+                                    " per its core.txt comment."))
                        "impl/quasiquote.clj — quote-function, ensure-quasiquote-functions, reduce-term")]]
 
     ;; ---- bounded and unbounded arity ---------------------------------------
@@ -1134,37 +1134,38 @@
            [unbounded_arity_function "documentary: unbounded_arity intersected with function. Nothing reads it by name."]
            [arityMax "documentary: the upper bound of a bounded_arity relation; the arity check bounds functionCorrespondingPredicate by name, not through this."]])
 
-    ;; ---- the upper-ontology skeleton -------------------------------------
-    ;; The collections CxCore holds so that a spindle member can place its own types
-    ;; under the root, or declare a position over a type a second member declares one
-    ;; over.  A spindle's members see the head and not each other, so a skeleton
-    ;; term defined in one member is invisible to the member extending it — which left
-    ;; `animal` unable to reach `thing` from CxOrganism, where it is defined.
+    ;; ---- the top of the ontology -----------------------------------------
+    ;; The collections core.txt states so that the domain files can place their own types
+    ;; under the root, or declare a position over a type a second domain file declares one
+    ;; over.
     ;;
-    ;; They are here because CxCore comments them and `vocabulary/audit` answers for every
-    ;; term CxCore comments, not because the engine reads any of them.  It reads none: no
-    ;; check names one, and the kinds hanging off them are the members'.  `inert` is the
+    ;; They are here because core.txt comments them and `vocabulary/audit` answers for every
+    ;; term core.txt comments, not because the engine reads any of them.  It reads none: no
+    ;; check names one, and the kinds hanging off them are the domain files'.  `inert` is the
     ;; class, and the note is what a KB author asking `interpreted` is told.
     (map (fn [[t why]] [t (inert (collection :notes why) why)])
-         '[[intangible "ontology, not grammar: something with no mass, the complement of tangible. CxCore holds it so every spindle member can extend it; no engine check names it."]
-           [spatial "ontology, not grammar: something with a location in some space, physical or mathematical. CxCore holds it so every spindle member can extend it; no engine check names it."]
-           [spatiotemporal "ontology, not grammar: something with a location in space and time. CxCore holds it so every spindle member can extend it; no engine check names it."]
-           [tangible "ontology, not grammar: something with mass, and so with a location. CxCore holds it so every spindle member can extend it; no engine check names it."]
-           [organism "ontology, not grammar: something alive in its own right. CxCore holds it so CxOrganism's kinds reach the root from CxOrganism; no engine check names it."]
-           [biological "ontology, not grammar: a tangible that is an organism or part of one. CxCore holds it so organism reaches tangible through it from CxOrganism and body_part from CxAbstract; no engine check names it."]
-           [measure "ontology, not grammar: what a QuantityFn or QuantityIntervalFn application denotes. CxCore holds it so CxMeasure and CxTime can both declare a position over it; no engine check names it."]])
+         '[[intangible "ontology, not grammar: something with no mass, the complement of tangible. core.txt states it as the top of the ontology the domain files extend; no engine check names it."]
+           [spatial "ontology, not grammar: something with a location in some space, physical or mathematical. core.txt states it as the top of the ontology the domain files extend; no engine check names it."]
+           [spatiotemporal "ontology, not grammar: something with a location in space and time. core.txt states it as the top of the ontology the domain files extend; no engine check names it."]
+           [tangible "ontology, not grammar: something with mass, and so with a location. core.txt states it as the top of the ontology the domain files extend; no engine check names it."]
+           [organism "ontology, not grammar: something alive in its own right. core.txt states it as the top of the ontology organism.txt's kinds hang from; no engine check names it."]
+           [biological "ontology, not grammar: a tangible that is an organism or part of one. core.txt states it because organism (organism.txt) and body_part (abstract.txt) both extend it; no engine check names it."]
+           [measure "ontology, not grammar: what a QuantityFn or QuantityIntervalFn application denotes. core.txt states it because measure.txt and time.txt both declare a position over it; no engine check names it."]])
 
     ;; ---- the space/time complements, nowhere_never, and the metatype ladder ----
-    ;; CxCore comments these too, beside their genl edges, so `vocabulary/audit` answers
+    ;; core.txt comments these too, beside their genl edges, so `vocabulary/audit` answers
     ;; for them and they are classified inert like the skeleton above: ontology the engine
     ;; reads by no name.  `temporal` is `spatial`'s
     ;; time twin; `aspatial` / `atemporal` are the not-in-any-space / not-in-time collections
-    ;; `nowhere_never` sits under; the ladder is the metatype-order theory that `typeGenl` reads,
+    ;; `nowhere_never` sits under; `uninterrupted` / `intermittent` partition `temporal` by
+    ;; whether a thing has a gap in time; the ladder is the metatype-order theory that `typeGenl` reads,
     ;; and `typeGenl` is itself inert.
     (map (fn [[t why]] [t (inert (collection :notes why) why)])
-         '[[temporal "ontology, not grammar: something that exists in time. CxCore holds it so CxTime and CxAbstract can extend it; no engine check names it."]
-           [aspatial "ontology, not grammar: not located in any space, the complement of spatial. CxCore holds it so every spindle member can place a kind under it; no engine check names it."]
-           [atemporal "ontology, not grammar: not located in time, the complement of temporal. CxCore holds it so nowhere_never can sit under it; no engine check names it."]
+         '[[temporal "ontology, not grammar: something that exists in time. core.txt states it because time.txt and abstract.txt both extend it; no engine check names it."]
+           [aspatial "ontology, not grammar: not located in any space, the complement of spatial. core.txt states it as the top of the ontology the domain files place kinds under; no engine check names it."]
+           [atemporal "ontology, not grammar: not located in time, the complement of temporal. core.txt states it so nowhere_never can sit under it; no engine check names it."]
+           [uninterrupted "ontology, not grammar: something temporal present at every moment between its start and its end, one side of the partition of temporal. core.txt states it as the top of the ontology the domain files place kinds under; no engine check names it."]
+           [intermittent "ontology, not grammar: something temporal with a gap between its start and its end, the other side of the partition of temporal. core.txt states it as the top of the ontology the domain files place kinds under; no engine check names it."]
            [nowhere_never "ontology, not grammar: in no space and at no time, below aspatial and atemporal and the parent of linguistic, measure, context and relation; no engine check names it."]
            [type "ontology, not grammar: a first-order type, on the metatype-order ladder. No engine check names it — typeGenl, which reads the ladder, is inert."]
            [metatype "ontology, not grammar: a second-order type, on the metatype-order ladder. No engine check names it."]
@@ -1188,14 +1189,14 @@
      ['relation  (enforced (collection :notes "the common arg target for predicates and functions.")
                            (str "generic: the whole that function and truth_valued_relation partition,"
                                 " and the arg target for relation-wide arity vocabulary"))]
-     ['predicate (enforced (collection :notes "the arg target CxCore constrains its own meta-level with.")
+     ['predicate (enforced (collection :notes "the arg target core.txt constrains its own meta-level with.")
                            "generic: the predicate specialization of relation")]
      ['function  (enforced (collection :notes "the arg target the function-valued positions name.")
                            (str "generic: the function specialization of relation and the arg"
                                 " target the function-valued positions of result, genlResult"
                                 " and functionCorrespondingPredicate name"))]
-     ;; The other half of relation, and the three levels below it.  CxCore comments them
-     ;; and `vocabulary/audit` answers for every term CxCore comments; no engine check names
+     ;; The other half of relation, and the three levels below it.  core.txt comments them
+     ;; and `vocabulary/audit` answers for every term core.txt comments; no engine check names
      ;; any of the four.  The connectives are read by their own names (the `implies`, `and`,
      ;; `or` and `not` entries above), never through `logical_connective`.
      ['truth_valued_relation (inert (collection :notes "ontology, not grammar: a relation whose applications are true or false, the complement of function within relation. No engine check names it.")
@@ -1250,7 +1251,7 @@
                                     :notes (str "classifies one exact argument policy; exact"
                                                 " arity declarations and the unary/binary/ternary"
                                                 " families specialize it."))
-                                   "generic taxonomy classification and ordinary CxCore arity rule")]
+                                   "generic taxonomy classification and ordinary core.txt arity rule")]
      ['fixed_arity_predicate
       (enforced (collection :notes "the predicate specialization of fixed_arity.")
                 "generic taxonomy classification under fixed_arity and predicate")]
@@ -1275,13 +1276,13 @@
                              " relation-wide taxonomy. No function WFF reader consumes it."))
                 "generic taxonomy classification under variable_arity and function")]
      ['at_least_binary
-      (enforced (collection :notes (str "derived by CxCore rules from arity or arityMin greater"
+      (enforced (collection :notes (str "derived by core.txt rules from arity or arityMin greater"
                                         " than one, and through (genl binary at_least_binary)."))
-                "ordinary CxCore rule inference from arity and arityMin")]
+                "ordinary core.txt rule inference from arity and arityMin")]
      ['at_least_ternary
-      (enforced (collection :notes (str "derived by CxCore rules from arity or arityMin greater"
+      (enforced (collection :notes (str "derived by core.txt rules from arity or arityMin greater"
                                         " than two, and through (genl ternary at_least_ternary)."))
-                "ordinary CxCore rule inference from arity and arityMin")]
+                "ordinary core.txt rule inference from arity and arityMin")]
      ['relation_kind     (enforced (collection :notes "a disjoint_metatype, so its two members separate each other.")
                                    "generic: a disjoint_metatype, so its two members separate each other")]
      ['instance_relation_predicate
@@ -1301,38 +1302,38 @@
                        {:reach "the same, refusing an arg instead, and open the same way."})
                 "checks/declaration-problem — an arg on one is refused")]
      ['equivalence_relation
-      (enforced (collection :notes (str "three CxCore rules derive (symmetric P), (transitive P)"
+      (enforced (collection :notes (str "three core.txt rules derive (symmetric P), (transitive P)"
                                         " and (reflexive P) from it, each enforced in turn — so it"
                                         " is enforced by generic forward chaining and by nothing"
                                         " keyed on its name."))
-                (str "generic forward chaining: the three CxCore rules derive (symmetric P),"
+                (str "generic forward chaining: the three core.txt rules derive (symmetric P),"
                      " (transitive P) and (reflexive P), each enforced in turn; also a"
                      " binary_predicate type"))]
      ['injection
-      (enforced (collection :notes (str "three CxCore rules derive (functional P),"
+      (enforced (collection :notes (str "three core.txt rules derive (functional P),"
                                         " (functionalInArg P 1) and, off the arg-declared"
                                         " domain, (predAllSpecified P D) — the"
                                         " first two enforced in turn, the third audited on"
                                         " demand, and nothing keyed on its name."))
-                (str "generic forward chaining: the three CxCore rules derive (functional P),"
+                (str "generic forward chaining: the three core.txt rules derive (functional P),"
                      " (functionalInArg P 1) and (predAllSpecified P D); also a"
                      " binary_predicate type"))]
      ['surjection
-      (enforced (collection :notes (str "three CxCore rules derive (functional P) and, off"
+      (enforced (collection :notes (str "three core.txt rules derive (functional P) and, off"
                                         " the arg-declared domain and range,"
                                         " (predAllSpecified P D) and (predSpecifiedAll P R)"
                                         " — the first enforced, the other two audited on"
                                         " demand, and nothing keyed on its name."))
-                (str "generic forward chaining: the three CxCore rules derive (functional P),"
+                (str "generic forward chaining: the three core.txt rules derive (functional P),"
                      " (predAllSpecified P D) and (predSpecifiedAll P R); also a"
                      " binary_predicate type"))]
      ['bijection
-      (enforced (collection :notes (str "two CxCore rules derive (injection P) and"
+      (enforced (collection :notes (str "two core.txt rules derive (injection P) and"
                                         " (surjection P) from it, and each of those derives"
                                         " its own marks in turn — so it is enforced by generic"
                                         " forward chaining and by nothing keyed on its name,"
                                         " like equivalence_relation."))
-                (str "generic forward chaining: the two CxCore rules derive (injection P)"
+                (str "generic forward chaining: the two core.txt rules derive (injection P)"
                      " and (surjection P), whose own rules land the enforced and audited"
                      " marks; also a binary_predicate type"))]
 
@@ -1366,9 +1367,11 @@
            [set/hardConstraint "sentex/peel-rule-wrapper — sets the rule's effect to :forbid"]
            [set/softConstraint "sentex/peel-rule-wrapper — sets the rule's effect to :penalize"]
            [set/monotonic    "sentex/strength-wrapper — peeled at the entry point into :monotonic strength"]])
+    [['set/inert (enforced (structural {:args [:sentence]} "stores the sentence inert.")
+                           "io.text/peel-form — the text loader writes the sentence through assert-inert")]]
 
     ;; ---- the evaluable comparisons ---------------------------------------
-    [['lessThan    (enforced {:shape   {:args [] :variadic :term}
+    [['lessThan    (enforced {:shape   {:args [:term :term] :variadic :term}
                               :storage [:none] :checked false :family nil
                               :facets  #{:answers}
                               :notes   (str "variable arity: (lessThan 1 2 3) states the chain."
@@ -1376,7 +1379,7 @@
                                             " by the chain collapse — but assertible, unlike the"
                                             " query operators, so not :query-only.")}
                              "the comparison prover, plus the chain collapse in a rule body")]
-     ['greaterThan (enforced {:shape   {:args [] :variadic :term}
+     ['greaterThan (enforced {:shape   {:args [:term :term] :variadic :term}
                               :storage [:none] :checked false :family nil
                               :facets  #{:answers}
                               :notes   "canonicalizes to lessThan reversed when stored."}
@@ -1491,7 +1494,7 @@
              (str "aspirational: a higher-order genl constraint whose rule-based derivation"
                   " depends on engine support for higher-order patterns. No inference path."))]
      ['partitionedByType
-      (inert {:shape {:args [] :variadic :term} :storage [:none] :checked false
+      (inert {:shape {:args [:term :term :term] :variadic :term} :storage [:none] :checked false
               :family nil :facets #{}
               :notes (str "(partitionedByType ?whole ?classifier . ?cells) records that the"
                           " ?cells exhaustively and disjointly partition ?whole, each a"
@@ -1511,7 +1514,7 @@
                   " being the relation or operator. Nothing derives or reads it, and no reader"
                   " classifies a compound by its shape yet."))]
      ['termsRelated
-      (inert {:shape {:args [] :variadic :term} :storage [:none] :checked false
+      (inert {:shape {:args [:term :term] :variadic :term} :storage [:none] :checked false
               :family nil :facets #{}
               :notes (str "documentation the engine stores and never reads: a grouping for"
                           " a reader, drawing no inference, as comment's prose draws none.")}
@@ -1539,7 +1542,7 @@
                      " context declines is not reported"))]
 
      ;; The three worked-example annotations name their example sentex by handle.  Each is
-     ;; a `target_following_predicate` in CxCore, so retracting the example tears the
+     ;; a `target_following_predicate` in core.txt, so retracting the example tears the
      ;; annotation down with it — that mark's enforcement, reached through a declaration
      ;; rather than through an arm keyed on these functors, which is why they stay inert
      ;; while participating in a teardown.
@@ -1574,7 +1577,7 @@
      ;; ---- the predAll / predExists / predSpecified matrix ------------------
      ;;
      ;; Quantifier-family declarations (docs/predall.md).  The
-     ;; *Instance* and *Exists* relations are each declared beside a CxCore **rule
+     ;; *Instance* and *Exists* relations are each declared beside a core.txt **rule
      ;; generator** — a rule whose consequent is a rule — so their enforcement is generic
      ;; forward chaining, keyed on nothing; like `equivalence_relation`, no arm reads the
      ;; functor.  The *Specified* pair is an on-demand integrity audit reached through
@@ -1582,17 +1585,17 @@
      ['predAllInstance
       (enforced {:shape {:args [:predicate :type :term]} :storage [:none] :checked false
                  :family nil :facets #{}
-                 :notes (str "enforced by the generic chain, not by name: the CxCore"
+                 :notes (str "enforced by the generic chain, not by name: the core.txt"
                              " generator beside the declaration stamps the concrete rule"
                              " when the holes ground.")}
-                (str "generic rule generator (docs/generators.md): the CxCore generator"
+                (str "generic rule generator (docs/generators.md): the core.txt generator"
                      " beside it stamps (implies (?indep ?x) (?pred ?x ?fixed)) — chain"
                      " inference concludes the fixed filler for every member"))]
      ['predInstanceAll
       (enforced {:shape {:args [:predicate :term :type]} :storage [:none] :checked false
                  :family nil :facets #{}
                  :notes "the argument-swapped twin of predAllInstance, same generic chain."}
-                (str "generic rule generator: the CxCore generator stamps (implies (?dep ?y)"
+                (str "generic rule generator: the core.txt generator stamps (implies (?dep ?y)"
                      " (?pred ?fixed ?y)), the argument-swapped twin"))]
      ['predAllExists
       (inert {:shape {:args [:predicate :type :type]} :storage [:none] :checked false
@@ -1905,7 +1908,7 @@
 (defn entry
   "The spec for `term`, or nil for one this grammar does not cover.
 
-  Nil is **not** \"nothing reads it\": the population is CxCore's own vocabulary, so an
+  Nil is **not** \"nothing reads it\": the population is core.txt's own vocabulary, so an
   ordinary domain predicate is simply not a term this question is asked about."
   [term]
   (get table term))

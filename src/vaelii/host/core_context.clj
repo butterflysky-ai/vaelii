@@ -1,55 +1,41 @@
 ;; SPDX-License-Identifier: SSPL-1.0
 ;; Copyright © 2026 Vaelii LLC and the Vaelii contributors.
 (ns vaelii.host.core-context
-  "The CxCore ontology — Vaelii's vocabulary context.  It defines and
-  documents the core predicates the engine interprets, as sentexes in CxCore:
-  the special-predicate surface (types/contexts, arg, disjoint, the `set/*Rule`
-  wrappers, the predicate metadata, negation, `ist`, the evaluables) and the
-  predicate meta-ontology.  Documentation rides on `comment` sentexes,
+  "The upper ontology: every KB file under `resources/kb/upper/`, loaded into CxUniverse.
+  `core.txt` is the vocabulary — the special-predicate surface the engine interprets
+  (types/contexts, arg, disjoint, the `set/*Rule` wrappers, the predicate metadata,
+  negation, `ist`, the evaluables), the predicate meta-ontology and the top of the
+  ontology — and each other file is one domain (abstract, life, measure, organism,
+  reflection, society, space, time).  Documentation rides on `comment` sentexes,
   `(comment <term> \"...\")` — ordinary sentexes (stored, indexed, queryable) — so the
   KB documents itself in its own representation.
 
-  The content is a KB file, `resources/kb/CxCore.txt` (read by
-  vaelii.host.seed); this namespace loads it and reads the docs back.
-
-  CxCore is the spindle **head**: the root every context sees, and the only
-  layer a core-only KB has.  The layers below it — the definitional `upper`
-  contexts (between Core and Universe) and the theory `middle` contexts (between
-  Universe and Well) — are the starter's, not the core KB's, and each wires itself
-  into the spindle in its own KB file (see vaelii.host.starter)."
+  CxUniverse is the root: every context the middle layer wires in sees it, and a KB built
+  for vocabulary alone holds exactly this load.  The middle contexts below it are the
+  starter's (see vaelii.host.starter)."
   (:require [vaelii.core :as v]
             [vaelii.host.seed :as seed]
-            [vaelii.impl.naming :as nm]))
+            [vaelii.impl.naming :as nm]
+            [vaelii.impl.sentex :as sx]))
+
+(defn upper-files
+  "The file names under `kb/upper/`, `core.txt` first and the domain files after it in
+  sorted order."
+  []
+  (let [fs (seed/layer-files "upper")]
+    (into ["core.txt"] (remove #{"core.txt"}) fs)))
 
 (defn load-into
-  "Assert the CxCore vocabulary into `kb` from its KB file
-  (resources/kb/CxCore.txt). Returns kb.
-
-  The topology edge `(genlCx CxUniverse CxCore)` is asserted **before** the file, and
-  it is here rather than in the file because of *when* it has to hold.  A
-  `decontextualized_predicate` declaration lifts the facts already present into
-  CxUniverse, and a rule stated in CxCore fires on the copy — so the two contexts must
-  already be comparable for that firing to be placed on arrival.  The file is read
-  term-centrically in natural sort order, which puts `genlCx` after `functional`; a firing
-  that finds no placement is re-joined when the edge arrives, so the KB is the same
-  either way, and asserting the edge first is what spares the load that second pass.
-
-  The `(forced_decontextualized_predicate genlCx)` and `(forced_monotonic_predicate
-  genlCx)` declarations go in ahead of the edge, so the edge is stored in CxUniverse and
-  at `:monotonic`, as the file's own edges are."
+  "Assert the upper ontology into `kb`: every file of `upper-files`, all into CxUniverse,
+  as one `seed/load-sentences` batch, so a sentence one file states over a term another
+  file defines is retried until that term arrives.  Returns kb."
   [kb]
-  ;; One settle at the end, not one per sentence: the whole vocabulary is a batch, and
+  ;; One settle at the end, not one per sentence: the whole upper ontology is a batch, and
   ;; `settle` computes belief from current state, so N per-assert reconciliations reach
-  ;; the same beliefs as one closing reconciliation (`v/with-deferred-settle`).  The
-  ;; `genlCx` edge is still asserted first — edges live on store, ahead of the deferred
-  ;; settle — so its ordering role (below) is unchanged.
+  ;; the same beliefs as one closing reconciliation (`v/with-deferred-settle`).
   (v/with-deferred-settle kb
-    ;; the declarations that store every `genlCx` edge in CxUniverse and at `:monotonic`
-    ;; go first, so the bootstrap edge lands where and as the file's own edges do
-    (v/assert kb '(forced_decontextualized_predicate genlCx) 'CxCore)
-    (v/assert kb '(forced_monotonic_predicate genlCx) 'CxCore)
-    (v/assert kb '(genlCx CxUniverse CxCore) 'CxCore)
-    (seed/load-context kb 'CxCore)))
+    (seed/load-sentences kb (into [] (mapcat #(seed/read-sentences % "upper")) (upper-files))
+                         sx/root-context)))
 
 (defn comment-of
   "The documentation attached to `term` by `comment` sentexes, in **content order**.

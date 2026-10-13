@@ -8,17 +8,16 @@
             [clojure.test :refer [are deftest is testing use-fixtures]]
             [vaelii.core :as v]
             [vaelii.host.core-context :as core-context]
-            [vaelii.host.seed :as seed]
             [vaelii.impl.provers :as provers]
             [vaelii.impl.sign :as sign]
             [vaelii.impl.types.prover :as prover-types]
             [vaelii.test-util :as tu])
   (:import [vaelii.impl.sign SignProver]))
 
-;; CxMeasure holds the sign vocabulary; the prover is opt-in, so each KB registers it.
+;; CxUniverse holds the sign vocabulary; the prover is opt-in, so each KB registers it.
 (use-fixtures :each (tu/neutral-fresh
                      #(doto (tu/fresh)
-                        (tu/load-core-with! '[[CxMeasure "upper"]])
+                        (tu/load-core!)
                         (v/add-prover (sign/sign-prover)))))
 
 (def ^:private C 'CxUniverse)
@@ -190,7 +189,7 @@
 
 (tu/deftest-kb a-forward-rule-resting-on-a-derived-sign-is-withdrawn-with-the-comparison
   (tu/with-terms [Tap Drain NetFlow WaterLevel overflowing]
-    (v/assert kb (list 'arg overflowing 1 'thing) 'CxCore {:strength :monotonic})
+    (v/assert kb (list 'arg overflowing 1 'thing) 'CxUniverse {:strength :monotonic})
     (v/assert-rule kb [(list 'trendOf '?x 'SignPositive)] (list overflowing '?x) C {:direction :forward})
     (tub! kb Tap Drain NetFlow WaterLevel)
     (testing "ambiguous, so nothing fires"
@@ -220,7 +219,6 @@
   [order]
   (let [k (doto (tu/isolated-fresh)
             (core-context/load-into)
-            (seed/load-context 'CxMeasure "upper")
             (v/add-prover (sign/sign-prover)))]
     (try
       (doseq [s order] (v/assert k s C))
@@ -240,8 +238,8 @@
       (is (= base (reading-of order)) (str "reading under " (pr-str order))))))
 
 (deftest the-same-knowledge-in-any-order-gives-the-same-answer
-  ;; On the isolated space, since it rebuilds a KB per ordering.  Each KB loads CxCore
-  ;; and CxMeasure, so `:default` reads the reverse alone and `…-in-three-orders…` all three
+  ;; On the isolated space, since it rebuilds a KB per ordering.  Each KB loads the upper
+  ;; layer, so `:default` reads the reverse alone and `…-in-three-orders…` all three
   (reads-the-same [(reverse order-facts)]))
 
 (deftest ^:slow the-same-knowledge-in-three-orders-gives-the-same-answer

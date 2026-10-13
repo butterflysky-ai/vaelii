@@ -18,8 +18,8 @@
     argument's type leaves it dormant, silence about the target's is what convicts.
 
   The third finding of the same shape — that the grammar itself is now audited, so a new
-  declaration nobody classified fails a test rather than landing in silence — needs a
-  CxCore baseline where these need a cleared one, and lives in
+  declaration nobody classified fails a test rather than landing in silence — needs an
+  upper-layer baseline where these need a cleared one, and lives in
   `vocabulary-audit-test`."
   (:require [clojure.test :refer [deftest is use-fixtures]]
             [vaelii.core :as v]

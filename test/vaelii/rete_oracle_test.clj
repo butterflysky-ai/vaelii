@@ -48,64 +48,68 @@
 ;; ---- the shared ontology (identical on both KBs) ------------------------
 
 (defn build-ontology!
-  "CxCore vocabulary + a compact ontology whose rules cover every invariant.  A
+  "The upper layer + a compact ontology whose rules cover every invariant.  A
   rule set, contexts, a type lattice, disjointness, and metadata — no contingent
-  facts (those are the random sequence)."
-  [kb]
-  (core-context/load-into kb)
-  ;; context spindle: Base sees Core; Left and Right are incomparable specs of Base,
-  ;; so a rule in Base firing over a Left fact and a Right fact has no common
-  ;; placement context (the sibling no-placement case)
-  (v/assert kb '(genlCx CxBase CxCore) 'CxCore {:strength :monotonic})
-  (v/assert kb '(genlCx CxLeft CxBase) 'CxCore {:strength :monotonic})
-  (v/assert kb '(genlCx CxRight CxBase) 'CxCore {:strength :monotonic})
-  ;; type lattice
-  (doseq [e '[(genl animal thing) (genl dog animal) (genl poodle dog)
-              (genl cat animal) (genl bird animal) (genl penguin bird)]]
-    (v/assert kb e 'CxBase {:strength :monotonic}))
-  ;; predicate lattice — the sub-predicate fan-out is not a unary-only rule.  `fatherOf`
-  ;; and `motherOf` sit under a **binary** `parentOf`, `leasesFrom` under a binary
-  ;; `owns`, `strictlyBetweenIn` under a **ternary** `betweenIn`; a matcher that fanned
-  ;; the functor only at arity 1 agrees with the reference on every unary probe and
-  ;; diverges the moment a fact of one of these arrives, so the comparison has to reach
-  ;; them (`streams-are-not-vacuous` is what says it does).
-  (doseq [e '[(genl fatherOf parentOf) (genl motherOf parentOf)
-              (genl leasesFrom owns)
-              (genl strictlyBetweenIn betweenIn)]]
-    (v/assert kb e 'CxBase {:strength :monotonic}))
-  (v/assert kb '(disjoint dog cat) 'CxBase {:strength :monotonic})
-  ;; metadata
-  (v/assert kb '(symmetric siblingOf) 'CxBase {:strength :monotonic})
-  ;; the commuting fan: arguments 2 onward of `covers` interchange, so a pattern naming
-  ;; the parts in an order the stored row does not hold them in reaches it only through
-  ;; `sx/commuting-arrangements`
-  (v/assert kb '(commutativeInArgAndRest covers 2) 'CxBase {:strength :monotonic})
-  (v/assert kb '(transitive ancestorOf) 'CxBase {:strength :monotonic})
-  (v/assert kb '(functional bestFriendOf) 'CxBase {:strength :monotonic})
-  ;; rules (all in Base, so they see facts in Left / Right / Base)
-  (let [R (fn [ante conseq]
-            (v/assert kb (list 'implies ante conseq) 'CxBase))]
-    ;; the leading-variable join the network exists to accelerate
-    (R '(and (parentOf ?x ?y) (parentOf ?y ?z)) '(grandparentOf ?x ?z))
-    ;; recursion + depth guard: right-recursive ancestor
-    (R '(parentOf ?x ?y) '(ancestorOf ?x ?y))
-    (R '(and (parentOf ?x ?y) (ancestorOf ?y ?z)) '(ancestorOf ?x ?z))
-    ;; unary subtype fan-out (a poodle is a dog)
-    (R '(dog ?x) '(has_fur ?x))
-    ;; type antecedent joined with a relation
-    (R '(and (owns ?p ?a) (animal ?a)) '(pet_owner ?p))
-    ;; a symmetric predicate as a NON-trigger antecedent — exercises the mirror probe
-    ;; inside the matcher (triggered by parentOf, siblingOf joined second)
-    (R '(and (parentOf ?x ?y) (siblingOf ?y ?z)) '(uncleAuntOf ?x ?z))
-    ;; a deferred antecedent in a forward join (computed, not matched)
-    (R '(and (ageOf ?x ?a) (ageOf ?y ?b) (lessThan ?a ?b)) '(youngerThan ?x ?y))
-    ;; a **ternary** antecedent, so the sub-predicate fan is driven end to end at an
-    ;; arity above one rather than only probed
-    (R '(and (betweenIn ?x ?y ?z) (dog ?y)) '(guardedBy ?x ?z)))
-  ;; exceptWhen default: birds fly unless penguins
-  (v/assert kb '(exceptWhen (penguin ?b) (set/defaultRule (implies (bird ?b) (flies ?b))))
-            'CxBase)
-  kb)
+  facts (those are the random sequence).  `load-core` loads the upper layer: the restored dump
+  (`tu/load-core!`) by default, and `core-context/load-into` where the load itself is
+  among what two runs compare."
+  ([kb] (build-ontology! kb tu/load-core!))
+  ([kb load-core]
+   (load-core kb)
+   ;; contexts: Base sees CxUniverse; Left and Right are incomparable specs of Base,
+   ;; so a rule in Base firing over a Left fact and a Right fact has no common
+   ;; placement context (the sibling no-placement case)
+   (v/assert kb '(genlCx CxBase CxUniverse) 'CxUniverse {:strength :monotonic})
+   (v/assert kb '(genlCx CxLeft CxBase) 'CxUniverse {:strength :monotonic})
+   (v/assert kb '(genlCx CxRight CxBase) 'CxUniverse {:strength :monotonic})
+   ;; type lattice
+   (doseq [e '[(genl animal thing) (genl dog animal) (genl poodle dog)
+               (genl cat animal) (genl bird animal) (genl penguin bird)]]
+     (v/assert kb e 'CxBase {:strength :monotonic}))
+   ;; predicate lattice — the sub-predicate fan-out is not a unary-only rule.  `fatherOf`
+   ;; and `motherOf` sit under a **binary** `parentOf`, `leasesFrom` under a binary
+   ;; `holdsTitleTo`, `strictlyBetweenIn` under a **ternary** `betweenIn`; a matcher that
+   ;; fanned the functor only at arity 1 agrees with the reference on every unary probe and
+   ;; diverges the moment a fact of one of these arrives, so the comparison has to reach
+   ;; them (`streams-are-not-vacuous` is what says it does).  `holdsTitleTo` is this test's
+   ;; own: the shipped `owns` types its subject a person, which the penguin `I5` is not.
+   (doseq [e '[(genl fatherOf parentOf) (genl motherOf parentOf)
+               (genl leasesFrom holdsTitleTo)
+               (genl strictlyBetweenIn betweenIn)]]
+     (v/assert kb e 'CxBase {:strength :monotonic}))
+   (v/assert kb '(disjoint dog cat) 'CxBase {:strength :monotonic})
+   ;; metadata
+   (v/assert kb '(symmetric siblingOf) 'CxBase {:strength :monotonic})
+   ;; the commuting fan: arguments 2 onward of `covers` interchange, so a pattern naming
+   ;; the parts in an order the stored row does not hold them in reaches it only through
+   ;; `sx/commuting-arrangements`
+   (v/assert kb '(commutativeInArgAndRest covers 2) 'CxBase {:strength :monotonic})
+   (v/assert kb '(transitive ancestorOf) 'CxBase {:strength :monotonic})
+   (v/assert kb '(functional bestFriendOf) 'CxBase {:strength :monotonic})
+   ;; rules (all in Base, so they see facts in Left / Right / Base)
+   (let [R (fn [ante conseq]
+             (v/assert kb (list 'implies ante conseq) 'CxBase))]
+     ;; the leading-variable join the network exists to accelerate
+     (R '(and (parentOf ?x ?y) (parentOf ?y ?z)) '(grandparentOf ?x ?z))
+     ;; recursion + depth guard: right-recursive ancestor
+     (R '(parentOf ?x ?y) '(ancestorOf ?x ?y))
+     (R '(and (parentOf ?x ?y) (ancestorOf ?y ?z)) '(ancestorOf ?x ?z))
+     ;; unary subtype fan-out (a poodle is a dog)
+     (R '(dog ?x) '(has_fur ?x))
+     ;; type antecedent joined with a relation
+     (R '(and (holdsTitleTo ?p ?a) (animal ?a)) '(pet_owner ?p))
+     ;; a symmetric predicate as a NON-trigger antecedent — exercises the mirror probe
+     ;; inside the matcher (triggered by parentOf, siblingOf joined second)
+     (R '(and (parentOf ?x ?y) (siblingOf ?y ?z)) '(uncleAuntOf ?x ?z))
+     ;; a deferred antecedent in a forward join (computed, not matched)
+     (R '(and (ageOf ?x ?a) (ageOf ?y ?b) (lessThan ?a ?b)) '(youngerThan ?x ?y))
+     ;; a **ternary** antecedent, so the sub-predicate fan is driven end to end at an
+     ;; arity above one rather than only probed
+     (R '(and (betweenIn ?x ?y ?z) (dog ?y)) '(guardedBy ?x ?z)))
+   ;; exceptWhen default: birds fly unless penguins
+   (v/assert kb '(exceptWhen (penguin ?b) (set/defaultRule (implies (bird ?b) (flies ?b))))
+             'CxBase)
+   kb))
 
 ;; ---- content snapshots, by content not by handle ------------------------
 
@@ -203,7 +207,7 @@
     (case (.nextInt rng 14)
       0 [:assert (list 'parentOf (ind) (ind)) (ctx) {:strength :monotonic}]
       1 [:assert (list 'siblingOf (ind) (ind)) (ctx) {:strength :monotonic}]
-      2 [:assert (list 'owns (ind) (ind)) (ctx) {:strength :monotonic}]
+      2 [:assert (list 'holdsTitleTo (ind) (ind)) (ctx) {:strength :monotonic}]
       3 [:assert (list (nth '[dog poodle cat bird penguin] (.nextInt rng 5)) (ind))
          (ctx) {:strength :monotonic}]
       4 [:assert (list 'ageOf (ind) (.nextInt rng 5)) (ctx) {:strength :monotonic}]
@@ -285,7 +289,7 @@
         (doseq [f '[(parentOf I0 I1) (parentOf I1 I2) (parentOf I2 I3)
                     (siblingOf I1 I4) (siblingOf I5 I1)
                     (siblingOf I8 I8)      ; palindrome: the mirror binds it identically
-                    (owns I0 I1) (dog I1) (poodle I2) (cat I3) (bird I4) (penguin I5)
+                    (holdsTitleTo I0 I1) (dog I1) (poodle I2) (cat I3) (bird I4) (penguin I5)
                     (ageOf I0 3) (ageOf I1 4) (bestFriendOf I6 I7)
                     ;; sub-predicate facts, so a super's pattern has something to fan to
                     ;; at arity 2 and arity 3
@@ -310,8 +314,8 @@
                       (animal ?a)            ; unary subtype fan-out
                       (dog ?a)               ; subtype (poodle satisfies)
                       (bird ?b)
-                      (owns ?p ?a)           ; binary fan-out (leasesFrom satisfies)
-                      (owns I5 ?a)           ; …with the leading value pinned
+                      (holdsTitleTo ?p ?a)   ; binary fan-out (leasesFrom satisfies)
+                      (holdsTitleTo I5 ?a)   ; …with the leading value pinned
                       (fatherOf ?x ?y)       ; the sub-predicate on its own
                       (betweenIn ?x ?y ?z)   ; ternary fan-out (strictlyBetweenIn satisfies)
                       (betweenIn I0 ?y ?z)   ; …with the leading value pinned
@@ -377,8 +381,8 @@
     (let [sup-kb (tu/fresh)
           ref-kb (tu/isolated-fresh)]
       (try
-        (build-ontology! sup-kb)
-        (without-suppression #(build-ontology! ref-kb))
+        (build-ontology! sup-kb core-context/load-into)
+        (without-suppression #(build-ontology! ref-kb core-context/load-into))
         (is (= (snapshot sup-kb) (snapshot ref-kb))
             (str "trial " trial ": ontologies diverged before any fact\n"
                  (pr-str (diff-report (snapshot ref-kb) (snapshot sup-kb)))))

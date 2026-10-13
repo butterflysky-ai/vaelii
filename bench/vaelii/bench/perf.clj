@@ -1494,11 +1494,11 @@
 
   Each declaration is a distinct **position** on the same predicate, which is what holds
   the vocabulary still while the count moves.  Nothing declares a length, and that is the
-  expensive case rather than a degenerate one: `checks/declared-arity` answers off a map
-  for a predicate carrying a length of its own and off a walk of its super-predicates for
-  one that does not, so a KB that has stated no arity is the KB where every declaration
-  pays the walk.  The cost is `O(declarations × super-predicates)` and this check pins the
-  first factor.
+  expensive case rather than a degenerate one: `arity/relation-length` answers off a
+  binding read for a predicate carrying a length of its own and off a walk of its
+  super-predicates for one that does not, so a KB that has stated no arity is the KB
+  where every declaration pays the walk.  The cost is `O(declarations × super-predicates)`
+  and this check pins the first factor.
 
   Ω(declarations) is the floor — the census reads each one, and reading them is the work —
   so the claim is linear.  What the bound separates is one reading per declaration from one
@@ -1532,7 +1532,7 @@
   chain of n super-predicates.
 
   The second factor of the same bound, and the axis the check above holds still.  A
-  declaration's arity read is `checks/declared-arity`, which walks the supers of a
+  declaration's arity read is `arity/relation-length`, which walks the supers of a
   predicate that declares no length of its own and asks each for its own — so the census
   costs `O(declarations × super-predicates)` and neither factor alone says the product is
   right.  Nothing in the chain declares a length, so every declaration walks to the end of
@@ -1722,7 +1722,7 @@
 
 (defn- separation-rule-under-moving-edge
   "One `genl` edge placing a fresh type under a part of a `partition`, asserted and then
-  retracted, on a KB holding CxCore's emptiness rule shape, `(disjoint ?type ?type)` with
+  retracted, on a KB holding CxUniverse's emptiness rule shape, `(disjoint ?type ?type)` with
   `(unary ?type)`, and n `unary` types under no separation.  The edge moves the separation
   of the fresh type alone, so the re-join it owes reads that type
   (`special/recheck-on-separation`); a re-join over every `unary` type costs n per edge."
@@ -2474,15 +2474,17 @@
 (defn- recover-placement-walk
   "One settle placing the nogoods a candidate index rebuilt as `recover` rebuilds it
   queued (`decide/rebuild-candidates!`, the settle `recover` closes with), divided by the
-  nogoods: 200 terms, each in a leaf type under each of two `disjoint` roots, over a
+  nogoods: 1600 terms, each in a leaf type under each of two `disjoint` roots, over a
   layered `genl` graph per root of nine levels of w types (0 to 8), each type below level
-  0 under up to three types of the level above.  Four leaves per root, so the 200 nogoods climb eight
-  subsumptions, each through the w·8 types above its leaf.
+  0 under up to three types of the level above.  Four leaves per root, so the 1600
+  nogoods climb eight subsumptions, each through the w·8 types above its leaf.
 
   The settle walks each subsumption once per vantage, so the walk is paid eight times
-  and not once per nogood."
+  and not once per nogood.  The eight walks grow with w, and the 1600 nogoods divide
+  their share of each nogood's cost."
   [w]
   (let [kb   (fresh-kb)
+        nn   1600
         rnd  (java.util.Random. 48)
         M    {:strength :monotonic}
         node (fn [side i j] (symbol (str "rpw" side "_" i "_" j "_kind")))
@@ -2494,13 +2496,13 @@
         (doseq [i (range 1 9) j (range w) pj (distinct (repeatedly 3 #(.nextInt rnd (int w))))]
           (v/assert kb (list 'genl (node side i j) (node side (dec i) pj)) 'CxPerf
                     (if (zero? (.nextInt rnd 3)) M {}))))
-      (dotimes [x 200]
+      (dotimes [x nn]
         (let [t (symbol (str "RPW" x))]
           (v/assert kb (list (node "a" 8 (mod x 4)) t) 'CxPerf {})
           (v/assert kb (list (node "b" 8 (mod (quot x 4) 4)) t) 'CxPerf {}))))
     (doall (for [_ (range 12)]
              (do (decide/rebuild-candidates! kb)
-                 (quot (nanos (settle/settle kb)) 200))))))
+                 (quot (nanos (settle/settle kb)) nn))))))
 
 (defn- first-write-after-recover
   "The first assert after a `recover` of `negation-pairs-kb`, of a fact naming nothing.
@@ -3695,6 +3697,139 @@
        (do (v/assert kb (list 'pvtEats x (symbol (str "PvtY" i))) 'CxUniverse)
            (nanos (v/assert kb (list 'pvt_carnivore x) 'CxUniverse)))))))
 
+(defn- declaration-at-a-leaf-beside-unseen-memberships
+  "One `(forced_monotonic_predicate T)` declaration at a fresh leaf context beside n
+  memberships of `T` stated in `CxDlFar`, a context the leaf does not see.
+
+  The claim is that a declaration costs the readers that see it (docs/nmtms.md, \"The
+  forced-monotonic roster\"): it forces `T` at the leaf alone, so the switch rewrites the
+  forced memberships of the rules reading or concluding `T` (`checks/force-reach!`), and
+  the placement pass reads the facts of `T` stated where the leaf sees
+  (`chain/declared-reach`).  Here both are empty at both n, and a reading that grows with
+  n is the switch or the pass reading every fact of `T`.  Each reading declares a fresh
+  type over its own n memberships, wired untimed."
+  [n]
+  (let [kb (fresh-kb)
+        m  {:strength :monotonic}]
+    (v/assert kb '(genlCx CxDlFar CxUniverse) 'CxUniverse m)
+    (doall
+     (for [i (range 24)
+           :let [t    (symbol (str "dl_kind" i))
+                 leaf (symbol (str "CxDlLeaf" i))]]
+       (do (v/bulk-assert-facts! kb (for [j (range n)] (list t (symbol (str "DlInd" j)))) 'CxDlFar)
+           (v/assert kb (list 'genlCx leaf 'CxUniverse) 'CxUniverse m)
+           (nanos (v/assert kb (list 'forced_monotonic_predicate t) leaf)))))))
+
+(defn- declaration-at-a-leaf-beside-a-wide-stating-context
+  "One `(forced_monotonic_predicate T)` declaration at a fresh leaf context beside 8
+  memberships of `T` stated in `CxWsRoot`, a context with n children that the leaf neither
+  sees nor shares a descendant with.
+
+  The claim is that the reach of a declaration (`chain/declaration-reach`) costs the
+  smaller of the two down-sets it compares, here the leaf's one context, and not the
+  children of a stating context it does not see.  Each reading declares a fresh type over
+  its own memberships at a fresh leaf, wired untimed; the leaf retires the closure memo."
+  [n]
+  (let [kb (fresh-kb)
+        m  {:strength :monotonic}]
+    (v/assert kb '(genlCx CxWsRoot CxUniverse) 'CxUniverse m)
+    (v/with-deferred-settle kb
+      (doseq [i (range n)]
+        (v/assert kb (list 'genlCx (symbol (str "CxWsKid" i)) 'CxWsRoot) 'CxUniverse m)))
+    (doall
+     (for [i (range 24)
+           :let [t    (symbol (str "ws_kind" i))
+                 leaf (symbol (str "CxWsLeaf" i))]]
+       (do (v/bulk-assert-facts! kb (for [j (range 8)] (list t (symbol (str "WsInd" j)))) 'CxWsRoot)
+           (v/assert kb (list 'genlCx leaf 'CxUniverse) 'CxUniverse m)
+           (nanos (v/assert kb (list 'forced_monotonic_predicate t) leaf)))))))
+
+(defn- cxuniverse-declaration-beside-bystander-contexts
+  "One `(forced_monotonic_predicate T)` declaration in `CxUniverse` over 32 memberships of `T`
+  stated in `CxDcFar` and 8 stated in `CxUniverse`, beside n bystander contexts under
+  `CxUniverse` that state nothing of `T`.
+
+  The claim is that a declaration every context sees costs the stored facts of `T`
+  (`chain/declaration-reach`), read in one probe of the predicate extent, and not the
+  contexts: a reach built from the ancestor sets of the contexts below `CxUniverse` grows
+  with n here and with the facts nowhere.  Each reading declares a fresh type over its own
+  memberships, wired untimed, and a context added under `CxUniverse` before each one
+  retires the closure memo."
+  [n]
+  (let [kb (fresh-kb)
+        m  {:strength :monotonic}]
+    (v/assert kb '(genlCx CxDcFar CxUniverse) 'CxUniverse m)
+    (v/with-deferred-settle kb
+      (doseq [i (range n)]
+        (v/assert kb (list 'genlCx (symbol (str "CxDcBy" i)) 'CxUniverse) 'CxUniverse m)))
+    (doall
+     (for [i (range 24)
+           :let [t (symbol (str "dc_kind" i))]]
+       (do (v/bulk-assert-facts! kb (for [j (range 32)] (list t (symbol (str "DcInd" j)))) 'CxDcFar)
+           (v/bulk-assert-facts! kb (for [j (range 8)] (list t (symbol (str "DcTop" j)))) 'CxUniverse)
+           ;; a new context retires the closure memo, so the declaration reads each
+           ;; context set afresh and a walk of the contexts below shows as growth
+           (v/assert kb (list 'genlCx (symbol (str "CxDcGen" i)) 'CxUniverse) 'CxUniverse m)
+           (nanos (v/assert kb (list 'forced_monotonic_predicate t) 'CxUniverse)))))))
+
+(defn- declaration-beside-stating-contexts-over-a-wide-descendant
+  "One `(forced_monotonic_predicate T)` declaration at `CxSwC`, which has n contexts below
+  it, beside one membership of `T` stated in each of n contexts `CxSwX…`, all above
+  `CxSwY`, which has n contexts below it.  No stating context shares a descendant with
+  `CxSwC`.
+
+  The claim is that the reach of a declaration (`chain/declaration-reach`) walks the
+  contexts below the declaring context once per call, and not once per stating context:
+  the declaration reads the n stating contexts, so it grows with n, and a walk per
+  stating context grows with the square of n.  Each reading declares a fresh type over
+  its own memberships, wired untimed."
+  [n]
+  (let [kb (fresh-kb)
+        m  {:strength :monotonic}
+        xs (mapv #(symbol (str "CxSwX" %)) (range n))]
+    (v/with-deferred-settle kb
+      (v/assert kb '(genlCx CxSwC CxUniverse) 'CxUniverse m)
+      (v/assert kb '(genlCx CxSwZ CxSwC) 'CxUniverse m)
+      (doseq [x xs]
+        (v/assert kb (list 'genlCx x 'CxUniverse) 'CxUniverse m)
+        (v/assert kb (list 'genlCx 'CxSwY x) 'CxUniverse m))
+      (doseq [i (range n)]
+        (v/assert kb (list 'genlCx (symbol (str "CxSwZk" i)) 'CxSwZ) 'CxUniverse m)
+        (v/assert kb (list 'genlCx (symbol (str "CxSwYk" i)) 'CxSwY) 'CxUniverse m)))
+    (doall
+     (for [i (range 12)
+           :let [t (symbol (str "sw_kind" i))]]
+       (do (doseq [x xs] (v/assert kb (list t 'SwInd) x))
+           (nanos (v/assert kb (list 'forced_monotonic_predicate t) 'CxSwC)))))))
+
+(defn- membership-clash-beside-denied-cxuniverse-declarations
+  "A clashing membership pair under a `disjoint` at a fresh context, beside n
+  `(forced_monotonic_predicate T)` declarations in `CxUniverse`, each denied there at
+  `:monotonic`, so a placed defeat in force at every reader names each declaration.
+
+  The claim is that a reader's roster reading (`except/roster-state`) runs the `in-force?`
+  of a defeat naming a declaration only for a predicate a stored denial or a rule reads,
+  and none of the n does: a write that reads visibility asks the reader's roster once
+  per handle it checks, so a reading that weighs every declaration grows with n.  Each
+  reading clashes a fresh pair at a fresh context, wired untimed."
+  [n]
+  (let [kb (fresh-kb)
+        m  {:strength :monotonic}]
+    (doseq [i (range n)
+            :let [decl (list 'forced_monotonic_predicate (symbol (str "dd_kind" i)))]]
+      (v/assert kb decl 'CxUniverse)
+      (v/assert kb (list 'not decl) 'CxUniverse m))
+    (doall
+     (for [i (range 24)
+           :let [t  (symbol (str "dd_trigger" i))
+                 r  (symbol (str "dd_rival" i))
+                 cx (symbol (str "CxDdAt" i))
+                 x  (symbol (str "DdInd" i))]]
+       (do (v/assert kb (list 'genlCx cx 'CxUniverse) 'CxUniverse m)
+           (v/assert kb (list 'disjoint t r) cx m)
+           (nanos (v/assert kb (list t x) cx)
+                  (v/assert kb (list r x) cx)))))))
+
 (defn- genlcx-edge-reader-fan
   "One `(genlCx sub super)` edge joining two branches of a KB carrying n **bystander**
   reader contexts — contexts that read the candidates' own branch and sit under no `sub`,
@@ -3723,16 +3858,16 @@
   [n]
   (let [kb (fresh-kb)]
     (v/assert kb '(functional gefParent) 'CxUniverse {:strength :monotonic})
-    (v/assert kb '(genlCx CxGefLeft CxUniverse) 'CxCore {:strength :monotonic})
-    (v/assert kb '(genlCx CxGefRight CxUniverse) 'CxCore {:strength :monotonic})
+    (v/assert kb '(genlCx CxGefLeft CxUniverse) 'CxUniverse {:strength :monotonic})
+    (v/assert kb '(genlCx CxGefRight CxUniverse) 'CxUniverse {:strength :monotonic})
     (v/with-deferred-settle kb
       ;; readers of the candidates' branch, under no `sub`: the joining edge changes no
       ;; ancestor set of theirs, so none of them is entitled to cost it anything
       (doseq [i (range n)]
-        (v/assert kb (list 'genlCx (symbol (str "CxGefBy" i)) 'CxGefLeft) 'CxCore
+        (v/assert kb (list 'genlCx (symbol (str "CxGefBy" i)) 'CxGefLeft) 'CxUniverse
                   {:strength :monotonic}))
       ;; the one sub, and the clashing pairs the sweep enumerates
-      (v/assert kb '(genlCx CxGefSub CxGefLeft) 'CxCore {:strength :monotonic})
+      (v/assert kb '(genlCx CxGefSub CxGefLeft) 'CxUniverse {:strength :monotonic})
       (doseq [i (range 8)]
         (v/assert kb (list 'gefParent (symbol (str "GefK" i)) (symbol (str "GefA" i)))
                   'CxGefLeft {:strength :monotonic})
@@ -3740,9 +3875,9 @@
                   'CxGefRight {:strength :monotonic})))
     (doall
      (for [_ (range readings-per-reader-fan)]
-       (let [t (nanos (v/assert kb '(genlCx CxGefSub CxGefRight) 'CxCore
+       (let [t (nanos (v/assert kb '(genlCx CxGefSub CxGefRight) 'CxUniverse
                                 {:strength :monotonic}))]
-         (v/retract! kb (v/handle-of kb '(genlCx CxGefSub CxGefRight) 'CxCore))
+         (v/retract! kb (v/handle-of kb '(genlCx CxGefSub CxGefRight) 'CxUniverse))
          t)))))
 
 (def ^:private reads-per-clash-reading
@@ -4239,6 +4374,35 @@
                (nanos (dotimes [_ asks-per-brave-reading]
                         (v/ask? kb '(bravely (pb_pacifist PbX0)) 'CxPerf)
                         (v/ask? kb '(cautiously (pb_pacifist PbX0)) 'CxPerf))))))))
+
+(defn- cautious-ask-beside-unseen-dilemmas
+  "`(cautiously S)` asked of one side of the Nixon diamond a reader `CxPcR` holds, beside n
+  diamonds placed in `CxPcSide`, which it does not see, each ask after a write so the
+  classification is rebuilt.  The classification reads the dilemmas `CxPcR` reads
+  (`clashes/contradictions-at`), so it reads none of the n.  The solve-free path, forced
+  by hiding the backend, as `brave-ask-between-writes` forces it.  The diamonds are built
+  under one deferred settle."
+  [n]
+  (with-redefs [solver/available? (constantly false)]
+    (let [kb   (fresh-kb)
+          M    {:strength :monotonic}
+          rule (fn [ante conseq]
+                 (list 'set/defaultRule
+                       (list 'set/forwardRule (rules/rule-sentence [ante] conseq))))]
+      (v/add-reasoner kb :brave-cautious)
+      (v/assert kb '(genlCx CxPcR CxUniverse) 'CxUniverse M)
+      (v/assert kb '(genlCx CxPcSide CxUniverse) 'CxUniverse M)
+      (v/assert kb (rule '(pc_quaker ?x) '(pc_pacifist ?x)) 'CxUniverse)
+      (v/assert kb (rule '(pc_republican ?x) '(not (pc_pacifist ?x))) 'CxUniverse)
+      (v/with-deferred-settle kb
+        (v/assert kb '(pc_quaker PcR) 'CxPcR)
+        (v/assert kb '(pc_republican PcR) 'CxPcR)
+        (doseq [i (range n) :let [x (symbol (str "PcX" i))]]
+          (v/assert kb (list 'pc_quaker x) 'CxPcSide)
+          (v/assert kb (list 'pc_republican x) 'CxPcSide)))
+      (doall (for [i (range 60)]
+               (do (v/assert kb (list 'pc_mark (symbol (str "PcW" i))) 'CxPerf)
+                   (nanos (v/ask? kb '(cautiously (pc_pacifist PcR)) 'CxPcR))))))))
 
 (defn- sibling-disjoint-new-spec
   "A `sibling_disjoint` clique of n specializations, then sixty more added one at a time,
@@ -5564,9 +5728,10 @@
     :run       inherited-entry-declaration}
 
    ;; The same entries, beside an except of a fact no entry's readings rest on.  Healthy,
-   ;; the settle reads the except's target closure against each entry's reading handles
-   ;; and asks no entry: 1.43x alone, 0.72 against 1.03 ms/op.  Asking every entry again
-   ;; when any except moves reads 14.53x alone, 8.39 against 121.87 ms/op.
+   ;; the settle looks the except's target closure up in the memo's inverted index and
+   ;; reads no entry: 0.92x, 0.72 against 0.67 ms/op.  Testing every entry's reading
+   ;; handles against the closure reads 1.56x, 0.92 against 1.44 ms/op, and asking every
+   ;; entry again when any except moves 14.53x alone, 8.39 against 121.87 ms/op.
    {:name      :inherited-entry-except
     :group     :clashes
     :claim     "32x the carried inherited-clash entries costs under 2x per except no entry's question reads — an except re-asks only the entries reading what it hides"
@@ -5871,8 +6036,8 @@
    ;; about what sits above the floor.  Healthy it reads **7.56x and 7.71x** on full runs and 7.14x
    ;; alone, and the vocabulary is fixed at both sizes, so 97% of the reading is the walk
    ;; itself: the same KB with the declarations left out costs 0.051 ms against 1.756 at
-   ;; n=250.  Below it, the form the arity table exists to replace — `checks/tabled-arity`
-   ;; answered off the index rather than off the taxonomy, a walk of the argument-1 posting
+   ;; n=250.  Below it, the form a binding read exists to replace — an arity
+   ;; answered off the argument-1 posting rather than off a binding read, a walk of the posting
    ;; these very declarations fill, so a census of n costs n² — reads **59.62x**,
    ;; implemented and measured on a full run rather than supposed.  15x is about twice the
    ;; healthy reading and under a third of the defective one, which is the slack the
@@ -6385,6 +6550,64 @@
     :max-ratio 2.0
     :run       trigger-membership-beside-declared-facts}
 
+   ;; A roster declaration at a leaf context beside the memberships of its predicate
+   ;; stated where the leaf does not see.  Flat by construction: the leaf sees none of them.
+   {:name      :declaration-at-a-leaf-beside-unseen-memberships
+    :group     :placement
+    :claim     "16x the unseen memberships beside a roster declaration at a leaf costs under 2x per declaration"
+    :sizes     [64 1024]
+    :max-ratio 2.0
+    :run       declaration-at-a-leaf-beside-unseen-memberships}
+
+   ;; A roster declaration at a leaf beside a stating context with many children, neither
+   ;; above nor below the leaf.  Flat by construction: the leaf's down-set is one context.
+   ;; Calibrated from both ends under `--only`: healthy 0.85x (0.60 ms/op against 0.70), and with
+   ;; the reach walking the children of the stating context, 13.19x (0.83 against 11.01).
+   {:name      :declaration-at-a-leaf-beside-a-wide-stating-context
+    :group     :placement
+    :claim     "64x the children of an unseen stating context beside a roster declaration at a leaf costs under 2x per declaration"
+    :sizes     [64 4096]
+    :max-ratio 2.0
+    :run       declaration-at-a-leaf-beside-a-wide-stating-context}
+
+   ;; A roster declaration in CxUniverse reaches every stored fact of its predicate, which one
+   ;; probe of the predicate extent lists.  The facts are fixed and the contexts vary, so a
+   ;; reach through the ancestor sets of the contexts below CxUniverse shows as growth.
+   ;; A context added before each reading retires the closure memo, and memberships stated
+   ;; in CxUniverse put the declaring context among the stating ones.  Calibrated
+   ;; from both ends under `--only`: healthy 0.99x (0.55 ms/op against 0.55), and with the
+   ;; reach walking the contexts below CxUniverse, 3.92x (0.59 against 2.30).
+   {:name      :cxuniverse-declaration-beside-bystander-contexts
+    :group     :placement
+    :claim     "64x the bystander contexts beside a CxUniverse roster declaration costs under 2x per declaration"
+    :sizes     [64 4096]
+    :max-ratio 2.0
+    :run       cxuniverse-declaration-beside-bystander-contexts}
+
+   ;; n CxUniverse roster declarations, each denied in CxUniverse, so a placed defeat every
+   ;; reader sees names each one, and no denial or rule reads a declared predicate.  The roster
+   ;; reading runs no `in-force?` for the n.  Calibrated from both ends under `--only`:
+   ;; healthy 1.20x (3.64 ms/op against 4.36), and with the reading weighing every
+   ;; declaration's defeats, 3.20x.
+   {:name      :membership-clash-beside-denied-cxuniverse-declarations
+    :group     :placement
+    :claim     "16x the CxUniverse roster declarations denied in CxUniverse beside a membership clash costs under 2x per write"
+    :sizes     [8 128]
+    :max-ratio 2.0
+    :run       membership-clash-beside-denied-cxuniverse-declarations}
+
+   ;; A roster declaration beside n stating contexts that share one descendant with n
+   ;; contexts below it, while the declaring context has n contexts below it.  Linear by
+   ;; construction: the declaration reads the n stating contexts once each.  Calibrated
+   ;; from both ends under `--only`: healthy 8.51x (0.52 ms/op against 4.42), and with the
+   ;; reach walking both down-sets once per stating context, 155.53x (11.66 against 1813).
+   {:name      :declaration-beside-stating-contexts-over-a-wide-descendant
+    :group     :placement
+    :claim     "16x the stating contexts and the contexts below them beside a roster declaration costs under 24x per declaration: linear, not quadratic"
+    :sizes     [64 1024]
+    :max-ratio 24.0
+    :run       declaration-beside-stating-contexts-over-a-wide-descendant}
+
    ;; The seeding a `genlCx` edge owes the `genl` edges its `sub` already sees.  Flat by
    ;; construction: the edge newly connects one fact to one rule at both n.  Calibrated
    ;; from both ends under a scratch driver's `run-check`: healthy 0.40x-1.14x (0.19-0.59
@@ -6606,6 +6829,15 @@
     :max-ratio 3.0
     :run       brave-ask-between-writes}
 
+   ;; Healthy 0.23x under `--only`.  A classification over every dilemma of the KB reads
+   ;; 11.19x (4.55 ms against 50.97).
+   {:name      :cautious-ask-beside-unseen-dilemmas
+    :group     :clashes
+    :claim     "16x the dilemmas standing outside a reader's ancestor set costs under 2x per cautious ask there after a write"
+    :sizes     [64 1024]
+    :max-ratio 2.0
+    :run       cautious-ask-beside-unseen-dilemmas}
+
    ;; Healthy 0.84x and 0.98x.  Reading the parent's spec closure per edge reads 3.11x
    ;; (0.60 ms against 1.86); the separation is narrower than the others' because the
    ;; closure walk is cheap per member, and the claim is the ordinary flat bound.
@@ -6795,7 +7027,8 @@
 
    ;; Both ends measured under `--only`, 2026-10-10: 1.316 -> 980.675 ms/op (745.21x)
    ;; with a guard defeat's read reading the firing's guard coverage, against 0.174 ->
-   ;; 0.356 (2.05x) with it left out (`except/guard-believed?`).
+   ;; 0.356 (2.05x) with it left out (a guard defeat's force reads its blockers alone,
+   ;; `except/guard-seen-fn`).
    {:name      :guard-defeats-at-a-reader
     :group     :exceptions
     :claim     "2x the guard defeats a reader sees naming one firing costs under 4x per read of the firing there — a guard defeat's read does not read the firing's guard coverage again"
@@ -6852,14 +7085,16 @@
     :max-ratio 2.0
     :run       witness-walk-beside-side-ancestors}
 
-   ;; Both ends measured 2026-10-09 under a load average of 20 to 24.  Healthy 1.29x (0.30
-   ;; ms against 0.39).  With each nogood walking its own subsumptions: 3.55x (3.87 ms
-   ;; against 13.74).
+   ;; Both ends measured 2026-10-11 at 1600 nogoods, eight warm rounds in one JVM, load
+   ;; average 7 to 15.  Healthy 0.99x to 1.43x (0.090 ms against 0.100).  With each
+   ;; nogood walking its own subsumptions: 5.29x to 7.54x (1.07 ms against 5.85).  At 200
+   ;; nogoods a healthy settle read 1.72x to 2.09x, since the eight walks' share of a
+   ;; nogood's cost is eight times larger there.
    {:name      :recover-placement-walk
     :group     :recover
-    :claim     "8x the types each subsumption climbs costs under 2x per nogood in the settle that places what a rebuilt candidate index queued"
+    :claim     "8x the types each subsumption climbs costs under 2.5x per nogood in the settle that places what a rebuilt candidate index queued"
     :sizes     [20 160]
-    :max-ratio 2.0
+    :max-ratio 2.5
     :run       recover-placement-walk}
 
    ;; Both ends measured 2026-10-07 under a load average of 16 to 20.  Healthy 1.56x (0.66
@@ -6933,14 +7168,14 @@
     :max-ratio 2.0
     :run       #(binding [*backend* :memory-columnar] (excepts-in-one-settle-beside-excepts %))}
 
-   ;; The `genl` gate reads every stored except's and defeat's target once per write
-   ;; (`kb/supporter-reaches?`): 4.20x at load 50 (0.78 ms/op at 64, 3.28 at 8192).
+   ;; The `genl` gate answers off the `:tax-named` count (`kb/supporter-reaches?`): 0.91x
+   ;; at load 23 (1.50 ms/op at 64, 1.36 at 8192), where a build of every stored except's
+   ;; and defeat's target per write read 2.35x at load 8 (1.01 and 2.38).
    {:name      :genl-defeat-beside-defeats-columnar
     :group     :placement
     :claim     "128x the standing defeats of other genl edges costs under 2x per genl edge's defeat and a membership read through it on memory-columnar"
     :sizes     [64 8192]
     :max-ratio 2.0
-    :unmet     true
     :run       #(binding [*backend* :memory-columnar] (genl-defeat-beside-defeats %))}
 
    {:name      :genlcx-edge-beside-seen-excepts-under-a-genlcx-except

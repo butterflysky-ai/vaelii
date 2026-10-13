@@ -121,9 +121,9 @@
   one node `[:argument-root :children [relOf 1 Subj]]` hold `fanout` handles between them,
   and a query from `CxAsk` matches the `fanout/contexts` stored there."
   [kb {:keys [subjects fanout contexts]}]
-  (v/assert kb (list 'genlCx 'CxAsk 'CxCore) 'CxCore {:chain? false})
+  (v/assert kb (list 'genlCx 'CxAsk 'CxUniverse) 'CxUniverse {:chain? false})
   (doseq [k (range (dec contexts))]
-    (v/assert kb (list 'genlCx (shadow-ctx k) 'CxCore) 'CxCore {:chain? false}))
+    (v/assert kb (list 'genlCx (shadow-ctx k) 'CxUniverse) 'CxUniverse {:chain? false}))
   (let [ctx-at (fn [n] (if (zero? (mod n contexts)) 'CxAsk (shadow-ctx (dec (mod n contexts)))))]
     (v/with-deferred-settle kb
       (dotimes [s subjects]
@@ -268,9 +268,9 @@
   their intersection under `relT` holds `fanout/objects` — the local narrowing the probe
   wants and the min-count lead misses."
   [kb {:keys [subjects fanout objects contexts]}]
-  (v/assert kb (list 'genlCx 'CxAsk 'CxCore) 'CxCore {:chain? false})
+  (v/assert kb (list 'genlCx 'CxAsk 'CxUniverse) 'CxUniverse {:chain? false})
   (doseq [k (range (dec contexts))]
-    (v/assert kb (list 'genlCx (shadow-ctx k) 'CxCore) 'CxCore {:chain? false}))
+    (v/assert kb (list 'genlCx (shadow-ctx k) 'CxUniverse) 'CxUniverse {:chain? false}))
   (let [ctx-at (fn [n] (if (zero? (mod n contexts)) 'CxAsk (shadow-ctx (dec (mod n contexts)))))]
     (v/with-deferred-settle kb
       (dotimes [s subjects]
@@ -363,7 +363,7 @@
   at the write entry point reads the argument roots and `matches-hierarchical` records returned-vs-matched)."
   [kb {:keys [types branching individuals memberships predicates disjoints clashes]}]
   (let [ctx 'CxBench]
-    (v/assert kb (list 'genlCx ctx 'CxCore) 'CxCore {:chain? false})
+    (v/assert kb (list 'genlCx ctx 'CxUniverse) 'CxUniverse {:chain? false})
     (v/with-deferred-settle kb
       (doseq [i (range types)]
         (v/assert kb (list 'genl (type-name i) (parent-of branching i)) ctx {:chain? false}))

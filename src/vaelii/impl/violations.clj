@@ -120,6 +120,20 @@
       {:rule h
        :sentence (when rsx (sx/authored-sentence rsx))})))
 
+(defn log-entries
+  "Log `entries` at :warn as `report` logs them, stamped with the current chaining run,
+  and file nothing.  The roster's void firings log here: a `:forced-conclusion` entry is
+  read off the stored firings (`vaelii.core/violations`), not filed.  Logs nothing while
+  `*report-sink*` is bound."
+  [kb entries]
+  (when (and (seq entries) (not *report-sink*))
+    (let [run (:runs @(reasoning/chain-stats kb))]
+      (doseq [e entries]
+        (let [e (assoc e :run run)]
+          (trove/log! {:level :warn :id ::dropped-conclusion :data e})
+          (when (:rule e)
+            (trove/log! {:level :debug :id ::dropping-rule :data (dropping-rule kb e)})))))))
+
 (defn report
   "Append dropped-conclusion entries to the accumulating ledger, stamped with the
   chaining run that dropped them, and log each at :warn — a drop must be visible even to
@@ -140,10 +154,7 @@
       (if *report-sink*
         (swap! *report-sink* #(newest (into % stamped)))
         (do
-          (doseq [e stamped]
-            (trove/log! {:level :warn :id ::dropped-conclusion :data e})
-            (when (:rule e)
-              (trove/log! {:level :debug :id ::dropping-rule :data (dropping-rule kb e)})))
+          (log-entries kb entries)
           (note-batch! stamped)
           (swap! (reasoning/violations kb) #(newest (into % stamped))))))))
 
@@ -168,7 +179,11 @@
   re-solved on every firing attempt of its rule.  Recording each occurrence would fill a
   ledger capped at its newest 1000 entries with copies of one defect and evict the
   derivation-path drops it exists to report.  `:run` is ignored in the comparison because
-  a later run meeting the same defect is the same defect, not a second one."
+  a later run meeting the same defect is the same defect, not a second one.
+
+  \"Once\" holds while the entry stands in the ledger: the ledger keeps its newest 1000
+  entries (`newest`), so an entry evicted by later ones is filed again when its defect is
+  met again, and `clear-violations!` empties it.  The scan reads every entry."
   [kb entry]
   (when-not (some #(= (dissoc % :run) entry) (some-> (report-target kb) deref))
     (report kb [entry]))

@@ -70,9 +70,9 @@
     rewriteOf  "withdrawing one un-merges two terms, so the OUT set of a round would shrink"
     sameAs     "withdrawing one un-merges two terms, so the OUT set of a round would shrink"
     equals     "withdrawing one un-merges two terms, so the OUT set of a round would shrink"
-    injection  "a premise of CxCore's rules concluding (functional P) and (functionalInArg P 1)"
-    surjection "a premise of CxCore's rule concluding (functional P)"
-    bijection  "a premise of CxCore's rules concluding (injection P) and (surjection P)"})
+    injection  "a premise of core.txt's rules concluding (functional P) and (functionalInArg P 1)"
+    surjection "a premise of core.txt's rule concluding (functional P)"
+    bijection  "a premise of core.txt's rules concluding (injection P) and (surjection P)"})
 
 (def baseline-roster
   "The engine's own roster, `{kind #{predicate …}}`: every family's `:grounds` and every
@@ -83,20 +83,59 @@
 
 (def roster-kinds "The two roster properties." (set (keys baseline-roster)))
 
+(defn- declarations
+  "`{handle context}` of the stored declarations giving `pred` the roster property
+  `kind`, believed or not, or nil when no believed one does.  Read KB-wide: each reader
+  keeps the ones it sees (`on-roster?`)."
+  [tax kind pred]
+  (when (tax/has-prop? tax kind pred)
+    (tax/prop-supporter-contexts tax kind pred)))
+
+(defn global?
+  "Is `pred` on the global roster as `kind`: a `baseline-roster` member.  Every reader
+  reads it on the roster, and no declaration moves it.  A declaration in any context,
+  CxUniverse's included, puts its predicate on the roster at the readers that believe it
+  (`on-roster?`, docs/nmtms.md, \"The forced-monotonic roster\")."
+  [_tax kind pred]
+  (contains? (baseline-roster kind) pred))
+
 (defn on-roster?
   "Does `pred` carry the roster property `kind` (`:forced-monotonic` or
-  `:forced-between-predicates`): a `baseline-roster` member, or declared.  The one reader
-  of the two properties, and a global one: the roster decides what a stored sentex is,
-  and that does not vary by the reader's visibility."
-  [tax kind pred]
-  (or (contains? (baseline-roster kind) pred) (tax/has-prop? tax kind pred)))
+  `:forced-between-predicates`).  The 3-arity is the union over every reader: `global?`,
+  or a believed declaration in any context.  The 4-arity is one reader's: `global?`, or
+  a declaration `[handle context]` `seen?` holds of."
+  ([tax kind pred]
+   (or (contains? (baseline-roster kind) pred) (tax/has-prop? tax kind pred)))
+  ([tax kind pred seen?]
+   (or (global? tax kind pred)
+       (boolean (some (fn [[h c]] (seen? h c)) (declarations tax kind pred))))))
+
+(defn global-reading
+  "The roster reading `(fn [kind pred])` every reader shares (`global?`)."
+  [tax]
+  (partial global? tax))
+
+(defn reader-reading
+  "The roster reading `(fn [kind pred])` of a reader that sees the declarations `[handle
+  context]` `seen?` holds of (`on-roster?`, 4-arity)."
+  [tax seen?]
+  (fn [kind pred] (on-roster? tax kind pred seen?)))
 
 (defn roster
-  "Every predicate `on-roster?` as `kind`.
-
-  Read unscoped, as `on-roster?` reads it: the roster decides what a stored sentex is."
+  "Every predicate `on-roster?` as `kind`, over every reader."
   [tax kind]
   (into (baseline-roster kind) (tax/props tax kind)))
+
+(defn declared
+  "`{[kind pred] {handle context}}`: every predicate on the roster by a believed
+  declaration and off the global roster (`global?`), with its declarations.  Empty on a
+  KB that declares only baseline members.  Read KB-wide, the union over every reader,
+  which a read walk splits into the declarations its reader sees and misses."
+  [tax]
+  (into {} (for [kind roster-kinds
+                 pred (tax/props tax kind)
+                 :when (not (global? tax kind pred))]
+             [[kind pred] (tax/prop-supporter-contexts tax kind pred)])))
 
 (defn- predicate-spelled?
   "Is `x` spelled as a predicate of arity 2 or more: `nm/predicate?` and not
@@ -109,14 +148,28 @@
 (defn roster-literal?
   "Is `literal` on the forced-monotonic roster: its functor is `on-roster?` as
   `:forced-monotonic`, or as `:forced-between-predicates` with every argument spelled as a
-  predicate of arity 2 or more."
+  predicate of arity 2 or more.  The 2-arity reads the union over every reader; the
+  3-arity reads the roster reading `on?` (`global-reading`, `reader-reading`)."
+  ([tax literal] (roster-literal? tax literal (partial on-roster? tax)))
+  ([_tax literal on?]
+   (let [f (nm/functor literal)]
+     (boolean (and (symbol? f)
+                   (or (on? :forced-monotonic f)
+                       (and (on? :forced-between-predicates f)
+                            (next literal)
+                            (every? predicate-spelled? (rest literal)))))))))
+
+(defn literal-declarations
+  "`{handle context}` of the stored declarations that put `literal` on the roster and
+  are not `global?`: empty when the global roster holds `literal` or no declaration
+  does."
   [tax literal]
   (let [f (nm/functor literal)]
-    (boolean (and (symbol? f)
-                  (or (on-roster? tax :forced-monotonic f)
-                      (and (on-roster? tax :forced-between-predicates f)
-                           (next literal)
-                           (every? predicate-spelled? (rest literal))))))))
+    (if (or (not (symbol? f)) (roster-literal? tax literal (global-reading tax)))
+      {}
+      (cond-> (or (declarations tax :forced-monotonic f) {})
+        (and (next literal) (every? predicate-spelled? (rest literal)))
+        (merge (declarations tax :forced-between-predicates f))))))
 
 (defn note-candidate!
   "Keep `:nogood-candidates` in step with the fact `sx` arriving (`stored?` true) or

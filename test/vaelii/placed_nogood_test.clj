@@ -851,9 +851,177 @@
         (is (= #{{:first first :read (if (= :g first) [true false true] [true true false])}}
                readings))))))
 
+(defn- loser-under-a-guarded-firing
+  "`[A B C]` believed at CxA after the writes `ops`, in order.
+
+  ```
+  CxA  N = (not (tyb IndB)) M   C = (tyc IndB)   A = (tya IndB)         (:n :c :a)
+       (tyb ?x) & (unknown (tyc ?x)) => (tya ?x) M                     (:guarded)
+       (tya ?x) => (tyb ?x)                                            (:rule)
+  ```
+  The rule derives B = (tyb IndB) from A, and the nogood {N, B} places a defeat of B.
+  The guarded rule fires from B to A, and C blocks the firing, so the guard defeat of A
+  rests on B.  A sorts before B, so a cycle broken in content order would put the guard
+  defeat in force and the defeat of B out of force."
+  [ops]
+  (tu/with-neutral-kb [kb tu/fresh]
+    (tu/with-terms [tya tyb tyc IndB CxA]
+      (v/assert kb (list 'genlCx CxA 'CxUniverse) 'CxUniverse)
+      (let [hs (into {} (map (fn [op]
+                               [op (case op
+                                     :n       (v/assert kb (list 'not (list tyb IndB)) CxA {:strength :monotonic})
+                                     :c       (v/assert kb (list tyc IndB) CxA)
+                                     :a       (v/assert kb (list tya IndB) CxA)
+                                     :guarded (v/assert kb (list 'set/forwardRule
+                                                                 (list 'implies (list 'and (list tyb '?x)
+                                                                                      (list 'unknown (list tyc '?x)))
+                                                                       (list tya '?x)))
+                                                        CxA {:strength :monotonic})
+                                     :rule    (v/assert kb (list 'set/forwardRule
+                                                                 (list 'implies (list tya '?x) (list tyb '?x)))
+                                                        CxA))]))
+                     ops)
+            b  (v/handle-of kb (list tyb IndB) CxA)]
+        (mapv #(boolean (and % (v/believed? kb % CxA))) [(:a hs) b (:c hs)])))))
+
+(tu/deftest-kb a-nogood-loser-a-guarded-firing-rests-on-is-hidden-in-every-order
+  ;; The guard defeat's force reads its blocker C and not the firing's antecedent B, so
+  ;; the two defeats form no cycle and N wins over B.
+  (is (= #{[true false true]}
+         (into #{} (map loser-under-a-guarded-firing) (permutations [:n :c :a :guarded :rule])))))
+
+(defn- loser-beside-an-unguarded-copy
+  "`[(tya IndB) (tyc IndB)]` believed at CxC, on any handle CxC sees, after the writes
+  `ops`, in order.
+
+  ```
+  CxA  (disjoint tya tyb) M   R = (tyb ?x) => (tya ?x) M                  (:rule)
+  CxB ⊂ CxA   (tyb IndB) M                                                (:b)
+              (exceptWhen (tyc ?x) R), which stores a guarded copy of R   (:guard)
+  CxC ⊂ CxB   (genl tyc tyb)   (tyc IndB)                                (:genl :c)
+              (tyd IndZ) and an except of it                             (:except)
+  ```
+  A = (tya IndB) at CxB rests on R's firing and on its guarded copy's.  The guard defeat
+  of the copy's firing at CxC rests on (tyc IndB), and the defeat of (tyc IndB) from the
+  nogood over A rests on A, so a read meets both.  R's firing holds A whatever the guard,
+  so (tyc IndB) loses at CxC.  The except hides nothing the nogood reads; it makes the
+  read walk the supports in full."
+  [ops]
+  (tu/with-neutral-kb [kb tu/fresh]
+    (tu/with-terms [tya tyb tyc tyd IndB IndZ CxA CxB CxC]
+      (let [M    {:strength :monotonic}
+            rule (list 'set/forwardRule (list 'implies (list tyb '?x) (list tya '?x)))]
+        (v/assert kb (list 'genlCx CxA 'CxUniverse) 'CxUniverse M)
+        (v/assert kb (list 'genlCx CxB CxA) 'CxUniverse M)
+        (v/assert kb (list 'genlCx CxC CxB) 'CxUniverse M)
+        (v/assert kb (list 'disjoint tya tyb) CxA M)
+        (doseq [op ops]
+          (case op
+            :rule   (v/assert kb rule CxA M)
+            :b      (v/assert kb (list tyb IndB) CxB M)
+            :guard  (v/assert kb (list 'exceptWhen (list tyc '?x) rule) CxB)
+            :genl   (v/assert kb (list 'genl tyc tyb) CxC)
+            :c      (v/assert kb (list tyc IndB) CxC)
+            :except (let [z (v/assert kb (list tyd IndZ) CxC)]
+                      (v/assert kb (list 'except (list 'sentexHandle z)) CxC))))
+        (mapv (fn [s] (boolean (some (fn [h] (let [sx (v/sentex kb h)]
+                                               (and (= s (v/sentence-of sx)) (v/sees? kb CxC (:context sx))
+                                                    (v/believed? kb h CxC))))
+                                     (v/handles kb))))
+              [(list tya IndB) (list tyc IndB)])))))
+
+(tu/deftest-kb a-defeat-held-by-an-unguarded-firing-is-in-force-beside-a-guard-defeat
+  ;; The cycle the read meets has one consistent reading: the defeat of (tyc IndB) in
+  ;; force.  Every fifth of the 720 orders.
+  (is (= #{[true false]}
+         (into #{} (map loser-beside-an-unguarded-copy)
+               (take-nth 5 (permutations [:rule :b :guard :genl :c :except]))))))
+
 (tu/deftest-kb a-defeat-resting-on-its-own-target-through-a-ground-is-in-force
   ;; G rests on L, so the defeat of L rests on L through G as well as directly.  The cycle
   ;; holds one defeat, which is first in content order, so it is in force at CxB: L is
   ;; hidden there, and G with it.
   (is (= #{{:read [true false false]}}
          (into #{} (map #(dissoc (ground-cycle :self nil %) :first)) (permutations [:w :breed :rule :l])))))
+
+;; ---- a cycle closed from every entry ------------------------------------------------
+
+(tu/deftest-kb a-cycle-resting-on-an-outer-open-defeat-is-closed-with-it-from-every-entry
+  ;; Three conflict keys over six facts, with stub reads: O = A, A = not B, B = A and not
+  ;; O, so that B reads O only once A is held true.  The one consistent reading is O and
+  ;; A in force and B out.  The reading is the same entered at any key, and a key read
+  ;; first and then each of the others after it.
+  (tu/with-terms [w_kind Ia Ib Ic Id Ie If]
+    (let [in-force-once @#'exc/in-force-once
+          ;; losers in content order: A's (Ib), B's (Id), O's (If)
+          [h1 h2 h3 h4 h5 h6] (map #(v/assert kb (list w_kind %) 'CxUniverse) [Ie If Ia Ib Ic Id])
+          ck   (fn [c x] [:vaelii.impl.except/conflict c x])
+          [o a b :as ks] [(ck h1 h2) (ck h3 h4) (ck h5 h6)]
+          reading (fn [entry]
+                    (let [st (volatile! {})
+                          s  {:memo st :recs (:records kb)}
+                          fs (atom {})
+                          r  (fn [k] (in-force-once s k (@fs k)))]
+                      (reset! fs {o (fn [] (r a))
+                                  a (fn [] (not (r b)))
+                                  b (fn [] (and (r a) (not (r o))))})
+                      (r entry)
+                      (mapv r ks)))]
+      (is (= {o [true true false] a [true true false] b [true true false]}
+             (into {} (for [e ks] [e (reading e)])))))))
+
+(tu/deftest-kb a-cycle-reads-its-first-consistent-assignment-from-every-entry-and-order
+  ;; Conflict keys with stub reads, the losers in content order k0 < k1 < k2 < k3.  In the
+  ;; first row k0 = not k1 and not k2: a read of k0 that finds k1 in force stops before k2,
+  ;; so k2 joins the cycle inside its close.  In the second, k2 and k3 close as a cycle of
+  ;; their own when the read opens them below k0 or k1.  Each row has two consistent
+  ;; readings, and every order of first reads takes the first in content order, in force
+  ;; first.
+  (tu/with-terms [w_kind Ia Ib Ic Id Ie If Ig Ih]
+    (let [in-force-once @#'exc/in-force-once
+          hs      (mapv #(v/assert kb (list w_kind %) 'CxUniverse) [Ia Ib Ic Id Ie If Ig Ih])
+          ks      (mapv (fn [i] [:vaelii.impl.except/conflict (hs (* 2 i)) (hs (inc (* 2 i)))]) (range 4))
+          reading (fn [forms order]
+                    (let [s {:memo (volatile! {}) :recs (:records kb)}
+                          r (fn r [i] (in-force-once s (ks i) #((forms i) r)))]
+                      (run! r order)
+                      (mapv r (range (count forms)))))]
+      (doseq [[forms expected]
+              [[[#(and (not (% 1)) (not (% 2))) #(not (% 0)) #(not (% 0))]
+                [true false false]]
+               [[#(not (% 1)) #(and (not (% 3)) (or (not (% 0)) (not (% 2))))
+                 #(or (not (% 3)) (not (% 1))) #(and (not (% 2)) (not (% 0)))]
+                [true false true false]]]]
+        (is (= #{expected}
+               (into #{} (map #(reading forms %)) (permutations (range (count forms))))))))))
+
+(tu/deftest-kb a-cycle-nested-in-a-members-read-is-closed-once-per-read
+  ;; Conflict keys with stub reads: d rings of m members, member i of ring l out of force
+  ;; when member i + 1 is in force, and reading ring l + 1 only when members i + 1 and
+  ;; i + 2 are both in force, so discovery closes ring l without ring l + 1 and each
+  ;; assignment of ring l's close reads ring l + 1 again.  Ring l + 1 rests on no member of
+  ;; ring l, so its close is kept: the member reads are at most d rings of 2^m
+  ;; assignments of m reads, 2m + 1 passes of m reads when m is odd and no assignment is
+  ;; consistent, and m + 1 other reads of each member, where reading ring l + 1 once per
+  ;; assignment of every ring above it multiplies them.
+  (tu/with-terms [w_kind]
+    (doseq [[d m] [[3 4] [2 6] [3 3] [2 5]]]
+      (let [in-force-once @#'exc/in-force-once
+            hs    (mapv (fn [_] (v/assert kb (list w_kind (tu/tmp-ind "Ring")) 'CxUniverse))
+                        (range (* 2 d m)))
+            ck    (fn [l i] (let [j (* 2 (+ (* l m) i))] [:vaelii.impl.except/conflict (hs j) (hs (inc j))]))
+            reads (atom 0)
+            s     {:memo (volatile! {}) :recs (:records kb)}
+            r     (fn r [l i]
+                    (in-force-once s (ck l i)
+                                   (fn []
+                                     (swap! reads inc)
+                                     (let [nxt (r l (mod (inc i) m))
+                                           b   (r l (mod (+ i 2) m))]
+                                       (when (and nxt b (< l (dec d))) (r (inc l) 0))
+                                       (not nxt)))))]
+        (r 0 0)
+        (is (<= @reads (* d m (+ (bit-shift-left 1 m) (* 3 m) 2))) (str "d " d ", m " m ": " @reads " member reads"))
+        (when (even? m)
+          (is (every? (fn [[l i]] (= (r l i) (not (r l (mod (inc i) m)))))
+                      (for [l (range d) i (range m)] [l i]))))))))

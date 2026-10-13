@@ -97,8 +97,8 @@
   whatever context stores it (docs/contexts.md, \"Context-scoped constraint checks\").
   A genlCx path caps no class, since each of its edges is `:monotonic`.
 
-  A context no genlCx edge names sees only itself: not CxUniverse and not CxCore
-  (docs/contexts.md, \"A context outside the spindle\")."
+  A context no genlCx edge names sees only itself, not CxUniverse
+  (docs/contexts.md, \"A context outside the topology\")."
   [edges c]
   (loop [seen #{c} todo [c]]
     (if-let [x (peek todo)]
@@ -358,6 +358,18 @@
                 state rs)]
       (if (= next state) state (recur next)))))
 
+(defn- void-at?
+  "Does rule sentex `r` conclude a literal on the roster `forced?` reads, or its denial,
+  without being a roster rule there: a `set/defaultRule`, an `unknown`, an exception, or
+  an antecedent off that roster (docs/reference.md D17)?  Such a rule fires at no
+  context whose roster holds its conclusion."
+  [forced? r]
+  (let [{:keys [consequent antecedents unknowns]} (:parsed r)
+        body (if (world/denial? consequent) (second consequent) consequent)]
+    (boolean (and (forced? body)
+                  (or (world/denial? consequent) (:defeasible? r) (seq unknowns)
+                      (seq (:exceptions r)) (some #(not (forced? %)) antecedents))))))
+
 (defn derive-at
   "The believed sentences at `c` when `out` is taken OUT, before inheritance: `{:believed
   #{S} :justs {S #{j}} :supports {S {home strength}} :sees up(c)}`.
@@ -368,21 +380,34 @@
   match climbs are the premise edges and coverings believed at `c`: no rule concludes
   either in v1. No rule reads an inherited claim (`world/check-world` refuses a rule
   reading a preserved predicate or one above it), so derivation runs before
-  `inherit-at` and reads none."
+  `inherit-at` and reads none.  `:forced?` reads the roster at `c`: the global roster
+  (`world/forced?`) and the predicates a roster declaration visible at `c` names; a denial
+  of a literal on it is no premise there, and a rule concluding one fires there only as
+  a roster rule (`void-at?`, docs/reference.md D17)."
   [prep c out]
   (let [sees     (up-with (:edges prep) c)
+        vis      (fn [homes] (select-keys homes sees))
+        ;; the predicates a roster declaration visible at `c` puts on the roster there
+        declared (into #{} (keep (fn [[s homes]] (when (and (world/roster-declaration? s)
+                                                            (seq (vis homes)))
+                                                   (second s))))
+                       (:premises prep))
+        forced?  (fn [s] (or (world/forced? s) (and (seq? s) (contains? declared (first s)))))
         supports (into {} (for [[s homes] (:premises prep)
                                 :when (not (contains? out s))
-                                :let [vis (select-keys homes sees)]
-                                :when (seq vis)]
-                            [s vis]))
+                                ;; a denial of a literal on the roster here is inert
+                                :when (not (and (world/denial? s) (forced? (second s))))
+                                :let [v (vis homes)]
+                                :when (seq v)]
+                            [s v]))
         believed (set (keys supports))
         adj      (genl-adjacency believed)]
-    (assoc (reduce (fn [st rs] (fire-stratum adj rs out st))
+    (assoc (reduce (fn [st rs] (fire-stratum adj (remove #(void-at? forced? %) rs) out st))
                    {:believed believed :justs {}}
                    (visible-rules prep sees))
            :supports supports
-           :sees sees)))
+           :sees sees
+           :forced? forced?)))
 
 ;; ---- classes ------------------------------------------------------------------
 
@@ -571,20 +596,22 @@
     `:anti-symmetric` nogood whose members differ only in symbol arguments: `:merge`,
     nobody OUT (docs/reference.md D6: the engine merges the two terms, and equality is
     outside the reference);
-  - no `:default` member off the forced-monotonic roster (`world/forced?`) otherwise:
+  - no `:default` member off the forced-monotonic roster (`forced?`, the roster at the
+    reading context; `world/forced?` when not given) otherwise:
     `:hard`, nobody OUT, since a roster member is never a loser (D7, D10–D13);
   - exactly one `:default` member off the roster: `:defeat`, that member is the `:loser`;
   - two or more `:default` members off the roster: `:dilemma`, nobody OUT.
 
   The ground is not weighed. Defeat-class is the only axis (docs/nmtms.md, \"There is
   no second axis\"), so nothing breaks a tie."
-  [class ng]
-  (let [cs   (into {} (map (juxt identity class)) (:members ng))
-        weak (keep (fn [[s c]] (when (and (= :default c) (not (world/forced? s))) s)) cs)]
-    (cond (and (every? #{:monotonic} (vals cs)) (symbol-merge? ng)) (assoc ng :verdict :merge)
-          (empty? weak)      (assoc ng :verdict :hard)
-          (= 1 (count weak)) (assoc ng :verdict :defeat :loser (first weak))
-          :else              (assoc ng :verdict :dilemma))))
+  ([class ng] (decide class ng world/forced?))
+  ([class ng forced?]
+   (let [cs   (into {} (map (juxt identity class)) (:members ng))
+         weak (keep (fn [[s c]] (when (and (= :default c) (not (forced? s))) s)) cs)]
+     (cond (and (every? #{:monotonic} (vals cs)) (symbol-merge? ng)) (assoc ng :verdict :merge)
+           (empty? weak)      (assoc ng :verdict :hard)
+           (= 1 (count weak)) (assoc ng :verdict :defeat :loser (first weak))
+           :else              (assoc ng :verdict :dilemma)))))
 
 (defn- check-nogood
   "`ng` when it is well formed at the view (members a non-empty set of believed
@@ -646,7 +673,7 @@
                          (map #(check-nogood view %))
                          (reduce (fn [m ng] (assoc m (nogood-key ng) ng)) {})
                          vals)
-          verdicts  (map #(decide (:class view) %) ngs)
+          verdicts  (map #(decide (:class view) % (:forced? d)) ngs)
           defeats   (filter #(= :defeat (:verdict %)) verdicts)]
       (if (empty? defeats)
         (assoc view

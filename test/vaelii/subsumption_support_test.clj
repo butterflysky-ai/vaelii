@@ -91,7 +91,7 @@
       (is (seq (v/sentexes-matching kb (list ancestorOf Tom Bob) 'CxUniverse)))
       (v/retract! kb edge)
       (testing "with the edge gone the fact no longer satisfies the rule, so neither does the conclusion stand"
-        (is (empty? (v/sentexes-matching kb (list ancestorOf Tom Bob) 'CxUniverse))))
+        (is (empty? (v/sentexes-matching kb (list ancestorOf Tom Bob) 'CxWell))))
       (testing "and the ingredients that were not retracted are all still believed"
         (is (seq (v/sentexes-matching kb (list fatherOf Tom Bob) 'CxUniverse)))))))
 
@@ -165,21 +165,21 @@
   ;; there anyway.  The justification names one, so retracting *that* one sweeps the
   ;; conclusion, and the surviving supporter re-derives it at a fresh handle.
   (tu/with-terms [fatherOf parentOf ancestorOf Tom Bob]
-    (let [e1 (v/assert kb (list 'genl fatherOf parentOf) 'CxCore)
-          e2 (v/assert kb (list 'genl fatherOf parentOf) 'CxUniverse)]
+    (let [e1 (v/assert kb (list 'genl fatherOf parentOf) 'CxUniverse)
+          e2 (v/assert kb (list 'genl fatherOf parentOf) 'CxWell)]
       (is (not= e1 e2) "two sentexes, one edge")
-      (v/assert kb (list 'implies (list parentOf '?x '?y) (list ancestorOf '?x '?y)) 'CxUniverse {:direction :forward})
-      (v/assert kb (list fatherOf Tom Bob) 'CxUniverse)
-      (let [before (v/handle-of kb (list ancestorOf Tom Bob) 'CxUniverse)]
+      (v/assert kb (list 'implies (list parentOf '?x '?y) (list ancestorOf '?x '?y)) 'CxWell {:direction :forward})
+      (v/assert kb (list fatherOf Tom Bob) 'CxWell)
+      (let [before (v/handle-of kb (list ancestorOf Tom Bob) 'CxWell)]
         (is (v/in? kb before))
         (v/retract! kb e1)
-        (let [after (v/handle-of kb (list ancestorOf Tom Bob) 'CxUniverse)]
+        (let [after (v/handle-of kb (list ancestorOf Tom Bob) 'CxWell)]
           (is (v/in? kb after)
               "the edge is still asserted, so the conclusion is still licensed")
           (is (not= before after)
               "as a re-derivation, not a survival: the sweep took the old record"))
         (v/retract! kb e2)
-        (is (empty? (v/sentexes-matching kb (list ancestorOf Tom Bob) 'CxUniverse))
+        (is (empty? (v/sentexes-matching kb (list ancestorOf Tom Bob) 'CxWell))
             "and only when the last supporter goes does the conclusion")))))
 
 (tu/deftest-kb an-edge-has-one-supporter-per-context
@@ -191,7 +191,7 @@
   (tu/with-terms [fatherOf parentOf]
     (let [a (v/assert kb (list 'genl fatherOf parentOf) 'CxUniverse)
           b (v/assert kb (list 'genl fatherOf parentOf) 'CxUniverse)
-          c (v/assert kb (list 'genl fatherOf parentOf) 'CxCore)
+          c (v/assert kb (list 'genl fatherOf parentOf) 'CxWell)
           support (tax/supporters (reasoning/taxonomy kb) [:genl fatherOf parentOf])]
       (is (= a b) "one sentence in one context is one sentex, however often it is asserted")
       (is (not= a c) "a second context is a second sentex, and a second supporter")
@@ -365,33 +365,35 @@
   ;; choice is for: a conclusion resting on an edge belongs no higher than a context that
   ;; can see the supporter named, so a witness that moved with arrival order would move
   ;; the conclusion's context with it.
-  (letfn [(witness [ctx-a ctx-b]
-            (tu/with-terms [fatherOf parentOf ancestorOf Tom Bob]
-              (v/assert kb (list 'genl fatherOf parentOf) ctx-a)
-              (v/assert kb (list 'genl fatherOf parentOf) ctx-b)
-              (v/assert kb (list 'implies (list parentOf '?x '?y) (list ancestorOf '?x '?y))
-                        'CxUniverse {:direction :forward})
-              (v/assert kb (list fatherOf Tom Bob) 'CxUniverse)
-              (let [[concl & more] (v/sentexes-matching kb (list ancestorOf Tom Bob) 'CxUniverse)
-                    derived        (:id concl)]
-                (is (nil? more) "one conclusion, so reading it is not a choice between several")
-                (is (some? derived))
-                {:contexts  (->> (v/supporting-justifications kb derived)
-                                 (mapcat :antecedents)
-                                 (map #(v/sentex kb %))
-                                 (filter #(= 'genl (first (:sentence %))))
-                                 (map :context)
-                                 set)
-                 ;; the same choice as a caller reads it: `why` walks the justification
-                 ;; into `:because`, so a witness that moved with arrival order would move
-                 ;; the proof tree a reader is shown
-                 :because   (->> (:support (v/why kb derived))
-                                 (mapcat :because)
-                                 (filter #(= 'genl (first (:sentence %))))
-                                 (map :context)
-                                 set)
-                 :placement (:context concl)})))]
-    (is (= (witness 'CxCore 'CxUniverse)
-           (witness 'CxUniverse 'CxCore))
-        "the same two supporters, asserted in either order, name the same witness and
-         land the conclusion in the same context")))
+  (let [above (tu/tmp-ctx "Above")]
+    (v/assert kb (list 'genlCx 'CxUniverse above) 'CxUniverse)
+    (letfn [(witness [ctx-a ctx-b]
+              (tu/with-terms [fatherOf parentOf ancestorOf Tom Bob]
+                (v/assert kb (list 'genl fatherOf parentOf) ctx-a)
+                (v/assert kb (list 'genl fatherOf parentOf) ctx-b)
+                (v/assert kb (list 'implies (list parentOf '?x '?y) (list ancestorOf '?x '?y))
+                          'CxUniverse {:direction :forward})
+                (v/assert kb (list fatherOf Tom Bob) 'CxUniverse)
+                (let [[concl & more] (v/sentexes-matching kb (list ancestorOf Tom Bob) 'CxUniverse)
+                      derived        (:id concl)]
+                  (is (nil? more) "one conclusion, so reading it is not a choice between several")
+                  (is (some? derived))
+                  {:contexts  (->> (v/supporting-justifications kb derived)
+                                   (mapcat :antecedents)
+                                   (map #(v/sentex kb %))
+                                   (filter #(= 'genl (first (:sentence %))))
+                                   (map :context)
+                                   set)
+                   ;; the same choice as a caller reads it: `why` walks the justification
+                   ;; into `:because`, so a witness that moved with arrival order would move
+                   ;; the proof tree a reader is shown
+                   :because   (->> (:support (v/why kb derived))
+                                   (mapcat :because)
+                                   (filter #(= 'genl (first (:sentence %))))
+                                   (map :context)
+                                   set)
+                   :placement (:context concl)})))]
+      (is (= (witness above 'CxUniverse)
+             (witness 'CxUniverse above))
+          "the same two supporters, asserted in either order, name the same witness and
+           land the conclusion in the same context"))))

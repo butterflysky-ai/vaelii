@@ -318,7 +318,7 @@
           (try
             (is (= [] (roster)))
             (v/assert kb '(forced_monotonic_predicate likes) 'CxUniverse)
-            (is (= '[[forced_monotonic_predicate likes]] (roster)))
+            (is (= '[[forced_monotonic_predicate likes CxUniverse]] (roster)))
             (finally (v/close! kb))))
         (finally (rm-rf! dir))))))
 

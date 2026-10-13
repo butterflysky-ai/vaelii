@@ -305,7 +305,7 @@
   (when asp?
     (tu/with-cleared-kb [kb tu/fresh]
       (tu/with-terms [colored]
-        (install-3coloring! kb 'CxTime colored '[T1 T2] '[[T1 T2]])
-        (let [r (v/assert kb (list 'do/label 'CxTime 'CxTimePlan :one) 'CxTime)]
+        (install-3coloring! kb 'CxUniverse colored '[T1 T2] '[[T1 T2]])
+        (let [r (v/assert kb (list 'do/label 'CxUniverse 'CxTimePlan :one) 'CxUniverse)]
           (is (every? number? [(:ground-ms r) (:translate-ms r) (:solve-ms r)])
               "grounding / translate / solve are timed separately for a profiling caller"))))))

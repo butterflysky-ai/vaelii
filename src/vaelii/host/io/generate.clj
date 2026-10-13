@@ -30,7 +30,8 @@
   (:require [vaelii.core :as v]
             [vaelii.host.core-context :as core-context]
             [vaelii.host.starter :as starter]
-            [vaelii.impl.rules :as rules]))
+            [vaelii.impl.rules :as rules]
+            [vaelii.impl.sentex :as sx]))
 
 ;; ---- the knobs -----------------------------------------------------------
 
@@ -76,7 +77,7 @@
          ;; the depth bound below it.  A single datum's fan-out is atomic, so a run
          ;; overshoots the cap by whatever the last one derived
          :max-derivations 100000
-         :base :core))                                   ; :core (the vocabulary head) | :starter
+         :base :core))                                   ; :core (the upper layer) | :starter
 
 (def ^:private context-root 'CxGenerated)
 
@@ -206,9 +207,9 @@
         ;;
         ;; Bound rather than written inline in the map below, because `:units` is the
         ;; count of assertions `load-into` makes and this is one of the phases it counts:
-        ;; the head edge under `CxCore` is an assertion the context *list* does not name,
+        ;; the edge under CxUniverse is an assertion the context *list* does not name,
         ;; so a unit total derived from that list runs one short of the bar it drives.
-        cedges (cons (list 'genlCx context-root 'CxCore)
+        cedges (cons (list 'genlCx context-root sx/root-context)
                      ;; each band sees the one above it — `(genlCx Sub Super)`,
                      ;; so the *second* element of a consecutive pair is the child
                      (map (fn [[super sub]] (list 'genlCx sub super))

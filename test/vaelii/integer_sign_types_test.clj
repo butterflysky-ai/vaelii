@@ -1,7 +1,7 @@
 ;; SPDX-License-Identifier: SSPL-1.0
 ;; Copyright © 2026 Vaelii LLC and the Vaelii contributors.
 (ns vaelii.integer-sign-types-test
-  "The four sign-refined integer types of CxCore — `positive_integer`,
+  "The four sign-refined integer types of CxUniverse — `positive_integer`,
   `negative_integer`, `non_negative_integer`, `non_positive_integer` — each a
   `defnSufficient` + `defnNecessary` pair over the computed `integer` / `greaterThan` /
   `lessThan`, so membership of a bare number is decided by evaluation at query time and
@@ -38,14 +38,14 @@
           :let [[_ & conjuncts] condition]]
     (testing (str type)
       (is (v/genl? kb type 'integer))
-      (is (some? (v/handle-of kb (list 'defnSufficient type condition) 'CxCore)))
-      (is (some? (v/handle-of kb (list 'defnNecessary type condition) 'CxCore)))
-      (is (nil? (v/handle-of kb (list 'defnIff type condition) 'CxCore)))
+      (is (some? (v/handle-of kb (list 'defnSufficient type condition) 'CxUniverse)))
+      (is (some? (v/handle-of kb (list 'defnNecessary type condition) 'CxUniverse)))
+      (is (nil? (v/handle-of kb (list 'defnIff type condition) 'CxUniverse)))
       (doseq [conjunct conjuncts]
-        (is (some? (v/handle-of kb (list 'implies (list type '?x) conjunct) 'CxCore))
+        (is (some? (v/handle-of kb (list 'implies (list type '?x) conjunct) 'CxUniverse))
             "membership entails every defining conjunct"))
       (is (= [:naf-not-closed]
-             (map :type (v/check kb (list 'implies condition (list type '?x)) 'CxCore)))
+             (map :type (v/check kb (list 'implies condition (list type '?x)) 'CxUniverse)))
           "no conjunct of the condition binds the member, so it expands to no rule"))))
 
 (tu/deftest-kb integer-is-a-computed-kind-check
@@ -110,9 +110,9 @@
 
 (tu/deftest-kb core-integer-constraints-use-the-tightest-sign-type
   (doseq [[pred slot] positive-position-slots]
-    (is (some? (v/handle-of kb (list 'arg pred slot 'positive_integer) 'CxCore))
+    (is (some? (v/handle-of kb (list 'arg pred slot 'positive_integer) 'CxUniverse))
         (str pred " argument " slot " is a one-based position")))
-  (is (some? (v/handle-of kb '(arg arity 2 non_negative_integer) 'CxCore))
+  (is (some? (v/handle-of kb '(arg arity 2 non_negative_integer) 'CxUniverse))
       "a predicate may have zero arguments, but never a negative arity"))
 
 (tu/deftest-kb arity-is-non-negative-rather-than-positive

@@ -354,7 +354,7 @@ no `temporalDistance` gets the qualitative answer back untouched.
 ## Vocabulary
 
 `temporalDistance` (ternary), `startOf` and `endOf` (binary) are declared in
-`resources/kb/upper/CxTime.txt` beside the interval and instant relations, each with
+`resources/kb/upper/time.txt` beside the interval and instant relations, each with
 its own `comment` sentex. Instants and intervals are ordinary individuals; nothing declares
 them, and nothing here is about clocks or calendars.
 

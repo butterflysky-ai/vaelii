@@ -13,7 +13,7 @@
 
   The one that matters most is the **scoping**: an `arg` declaration binds a predicate's
   arguments only for a reader whose context sees the declaration, so `describe` at
-  `CxCore` and at `CxWell` are two different answers about one predicate and both are
+  `CxUniverse` and at `CxWell` are two different answers about one predicate and both are
   right.  A `describe` that read the whole KB would answer the second everywhere, and
   every context-scoped vocabulary would look global."
   (:require [clojure.test :refer [deftest is testing use-fixtures]]
@@ -33,7 +33,7 @@
   (let [d (v/describe kb 'parentOf W)]
     (testing "it is a predicate, and the KB says how long a parentOf sentence is"
       (is (= :predicate (:role d)))
-      (is (= 2 (:arity d))))
+      (is (= [2 'parentOf] ((juxt :arity :arity-via) d))))
     (testing "both argument positions are declared, and each declaration says where"
       (is (= '[(arg parentOf 1 organism) (arg parentOf 2 organism)]
              (mapv :sentence (:arg-declarations d))))
@@ -67,7 +67,7 @@
     (is (= [:predicate 2] ((juxt :role :arity) (v/describe kb r))) (str r)))
   (is (contains? (:props (v/describe kb 'orthogonal)) :symmetric))
   (tu/with-terms [near_rel close_rel unary_kind]
-    (v/assert kb (list 'symmetric near_rel) 'CxUniverse)
+    (v/assert kb (list 'symmetric near_rel) 'CxUniverse {:strength :monotonic})
     (v/assert kb (list 'binary_predicate close_rel) 'CxUniverse)
     (v/assert kb (list 'genl near_rel close_rel) 'CxUniverse)
     (v/assert kb (list 'unary_predicate unary_kind) 'CxUniverse)
@@ -75,7 +75,13 @@
     (let [d (v/describe kb near_rel W)]
       (is (= [:predicate 2] ((juxt :role :arity) d)))
       (is (= #{:symmetric} (:props d))))
-    (is (= :type (:role (v/describe kb unary_kind W))) "a unary node is a type")))
+    (is (= :type (:role (v/describe kb unary_kind W))) "a unary node is a type"))
+  (tu/with-terms [relP relQ Xa Xb Xc]
+    (v/assert kb (list 'arity relQ 2) 'CxUniverse)
+    (v/assert kb (list 'genl relP relQ) 'CxUniverse)
+    (v/assert kb (list relP Xa Xb Xc) 'CxUniverse)
+    (is (= [:predicate 2 relQ] ((juxt :role :arity :arity-via) (v/describe kb relP W)))
+        "a relation bound to no length of its own is described with the length it inherits")))
 
 (tu/deftest-kb a-type-is-described-by-what-it-is-under-and-what-it-rules-out
   (let [d (v/describe kb 'dog W)]
@@ -200,7 +206,7 @@
     (is (= :context (:role d)))
     (testing "its ancestor set holds the contexts it reads, reflexively"
       (is (contains? (set (:terms (:up d))) 'CxKinship))
-      (is (contains? (set (:terms (:up d))) 'CxCore)))
+      (is (contains? (set (:terms (:up d))) 'CxUniverse)))
     (testing "its descendant set holds the contexts that read it"
       (is (contains? (set (:terms (:down d))) 'CxWell)))
     (testing "and how many sentexes hold in it"
@@ -211,15 +217,16 @@
 ;; ---- the scoping, which is the whole point ------------------------------
 
 (tu/deftest-kb an-argument-declaration-is-reported-only-where-the-reader-can-see-it
-  ;; `(arg parentOf 1 organism)` is stated in an upper-spindle member; `CxCore` is its head and
-  ;; sees nothing below.  A `describe` that read the whole KB would report the
+  ;; `(arg parentOf 1 organism)` is stated in CxUniverse, which a context with no
+  ;; `genlCx` edge does not see.  A `describe` that read the whole KB would report the
   ;; declaration to a reader for whom it does not bind, which is the failure this
   ;; scoping exists to stop — and it is invisible from the answer, since a declaration
   ;; reported is a declaration that looks like it applies.
   (testing "a reader below the declaration sees it"
     (is (= 2 (count (:arg-declarations (v/describe kb 'parentOf W))))))
-  (testing "a reader above it does not"
-    (is (empty? (:arg-declarations (v/describe kb 'parentOf 'CxCore)))))
+  (testing "a reader that does not see CxUniverse does not"
+    (tu/with-terms [CxOutside]
+      (is (empty? (:arg-declarations (v/describe kb 'parentOf CxOutside))))))
   (testing "and the unscoped read sees every context's"
     (is (= 2 (count (:arg-declarations (v/describe kb 'parentOf '?ctx)))))))
 

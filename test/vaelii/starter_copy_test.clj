@@ -58,7 +58,7 @@
           (v/handles kb))))
 
 (defn- taxonomy-content
-  "The two cached closures a reader sees: the type hierarchy and the context spindle."
+  "The two cached closures a reader sees: the type hierarchy and the context hierarchy."
   [kb]
   (let [t (reasoning/taxonomy kb)]
     {:types    (into {} (for [x (tax/types t)]    [x (set (tax/genls-global t x))]))

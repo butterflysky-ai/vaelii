@@ -238,7 +238,7 @@
   ;; choose between — the only way a sighting outlives its named edge is a second path.
   (tu/with-terms [bird flies Tweety CxLow CxHigh]
     (v/assert kb (list 'genlCx CxHigh 'CxUniverse) 'CxUniverse)
-    (let [e1 (v/assert kb (list 'genlCx CxLow CxHigh) 'CxCore)
+    (let [e1 (v/assert kb (list 'genlCx CxLow CxHigh) 'CxUniverse)
           e2 (v/assert kb (list 'genlCx CxLow CxHigh) 'CxUniverse)]
       (is (= e1 e2) "one sentex, in CxUniverse, whichever context stated it")
       (is (= 'CxUniverse (:context (v/sentex kb e1))))

@@ -2387,7 +2387,7 @@
 
 (deftest a-derived-context-edge-seeds-like-an-asserted-one
   ;; and a rule concluding the edge reaches the same belief an assert does, or the
-  ;; fixpoint would depend on whether the spindle was written or inferred.
+  ;; fixpoint would depend on whether the context edge was written or inferred.
   ;;
   ;; Four orderings, chosen for the positions that matter: the edge rule first and last,
   ;; and the fact arriving before and after the wiring that has to reach it.  The test
@@ -2669,7 +2669,7 @@
   (two-permuting-marks-license nil))
 
 ;; The same firings with the rules and the facts in a context that sees no statement of
-;; the mark: `CxPI`, which no `genlCx` edge names, and `CxPH`, which sees CxCore and not
+;; the mark: `CxPI`, which no `genlCx` edge names, and `CxPH`, which sees `CxPG` and not
 ;; CxUniverse, where the lifted copy sits.  The store sorts the fact for every context, so
 ;; the matcher reads the mirror there too, and the firing is placed by the rule and the
 ;; fact while naming the mark (`chain/placement-antecedents`).  Placed by the mark's context
@@ -2681,7 +2681,7 @@
   args] context]}` — stated of `umRel`, its handle into `h` under `k`."
   [home marks h]
   (into [#(do (v/assert % '(genlCx CxPA CxUniverse) 'CxUniverse)
-              (v/assert % '(genlCx CxPH CxCore) 'CxUniverse)
+              (v/assert % '(genlCx CxPH CxPG) 'CxUniverse)
               (v/assert % '(implies (umRel ?x ?y) (umNoted ?x ?y)) home {:direction :forward}))
          #(v/assert % '(implies (and (umRel ?x ?y) (um_tagged ?x)) (umJoined ?x ?y))
                     home {:direction :forward})
@@ -3163,14 +3163,14 @@
             'CxUniverse {:direction :forward}))
 
 (deftest a-generator-and-its-stamped-rules-are-order-independent
-  ;; The shape CxCore's arity vocabulary uses (docs/generators.md), stated over a
+  ;; The shape CxUniverse's arity vocabulary uses (docs/generators.md), stated over a
   ;; miniature so the scenario is the mechanism and not the ontology: one rule whose
   ;; consequent is itself a rule, a mapping fact that fills the hole, and members of the
   ;; type the hole names.  A stamped rule is minted when its mapping fact arrives and
   ;; may therefore arrive after the members it fires on, before them, or between two of
   ;; them.  120 orderings.  A stamped rule concludes an arity binding, a roster literal,
   ;; only from roster antecedents, so the generator's op declares the two types on the
-  ;; roster, as the engine's baseline holds CxCore's exact-arity classes.
+  ;; roster, as the engine's baseline holds CxUniverse's exact-arity classes.
   (let [ops [#(generator! %)
              #(v/assert % '(typeArity binary_thing 2) 'CxUniverse)
              #(v/assert % '(typeArity ternary_thing 3) 'CxUniverse)

@@ -1,7 +1,7 @@
 ;; SPDX-License-Identifier: SSPL-1.0
 ;; Copyright © 2026 Vaelii LLC and the Vaelii contributors.
 (ns vaelii.core-context-test
-  "The CxCore ontology loads and documents the core predicates."
+  "The upper ontology loads into CxUniverse and documents the core predicates."
   (:require [clojure.test :refer [deftest is testing use-fixtures]]
             [vaelii.core :as v]
             [vaelii.host.core-context :as core-context]
@@ -11,12 +11,12 @@
 (use-fixtures :each (tu/neutral-fresh #(doto (tu/fresh) (core-context/load-into))))
 
 (tu/deftest-kb core-predicates-are-documented
-  (testing "every core predicate has a comment sentex in CxCore"
+  (testing "every core predicate has a comment sentex in CxUniverse"
     (doseq [term '[thing genl genlCx arg comment implies]]
       (is (= 1 (count (core-context/comment-of kb term))) (str "comment for " term))
       (is (string? (first (core-context/comment-of kb term))))))
-  (testing "comments are ordinary sentexes living in CxCore"
-    (is (seq (v/sentexes-matching kb '(comment genl ?text) 'CxCore)))))
+  (testing "comments are ordinary sentexes living in CxUniverse"
+    (is (seq (v/sentexes-matching kb '(comment genl ?text) 'CxUniverse)))))
 
 (tu/deftest-kb extended-core-vocabulary-is-documented
   (testing "metadata, negation, and virtual rule wrappers each have a comment"
@@ -32,15 +32,14 @@
   ;; the constraint-only reading: the refusal is the subject
   (tu/without-entailing
    ;; arg is a core predicate the engine interprets, so a constraint on it is checked
-   ;; on assert.  (The starter's domain arg live in the upper CxRelation now, not
-   ;; the vocabulary head, so this defines its own vocabulary — wiring a data context to
-   ;; see CxCore directly, since a CxCore-only KB is a head with no spindle under it.)
+   ;; on assert.  The test defines its own vocabulary in CxUniverse and wires a data
+   ;; context below it.
    (let [animal (tu/tmp-type) rock (tu/tmp-type) kin (tu/tmp-pred)
          tom (tu/tmp-ind) boulder (tu/tmp-ind)]
-     (v/assert kb '(genlCx CxData CxCore) 'CxUniverse)   ; a data context that sees core
-     (v/assert kb (list 'genl animal 'thing) 'CxCore)
-     (v/assert kb (list 'genl rock   'thing) 'CxCore)
-     (v/assert kb (list 'arg kin 1 animal) 'CxCore)                  ; the constraint
+     (v/assert kb '(genlCx CxData CxUniverse) 'CxUniverse)   ; a data context below the upper layer
+     (v/assert kb (list 'genl animal 'thing) 'CxUniverse)
+     (v/assert kb (list 'genl rock   'thing) 'CxUniverse)
+     (v/assert kb (list 'arg kin 1 animal) 'CxUniverse)                  ; the constraint
      (v/assert kb (list animal tom)    'CxData)
      (v/assert kb (list rock   boulder) 'CxData)
      (testing "the arg constraint applies on assert"
@@ -50,32 +49,32 @@
 
 (tu/deftest-kb argument-declarations-accept-functions-and-predicates
   (tu/with-terms [ReviewFn reviewRelation]
-    (v/assert kb (list 'ternary_function ReviewFn) 'CxCore)
-    (v/assert kb (list 'ternary_predicate reviewRelation) 'CxCore)
+    (v/assert kb (list 'ternary_function ReviewFn) 'CxUniverse)
+    (v/assert kb (list 'ternary_predicate reviewRelation) 'CxUniverse)
     (doseq [relation [ReviewFn reviewRelation]
             [position projection] [[1 'arg1] [2 'arg2] [3 'arg3]]]
-      (v/assert kb (list 'arg relation position 'integer) 'CxCore)
-      (is (true? (v/ask? kb (list projection relation 'integer) 'CxCore)))
-      (is (empty? (v/check kb (list projection relation 'integer) 'CxCore))))))
+      (v/assert kb (list 'arg relation position 'integer) 'CxUniverse)
+      (is (true? (v/ask? kb (list projection relation 'integer) 'CxUniverse)))
+      (is (empty? (v/check kb (list projection relation 'integer) 'CxUniverse))))))
 
 (tu/deftest-kb remaining-argument-metadata-accepts-relations
   ;; A temporary type rather than `integer`, because the declarations are the subject and
   ;; the type is incidental.  With subsumed mints pruned, the default, a `quotedArg` written
-  ;; of `integer` gives it a type more specific than `thing`, which withdraws CxCore's own
+  ;; of `integer` gives it a type more specific than `thing`, which withdraws CxUniverse's own
   ;; minted `(thing integer)`; the re-mint after the teardown allocates a fresh handle, so
   ;; the baseline would come back saying the same thing under a different one, and
   ;; `assert-neutral!` refuses to call that restored (docs/argtypes.md).
   (tu/with-terms [ReviewFn reviewRelation tmpScalar]
-    (v/assert kb (list 'genl tmpScalar 'thing) 'CxCore)
-    (v/assert kb (list 'binary_function ReviewFn) 'CxCore)
-    (v/assert kb (list 'binary_predicate reviewRelation) 'CxCore)
+    (v/assert kb (list 'genl tmpScalar 'thing) 'CxUniverse)
+    (v/assert kb (list 'binary_function ReviewFn) 'CxUniverse)
+    (v/assert kb (list 'binary_predicate reviewRelation) 'CxUniverse)
     (doseq [relation [ReviewFn reviewRelation]
             declaration [(list 'genlArg relation 1 'thing)
                          (list 'quotedArg relation 1 tmpScalar)
                          (list 'interArg relation 1 tmpScalar 2 tmpScalar)]]
-      (is (empty? (v/check kb declaration 'CxCore)))
-      (v/assert kb declaration 'CxCore)
-      (is (true? (v/ask? kb declaration 'CxCore))))))
+      (is (empty? (v/check kb declaration 'CxUniverse)))
+      (v/assert kb declaration 'CxUniverse)
+      (is (true? (v/ask? kb declaration 'CxUniverse))))))
 
 (tu/deftest-kb arity-is-declared-functional
   ;; a relation has one arity, and the arity and its relation-wide exact class derive
@@ -85,41 +84,39 @@
   ;; (disjoint binary ternary) on the classes the two numbers derive.
   (is (v/has-prop? kb :functional 'arity))
   (let [rel (tu/tmp-pred)]
-    (v/assert kb (list 'binary_predicate rel) 'CxCore)
-    (is (integer? (v/assert kb (list 'arity rel 7) 'CxCore)))
-    (is (not (and (v/ask? kb (list 'arity rel 2) 'CxCore)
-                  (v/ask? kb (list 'arity rel 7) 'CxCore)))
+    (v/assert kb (list 'binary_predicate rel) 'CxUniverse)
+    (is (integer? (v/assert kb (list 'arity rel 7) 'CxUniverse)))
+    (is (not (and (v/ask? kb (list 'arity rel 2) 'CxUniverse)
+                  (v/ask? kb (list 'arity rel 7) 'CxUniverse)))
         "the two values are one nogood, and not both believed")))
 
 (tu/deftest-kb exact-arity-derives-fixed-policy-without-argument-entailment
   (binding [checks/*assertive-arg-types?* false]
     (tu/with-terms [freshRelation]
-      (let [h (v/assert kb (list 'arity freshRelation 4) 'CxCore)]
-        (is (v/ask? kb (list 'fixed_arity freshRelation) 'CxCore))
-        (is (v/isa? kb freshRelation 'fixed_arity 'CxCore))
+      (let [h (v/assert kb (list 'arity freshRelation 4) 'CxUniverse)]
+        (is (v/ask? kb (list 'fixed_arity freshRelation) 'CxUniverse))
+        (is (v/isa? kb freshRelation 'fixed_arity 'CxUniverse))
         (v/retract! kb h)
-        (is (not (v/ask? kb (list 'fixed_arity freshRelation) 'CxCore)))
-        (is (not (v/isa? kb freshRelation 'fixed_arity 'CxCore)))))))
+        (is (not (v/ask? kb (list 'fixed_arity freshRelation) 'CxUniverse)))
+        (is (not (v/isa? kb freshRelation 'fixed_arity 'CxUniverse)))))))
 
-(tu/deftest-kb the-core-vocabulary-is-the-size-docs-kbs-says
-  ;; A bound, not a pin.  docs/kbs.md's row says "850+", and the exact number moves
-  ;; whenever CxCore gains a term on purpose — which made an equality here pure churn:
-  ;; it failed on every deliberate change and caught nothing else, because
-  ;; `vocabulary-audit` already fails a functor nobody classified.  What a count *can*
-  ;; catch is the load going wrong in bulk — an empty classpath, a file read twice — so
-  ;; that is what this asserts.
+(tu/deftest-kb the-upper-vocabulary-is-the-size-docs-kbs-says
+  ;; A bound, not a pin.  The exact number moves whenever a shipped upper file gains a term
+  ;; on purpose, and `vocabulary-audit` already fails a functor nobody classified.  The
+  ;; bound catches the load going wrong in bulk: an empty classpath, or a file read twice.
   (let [n (v/sentex-count kb)]
-    (is (< 500 n 1800)
-        (str "CxCore loaded " n " sentexes; docs/kbs.md's Core vocabulary row says 850+."
+    (is (< 2000 n 4500)
+        (str "the upper layer loaded " n " sentexes; docs/kbs.md's vocabulary row says 3,000+."
              "  A number outside this band means the load is wrong, not that the"
-             "  vocabulary grew — check the classpath before touching the row."))))
+             "  vocabulary grew: check the classpath before touching the row."))))
 
-(tu/deftest-kb the-bootstrap-genlCx-edge-is-stored-where-every-edge-is
-  ;; `(forced_decontextualized_predicate genlCx)` stores every edge in CxUniverse, and the
-  ;; edge `load-into` asserts ahead of the file is one of them, so the declaration has to
-  ;; precede it: an edge left in CxCore is a second sentex the next assert of it stores
-  (is (some? (v/handle-of kb '(genlCx CxUniverse CxCore) 'CxUniverse)))
-  (is (nil? (v/handle-of kb '(genlCx CxUniverse CxCore) 'CxCore)))
-  (let [n (v/sentex-count kb)]
-    (v/assert kb '(genlCx CxUniverse CxCore) 'CxCore)
-    (is (= n (v/sentex-count kb)) "re-asserting the edge is the one it already holds")))
+(tu/deftest-kb an-edge-asserted-in-another-context-is-stored-in-cxuniverse
+  ;; `(forced_decontextualized_predicate genlCx)` in core.txt stores every edge in
+  ;; CxUniverse, so an edge written to a data context is the sentex a second assert finds.
+  (tu/with-terms [CxLow CxHigh]
+    (v/assert kb (list 'genlCx CxLow CxHigh) CxLow)
+    (is (some? (v/handle-of kb (list 'genlCx CxLow CxHigh) 'CxUniverse)))
+    (is (nil? (v/handle-of kb (list 'genlCx CxLow CxHigh) CxLow)))
+    (let [n (v/sentex-count kb)]
+      (v/assert kb (list 'genlCx CxLow CxHigh) CxHigh)
+      (is (= n (v/sentex-count kb)) "re-asserting the edge finds the one stored"))))

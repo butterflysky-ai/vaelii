@@ -15,7 +15,7 @@
   (let [dog (tu/tmp-type) cat (tu/tmp-type)
         muffet (tu/tmp-ind) whiskers (tu/tmp-ind)]
     ;; the declaration constrains where it is visible, so the asserting context is
-    ;; wired below it — the same wiring the starter's spindle gives every real one
+    ;; wired below it, as the starter wires every middle context
     (v/assert kb (list 'genlCx 'CxNaturalWorld 'CxUniverse) 'CxUniverse)
     (v/assert kb (list 'disjoint dog cat) 'CxUniverse)
     (v/assert kb (list dog muffet) 'CxNaturalWorld)

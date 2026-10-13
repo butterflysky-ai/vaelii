@@ -696,7 +696,7 @@
   ;; are scalars and route nowhere, so the two increments follow it down.  A node count read
   ;; off the leaves is the exception (`counted-count`): an increment or decrement stores
   ;; nothing and replies with the count the leaf write before it in the batch left
-  ;; (`kv/node-adds` orders them so).
+  ;; (`kv/flat-family-adds` orders them so).
   (kv-get  [this k]
     (if-some [n (counted-count this dict argfam m k)] n (p/kv-get fallback k)))
   (kv-increment [this k]

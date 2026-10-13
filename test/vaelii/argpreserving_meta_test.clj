@@ -10,14 +10,14 @@
 
   The engine answers it in `provers/MetaConstraintProver`, a bounded closure walk, and
   NOT by declaring the meta-predicates `transitiveInArg` — that would tax every one of
-  the KB's very many `arg`/`genlArg` lookups (see `resources/kb/CxCore.txt`).  The
+  the KB's very many `arg`/`genlArg` lookups (see `resources/kb/CxUniverse.txt`).  The
   predicate position (1) reaches DOWN `genl` (a constraint on a super binds its
   specializations); an unconditional type reaches UP (a stored subtype answers its
   supertypes — `arg`/`genlArg` position 3, `interArg`'s target position 5); and
   `interArg`'s trigger position 3, being an antecedent, is contravariant and reaches
   DOWN.
 
-  The KB here is CxCore alone, so what these tests read is the *shipped* vocabulary
+  The KB here is the upper layer alone, so what these tests read is the *shipped* vocabulary
   and not one they stated."
   (:require [clojure.test :refer [is testing use-fixtures]]
             [vaelii.core :as v]
@@ -25,7 +25,7 @@
 
 (use-fixtures :each (tu/neutral-fresh #(doto (tu/fresh) (tu/load-core!))))
 
-(def ^:private C 'CxCore)
+(def ^:private C 'CxUniverse)
 
 ;; ---- arg, both directions --------------------------------------------
 
@@ -80,7 +80,7 @@
   ;; other three, and refuses a sub-predicate's tuple under a super's declaration —
   ;; while the query surface answered only what was literally stored.
   ;;
-  ;; The types here are the *syntactic* lattice CxCore ships, not a stated one: a
+  ;; The types here are the *syntactic* lattice CxUniverse ships, not a stated one: a
   ;; `quotedArg` types the term written in a position, so `positive_integer` below
   ;; `integer` is the refinement the covariance is read over.
   (tu/with-terms [pAge pInfantAge]
@@ -154,9 +154,9 @@
   ;; constraint, a sub-predicate may carry a signature of its own — a ternary
   ;; specialization of a binary — so its arity is not answered down `genl` as a fact,
   ;; and answering it would in any case need the forward `(arity ?p 2) ⊢
-  ;; (binary_predicate ?p)` cycle a backward prover cannot fire.  `check`'s
-  ;; `inherited-arity` still holds a sub-predicate that declares NOTHING of its own to
-  ;; its supers at assert time — a refusal, not an answerable `(arity sub n)`.
+  ;; (binary_predicate ?p)` cycle a backward prover cannot fire.  `arity/relation-length`
+  ;; still holds a sub-predicate that declares NOTHING of its own to its supers at assert
+  ;; time — a refusal, not an answerable `(arity sub n)`.
   (tu/with-terms [mySuper mySub]
     (v/assert kb (list 'genl mySub mySuper) C)
     (v/assert kb (list 'arity mySuper 2) C)

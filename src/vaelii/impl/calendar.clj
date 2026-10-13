@@ -132,11 +132,12 @@
 ;; ---- the prover ---------------------------------------------------------
 
 (defn- time-vocabulary-visible?
-  "Is `CxTime` visible from `context`?  One cached, belief-following taxonomy read, and
-  the goal's own structural test has already run when it is asked — so a KB that never
-  writes a calendar term pays nothing for it.
+  "Is the time vocabulary (`time.txt`, stored in CxUniverse) visible from `context`?
+  One cached, belief-following taxonomy read, and the goal's own structural test has
+  already run when it is asked — so a KB that never writes a calendar term pays nothing
+  for it.
 
-  `(transitive instantBefore)` stands in for the file: it is `CxTime`'s declaration and
+  `(transitive instantBefore)` stands in for the file: it is declared in `time.txt` and
   nothing else states it, so it is believed exactly where the vocabulary these goals are
   written in can be seen.  A calendar is arithmetic and could be answered from anywhere;
   scoping it to the theory that names `startOf` is what keeps a computed answer a claim

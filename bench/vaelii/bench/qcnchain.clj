@@ -22,7 +22,6 @@
   Run: `lein bench-qcnchain`"
   (:require [vaelii.core :as v]
             [vaelii.host.core-context :as core-context]
-            [vaelii.host.seed :as seed]
             [vaelii.impl.space :as space]))
 
 (defn- fresh-kb
@@ -33,7 +32,6 @@
   (let [kb (v/open-kb {:backend :memory :space 30 :recover? false})]
     (v/clear! kb)
     (core-context/load-into kb)
-    (seed/load-context kb 'CxSpace "upper")
     kb))
 
 (defn- ms [f] (let [t (System/nanoTime)] (f) (/ (- (System/nanoTime) t) 1e6)))

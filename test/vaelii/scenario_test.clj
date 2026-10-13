@@ -25,7 +25,7 @@
 ;; network directly, so it needs no query engine.
 (use-fixtures :each (tu/neutral-fresh
                      #(doto (tu/fresh)
-                        (tu/load-core-with! '[[CxTime "upper"] [CxSpace "upper"]]))))
+                        (tu/load-core!))))
 
 (def ^:private C 'CxUniverse)
 

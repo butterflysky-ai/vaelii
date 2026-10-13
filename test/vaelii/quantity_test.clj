@@ -10,20 +10,16 @@
   (:require [clojure.test :refer [is testing use-fixtures]]
             [vaelii.core :as v]
             [vaelii.host.core-context :as core-context]
-            [vaelii.host.seed :as seed]
             [vaelii.impl.nat :as nat]
             [vaelii.impl.provers :as provers]
             [vaelii.impl.types.prover :as prover-types]
             [vaelii.test-util :as tu]))
 
-;; a fresh KB per test: the CxCore grammar (`unreifiable_function`,
-;; `binary_predicate`, …) plus CxMeasure, the upper context that declares
-;; QuantityFn / QuantityIntervalFn unreifiable and documents the comparison and table
-;; predicates.  Measurement is subject matter, not grammar, so it is nobody's business
-;; but its own context's.
+;; a fresh KB per test: the upper layer, whose measure.txt declares QuantityFn /
+;; QuantityIntervalFn unreifiable and documents the comparison and table predicates.
 (use-fixtures :each (tu/neutral-fresh
                      #(doto (tu/fresh)
-                        (tu/load-core-with! '[[CxMeasure "upper"]]))))
+                        (tu/load-core!))))
 
 (def ^:private C 'CxUniverse)
 
@@ -214,8 +210,7 @@
   (v/assert kb '(conversionFactor Gram Kilogram 0.002) C)
   (let [forward (factor-of kb 'Gram)]
     (tu/with-neutral-kb [other #(doto (tu/isolated-fresh)
-                                  (core-context/load-into)
-                                  (seed/load-context 'CxMeasure "upper"))]
+                                  (core-context/load-into))]
       (v/assert other '(conversionFactor Gram Kilogram 0.002) C)
       (v/assert other '(conversionFactor Gram Kilogram 0.001) C)
       (v/assert other '(dimensionOf Gram Mass) C)
@@ -240,8 +235,7 @@
     (v/assert kb '(spanOf Trail (QuantityFn 1 Furlong)) C)
     (v/assert kb '(spanOf Trail (QuantityFn 2 Chain)) C)
     (tu/with-neutral-kb [other #(doto (tu/isolated-fresh)
-                                  (core-context/load-into)
-                                  (seed/load-context 'CxMeasure "upper"))]
+                                  (core-context/load-into))]
       (table! other)
       (v/assert other '(spanOf Trail (QuantityFn 2 Chain)) C)
       (v/assert other '(spanOf Trail (QuantityFn 1 Furlong)) C)

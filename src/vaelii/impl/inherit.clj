@@ -1067,7 +1067,8 @@
   each returned, since each places the conclusion in a reader the other does not reach.
   Each step names the facts stating it that no other fact stating it covers, ordered on
   the **context name and then on what the fact says**, so the witnesses are a function
-  of the content rather than of the order the facts arrived in.  The sentence is in the
+  of the content rather than of the order the facts arrived in, and each step carries
+  that key into the walk's own order (`tax/uncovered-routes`).  The sentence is in the
   key because the matcher is type-aware and a goal fans over sub-predicates: two
   believed sentexes routinely state one step from one context, and the handle chosen
   here becomes an antecedent of the recorded justification — the same completeness
@@ -1092,9 +1093,10 @@
                       compare)
                      (partition-by first)
                      (mapcat (fn [steps]
-                               (for [sw (tax/uncovered tx label (mapv second steps))]
-                                 [(first (first steps)) sw (supporter-rank sclass (first sw))
-                                  (boolean (and hid (hid (first sw))))])))))]
+                               (let [keys (into {} (map (fn [[_ sw c t]] [sw [c t]])) steps)]
+                                 (for [sw (tax/uncovered tx label (mapv second steps))]
+                                   [(first (first steps)) sw (supporter-rank sclass (first sw))
+                                    (boolean (and hid (hid (first sw)))) (keys sw)]))))))]
     (tax/uncovered-routes tx a w step)))
 
 (defn- move-supports
@@ -1751,7 +1753,7 @@
 (def ^:private universal-context
   "Where the engine lifts a permuting mark (`special/universal-context`, which requires this
   namespace and so cannot be read from it)."
-  'CxUniverse)
+  sx/root-context)
 
 (def ^:private permuted-mark-cap
   "The most mark statements on one predicate `permuted-read-supports` searches the

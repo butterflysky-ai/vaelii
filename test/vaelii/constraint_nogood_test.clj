@@ -1242,7 +1242,7 @@
   ;; The index keeps the related `disjoint`s under the `genl` generation and the cover
   ;; pairs at the store and removal choke points, so an edge or a cover leaving takes its
   ;; report with it, and a context that does not see the edge reads no clash.  The KB
-  ;; loads no roster, so the declarations are asserted `:monotonic` as CxCore forces them.
+  ;; loads no roster, so the declarations are asserted `:monotonic` as CxUniverse forces them.
   (tu/with-terms [animal_w dog_w cat_w CxRelSide]
     (let [clashes #(into #{} (map (fn [r] (into #{} (map :sentence) (:sides r)))) (v/conflicts kb))
           decl    (list 'disjoint dog_w animal_w)

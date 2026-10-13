@@ -8,12 +8,11 @@ surface the placement tests reason over, and emits an is-a diagram:
 
   - one node per type that appears in a `(genl sub super)`,
   - one edge per `(genl sub super)`, arrow pointing at the more general `super`,
-  - node fill tinted by the context the term is *defined* in (its `(comment term …)`),
-  - edge colour set by the context the `genl` is *written* in.
+  - node fill tinted by the file the term is *defined* in (its `(comment term …)`),
+  - edge colour set by the file the `genl` is *written* in.
 
-An edge whose colour differs from its child node's fill is a genl asserted somewhere
-other than where its subject is documented — the cross-context placement the
-`no-authored-type-relation-names-a-term-its-own-context-cannot-see` test flags.
+An edge whose colour differs from its child node's fill is a genl written in a file
+other than the one that documents its subject.
 
 Four layout engines, none required to be installed:
 
@@ -54,18 +53,19 @@ import sys
 
 REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
-# One hue per context. `line` draws that context's genl edges; `fill` tints a node
-# defined in that context (the same hue lightened toward white so a black label reads).
+# One hue per file, keyed by its basename: an upper file (`core`, `abstract`, …), all
+# loaded into CxUniverse, or a middle context. `line` draws the genl edges written in
+# that file; `fill` tints a node defined there (the same hue lightened toward white so a
+# black label reads).
 CONTEXT_COLORS = {
-    "CxCore":     ("#2f5d8f", "#dbe6f2"),
-    "CxAbstract": ("#6b4c9a", "#e5dcf1"),
-    "CxLife":     ("#2f8f5d", "#d7efe0"),
-    "CxOrganism": ("#1f8a8a", "#d3ecec"),
-    "CxMeasure":  ("#c07a1f", "#f5e6cf"),
-    "CxSociety":  ("#b03a6e", "#f4d9e5"),
-    "CxSpace":    ("#8a5a2f", "#eee0d0"),
-    "CxTime":     ("#b03030", "#f3d6d6"),
-    "CxUniverse": ("#555555", "#e2e2e2"),
+    "core":       ("#2f5d8f", "#dbe6f2"),
+    "abstract":   ("#6b4c9a", "#e5dcf1"),
+    "life":       ("#2f8f5d", "#d7efe0"),
+    "organism":   ("#1f8a8a", "#d3ecec"),
+    "measure":    ("#c07a1f", "#f5e6cf"),
+    "society":    ("#b03a6e", "#f4d9e5"),
+    "space":      ("#8a5a2f", "#eee0d0"),
+    "time":       ("#b03030", "#f3d6d6"),
     "CxWell":     ("#444444", "#dcdcdc"),
 }
 FALLBACK = ("#777777", "#e6e6e6")
@@ -75,10 +75,11 @@ COMMENT_RE = re.compile(r"\(comment\s+(\S+)\s")
 
 
 def kb_files(include_middle, extra):
-    """The .txt files to read: CxCore plus every upper context, then optionally middle,
+    """The .txt files to read: every upper file, `core.txt` first, then optionally middle,
     then any explicit `extra` context names."""
-    files = [os.path.join(REPO, "resources/kb/CxCore.txt")]
-    files += sorted(glob.glob(os.path.join(REPO, "resources/kb/upper/*.txt")))
+    files = [os.path.join(REPO, "resources/kb/upper/core.txt")]
+    files += sorted(f for f in glob.glob(os.path.join(REPO, "resources/kb/upper/*.txt"))
+                    if os.path.basename(f) != "core.txt")
     if include_middle:
         files += sorted(glob.glob(os.path.join(REPO, "resources/kb/middle/*.txt")))
     for cx in extra:
@@ -365,7 +366,7 @@ def svg(pos, depth, home, edges, margin=28, legend_cx=None):
         lx, ly = margin, 20
         out.append(
             f'<text x="{lx}" y="{ly}" font-size="14" font-weight="600" fill="#111">'
-            f'context — node fill = where a term is defined, edge colour = where its genl '
+            f'file — node fill = where a term is defined, edge colour = where its genl '
             f'is written</text>'
         )
         for i, cx in enumerate(legend_cx):
@@ -453,7 +454,7 @@ def inject_legend(svg_text, legend_cx, scale=1.0):
 
     leg = [f'<rect x="0" y="0" width="{vb[2]}" height="{band}" fill="white"/>',
            f'<text x="{s(14)}" y="{s(22)}" font-family="Helvetica" font-size="{s(15)}" '
-           f'font-weight="700" fill="#111">context — node fill = where a term is defined, '
+           f'font-weight="700" fill="#111">file — node fill = where a term is defined, '
            f'edge colour = where its genl is written</text>']
     for i, cx in enumerate(legend_cx):
         line, fill = colors(cx)
@@ -559,7 +560,7 @@ def icicle_svg(roots, children, depth, home, edges, legend_cx, ratio, leaf_h=17,
 
     lx = margin
     out.append(f'<text x="{lx}" y="20" font-size="15" font-weight="700" fill="#111">'
-               f'context — box fill = where a term is defined; faint curve = a '
+               f'file — box fill = where a term is defined; faint curve = a '
                f'multiple-inheritance genl, coloured by where it is written</text>')
     for i, cx in enumerate(legend_cx):
         line, fill = colors(cx)
@@ -588,7 +589,7 @@ def main():
     ap.add_argument("--include-middle", action="store_true",
                     help="also read resources/kb/middle/*.txt")
     ap.add_argument("--include", nargs="*", default=[],
-                    help="extra context names to read (e.g. CxUniverse)")
+                    help="extra files to read, by path under resources/kb without .txt (e.g. koinii/CxRegistry)")
     args = ap.parse_args()
 
     files = kb_files(args.include_middle, args.include)

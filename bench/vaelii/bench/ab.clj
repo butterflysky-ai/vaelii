@@ -13,7 +13,8 @@
 
   Run: `lein with-profile +bench run -m vaelii.bench.ab [--only a,b] [--list]`"
   (:require [clojure.string :as str]
-            [vaelii.core :as v]))
+            [vaelii.core :as v]
+            [vaelii.starter :as starter]))
 
 (def ^:private cx 'CxAb)
 
@@ -166,9 +167,137 @@
     (v/import! kb dir)
     (sample #(dotimes [i 50] (ancestors-of kb (+ 1900 i))) 2 7)))
 
+;; ---- the arity paths ----------------------------------------------------
+;;
+;; The four probes below time what `decide/arity`, `arity/relation-length` and
+;; `arity/own-length` do for a write, an edge move, a read and
+;; a recover.  `lein perf`'s arity checks judge growth between two sizes, so a constant
+;; added at both sizes passes them.
+
+(def ^:private strong {:strength :monotonic})
+
+(defn- arity-predicate
+  "The name of the `i`th predicate of binding kind `k` (`arity-bound-predicates`)."
+  [k i]
+  (symbol (str "abAr" (name k) i)))
+
+(defn- arity-bound-predicates
+  "Declares `per` predicates of each of five bindings in `cx` and returns their names by
+  kind: `:own` `(arity P 2)`, `:cls` `(binary_predicate P)`, `:inh` a `genl` spec of an
+  `:own` predicate, `:min` `variable_arity` with `(arityMin P 2)`, and `:none`, unbound."
+  [kb per]
+  (let [ps (fn [k] (mapv #(arity-predicate k %) (range per)))]
+    (v/with-deferred-settle kb
+      (doseq [p (ps :own)] (v/assert kb (list 'arity p 2) cx strong))
+      (doseq [p (ps :cls)] (v/assert kb (list 'binary_predicate p) cx strong))
+      (doseq [[p q] (map vector (ps :inh) (ps :own))] (v/assert kb (list 'genl p q) cx strong))
+      (doseq [p (ps :min)]
+        (v/assert kb (list 'variable_arity p) cx strong)
+        (v/assert kb (list 'arityMin p 2) cx strong)))
+    (zipmap [:own :cls :inh :min :none] (map ps [:own :cls :inh :min :none]))))
+
+(defn- arity-assert
+  "12,000 facts of length two to four over 5 groups of 20 predicates (100 predicates, 120
+  facts each): bound by `(arity P 2)`, by `(binary_predicate P)`, by inheritance through a
+  `genl` edge, by `arityMin` under `variable_arity` (length two, three and four), and
+  unbound.  The declarations are built outside the timed window."
+  []
+  (let [n 120
+        facts (fn [kb]
+                (let [by (arity-bound-predicates kb 20)]
+                  (vec (for [k [:own :cls :inh :min :none] p (by k) i (range n)
+                             :let [len (if (= k :min) (+ 2 (mod i 3)) 2)]]
+                         (cons p (map #(symbol (str "AbArI" % "N" i "P" (subs (name p) 4))) (range len)))))))
+        built (atom nil)]
+    (sample-fresh #(let [kb (fresh-kb)] (reset! built (facts kb)) kb)
+                  (fn [kb] (run! #(v/assert kb % cx {:chain? false}) @built))
+                  2 7)))
+
+(defn- arity-edge-move
+  "A `genl` edge asserted and retracted 1,400 times under 200 bound predicates, 40 of them in
+  an arity conflict: each of the 200 is a spec of a root binding two, 40 bind one.  Half
+  the moves put a fresh type under a chain of eight types bound to one argument, in a
+  context the side context does not see; the other half move a conforming predicate under
+  a predicate bound to two."
+  []
+  (let [m 200 k 40 rounds 700
+        rel   #(symbol (str "abAeRel" %))
+        chain #(symbol (str "abaec" % "_t"))
+        built #(let [kb (fresh-kb)]
+                 (v/with-deferred-settle kb
+                   (doseq [c '[CxAbAeSide CxAbAeEdge]] (v/assert kb (list 'genlCx c 'CxUniverse) 'CxUniverse strong))
+                   (v/assert kb '(arity abAeRoot 2) 'CxAbAeSide strong)
+                   (v/assert kb '(arity abAeMid 2) 'CxAbAeSide strong)
+                   (dotimes [i m]
+                     (v/assert kb (list 'genl (rel i) 'abAeRoot) 'CxAbAeSide strong)
+                     (v/assert kb (list 'arity (rel i) (if (< i k) 1 2)) 'CxAbAeSide strong))
+                   (doseq [i (range 1 8)] (v/assert kb (list 'genl (chain i) (chain (dec i))) 'CxAbAeEdge strong))
+                   (v/assert kb (list 'arity (chain 0) 1) 'CxAbAeEdge strong))
+                 kb)]
+    (sample-fresh built
+                  (fn [kb]
+                    (dotimes [r rounds]
+                      (v/retract! kb (v/assert kb (list 'genl (symbol (str "abaev" r "_t")) (chain 7))
+                                               'CxAbAeEdge strong))
+                      (v/retract! kb (v/assert kb (list 'genl (rel (+ k (mod r (- m k)))) 'abAeMid)
+                                               'CxAbAeSide strong))))
+                  1 5)))
+
+(defn- arity-read
+  "`describe` and an `admitsArgnum` ask over each of 100 predicates (20 of each binding of
+  `arity-assert`), 80 passes: the reads that reach `arity/own-length`."
+  []
+  (let [kb (fresh-kb)
+        ps (into [] cat (vals (arity-bound-predicates kb 20)))]
+    (sample #(dotimes [_ 80]
+               (doseq [p ps]
+                 (v/describe kb p cx)
+                 (doall (v/ask kb (list 'admitsArgnum p 2) cx))))
+            2 7)))
+
+(defn- arity-recover
+  "An open over a disk store holding 400 bound predicates and 12,000 facts under them, then
+  one write: the first sync after a recover.  The store is built once and reopened for each
+  rep; each rep adds one fact."
+  []
+  (let [dir (str (java.nio.file.Files/createTempDirectory
+                  "ab-arity" (make-array java.nio.file.attribute.FileAttribute 0)))
+        open #(v/open-kb {:backend :disk-log :dir dir})
+        k    (atom 0)]
+    (let [kb (open)]
+      (let [by (arity-bound-predicates kb 100)]
+        (doseq [p (concat (by :own) (by :cls) (by :inh) (by :min)) i (range 30)]
+          (v/assert kb (list p (symbol (str "AbArA" i)) (symbol (str "AbArB" i))) cx {:chain? false})))
+      (v/close! kb))
+    (let [rep #(let [t0 (System/nanoTime)
+                     kb (open)]
+                 (try
+                   (v/assert kb (list (arity-predicate :own 0) 'AbArW (symbol (str "AbArZ" (swap! k inc)))) cx {:chain? false})
+                   (/ (- (System/nanoTime) t0) 1e6)
+                   (finally (v/close! kb))))]
+      (try
+        (rep)
+        (median (repeatedly 5 rep))
+        (finally
+          (doseq [f (reverse (file-seq (java.io.File. dir)))] (.delete ^java.io.File f)))))))
+
+(defn- starter-load
+  "`vaelii.starter/load-into` over an empty in-memory KB: every shipped file, the upper
+  layer and the middle theories, and the closing `unary_predicate` batch."
+  []
+  (sample-fresh fresh-kb starter/load-into 1 3))
+
+(defn- starter-recover
+  "`recover` over an in-memory KB the starter is loaded into: the taxonomy and the JTMS
+  rebuilt from the stored records.  The load is outside the timed window."
+  []
+  (let [kb (starter/load-into (fresh-kb))]
+    (sample #(v/recover kb) 1 3)))
+
 (def probes
   [#'genl-read #'transitive-ask #'retract-reask #'assert-load #'forward-join #'naf-prove
-   #'arith-prove #'read-after-import])
+   #'arith-prove #'read-after-import #'arity-assert #'arity-edge-move #'arity-read
+   #'arity-recover #'starter-load #'starter-recover])
 
 (defn -main [& args]
   (let [[flag value] args

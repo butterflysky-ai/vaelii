@@ -11,7 +11,7 @@
 
 (use-fixtures :each (tu/neutral-fresh
                      #(doto (tu/fresh)
-                        (tu/load-core-with! '[[CxMeasure "upper"] [CxTime "upper"]])
+                        (tu/load-core!)
                         (v/add-prover (dur/duration-prover)))))
 
 (def ^:private C 'CxUniverse)

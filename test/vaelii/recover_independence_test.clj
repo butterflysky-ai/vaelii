@@ -81,9 +81,10 @@
   ;; which `recover` replays and a derivation path can miss.  The rule fires first, so
   ;; there is a standing firing for the except to sweep: a cold KB computes rather than
   ;; recalls, and would hide the difference.
-  ;; `hide` is on the forced-monotonic roster, so a rule reading it may conclude an `except`
+  ;; `hide` is on the forced-monotonic roster at CxSub, so a rule there reading it may
+  ;; conclude an `except`
   (tu/with-terms [q p hide Aa Trigger CxSub]
-    (v/assert kb (list 'forced_monotonic_predicate hide) 'CxUniverse)
+    (v/assert kb (list 'forced_monotonic_predicate hide) CxSub)
     (v/assert kb (list 'genlCx CxSub 'CxWell) 'CxUniverse {:strength :monotonic})
     (let [h (v/assert kb (list q Aa) CxSub {:strength :monotonic})]
       (v/assert kb (list 'implies (list q '?x) (list p '?x)) CxSub {:direction :forward :strength :monotonic})
@@ -290,7 +291,10 @@
 
 (tu/deftest-kb the-roster-forcing-reads-the-same-after-a-restart
   ;; The records hold every write as written; the forced sets are rebuilt from them and
-  ;; the declarations (docs/nmtms.md, "The forced-monotonic roster").
+  ;; the declarations (docs/nmtms.md, "The forced-monotonic roster").  The declaration is
+  ;; no entry of the global roster, so the denial and the firing are IN in the network at
+  ;; their classes, and the context that sees the declaration reads the denial inert and the
+  ;; firing void.
   (tu/with-terms [likes knows Ann Bob Cal Dan]
     (v/assert kb (list 'forced_monotonic_predicate likes) 'CxUniverse)
     (v/assert kb (list 'set/forwardRule (list 'implies (list knows '?x '?y) (list likes '?x '?y)))
@@ -301,9 +305,85 @@
           fired  (v/handle-of kb (list likes Ann Dan) 'CxUniverse)
           observe (fn [k] (mapv (fn [h] [(v/in? k h) (v/defeat-class k h) (:strength (v/sentex k h))])
                                 [fact denial fired]))]
-      (is (= [[true :default :default] [false nil :default] [false nil nil]]
+      (is (= [[true :default :default] [false :default :default] [false :default nil]]
              (one-reading! "a roster fact at its written strength, a denial held OUT and a void firing"
                            kb observe))))))
+
+(tu/deftest-kb a-declaration-below-the-root-reads-the-same-after-a-restart
+  ;; CxA sees the declaration and CxB does not: the rival loses, the definitional firing
+  ;; stands and the denial is inert at CxA alone, either side of a restart
+  (tu/with-terms [CxU CxA CxB trigger_kind rival_kind made_kind species_kind kind_two]
+    (doseq [[sub super] [[CxU 'CxUniverse] [CxA CxU] [CxB CxU]]]
+      (v/assert kb (list 'genlCx sub super) 'CxUniverse {:strength :monotonic}))
+    (v/assert kb (list 'forced_monotonic_predicate trigger_kind) CxA)
+    (v/assert kb (list 'disjoint trigger_kind rival_kind) CxU {:strength :monotonic})
+    (v/assert kb (list 'set/forwardRule (list 'implies (list trigger_kind '?s)
+                                              (list 'orthogonal '?s made_kind)))
+              CxU)
+    (doseq [s [(list trigger_kind species_kind) (list rival_kind species_kind)
+               (list trigger_kind kind_two)]]
+      (v/assert kb s CxU))
+    (v/assert kb (list 'not (list trigger_kind kind_two)) CxU {:strength :monotonic})
+    (let [asked   [(list trigger_kind species_kind) (list rival_kind species_kind)
+                   (list 'orthogonal species_kind made_kind)
+                   (list trigger_kind kind_two) (list 'not (list trigger_kind kind_two))]
+          observe (fn [k] (into {} (for [c [CxA CxB CxU]] [c (mapv #(v/ask? k % c) asked)])))]
+      (is (= {CxA [true false true true false]
+              CxB [true true false false true]
+              CxU [true true false false true]}
+             (one-reading! "a declaration CxA sees and CxB does not" kb observe))))))
+
+(tu/deftest-kb a-cxuniverse-declaration-reads-the-same-after-a-restart
+  ;; a CxUniverse declaration a :monotonic denial defeats at CxDen alone: the rival loses at
+  ;; CxA and CxB, which read it believed, and CxDen reads the dilemma, either side of a
+  ;; restart
+  (tu/with-terms [CxU CxA CxB CxDen trigger_kind rival_kind species_kind]
+    (doseq [[sub super] [[CxU 'CxUniverse] [CxA CxU] [CxB CxU] [CxDen CxU]]]
+      (v/assert kb (list 'genlCx sub super) 'CxUniverse {:strength :monotonic}))
+    (let [decl (list 'forced_monotonic_predicate trigger_kind)]
+      (v/assert kb decl 'CxUniverse)
+      (v/assert kb (list 'not decl) CxDen {:strength :monotonic}))
+    (v/assert kb (list 'disjoint trigger_kind rival_kind) CxU {:strength :monotonic})
+    (doseq [s [(list trigger_kind species_kind) (list rival_kind species_kind)]]
+      (v/assert kb s CxU))
+    (let [asked   [(list trigger_kind species_kind) (list rival_kind species_kind)]
+          observe (fn [k] (into {} (for [c [CxA CxB CxDen]] [c (mapv #(v/ask? k % c) asked)])))]
+      (is (= {CxA [true false] CxB [true false] CxDen [true true]}
+             (one-reading! "a CxUniverse declaration defeated at one context" kb observe))))))
+
+(tu/deftest-kb an-excepted-defeat-of-a-declaration-reads-the-same-after-a-restart
+  ;; a :monotonic denial of a declaration at CxU defeats it there, and CxR below CxU excepts
+  ;; the defeat: CxU reads the dilemma and CxR forces the trigger, either side of a restart
+  (tu/with-terms [CxU CxR trigger_kind rival_kind species_kind]
+    (doseq [[sub super] [[CxU 'CxUniverse] [CxR CxU]]]
+      (v/assert kb (list 'genlCx sub super) 'CxUniverse {:strength :monotonic}))
+    (v/assert kb (list 'disjoint trigger_kind rival_kind) CxU {:strength :monotonic})
+    (let [decl (list 'forced_monotonic_predicate trigger_kind)
+          h    (v/assert kb decl CxU)]
+      (v/assert kb (list 'not decl) CxU {:strength :monotonic})
+      (doseq [s [(list trigger_kind species_kind) (list rival_kind species_kind)]]
+        (v/assert kb s CxU))
+      (let [d (:id (first (filter #(= (list 'defeat (list 'sentexHandle h)) (:sentence %))
+                                  (v/sentexes-with-functor kb 'defeat))))]
+        (v/assert kb (list 'except (list 'sentexHandle d)) CxR {:strength :monotonic}))
+      (let [asked   [decl (list trigger_kind species_kind) (list rival_kind species_kind)]
+            observe (fn [k] (into {} (for [c [CxU CxR]] [c (mapv #(v/ask? k % c) asked)])))]
+        (is (= {CxU [false true true] CxR [true true false]}
+               (one-reading! "an excepted defeat of a declaration" kb observe)))))))
+
+(tu/deftest-kb a-declared-conclusion-reads-the-same-after-a-restart
+  ;; a firing concluding a literal CxA declares on the roster, from an antecedent off it:
+  ;; void at CxA, believed at CxB and CxU, either side of a restart
+  (tu/with-terms [CxU CxA CxB trigger_kind seed_kind species_kind]
+    (doseq [[sub super] [[CxU 'CxUniverse] [CxA CxU] [CxB CxU]]]
+      (v/assert kb (list 'genlCx sub super) 'CxUniverse {:strength :monotonic}))
+    (v/assert kb (list 'forced_monotonic_predicate trigger_kind) CxA)
+    (v/assert kb (list 'set/forwardRule (list 'implies (list seed_kind '?s) (list trigger_kind '?s)))
+              CxU)
+    (v/assert kb (list seed_kind species_kind) CxU)
+    (let [c       (list trigger_kind species_kind)
+          observe (fn [k] (mapv #(v/ask? k c %) [CxA CxB CxU]))]
+      (is (= [false true true] (one-reading! "a declared conclusion" kb observe))))))
 
 (tu/deftest-kb a-denial-an-older-store-kept-inert-recovers-as-a-default-premise
   ;; An older store held a denial of a roster literal with no premise mark; a recover

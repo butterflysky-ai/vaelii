@@ -314,7 +314,7 @@ order would pick the answer. The aggregate bodies' predicates, one per conjunct,
 | `checks/check-stratified` | the same predicates as negative edges |
 | `chain` | withhold from the join; bind per placement; the withdrawal arm |
 | `settle` | re-join a queued aggregate rule whether or not anything blocked |
-| `kb/CxCore.txt` | five `(comment …)` + `(ternary_predicate …)` declarations |
+| `kb/upper/core.txt` | five `(comment …)` + `(ternary_predicate …)` declarations |
 
 ## Where the census is taken
 
@@ -348,7 +348,7 @@ question. Tests pin the two chainers' agreement on the comparison-on-a-count sha
 
 ## Scope
 
-**In:** the five operators as one prover, the `wff` refusal, the CxCore
+**In:** the five operators as one prover, the `wff` refusal, the `core.txt`
 declarations, the closure and stratification checks, the re-check maintenance.
 
 **Out:**

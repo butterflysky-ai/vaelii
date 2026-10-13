@@ -31,8 +31,8 @@
   (let [sbx (fresh-sandbox)]
     (sandbox/open kb sbx)
     (try
-      (testing "it sees the whole shipped spindle, so every type and rule is usable"
-        (doseq [c ['CxWell 'CxBiology 'CxUniverse 'CxCore]]
+      (testing "it sees every shipped context, so every type and rule is usable"
+        (doseq [c ['CxWell 'CxBiology 'CxUniverse]]
           (is (v/sees? kb sbx c) (str "the sandbox should see " c))))
       (testing "and nothing sees it — no shipped context, and no other sandbox"
         (is (empty? (into [] (comp (remove #{sbx}) (filter #(v/sees? kb % sbx)))
@@ -55,7 +55,7 @@
       (sandbox/open kb sbx)
       (try
         (is (sandbox/live? kb sbx))
-        ;; under the entailing reading CxCore's (arg genlCx 1 context) derives the edge's
+        ;; under the entailing reading CxUniverse's (arg genlCx 1 context) derives the edge's
         ;; membership; the starter loaded under the same reading already holds CxWell's
         (is (= (cond-> #{(list 'genlCx sbx 'CxWell)}
                  checks/*assertive-arg-types?* (conj (list 'context sbx)))

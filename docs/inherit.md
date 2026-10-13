@@ -64,8 +64,8 @@ licences do not travel down it.
 
 ## Four predicates ship with one
 
-`largerThan` and `partType` are in `resources/kb/upper/CxAbstract.txt`, `capabilityType`
-and `hasCapability` in `resources/kb/upper/CxLife.txt`. The first two are worth comparing
+`largerThan` and `partType` are in `resources/kb/upper/abstract.txt`, `capabilityType`
+and `hasCapability` in `resources/kb/upper/life.txt`. The first two are worth comparing
 because they are declared **differently on purpose**:
 
 ```clojure
@@ -167,7 +167,7 @@ Preservation moves an **argument** along a relation; the predicate, and the leve
 relates at, are left alone. Crossing the line is a different claim: it links two
 predicates and has a quantifier reading to pin down (every member? some member?). The
 vocabulary for it is `(typeToInstancePred TypePred InstancePred)` — declared in
-CxCore and **deliberately inert**: it records the pairing for a reader and the
+`core.txt` and **deliberately inert**: it records the pairing for a reader and the
 engine infers nothing from it, because the quantifier reading is exactly the thing
 nothing here fixes.
 
@@ -325,7 +325,7 @@ itself, and in this example each part carries its membership the other way:
 upper)`. A `:default` `(up_kind lower)` is the unique weakest member of the first clash
 and is not believed
 (`inherited_clash_test/a-membership-beside-a-known-true-inherited-membership-of-a-separated-type-is-a-nogood-in-every-order`).
-A reading with a `:default` reason forms no nogood, as above. CxCore states
+A reading with a `:default` reason forms no nogood, as above. `core.txt` states
 `(transitiveInArgInverse empty 1 genl)` and `(transitiveInArg nonempty 1 genl)` known-true,
 since each holds by the definition of `genl`, and `empty` and `nonempty` partition
 `unary_predicate`. So a type stated `empty` known-true, with a known-true edge from a subtype
@@ -617,7 +617,7 @@ covers from the reader, which is the CxUniverse copy the engine lifts every `(sy
 into ([contexts.md](contexts.md#where-a-relation-property-is-read-from)), so the firing
 goes with the last statement of a mark stated in either of two siblings. The declaration
 joins the justification and not the placement, which the claim and the rule decide
-([contexts.md](contexts.md#a-context-outside-the-spindle)). A firing the ordinary matcher makes over a mirror names the mark the same
+([contexts.md](contexts.md#a-context-outside-the-topology)). A firing the ordinary matcher makes over a mirror names the mark the same
 way ([inference.md](inference.md#forward-chaining)).
 
 **A more specific contrary claim withdraws a conclusion with nothing retracted.**

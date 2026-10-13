@@ -69,9 +69,9 @@
   reported here is real while a *non*-entailment means \"not provable\", never \"provably
   false\" — the same open-world reading `arg` and `exceptWhen` take.
 
-  The vocabulary ships as `kb/upper/CxTime.txt`, an *upper* context rather than the
-  vocabulary head: these twenty predicates are *about* time, so CxCore keeps only the
-  grammar they are declared in.  The prover is **opt-in** on top of it: register it with
+  The vocabulary ships as `kb/upper/time.txt`, a domain file rather than the vocabulary
+  file: these twenty predicates are *about* time, so core.txt keeps only the grammar they
+  are declared in.  The prover is **opt-in** on top of it: register it with
   `vaelii.core/add-prover`, and until then a KB stores and retrieves interval relations as
   ordinary facts without paying for the network."
   (:require [clojure.set :as set]

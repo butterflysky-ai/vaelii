@@ -180,11 +180,12 @@
               (if (seq sols) sols (recur (inc k) seen')))))))))
 
 (defn- local-analysis
-  "The JTMS reading behind `classify-local` and `label-dilemmas`, or nil when the KB
-  reports no dilemma: `:classification` (`classify-local`'s answer), `:holds?` (is a
-  datum believed with a set forced OUT), `:optima` (each enumerated cluster's optimal
-  resolutions) and `:unenumerated` (the members of the clusters it could not enumerate)."
-  [kb]
+  "The JTMS reading of the dilemma reports `ds` behind `classify-local` and
+  `label-dilemmas`, or nil when no member of `ds` is `:default`: `:classification`
+  (`classify-local`'s answer), `:holds?` (is a datum believed with a set forced OUT),
+  `:optima` (each enumerated cluster's optimal resolutions) and `:unenumerated` (the
+  members of the clusters it could not enumerate)."
+  [kb ds]
   (let [tms     (reasoning/tms kb)
         nogoods (into []
                       (keep (fn [ng]
@@ -192,7 +193,7 @@
                                              (filter #(= :default (jtms/defeat-class tms %)))
                                              (:nogood ng))]
                                 (when (seq ms) ms))))
-                      (clashes/contradictions-of kb))]
+                      ds)]
     (when (seq nogoods)
       (let [n           (count nogoods)
             max-members (config/classify-max-cluster-members)
@@ -286,10 +287,11 @@
          :unenumerated   unenumerated}))))
 
 (defn classify-local
-  "A skeptical/credulous classification of the KB's current dilemmas, read from the JTMS
+  "A skeptical/credulous classification of the KB's current dilemmas, or with `context` of
+  the dilemmas a reader there reads (`clashes/contradictions-at`), read from the JTMS
   dependency graph — **no answer-set enumeration, no backend**.  Returns the `classify`
-  shape `{:true #{} :supportable #{} :false #{}}` plus `:refinable`, or nil when the KB
-  reports no dilemma.  `:refinable` holds the members of the clusters it did not enumerate
+  shape `{:true #{} :supportable #{} :false #{}}` plus `:refinable`, or nil when there is
+  no dilemma.  `:refinable` holds the members of the clusters it did not enumerate
   whose members move none of each other: a `Program` over such a cluster is exact, so a
   backend may classify them.
 
@@ -323,8 +325,8 @@
   consequence closures: linear in the number of **independent** dilemmas
   (`grounded_in_region_test`), exponential only inside one interacting cluster or across the
   clusters one datum joins, and capped at both.  See docs/labeling.md."
-  [kb]
-  (:classification (local-analysis kb)))
+  ([kb] (:classification (local-analysis kb (clashes/contradictions-of kb))))
+  ([kb context] (:classification (local-analysis kb (clashes/contradictions-at kb context)))))
 
 (defn- member-components
   "The dilemmas `ds` grouped into components: two dilemmas share a component when they
@@ -364,31 +366,32 @@
   (some #(when (contains? (get cls %) h) %) [:true :supportable :false]))
 
 (defn- classification
-  "What `classify-datum` reads, resident on the KB's `:qcn` atom and rebuilt when the
-  change clock moves (`observe/cached`), keyed on whether a backend is reachable:
-  `classify-local`'s answer, and with a backend a `component-classifier` for the members
-  it leaves `:refinable`."
-  [kb]
+  "What `classify-datum` reads at `context`, resident on the KB's `:qcn` atom and rebuilt
+  when the change clock moves (`observe/cached`), keyed on the context and on whether a
+  backend is reachable: `classify-local`'s answer over the dilemmas `context` reads, and
+  with a backend a `component-classifier` for the members it leaves `:refinable`."
+  [kb context]
   (let [backend? (solver/available?)]
-    (observe/cached (reasoning/qcn kb) [::classification backend?]
+    (observe/cached (reasoning/qcn kb) [::classification context backend?]
                     (fn [_]
-                      {:local   (classify-local kb)
+                      {:local   (classify-local kb context)
                        :backend (when backend?
                                   (component-classifier
-                                   (clashes/ranked (clashes/contradictions-of kb))))}))))
+                                   (clashes/ranked (clashes/contradictions-at kb context))))}))))
 
 (defn classify-datum
-  "Handle `h`'s class over the optimal labelings of the KB's current dilemmas —
-  `:true`, `:supportable` or `:false`, as `classify` names them — or nil when no dilemma
-  classifies it.  Read off the solve-free JTMS bracket (`classify-local`) once per change
-  clock, with or without a backend, so a backend never changes an answer the bracket
-  gives: a `Program` encodes no derivation between members, and on dilemmas whose members
-  derive from one another its optima are not the KB's.  A backend refines only a
-  `:refinable` member — one in a cluster the bracket did not enumerate and whose members
-  move none of each other, where the `Program` over its member component is exact.  The
-  `(bravely S)` / `(cautiously S)` prover reads this."
-  [kb h]
-  (let [{:keys [local backend]} (classification kb)]
+  "Handle `h`'s class over the optimal labelings of the dilemmas a reader at `context`
+  reads (`clashes/contradictions-at`) — `:true`, `:supportable` or `:false`, as
+  `classify` names them — or nil when no such dilemma classifies it.  Read off the
+  solve-free JTMS bracket (`classify-local`) once per context and change clock, with or
+  without a backend, so a backend never changes an answer the bracket gives: a `Program`
+  encodes no derivation between members, and on dilemmas whose members derive from one
+  another its optima are not the KB's.  A backend refines only a `:refinable` member — one
+  in a cluster the bracket did not enumerate and whose members move none of each other,
+  where the `Program` over its member component is exact.  The `(bravely S)` /
+  `(cautiously S)` prover reads this."
+  [kb h context]
+  (let [{:keys [local backend]} (classification kb context)]
     (if (and backend (contains? (:refinable local) h))
       (class-of (backend h) h)
       (class-of local h))))
@@ -490,7 +493,7 @@
   and `program`'s `:fixed` background `:true`."
   [kb ds program]
   (let [{:keys [classification holds? optima unenumerated]}
-        (or (local-analysis kb)
+        (or (local-analysis kb ds)
             ;; no `:default` member anywhere: nothing to enumerate, the solve decides all
             (let [tms (reasoning/tms kb)]
               {:holds?       (fn [forced h] (and (not (forced h)) (jtms/in? tms h)))

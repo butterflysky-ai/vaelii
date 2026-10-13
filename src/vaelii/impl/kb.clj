@@ -18,6 +18,7 @@
             [vaelii.impl.columnar :as columnar]
             [vaelii.impl.config :as config]
             [vaelii.impl.decide :as decide]
+            [vaelii.impl.decide.arity :as arity]
             [vaelii.impl.decide.negation :as negation]
             [vaelii.impl.dense-kv :as dense]
             [vaelii.impl.disk.backend :as disk]
@@ -866,7 +867,7 @@
 (defn- store-space?
   "Is `space` a value `:space` names a store with?  A whole number 0 or more, or a
   keyword, a symbol or a vector — the spelling of a **private** space, one no number can
-  name: an ephemeral `fork` and a `kb-diff` side take `mem/engine-space`, the spindle takes a
+  name: an ephemeral `fork` and a `kb-diff` side take `mem/engine-space`, `sync/premises` takes a
   vector of its own, and a test takes a `gensym` or a namespaced keyword.
 
   Each backend derives its store from the value — the memory registry keys on it, the
@@ -1396,39 +1397,45 @@
   supporters: `:rel` names it, `:supports?` tests a handle, `:count` counts them and
   `:handles` lists them.
 
-  For `genlCx`, the stored excepts' targets are walked forward while the excepts and the
-  walk are no more than the supporters, else each supporter's support is read past its
-  premises (`exc/genlCx-excepted?`); the reader classes of a `genlCx` move read the same
-  walk (`exc/genlCx-except-contexts`).  For another relation the walk goes forward from the
+  A stored roster fact naming a supporter itself answers true off one count read per
+  functor (`reads/stored-count-named-supporters-global`).  Otherwise, for `genlCx`, the stored excepts'
+  targets are walked forward while the excepts and the walk are no more than the
+  supporters, else each supporter's support is read past its premises
+  (`exc/genlCx-excepted?`); the reader classes of a `genlCx` move read the same walk
+  (`exc/genlCx-except-contexts`).  For another relation the walk goes forward from the
   targets over the justifications resting on them while the stored facts of the roster's
   functors are no more than the supporters, else up each supporter's support
   (`exc/support`), which holds the supporter itself, with one `reads/stored-naming?` probe
   per handle and functor and no target set built.  Either walk stops at the first hit, so
   the read costs whichever side is smaller."
   [kb roster view defeats?]
-  (if (= :genlCx (:rel view))
-    (exc/genlCx-excepted? kb view)
-    (let [idx       (:index kb)
-          tms       (reasoning/tms kb)
-          supports? (:supports? view)
-          entries   (into [] (remove #(and (not defeats?) (= sx/defeat-functor (key %)))) roster)
-          n         (transduce (map #(reads/stored-count-with-functor idx (key %))) + 0 entries)]
-      (cond
-        (zero? n) false
-        (<= n (long (:count view)))
-        (loop [seen #{}, stack (into [] (mapcat (comp deref val)) entries)]
-          (if-let [d (peek stack)]
-            (let [stack (pop stack)]
-              (cond (supports? d)      true
-                    (contains? seen d) (recur seen stack)
-                    :else (recur (conj seen d)
-                                 (into stack (comp (keep #(jtms/justification tms %)) (map :consequence))
-                                       (jtms/dependents tms d)))))
-            false))
-        :else
-        (let [named? (fn [h] (some #(reads/stored-naming? idx (key %) h) entries))]
-          (boolean (some (fn [h] (some named? (exc/support tms h (constantly false))))
-                         ((:handles view)))))))))
+  (let [idx     (:index kb)
+        rel     (:rel view)
+        genlCx? (= :genlCx rel)
+        entries (into [] (remove #(and (or genlCx? (not defeats?)) (= sx/defeat-functor (key %)))) roster)]
+    (cond
+      (some #(pos? (reads/stored-count-named-supporters-global idx rel (key %))) entries) true
+      genlCx? (exc/genlCx-excepted? kb view)
+      :else
+      (let [tms       (reasoning/tms kb)
+            supports? (:supports? view)
+            n         (transduce (map #(reads/stored-count-with-functor idx (key %))) + 0 entries)]
+        (cond
+          (zero? n) false
+          (<= n (long (:count view)))
+          (loop [seen #{}, stack (into [] (mapcat (comp deref val)) entries)]
+            (if-let [d (peek stack)]
+              (let [stack (pop stack)]
+                (cond (supports? d)      true
+                      (contains? seen d) (recur seen stack)
+                      :else (recur (conj seen d)
+                                   (into stack (comp (keep #(jtms/justification tms %)) (map :consequence))
+                                         (jtms/dependents tms d)))))
+              false))
+          :else
+          (let [named? (fn [h] (some #(reads/stored-naming? idx (key %) h) entries))]
+            (boolean (some (fn [h] (some named? (exc/support tms h (constantly false))))
+                           ((:handles view))))))))))
 
 (defn- attach-visibility!
   "Install the taxonomy's two visibility callbacks (`tax/install-supporter-visibility!`)
@@ -2098,32 +2105,29 @@
   (first (for [[t n] tax/exact-arity-classes :when (isa-among? ms t)] n)))
 
 (defn relation-arity
-  "The exact arity `pred` itself is declared with, visible from `context` (nil: every
-  believed declaration), or nil: its `(arity P n)` declaration (`tax/declared-arity`, a
-  map read), else its exact-arity class membership (`tax/exact-arity-classes`).  The reader
-  for a caller outside the arity check (the provers, `describe`, the quality pass); the
-  check reads the same two spellings through its per-assert membership reader.  The
-  believed reading, which any believed membership and edge give; the arity nogood reads
-  the roster bindings instead (docs/taxonomy.md, \"Arity\")."
-  [kb pred context]
-  (or (let [n (tax/declared-arity (reasoning/taxonomy kb) pred context)]
-        (when (and (integer? n) (pos? n)) n))
-      (membership-arity (memberships kb pred (or context '?ctx)))))
+  "The exact length that binds `pred`, its own or one it inherits through `genl`, or nil:
+  `arity/relation-length`'s `:exact`, read the same at every context (docs/taxonomy.md,
+  \"Arity\").  The integrity pass reads it."
+  [kb pred]
+  (:exact (arity/relation-length kb pred)))
 
 (defn relation?
   "Is `term` a relation of two or more places by its stored content, visible from
-  `context` (nil: every believed declaration): a `relation-arity` of two or more, or a
-  `variable_arity` membership.  A `genl` edge between two relations makes each a node of
-  the `genl` hierarchy; such a node is not a type, and a node with an arity of one or
-  none is.  No spelling is read.  The believed reading of an arity (docs/taxonomy.md,
-  \"Arity\")."
+  `context` (nil: every believed declaration): a declared arity of two or more, or a
+  `variable_arity` membership, or, where neither answers, a length of two or more it
+  inherits through `genl` (`arity/relation-length`, read the same at every context).  A
+  `genl` edge between two relations makes each a node of the `genl` hierarchy; such a
+  node is not a type, and a node with an arity of one or none is.  No spelling is read.
+  The believed reading of an arity (docs/taxonomy.md, \"Arity\")."
   [kb term context]
   (let [n (tax/declared-arity (reasoning/taxonomy kb) term context)]
     (if (and (integer? n) (pos? n))
       (>= n 2)
       (let [ms (memberships kb term (or context '?ctx))]
         (boolean (or (some-> (membership-arity ms) (>= 2))
-                     (isa-among? ms 'variable_arity)))))))
+                     (isa-among? ms 'variable_arity)
+                     (let [{l :exact via :via} (arity/relation-length kb term)]
+                       (and l (>= l 2) (not= via term)))))))))
 
 (defn isa?
   "Is individual `x` (transitively) of type `t`?  Considers only type memberships
@@ -2464,6 +2468,22 @@
 
 ;; ---- the rule rosters ----------------------------------------------------
 
+(def ^:dynamic *defer-index-refresh?*
+  "True while `vaelii.impl.recovery` runs a recover from the records on the calling thread.
+  `refresh-index-image!` then writes nothing, so a settle does not wait on an image write
+  that its own later writes make stale.  `recover` calls `refresh-index-image!` once after the recover."
+  false)
+
+(defn refresh-index-image!
+  "Offer `kb`'s index image the mid-life refresh (`disk/maybe-refresh-index-snapshot!`),
+  from the writer's thread.  A no-op for a KB with no image (`:snapshot-dir` nil) and while
+  `*defer-index-refresh?*` is true.  The root count is a profiled index read, so it is read
+  only for a KB that has an image."
+  [kb]
+  (when-let [d (:snapshot-dir kb)]
+    (when-not *defer-index-refresh?*
+      (disk/maybe-refresh-index-snapshot! d (reads/stored-count-at (:index kb) [])))))
+
 (defn create-sentex
   "Store `sentence` in `context` as a new sentex, index it, and return `[handle sentex]`.
 
@@ -2505,8 +2525,7 @@
      ;; on a KB that *has* an image, so every other backend pays one field read: the root
      ;; count is a profiled index read and the refresh call resolves nothing, so both stay
      ;; behind the gate rather than being evaluated for a directory with no image in it.
-     (when-let [d (:snapshot-dir kb)]
-       (disk/maybe-refresh-index-snapshot! d (reads/stored-count-at (:index kb) [])))
+     (refresh-index-image! kb)
      ;; the add-side boundary for an incremental matcher's alpha memories — a no-op
      ;; unless one is engaged (docs/inference.md, "Incremental rule matching")
      (observe/notify-add kb s h)
@@ -2577,8 +2596,7 @@
     ;; ...and the new spelling in — `create-sentex`'s half, with the handle it already has
     (p/put-sentex (:records kb) s')
     (p/index-sentex idx s' h)
-    (when-let [d (:snapshot-dir kb)]
-      (disk/maybe-refresh-index-snapshot! d (reads/stored-count-at idx [])))
+    (refresh-index-image! kb)
     (observe/notify-add kb s' h)
     (observe/note-change)
     (observe/cache-handle! (canon-stamp kb) (sx/sentence-of s') (:context s') h)

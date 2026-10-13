@@ -100,7 +100,7 @@
 
 ;; The partition makes `(nonempty inner)` a denial of the `(empty inner)` that
 ;; `(empty outer)` reaches, and `(empty outer)` a denial of the `(nonempty outer)` that
-;; `(nonempty inner)` reaches.  CxCore states both declarations `:monotonic`, so a reading
+;; `(nonempty inner)` reaches.  CxUniverse states both declarations `:monotonic`, so a reading
 ;; over a known-true claim and edge is known-true.
 (defn- permutations [xs]
   (if (empty? xs)
@@ -179,17 +179,20 @@
     (is (stored? kb (list 'empty both_kind)))))
 
 (tu/deftest-kb emptiness-from-a-separation-is-concluded-in-the-context-of-the-separation
-  ;; a separation stated in CxCore concludes the emptiness in CxCore, and CxUniverse
-  ;; sees CxCore
-  (tu/with-terms [plant_kind mineral_kind both_kind]
-    (v/assert kb (list 'unary_predicate both_kind) 'CxCore)
-    (v/assert kb (list 'genl plant_kind 'thing) 'CxCore)
-    (v/assert kb (list 'genl mineral_kind 'thing) 'CxCore)
-    (v/assert kb (list 'disjoint plant_kind mineral_kind) 'CxCore)
-    (v/assert kb (list 'genl both_kind plant_kind) 'CxCore)
-    (v/assert kb (list 'genl both_kind mineral_kind) 'CxCore)
-    (is (= ['CxCore] (map :context (v/sentexes-matching kb (list 'empty both_kind) '?ctx))))
-    (is (stored? kb (list 'empty both_kind)))))
+  ;; a separation stated in a context below CxUniverse concludes the emptiness there, and
+  ;; nowhere above it.  `(unary_predicate both_kind)` has a copy in CxUniverse
+  ;; (`decontextualized_predicate`), and a firing on the copy reads the separation, which
+  ;; only the lower context sees, so it concludes there too.
+  (tu/with-terms [CxSeparation plant_kind mineral_kind both_kind]
+    (v/assert kb (list 'genlCx CxSeparation 'CxUniverse) 'CxUniverse)
+    (v/assert kb (list 'unary_predicate both_kind) CxSeparation)
+    (v/assert kb (list 'genl plant_kind 'thing) CxSeparation)
+    (v/assert kb (list 'genl mineral_kind 'thing) CxSeparation)
+    (v/assert kb (list 'disjoint plant_kind mineral_kind) CxSeparation)
+    (v/assert kb (list 'genl both_kind plant_kind) CxSeparation)
+    (v/assert kb (list 'genl both_kind mineral_kind) CxSeparation)
+    (is (= #{CxSeparation}
+           (set (map :context (v/sentexes-matching kb (list 'empty both_kind) '?ctx)))))))
 
 ;; ---- against the metatype ladder ------------------------------------------
 

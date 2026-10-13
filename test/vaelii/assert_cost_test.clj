@@ -495,6 +495,11 @@
 ;; moved reads the `disjoint` and `orthogonal` counts again (`related/sync-related`), which
 ;; is the +2 a KB's first settle reads and `taxonomy-edge` reads per assert.
 ;;
+;; **Two `:trie-counts` reads per taxonomy supporter posted** are the `except` and `defeat`
+;; naming counts of its handle, which file the facts naming it in the `:tax-named` family
+;; (`tax/post!`).  The four workloads that post a supporter per assert, `taxonomy-edge`,
+;; `arity-declaration` and the preserved-edge pair, read them.
+;;
 ;; **`:slots` counts the slot rosters' ops and the shape roster's together.**  A positive
 ;; fact writes one shape op, its length into its functor's lengths (`kv/shape-adds`); a
 ;; retraction writes one when it empties its shape's node (`kv/shape-retires`), and none
@@ -595,10 +600,14 @@
    ;; type and never a present one.  Skipping it is the −600 `:argument-root`, −600
    ;; `:argument-slot` and −400 `:predicate-extent` here; the retroactive and chaining mints, which
    ;; no pre-store check covers, still pay it.
+   ;;
+   ;; The declaration's argument-position check reads its predicate's length off the binding
+   ;; family (`arity/relation-length`) and no membership of it: the −1 in each of
+   ;; `:argument-root` and `:argument-slot`.
    {:name    :declared
     :build   declared
     :sentexes 100
-    :reads   {:arity-binding 2 :argument-root 201 :argument-slot 101 :exception-index 100
+    :reads   {:arity-binding 2 :argument-root 200 :argument-slot 100 :exception-index 100
               :opposed 100 :predicate-extent 1700 :rule-index 100 :trie-counts 2300
               :trie-lookup 300 :mint 100}
     :writes  {:levels 500 :terms 300 :roots 1600 :roster 0 :slots 300}}
@@ -677,7 +686,7 @@
     :build   taxonomy-edge
     :sentexes 100
     :reads   {:argument-root 1 :argument-slot 1 :arity-binding 502 :exception-index 300 :opposed 100 :predicate-extent 1500
-              :rule-index 500 :trie-counts 700 :trie-lookup 100 :mint 100}
+              :rule-index 500 :trie-counts 900 :trie-lookup 100 :mint 100}
     :writes  {:levels 500 :terms 400 :roots 1300 :roster 101 :slots 201}}
 
    ;; **No read per relative**: an arity arriving reads the lengths stored above its
@@ -696,7 +705,7 @@
     :build   arity-declaration
     :sentexes 100
     :reads   {:argument-root 1 :argument-slot 1 :arity-binding 806 :exception-index 100 :opposed 100 :predicate-extent 1300
-              :rule-index 100 :trie-counts 700 :trie-lookup 100 :mint 100}
+              :rule-index 100 :trie-counts 900 :trie-lookup 100 :mint 100}
     :writes  {:levels 500 :terms 300 :roots 1300 :roster 1 :slots 400}}
 
    ;; **Two workloads, one budget, and the equality is the claim.**  A `genl` edge on a KB
@@ -720,7 +729,7 @@
     :build   preserved-edges-4
     :sentexes 100
     :reads   {:arity-binding 200 :argument-root 2 :argument-slot 600 :exception-index 300 :opposed 100
-              :predicate-extent 3800 :rule-index 700 :trie-counts 700
+              :predicate-extent 3800 :rule-index 700 :trie-counts 900
               :trie-lookup 100 :mint 100}
     :writes  {:levels 500 :terms 400 :roots 1300 :roster 200 :slots 300}}
 
@@ -728,7 +737,7 @@
     :build   preserved-edges-32
     :sentexes 100
     :reads   {:arity-binding 200 :argument-root 2 :argument-slot 600 :exception-index 300 :opposed 100
-              :predicate-extent 3800 :rule-index 700 :trie-counts 700
+              :predicate-extent 3800 :rule-index 700 :trie-counts 900
               :trie-lookup 100 :mint 100}
     :writes  {:levels 500 :terms 400 :roots 1300 :roster 200 :slots 300}}])
 

@@ -8,7 +8,7 @@
     individual   CapitalCamelCase                               Muffet, Tom
     type         snake_case, lowercase, unary predicate         dog, physical_object
     sense        a type, plus which sense of it is meant        abrasive-grit
-    context      Cx prefix, then CapitalCamelCase               CxUniverse, CxCore
+    context      Cx prefix, then CapitalCamelCase               CxUniverse, CxWell
     lexeme       the `lex` namespace; the name is parse input   lex/fool's_gold
 
   Single lowercase words (dog, genl, parentOf) satisfy both `predicate?` and
@@ -807,7 +807,7 @@ The spelling is a **biconditional on arity**.  A functor carrying an underscore 
   taught the reader, and here it stores a two-place predicate named `isa` relating two
   individuals — legal, indexed, believed, and matched by nothing anyone will ask.  The
   reader then asks `(isa? kb 'Muffet 'Dog)` and gets false, with no error to search for,
-  because the type they meant was never asserted.  `CxCore.txt` says never to write
+  because the type they meant was never asserted.  `core.txt` says never to write
   it and `docs/naming.md` calls it out by name; neither is in front of someone who is
   typing.
 

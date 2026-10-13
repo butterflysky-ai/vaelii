@@ -265,12 +265,11 @@ length.
 ## The vocabulary
 
 All fifty predicates — fourteen RCC-8, thirteen cardinal, thirteen relative, ten distance —
-are declared `binary_predicate` in `resources/kb/upper/CxSpace.txt`, each with its own
-`comment` sentex, in one **upper** context rather than the vocabulary head because all four
-calculi are *about* space: CxCore holds only the grammar they are stated in
-(`binary_predicate`, `comment`), which every domain shares. So the vocabulary is separable —
-a KB built from CxCore plus the layers it wants carries regions only if it reasons
-about them (the starter, which loads every upper context it finds, takes them). Regions,
+are declared `binary_predicate` in `resources/kb/upper/space.txt`, each with its own
+`comment` sentex, in a domain file rather than `core.txt` because all four calculi are
+*about* space: `core.txt` holds only the grammar they are stated in (`binary_predicate`,
+`comment`), which every domain shares. Every upper file loads into CxUniverse, so a KB
+with the upper layer carries the spatial vocabulary. Regions,
 places, and the things a frame or a distance is about are all **ordinary individuals**:
 every argument position is declared `(arg … spatial)`, the type a location in some
 space — physical or mathematical — makes something an instance of. None of the four

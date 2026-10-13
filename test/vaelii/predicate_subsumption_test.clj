@@ -33,7 +33,7 @@
 
 (tu/deftest-kb match1-subsumes-a-sub-predicate
   (tu/with-terms [fatherOf parentOf loves A B]
-    (v/assert kb (list 'genl fatherOf parentOf) 'CxCore {:strength :monotonic})
+    (v/assert kb (list 'genl fatherOf parentOf) 'CxUniverse {:strength :monotonic})
     (testing "a fatherOf fact satisfies a parentOf antecedent, binding the arguments"
       (is (= {(symbol "?x") A (symbol "?y") B}
              (res/match1 kb (list parentOf (symbol "?x") (symbol "?y")) (list fatherOf A B)))))
@@ -45,9 +45,9 @@
 
 (tu/deftest-kb match-pattern-reaches-sub-predicate-facts
   (tu/with-terms [fatherOf parentOf A B C D]
-    (v/assert kb (list 'genl fatherOf parentOf) 'CxCore {:strength :monotonic})
-    (v/assert kb (list fatherOf A B) 'CxCore {:strength :monotonic})
-    (v/assert kb (list parentOf C D) 'CxCore {:strength :monotonic})
+    (v/assert kb (list 'genl fatherOf parentOf) 'CxUniverse {:strength :monotonic})
+    (v/assert kb (list fatherOf A B) 'CxUniverse {:strength :monotonic})
+    (v/assert kb (list parentOf C D) 'CxUniverse {:strength :monotonic})
     (testing "a parentOf query matches both the direct parentOf fact and the fatherOf one"
       (let [sentences (set (map (fn [[h _]] (:sentence (v/sentex kb h)))
                                 (res/match-pattern kb (list parentOf (symbol "?x") (symbol "?y")) '?ctx)))]
@@ -63,11 +63,11 @@
   ;; the oracle: the generalized fan is exactly the union of raw matches over the spec
   ;; closure — nothing more, nothing less
   (tu/with-terms [fatherOf motherOf parentOf A B C D E F]
-    (v/assert kb (list 'genl fatherOf parentOf) 'CxCore {:strength :monotonic})
-    (v/assert kb (list 'genl motherOf parentOf) 'CxCore {:strength :monotonic})
-    (v/assert kb (list fatherOf A B) 'CxCore {:strength :monotonic})
-    (v/assert kb (list motherOf C D) 'CxCore {:strength :monotonic})
-    (v/assert kb (list parentOf E F) 'CxCore {:strength :monotonic})
+    (v/assert kb (list 'genl fatherOf parentOf) 'CxUniverse {:strength :monotonic})
+    (v/assert kb (list 'genl motherOf parentOf) 'CxUniverse {:strength :monotonic})
+    (v/assert kb (list fatherOf A B) 'CxUniverse {:strength :monotonic})
+    (v/assert kb (list motherOf C D) 'CxUniverse {:strength :monotonic})
+    (v/assert kb (list parentOf E F) 'CxUniverse {:strength :monotonic})
     (doseq [pat [(list parentOf (symbol "?x") (symbol "?y"))
                  (list parentOf A (symbol "?y"))
                  (list parentOf (symbol "?x") D)
@@ -79,30 +79,30 @@
 
 (tu/deftest-kb forward-chaining-fires-through-subsumption
   (tu/with-terms [fatherOf parentOf hasChild A B]
-    (v/assert kb (list 'genl fatherOf parentOf) 'CxCore {:strength :monotonic})
+    (v/assert kb (list 'genl fatherOf parentOf) 'CxUniverse {:strength :monotonic})
     (v/assert kb (list 'implies (list parentOf (symbol "?x") (symbol "?y"))
-                       (list hasChild (symbol "?y") (symbol "?x"))) 'CxCore {:direction :forward})
-    (v/assert kb (list fatherOf A B) 'CxCore {:strength :monotonic})
+                       (list hasChild (symbol "?y") (symbol "?x"))) 'CxUniverse {:direction :forward})
+    (v/assert kb (list fatherOf A B) 'CxUniverse {:strength :monotonic})
     (testing "a rule on the super-predicate fires on a sub-predicate fact"
-      (is (seq (v/sentexes-matching kb (list hasChild B A) 'CxCore))))))
+      (is (seq (v/sentexes-matching kb (list hasChild B A) 'CxUniverse))))))
 
 (tu/deftest-kb ask-reaches-through-subsumption-and-follows-belief
   (tu/with-terms [fatherOf parentOf A B]
-    (v/assert kb (list fatherOf A B) 'CxCore {:strength :monotonic})
+    (v/assert kb (list fatherOf A B) 'CxUniverse {:strength :monotonic})
     (testing "before the genl edge, a parentOf goal is not answered by the fatherOf fact"
-      (is (not (v/ask? kb (list parentOf A B) 'CxCore))))
-    (let [edge (v/assert kb (list 'genl fatherOf parentOf) 'CxCore {:strength :monotonic})]
+      (is (not (v/ask? kb (list parentOf A B) 'CxUniverse))))
+    (let [edge (v/assert kb (list 'genl fatherOf parentOf) 'CxUniverse {:strength :monotonic})]
       (testing "with the edge, the goal is answered by subsumption"
-        (is (v/ask? kb (list parentOf A B) 'CxCore)))
+        (is (v/ask? kb (list parentOf A B) 'CxUniverse)))
       (testing "retracting the edge withdraws the subsumption (belief-following)"
         (v/retract! kb edge)
-        (is (not (v/ask? kb (list parentOf A B) 'CxCore)))))))
+        (is (not (v/ask? kb (list parentOf A B) 'CxUniverse)))))))
 
 ;; ---- backward dual: a subtype-concluding rule answers a supertype goal ----
 
 (tu/deftest-kb subsuming-unify-honors-consequent-specificity
   (tu/with-terms [fatherOf parentOf loves A B]
-    (v/assert kb (list 'genl fatherOf parentOf) 'CxCore {:strength :monotonic})
+    (v/assert kb (list 'genl fatherOf parentOf) 'CxUniverse {:strength :monotonic})
     (let [x (symbol "?x") y (symbol "?y")]
       (testing "a fatherOf consequent answers a parentOf goal, binding the arguments"
         (is (= {x A y B}
@@ -118,11 +118,11 @@
 (tu/deftest-kb concluding-rule-handles-is-specs-intersect-index
   (tu/with-terms [fatherOf parentOf sonOf A B]
     (let [rule (v/assert-rule kb [(list sonOf '?y '?x)] (list fatherOf '?x '?y)
-                              'CxCore {:direction :backward})]
+                              'CxUniverse {:direction :backward})]
       (testing "before the edge, only fatherOf's own goal reaches the rule"
         (is (contains? (res/concluding-rule-handles kb fatherOf) rule))
         (is (not (contains? (res/concluding-rule-handles kb parentOf) rule))))
-      (let [edge (v/assert kb (list 'genl fatherOf parentOf) 'CxCore {:strength :monotonic})]
+      (let [edge (v/assert kb (list 'genl fatherOf parentOf) 'CxUniverse {:strength :monotonic})]
         (testing "with fatherOf ⊑ parentOf, a parentOf goal reaches the fatherOf rule"
           (is (contains? (res/concluding-rule-handles kb parentOf) rule)))
         (testing "and it is exactly specs(parentOf) ∩ rules-by-consequent"
@@ -140,22 +140,22 @@
   ;; rule and unify parentOf against its fatherOf consequent by subsumption.
   (tu/with-terms [fatherOf parentOf sonOf A B]
     (let [p (symbol "?p") c (symbol "?c")]
-      (v/assert kb (list 'genl fatherOf parentOf) 'CxCore {:strength :monotonic})
+      (v/assert kb (list 'genl fatherOf parentOf) 'CxUniverse {:strength :monotonic})
       (v/assert-rule kb [(list sonOf '?y '?x)] (list fatherOf '?x '?y)
-                     'CxCore {:direction :backward})
-      (v/assert kb (list sonOf B A) 'CxCore {:strength :monotonic})
+                     'CxUniverse {:direction :backward})
+      (v/assert kb (list sonOf B A) 'CxUniverse {:strength :monotonic})
       (testing "the subtype conclusion is never materialized (backward rule, no forward firing)"
-        (is (nil? (v/handle-of kb (list fatherOf A B) 'CxCore)))
-        (is (empty? (v/sentexes-matching kb (list parentOf A B) 'CxCore))))
+        (is (nil? (v/handle-of kb (list fatherOf A B) 'CxUniverse)))
+        (is (empty? (v/sentexes-matching kb (list parentOf A B) 'CxUniverse))))
       (testing "the node engine answers the parentOf goal via the fatherOf-concluding rule, with the right binding"
-        (is (v/query? kb (list parentOf p c) 'CxCore {:max-depth 2}))
-        (is (contains? (set (v/query kb (list parentOf p c) 'CxCore {:max-depth 2}))
+        (is (v/query? kb (list parentOf p c) 'CxUniverse {:max-depth 2}))
+        (is (contains? (set (v/query kb (list parentOf p c) 'CxUniverse {:max-depth 2}))
                        {p A c B})))
       (testing "prove (recur DFS) agrees"
-        (is (v/provable? kb (list parentOf p c) 'CxCore))
-        (is (some #(and (= A (% p)) (= B (% c))) (v/prove kb (list parentOf p c) 'CxCore))))
+        (is (v/provable? kb (list parentOf p c) 'CxUniverse))
+        (is (some #(and (= A (% p)) (= B (% c))) (v/prove kb (list parentOf p c) 'CxUniverse))))
       (testing "backward (lazy) agrees"
-        (is (some #(and (= A (% p)) (= B (% c))) (v/prove kb (list parentOf p c) 'CxCore)))))))
+        (is (some #(and (= A (% p)) (= B (% c))) (v/prove kb (list parentOf p c) 'CxUniverse)))))))
 
 ;; ---- the fan-out is scoped by the vantage --------------------------------
 ;; A genl edge connects a sub-predicate's facts to a supertype pattern only where
@@ -166,10 +166,10 @@
 
 (tu/deftest-kb the-matching-fan-out-walks-only-visible-genl-edges
   (tu/with-terms [dog_t animal_t Muffet CxA CxB]
-    (v/assert kb (list 'genlCx CxA 'CxCore) 'CxCore)
-    (v/assert kb (list 'genlCx CxB 'CxCore) 'CxCore)
+    (v/assert kb (list 'genlCx CxA 'CxUniverse) 'CxUniverse)
+    (v/assert kb (list 'genlCx CxB 'CxUniverse) 'CxUniverse)
     (v/assert kb (list 'genl dog_t animal_t) CxA)
-    (v/assert kb (list dog_t Muffet) 'CxCore)
+    (v/assert kb (list dog_t Muffet) 'CxUniverse)
     (doseq [hierarchical? [true false]]
       (binding [res/*hierarchical-retrieval* hierarchical?]
         (testing (str "hierarchical-retrieval " hierarchical?)
@@ -187,12 +187,12 @@
   ;; (genl fatherOf parentOf) is visible — in all three chainers.
   (tu/with-terms [fatherOf parentOf sonOf A B CxA CxB]
     (let [p (symbol "?p") c (symbol "?c")]
-      (v/assert kb (list 'genlCx CxA 'CxCore) 'CxCore)
-      (v/assert kb (list 'genlCx CxB 'CxCore) 'CxCore)
+      (v/assert kb (list 'genlCx CxA 'CxUniverse) 'CxUniverse)
+      (v/assert kb (list 'genlCx CxB 'CxUniverse) 'CxUniverse)
       (v/assert kb (list 'genl fatherOf parentOf) CxA {:strength :monotonic})
       (v/assert-rule kb [(list sonOf '?y '?x)] (list fatherOf '?x '?y)
-                     'CxCore {:direction :backward})
-      (v/assert kb (list sonOf B A) 'CxCore {:strength :monotonic})
+                     'CxUniverse {:direction :backward})
+      (v/assert kb (list sonOf B A) 'CxUniverse {:strength :monotonic})
       (testing "the goal is answered where the subtype edge is visible"
         (is (v/query? kb (list parentOf p c) CxA {:max-depth 2}))
         (is (v/provable? kb (list parentOf p c) CxA))

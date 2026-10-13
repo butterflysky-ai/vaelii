@@ -2,7 +2,7 @@
 ;; Copyright © 2026 Vaelii LLC and the Vaelii contributors.
 (ns vaelii.predall-test
   "The predAll / predExists / predInstance / predSpecified matrix (docs/predall.md,
-  resources/kb/CxCore.txt).
+  resources/kb/CxUniverse.txt).
 
   The *Instance* relations (predAllInstance / predInstanceAll) are rule generators that do
   REAL inference: every member of the quantified collection is concluded to bear the
@@ -971,7 +971,7 @@
                 " on demand at query time"))))))
 
 (tu/deftest-kb the-audit-runs-through-the-public-api
-  ;; the declarations in CxCore send an author to `vaelii.core`, so the audit answers there
+  ;; the declarations in CxUniverse send an author to `vaelii.core`, so the audit answers there
   ;; without a caller requiring anything under `vaelii.impl`.  `predall` sits ABOVE core and
   ;; the delegation runs back down through `wiring`, which is the arrangement being pinned:
   ;; a broken resolve there fails at call time rather than at load.

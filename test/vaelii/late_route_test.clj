@@ -12,8 +12,8 @@
 
   Four shapes, each stated in CxUniverse at `:monotonic`: an argument-type entailment
   down a predicate chain, a forward rule over a type chain, the same rule over an edge a
-  `genlArg` mints, and a `transitiveInArgInverse` preservation.  Then CxCore and the starter,
-  authored order against the content order their own text export reloads in."
+  `genlArg` mints, and a `transitiveInArgInverse` preservation.  Then the upper layer and the
+  starter, authored order against the content order their own text export reloads in."
   (:require [clojure.java.io :as io]
             [clojure.test :refer [deftest is testing]]
             [vaelii.core :as v]
@@ -201,18 +201,18 @@
         (run! #(io/delete-file % true) (reverse (file-seq dir)))))))
 
 (deftest core-in-authored-and-content-order-holds-the-same-justifications
-  ;; `load-core!` restores CxCore as `core-context/load-into` asserts it, in authored
-  ;; order; its own text export reloads the same sentences in content order.
-  ;; The floor is one both argument-declaration readings clear: CxCore holds 262
-  ;; justifications with the entailment and 196 without it (VAELII_ASSERTIVE_ARG_TYPES=0).
+  ;; `load-core!` restores the upper layer as `core-context/load-into` asserts it, in
+  ;; authored order; its own text export reloads the same sentences in content order.
+  ;; The floor is one both argument-declaration readings clear: the upper layer holds 1,806
+  ;; justifications with the entailment and 1,018 without it (VAELII_ASSERTIVE_ARG_TYPES=0).
   (let [[authored reloaded] (round-trip tu/load-core!)]
-    (is (< 150 (reduce + (vals authored))))
+    (is (< 900 (reduce + (vals authored))))
     (is (= authored reloaded))))
 
 (deftest ^:slow the-starter-in-authored-and-content-order-holds-the-same-justifications
-  ;; the starter holds 1,187 justifications with the entailment and 725 without it
+  ;; the starter holds 1,954 justifications with the entailment and 1,101 without it
   (let [[authored reloaded] (round-trip tu/load-starter!)]
-    (is (< 600 (reduce + (vals authored))))
+    (is (< 1000 (reduce + (vals authored))))
     (is (= authored reloaded))))
 
 (deftest two-pairings-over-one-antecedent-set-are-two-justifications

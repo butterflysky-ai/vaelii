@@ -444,10 +444,8 @@
         "the fact the census would otherwise have called impossible")))
 
 (tu/deftest-kb a-variableArity-sub-is-not-stranded-by-the-length-above-it
-  ;; The inherited route into the same reading, and the mark is where the inheritance never
-  ;; looks: `inherited-arity` asks the release of the supers, so the sub carrying it still
-  ;; takes their length, and only the position arm's own reading of the predicate releases
-  ;; the entry.
+  ;; The inherited route into the same reading: a sub carrying the mark is bound to no
+  ;; length (`arity/relation-length`), so the entry is not stranded.
   (tu/with-terms [chainOf subChainOf a_type]
     (v/assert kb (list 'genl a_type 'thing) 'CxUniverse)
     (v/assert kb (list 'arg subChainOf 3 a_type) 'CxUniverse)

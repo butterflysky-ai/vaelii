@@ -61,7 +61,7 @@ lein lint    # glossary, versions, doc links, doc drift, conflict markers, clj-k
              # checks, run in three concurrent lanes
 lein fix     # reformats in place; cljfmt is the only auto-repairable check
 lein gate    # lint alongside the suite — the check before you push
-lein release-gate  # ...and the perf claims, before a tag or a perf-sensitive land
+lein release-gate  # ...and the uberjar and the perf claims, before a tag or a perf-sensitive land
 ```
 
 **`lein gate` is the one to run before opening a pull request.** It runs two stages
@@ -76,7 +76,9 @@ warning (a restricted native call, a `sun.misc.Unsafe` caller, a deprecated `-XX
 or lein's leaked `$CLASSPATH` — so a dependency or a JDK that brings one in goes red here.
 **Perf is opt-in**: `lein release-gate` adds the scaling claims before a tag or a
 perf-sensitive land, `--perf` adds them without the release framing, and a fast gate
-that lands a hot-path change without them prints "perf owed". A gate at `:default` that
+that lands a hot-path change without them prints "perf owed". `lein release-gate` also
+runs an `uberjar` stage, which AOT-compiles every namespace into the standalone jar and
+loads `vaelii.core` from it. A gate at `:default` that
 lands an index, TMS or inference change prints "slow owed" (§5).
 `--fail-fast`, `--only <stage>`, `--skip <stage>`, `--quick`, `--all`, and
 `PERF_TOLERANCE` on a loaded machine.
@@ -213,7 +215,7 @@ rejection messages: [`docs/naming.md`](docs/naming.md).
 | predicate | camelCase, lowercase-initial | `parentOf`, `genl`, `arg` |
 | individual | CapitalCamelCase | `Muffet`, `Tom` |
 | type | snake_case, a **unary** predicate | `dog`, `physical_object` |
-| context | `Cx` followed by CapitalCamelCase | `CxCore`, `CxUniverse` |
+| context | `Cx` followed by CapitalCamelCase | `CxWell`, `CxUniverse` |
 
 What follows from it:
 
@@ -575,7 +577,7 @@ If your predicate is transitive, symmetric or functional, assert the meta-predic
 alongside it and the existing machinery picks it up. A declaration the engine does not
 read is worse than none, because it is indistinguishable from one that works:
 `vaelii.impl.vocabulary` is the roster of what the engine's own grammar actually
-enforces, and `vocabulary_audit_test.clj` fails both on a `CxCore` term the roster
+enforces, and `vocabulary_audit_test.clj` fails both on a `core.txt` term the roster
 does not mention and on a roster entry naming a term the grammar has retired. If you
 add a declaration, add it there too.
 
@@ -722,7 +724,7 @@ mocks — the in-memory stores by default, with no external dependency.
   write that walks the corpus costs what one that does not costs, so a guard or a check
   whose cost follows what the KB holds passes everywhere else. `full_kb_test` opens the
   store once and holds each probe (reads, a fact, a rule, their retraction, a corpus
-  premise out and back, the spindle sync, a `genl` edge, a new context wired under a
+  premise out and back, the sync of the shipped contexts, a `genl` edge, a new context wired under a
   corpus one) to a ceiling of counted index operations and a looser one of milliseconds,
   each about three times its cost on the legacy KB: a baseline a change may not grow past.
   A write probe already past any ceiling is `known-unbounded`: it runs last, is reported,

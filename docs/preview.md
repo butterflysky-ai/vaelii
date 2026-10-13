@@ -122,7 +122,9 @@ it. A throw that is not an `ex-info` propagates after the rollback.
 `:violations` is what the **derivation path** dropped: the definitional constraints
 (arg, disjointness, functionality) that chaining reports rather than throws
 ([inference.md](inference.md)). The KB's own ledger is restored, so a preview never
-shows up in `(violations kb)`.
+shows up in `(violations kb)`. `:violations` lists no `:forced-conclusion` entry, since
+`violations` reads that entry off the stored firings and files nothing in the ledger
+([nmtms.md](nmtms.md#the-forced-monotonic-roster)).
 
 `:contradictions` is the dilemmas the batch would **open**, with the standing ones
 subtracted. Asserting the negation of a believed default withdraws nothing — a defeasible

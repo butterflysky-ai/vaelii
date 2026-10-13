@@ -18,7 +18,7 @@ OpenCyc reader is in this repo. This page is the **sequence**, and what each ste
 | KB | comes from | to first load | once loaded |
 |---|---|---|---|
 | Starter ontology | the classpath | seconds | 1,600+ asserted / 3,200+ stored |
-| Core vocabulary | the classpath | seconds | 850+ sentexes |
+| Upper vocabulary | the classpath | seconds | 3,000+ sentexes |
 | cyc-tiny | a test fixture in the plugin | one dependency, then seconds | 7,571 sentexes |
 | OpenCyc 4.0 | a distribution you supply | a conversion, then ~10 minutes | ~1.2M sentexes |
 
@@ -31,7 +31,7 @@ lein run -m vaelii.web        # starter-loaded, http://localhost:3000
 That is the whole route. `lein browser` gives you the same browser with a REPL and a
 reload channel into it; `lein cli repl --starter` gives you the KB and no browser.
 
-Neither KB is a one-shot. **Core vocabulary**, **Starter ontology** and the **generator**
+Neither KB is a one-shot. **Upper vocabulary**, **Starter ontology** and the **generator**
 are the three sources always offered on the `/kbs` page, so you can load any of them again
 — or a second copy at a different shape — without a restart.
 
@@ -90,7 +90,7 @@ scripts/link-checkouts.sh && lein browser
 ```
 
 `/kbs` → the **cyc-tiny** card → Load, at the default `ontology` profile. The load takes
-about 8 s, CxCore included, and the KB holds 7,571 sentexes, 1,001 terms, 429 types and 17
+about 8 s, the upper layer included, and the KB holds 7,571 sentexes, 1,001 terms, 429 types and 17
 contexts. The engine's own checks refuse 1,390 of the translated sentences, by `:type`:
 
 | `:type` | refused | what |
@@ -198,6 +198,15 @@ asserts *two* things — the rule, and the exception qualifying it — a wrapper
 differs from the rule's. Both are peeled before anything is stored, so neither reaches a
 sentence as a functor ([exceptions.md](exceptions.md)).
 
+`(set/inert S)` stores `S` through `assert-inert`: indexed, durable and browsable, but no
+premise, so nothing believes it, chains from it or reports a contradiction against it
+([solving.md](solving.md#the-inert-fact-primitive)). The loader peels the wrapper around
+a whole form, and the export writes every inert sentex under it. An inert sentex has no
+strength, so `(set/inert (set/monotonic S))` and the reverse nesting are refused `:shape`.
+A rule under `(set/inert …)` is refused `:not-indexable`, as `assert-inert` refuses one;
+`(set/inertRule R)` is the form for a rule that is believed and fires in neither
+direction ([inference.md](inference.md)). `assert` does not read `set/inert`.
+
 **A form the EDN reader refuses is refused by file and line.** An unbalanced form, an
 unknown `#tag` and a `#=` read-eval form are `:unreadable`, with `:file` and the `:line`
 the form opens on. The refusal names the kind of failure and never repeats the reader's
@@ -205,8 +214,8 @@ own message, which can quote the file: `kb-diff` reads a path the same way and s
 refusal's message over the wire.
 
 **This is a round trip through content, not through state.** What is written is the
-*premises* — what somebody asserted — and a reload derives the rest again, so the KB that
-comes back has the same beliefs at different handles. Where handle identity is what you
+*premises* — what somebody asserted — and the inert sentexes, and a reload derives the
+rest again, so the KB that comes back has the same beliefs at different handles. Where handle identity is what you
 need (a backup, a move between stores, a corpus too big to re-derive), the pair is
 `export!` / `import!` instead.
 

@@ -49,14 +49,12 @@
 
 (tu/deftest-kb the-theory-is-opt-in-below-cxuniverse
   (testing "the theory sees the upper ontology through CxUniverse"
-    (is (holds-sees CPT 'CxUniverse))
-    (is (holds-sees CPT 'CxAbstract)))
+    (is (holds-sees CPT 'CxUniverse)))
   (testing "CxUniverse states the theory's context membership beside the other shipped contexts"
     (is (some #(v/premise? kb (:id %))
               (v/sentexes-matching kb (list 'context CPT) 'CxUniverse))))
   (testing "neither CxWell nor the upper ontology sees the theory"
     (is (not (holds-sees 'CxWell CPT)))
-    (is (not (holds-sees 'CxAbstract CPT)))
     (is (not (holds-sees 'CxUniverse CPT)))))
 
 (tu/deftest-kb the-theory-declares-every-relation-and-comments-it-once
@@ -86,7 +84,7 @@
     (is (holds-genl 'ipv4_address 'ip_address CPT))
     (is (holds-genl 'ipv6_address 'ip_address CPT))
     (is (holds-genl 'ip_address 'string CPT)))
-  (testing "a software tool is not placed under CxAbstract's tool"
+  (testing "a software tool is not placed under CxUniverse's tool"
     (is (not (holds-genl 'software_tool 'tool CPT)))
     (is (v/disjoint? kb 'software_tool 'tool CPT)))
   (testing "the separations"
@@ -132,23 +130,20 @@
                                  (flatten (map :sentence (:sides %))))
                           (concat (v/contradictions kb) (v/conflicts kb))))))))
 
-(tu/deftest-kb a-context-that-does-not-see-the-theory-reads-no-relation-declaration
+(tu/deftest-kb a-context-that-does-not-see-the-theory-reads-only-its-decontextualized-marks
   (tu/with-terms [CxElsewhere Grep CallOne]
     (v/assert kb (list 'genlCx CxElsewhere 'CxWell) 'CxUniverse)
     (v/assert kb (list 'read_only_software_tool Grep) CxElsewhere)
     (v/assert kb (list 'invokesTool CallOne Grep) CxElsewhere)
-    (doseq [ctx [CxElsewhere 'CxWell 'CxAbstract 'CxUniverse]]
-      (testing (str "no declaration of a computing relation is read in " ctx)
-        ;; toolName is left out of the arity question: `functional` is a decontextualized
-        ;; mark and a kind of binary_predicate, so (functional toolName) holds in CxUniverse
-        ;; and in every context below CxUniverse, and classifies toolName there.  CxAbstract
-        ;; is above CxUniverse and reads no mark.
-        (doseq [p (remove #{'toolName} binary-relations)]
-          (is (not (holds-ask (list 'binary_predicate p) ctx)) (str p " in " ctx)))
-        (is (= (not= ctx 'CxAbstract) (holds-ask '(functional toolName) ctx))
-            (str "the functional mark in " ctx))
+    (doseq [ctx [CxElsewhere 'CxWell 'CxUniverse]]
+      (testing (str "no other declaration of a computing relation is read in " ctx)
+        ;; The exact-arity classes and `functional` are decontextualized marks, so each
+        ;; membership has a copy in CxUniverse, read there and in every context below it.
+        (doseq [p binary-relations]
+          (is (holds-ask (list 'binary_predicate p) ctx) (str p " in " ctx)))
+        (is (holds-ask '(functional toolName) ctx) (str "the functional mark in " ctx))
         (doseq [p ternary-relations]
-          (is (not (holds-ask (list 'ternary_predicate p) ctx)) (str p " in " ctx)))
+          (is (holds-ask (list 'ternary_predicate p) ctx) (str p " in " ctx)))
         (doseq [p (concat binary-relations ternary-relations)]
           (is (zero? (declared-positions p ctx)) (str p " in " ctx))
           (is (empty? (v/sentexes-matching kb (list 'comment p '?c) ctx)) (str p " in " ctx)))))

@@ -85,7 +85,7 @@
     (testing "the type tree, contexts, predicates, and disjointness render"
       (is (re-find #"thing" (:body r)))
       (is (re-find #"animal" (:body r)))
-      (is (re-find #"CxCore" (:body r)))
+      (is (re-find #"CxUniverse" (:body r)))
       (is (re-find #"Core predicates" (:body r)))
       (is (or (re-find #"⊥" (:body r))
               (re-find #"disjoint from" (:body r)))
@@ -162,7 +162,7 @@
       (is (re-find #"hx-get=\"/tree/rows\?rel=genl&amp;node=bird" b)
           "the child carries the request that would reach it")))
   (testing "the context lattice reads through the same route"
-    (is (= 200 (:status (GET "/tree/rows" "rel=genlCx&node=CxCore")))))
+    (is (= 200 (:status (GET "/tree/rows" "rel=genlCx&node=CxUniverse")))))
   (testing "a relation that is not one of the two is refused, not looked up"
     ;; `rel` reaches the index as a functor, so it is checked rather than trusted
     (let [r (GET "/tree/rows" "rel=parentOf&node=Tom")]
@@ -347,7 +347,7 @@
               {:chain? false})
     ;; Sized off the largest context already loaded rather than off a constant: the
     ;; claim is that this context leads the ranking, and a fixed 400 makes that a bet
-    ;; on the shipped ontology staying smaller than it — which CxCore, carrying an
+    ;; on the shipped ontology staying smaller than it — which CxUniverse, carrying an
     ;; argument declaration for every position of every predicate, does not.
     (let [n (+ 50 (apply max 0 (map #(v/count-in-context kb %) (v/contexts kb))))]
       (v/assert-many kb (for [i (range n)] (list heldBy (symbol (str "TmpBig" i))))
@@ -459,7 +459,7 @@
   ;; `genlCx` is answered from the closure, which is complete for it — so every other
   ;; applicable prover is shadowed, and "applicable" stops meaning "consulted".  No rule
   ;; concludes `genlCx`, so no shadowing channel bears on the goal.
-  (let [body (:body (GET "/levels" "q=%28genlCx%20CxOrganism%20CxCore%29&ctx=CxOrganism"))]
+  (let [body (:body (GET "/levels" "q=%28genlCx%20CxBiology%20CxUniverse%29&ctx=CxBiology"))]
     (is (re-find #"TransitivityProver" body))
     (is (re-find #"shadowed by" body))
     (is (re-find #"the sole complete method" body))))
@@ -1639,7 +1639,7 @@
         (is (re-find #"contradicted by" (:body r)))))))
 
 (tu/deftest-kb a-defeat-a-separation-caused-names-the-separation-on-the-sentex-and-term-pages
-  ;; `(disjoint gladdenOf saddenOf)` mints `(genl gladdenOf thing)` through CxCore's
+  ;; `(disjoint gladdenOf saddenOf)` mints `(genl gladdenOf thing)` through CxUniverse's
   ;; `(genlArg disjoint 1 thing)`, and `(unary_predicate thing)` then defeats the tuple.
   ;; The mint is the entailing reading's, so the test pins it: under the constraint-only
   ;; reading the tuple stays believed and no page names the separation.
@@ -2333,7 +2333,7 @@
   ;; the home page prints `comment` text — KB content, which an importer or an agent
   ;; writes, so it is as untrusted as a query param
   (tu/with-terms [evilPred]
-    (v/assert kb (list 'comment evilPred "doc <script>alert('kb')</script> text") 'CxCore)
+    (v/assert kb (list 'comment evilPred "doc <script>alert('kb')</script> text") 'CxUniverse)
     (let [body (predicate-page-holding evilPred)]
       (is (some? body) "the comment is on one of the list's pages")
       (is (escaped? body "<script>alert('kb')" "&lt;script&gt;alert(&apos;kb&apos;)")))))
@@ -2342,7 +2342,7 @@
   ;; a sentence carrying a free-text string is the structure that puts markup in the
   ;; textarea; it must be escaped once, so the user edits the text they wrote
   (tu/with-terms [notedPred]
-    (let [h (v/assert kb (list 'comment notedPred "a <b> tag") 'CxCore)
+    (let [h (v/assert kb (list 'comment notedPred "a <b> tag") 'CxUniverse)
           r (GET "/edit" (str "handles=" h))]
       (is (re-find #"&lt;b&gt;" (:body r)) "the markup in the sentence is escaped")
       (is (not (re-find #"&amp;lt;" (:body r))) "and not escaped a second time"))))
@@ -2748,7 +2748,7 @@
       (is (re-find #":strength :monotonic" body))))
   (testing "opened from a term page it arrives with the term already in it"
     (is (re-find #"\(dog " (:body (GET "/assert" "q=dog"))))
-    (is (re-find #"value=\"CxCore\"" (:body (GET "/assert" "q=CxCore"))))))
+    (is (re-find #"value=\"CxUniverse\"" (:body (GET "/assert" "q=CxUniverse"))))))
 
 (tu/deftest-kb asserting-through-the-form-stores-the-sentence
   (tu/with-terms [likesOf Alice Bob CxNew]
@@ -3307,3 +3307,58 @@
   (testing "a KB being exported refuses every op"
     (with-redefs [cat/exporting-kb? (constantly true)]
       (is (= [409 :still-exporting] ((juxt :status :type) (post-op *app* :term-count [])))))))
+
+(deftest a-changed-kb-file-syncs-the-loaded-kbs-on-the-next-request
+  (let [stamps (atom {"core.txt" 1})
+        calls  (atom [])
+        busy?  (atom false)]
+    (with-redefs [web/kb-file-stamps (fn [] @stamps)
+                  cat/held-premises   (constantly nil)
+                  cat/sync-loaded!   (fn []
+                                       (swap! calls conj @stamps)
+                                       (when @busy? (throw (ex-info "busy" {:type :job-busy})))
+                                       :job)]
+      (let [h (#'web/kb-file-syncing (constantly {:status 200}))]
+        (h {})
+        (swap! stamps assoc "core.txt" 2)
+        (reset! busy? true)
+        (h {})
+        (reset! busy? false)
+        (h {})
+        (h {})
+        (testing "nothing before a change, a retry after a busy writer, then nothing again"
+          (is (= [{"core.txt" 2} {"core.txt" 2}] @calls)))))))
+
+(deftest a-write-to-the-starter-is-written-back-after-a-non-get-request
+  (let [stamps  (atom {"core.txt" 1})
+        held    (atom 0)
+        backs   (atom [])
+        writer  (atom nil)
+        status  (atom :running)]
+    (with-redefs [web/kb-file-stamps (fn [] @stamps)
+                  cat/sync-loaded!   (constantly :sync-job)
+                  cat/held-premises   (fn [k] (is (= "starter" k)) (swap! held inc))
+                  cat/write-back!    (fn [_ base] (swap! backs conj base) [(+ 10 base) nil])
+                  jobs/writer        (fn [] @writer)
+                  jobs/job           (fn [_] {:status @status})]
+      (let [h   (#'web/kb-file-syncing (constantly {:status 200}))
+            get {:request-method :get}
+            put {:request-method :post}]
+        (h get)
+        (h get)
+        (h put)
+        (reset! writer :a-job)
+        (h put)
+        (reset! writer nil)
+        (h put)
+        (testing "the first request reads the starter, and each non-GET one compares with the last reading"
+          (is (= [1 11] @backs)))
+        (swap! stamps assoc "core.txt" 2)
+        (h put)
+        (h put)
+        (testing "nothing is compared while the file sync runs"
+          (is (= [1 11] @backs)))
+        (reset! status :done)
+        (h put)
+        (testing "a finished sync takes a fresh reading, which the next comparison starts from"
+          (is (= [1 11 2] @backs)))))))

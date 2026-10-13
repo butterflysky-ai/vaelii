@@ -31,7 +31,7 @@
 
 (use-fixtures :each (tu/neutral-fresh
                      #(doto (tu/fresh)
-                        (tu/load-core-with! '[[CxTime "upper"]])
+                        (tu/load-core!)
                         (v/add-reasoner :point :allen)
                         (v/add-prover (pt/includes-instant-prover)))))
 

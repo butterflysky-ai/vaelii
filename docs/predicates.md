@@ -250,7 +250,7 @@ is not reported, in the one arrival order that route was the only way into.
 
 ## Adding one, end to end
 
-1. **Write the term into the ontology.** `resources/kb/CxCore.txt`, term-centric: a
+1. **Write the term into the ontology.** `resources/kb/upper/core.txt`, term-centric: a
    `comment`, the predicate class, an `arg` per position, and any marks it carries. This is
    the KB half and it is data.
 2. **Declare it** in `predicates/entries`, through a constructor where one fits. Position
@@ -259,7 +259,7 @@ is not reported, in the one arrival order that route was the only way into.
    triple, the `:wff` check, or both. Declaring `:checked true` with no `:wff` arm will not
    load, and neither will the reverse.
 4. **Answer for it.** Either `:enforced` prose naming the path that reads it, or the `inert`
-   constructor with the reason nothing does. A term CxCore comments and nobody answers for
+   constructor with the reason nothing does. A term `core.txt` comments and nobody answers for
    lands in `vocabulary-audit`'s `:unclassified`.
 5. **Satisfy the facet contract, or record what it stops short of.** Each facet you carry
    implies others, a family holds its spellings to the same lanes, and a declaration that
@@ -279,7 +279,7 @@ is not reported, in the one arrival order that route was the only way into.
 | `predicates_test` | the declaration's own contract: every inert term carries a stated reason, every note names a lane the facet vocabulary does not reach, every `:arbitrable` term claims its `:opposing-read`, and a roster that has moved states its value as a **literal** — reconstructing a derived var proves the wiring and nothing about what it holds. The validators' enforcement are driven here too, one deliberately broken declaration per rule |
 | `special_table_test` | the table's order, each `:props` kind and each derivation-path flag, frozen in a table written out that nothing derives |
 | `vocabulary_audit_test` | `:unclassified`, `:retired` and `:contradicted` are empty on the shipped ontology |
-| `core_context_test` | the CxCore sentex count, which [kbs.md](kbs.md)'s shipped-KB table quotes and nothing else pins — update both together |
+| `core_context_test` | the upper layer's sentex count, which [kbs.md](kbs.md)'s shipped-KB table quotes and nothing else pins — update both together |
 | `refusal_roster_test`, `type_contract_test` | a new `ex-info` `:type` needs both, with its changelog entry. Reusing `:bad-table-entry` with a new `:mismatch` value is the cheaper move and needs one line — `type_contract_test`'s `discriminants`, where the `:mismatch` vocabulary is pinned as the `:type` one is. Check there first that the condition is not one another validator already has a word for |
 
 Then `lein gate`, and `lein test-matrix --owed`: a declaration change reaches inference,
@@ -296,7 +296,7 @@ the total:
 | Kind of file | Where |
 |---|---|
 | the **declaration** | one row of `predicates/entries`, and nothing else in the namespace |
-| **arms** carrying semantics nothing derives | the table and its add / drop / rebuild triple in `taxonomy`, plus the readers that follow belief through it; the check itself in `checks` and the two call sites that ask it; the arms map in `special` and the shape refusal in `wff`; `settle`'s partner posting and its message arm; the `(comment …)` block in `CxCore.txt`; the term's own test namespace |
+| **arms** carrying semantics nothing derives | the table and its add / drop / rebuild triple in `taxonomy`, plus the readers that follow belief through it; the check itself in `checks` and the two call sites that ask it; the arms map in `special` and the shape refusal in `wff`; `settle`'s partner posting and its message arm; the `(comment …)` block in `core.txt`; the term's own test namespace |
 | **frozen surfaces**, each named by a **failing test** rather than found by reading | `special_table_test`'s order, `type_contract_test`'s `:type` vocabulary, `predicates_test`'s roster pins, and `troubleshooting.md`'s `:type` row, which `refusal_roster_test` requires. All four are in "What a new term owes" above |
 | **rosters that are not views** | `checks/arbitrable-kinds`, and `settle`'s hand-unions — the two under "Where this stops" below |
 

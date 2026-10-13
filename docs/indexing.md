@@ -74,6 +74,9 @@ ints and keywords keep their type. The whole layout:
 | `[:tax-support :children k]` | set | the contexts that state a supporter of `k` |
 | `[:tax-support :handles (conj k ctx)]` | set | the handles of those supporters stated in `ctx` |
 | `[:tax-installs h]` | set | the taxonomy keys handle `h` installs (keys, not handles) |
+| `[:tax-named :count [rel f]]` | integer | how many positive `(f (sentexHandle H))` facts, `f` `except` or `defeat`, are stored whose `H` installs a key of relation `rel` (`:genl`, `:genlCx` or `:flat`) |
+| `[:tax-named :children [rel f]]` | set | the contexts that state such a fact |
+| `[:tax-named :handles [rel f ctx]]` | set | the handles of those facts stated in `ctx` |
 | `[:exception-index pred]` | set | rules whose exception query mentions `pred` |
 | `[:exception-index :rules]` | set | every rule carrying an exception |
 | `[:term-index term]` | set | sentexes containing `term` anywhere, any nesting |
@@ -1130,6 +1133,18 @@ member of a disjoint metatype is a supporter only while a mark on the metatype i
 So `reindex` posts these families after its per-record pass, by replaying the stored
 declarations over a scratch taxonomy (`special/post-taxonomy-supporters!`), and the
 importer's inline load does the same once every record is in.
+
+`:tax-named` files each stored positive `except` or `defeat` whose target is a supporter,
+under the target's relation (`kv/key-relation`), so the scoped-read gate
+(`kb/supporter-reaches?`) answers that a supporter rests on a roster target with one count
+read when the target is the supporter itself. Two writes post it, each reading the other
+side as stored. The naming fact's index write reads `[:tax-installs H]` of its target
+(`kv/flat-family-adds`). The taxonomy's post of a supporter reads the naming facts of the
+supporter's handle in the trie, and its retirement retires them once the handle installs
+no other key of the relation (`tax/post!`, `tax/retire!`). An `except` outlives a target
+retracted before it, and the retirement takes it out of the family then. The family's
+other path is the gate's walk over the roster's targets
+(`index_test/the-named-supporter-family-agrees-with-the-naming-trie`).
 
 ## 10. The mint family
 

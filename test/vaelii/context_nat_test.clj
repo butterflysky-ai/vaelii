@@ -62,9 +62,9 @@
         h    (v/assert kb '(likes Tom Ann) (list cxfn 'CxMonad (list 'DatetimeFn "2000")))
         k    (:context (v/sentex kb h))]
     (testing "a hand-asserted genlCx edge over the cx/ constant is accepted and wires it in"
-      (v/assert kb (list 'genlCx k 'CxCore) 'CxUniverse)
+      (v/assert kb (list 'genlCx k 'CxUniverse) 'CxUniverse)
       (is (contains? (set (v/contexts kb)) k))
-      (is (v/sees? kb k 'CxCore)))))
+      (is (v/sees? kb k 'CxUniverse)))))
 
 ;; ---- the stored set and the readings are functions of the offered set ----
 
@@ -162,14 +162,15 @@
 
 (tu/deftest-kb a-declaration-admits-the-slot-only-where-cxuniverse-sees-it
   ;; The slot resolves through the `termOfUnit` map in CxUniverse, so the declaration is
-  ;; read there: stated in CxUniverse or in CxCore above it, it admits the slot; stated in
-  ;; an unwired context or in a spec of CxUniverse, it does not.
+  ;; read there: stated in CxUniverse or in a context above it, it admits the slot; stated
+  ;; in an unwired context or in a spec of CxUniverse, it does not.
   (doseq [where [:universe :above :unwired :below]]
-    (tu/with-terms [Winter NewYear holiday CxBelow CxElse]
+    (tu/with-terms [Winter NewYear holiday CxBelow CxAbove CxElse]
       (let [cxfn (fresh-cxfn "Scope")
             _    (v/assert kb (list 'genlCx CxBelow 'CxUniverse) 'CxUniverse {:strength :monotonic})
+            _    (v/assert kb (list 'genlCx 'CxUniverse CxAbove) 'CxUniverse {:strength :monotonic})
             _    (v/assert kb (list 'result cxfn 'context)
-                           ({:universe 'CxUniverse :above 'CxCore :unwired CxElse :below CxBelow}
+                           ({:universe 'CxUniverse :above CxAbove :unwired CxElse :below CxBelow}
                             where))
             slot (list cxfn Winter)
             fact (list holiday NewYear)]
@@ -389,12 +390,14 @@
         mterm (list 'DatetimeFn "2000-01")
         year  (list cxfn 'CxMonad yterm)
         month (list cxfn 'CxMonad mterm)
-        rfact (list 'subFooOf mterm yterm)]
-    ;; two R-evidence facts, CxUniverse first (lower handle), CxCore second (higher handle
-    ;; but the smaller context by content) — so a handle/retrieval-first pick and a
-    ;; content-first pick disagree.
+        rfact (list 'subFooOf mterm yterm)
+        above (tu/tmp-ctx "Above")]
+    ;; two R-evidence facts, CxUniverse first (lower handle), then a context above it
+    ;; (higher handle but the smaller context by content, `CxTmp…`) — so a
+    ;; handle/retrieval-first pick and a content-first pick disagree.
+    (v/assert kb (list 'genlCx 'CxUniverse above) 'CxUniverse)
     (v/assert kb rfact 'CxUniverse)
-    (v/assert kb rfact 'CxCore)
+    (v/assert kb rfact above)
     (v/assert kb '(holiday NewYear) year)
     (v/assert kb '(weather Cold) month)
     (v/assert kb (list 'contextArgSubrelation cxfn 2 'subFooOf) 'CxUniverse)
@@ -407,7 +410,7 @@
                                 (v/supporting-justifications kb (:id edge))))
             ev   (first (filter #(= rfact (:sentence (v/sentex kb %))) (:antecedents just)))]
         (testing "its R-evidence supporter is the fact in the smallest context, not the first"
-          (is (= 'CxCore (:context (v/sentex kb ev)))))))))
+          (is (= above (:context (v/sentex kb ev)))))))))
 
 ;; ---- the context slot reads back through the ranks it was written under ---
 

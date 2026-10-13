@@ -38,14 +38,11 @@
             [vaelii.impl.observe :as observe]
             [vaelii.impl.qcn :as qcn]
             [vaelii.impl.qcn-kb :as qkb]
-            [vaelii.host.seed :as seed]
             [vaelii.impl.space :as space]))
 
 (defn- fresh-kb []
   (let [kb (v/open-kb {:backend :memory :space 30 :recover? false})]
     (core-context/load-into kb)
-    (seed/load-context kb 'CxSpace "upper")
-    (seed/load-context kb 'CxTime "upper")
     kb))
 
 (defn- containment-tree

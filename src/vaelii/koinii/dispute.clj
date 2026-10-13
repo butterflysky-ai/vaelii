@@ -164,7 +164,7 @@
 
 (defn- ensure-state-context!
   "Load koinii's `CxDisputes` seed (`resources/kb/koinii/CxDisputes.txt`) into `kb` unless it
-  is already stored there.  The seed places `CxDisputes` under `CxCore` and declares the two
+  is already stored there.  The seed places `CxDisputes` under `CxUniverse` and declares the two
   marks and the `dispute` term they carry, so the arity check reads a declaration where
   every mark is stored.  Called by the two writes, which is the first time a KB needs the
   context: a deployment that never marks a dispute never loads it."

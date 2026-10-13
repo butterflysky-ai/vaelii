@@ -355,6 +355,43 @@
       (print-known "declaration below the pair" known)
       (is (empty? fails) (failure-text "declaration below the pair" fails (count orders))))))
 
+(deftest a-declaration-below-a-dilemma-decides-it-only-where-it-is-seen-in-every-order
+  ;;   CxUniverse  (disjoint ta tb) monotonic   (ta Ind) default   (tb Ind) default
+  ;;     └─ CxA    (forced_monotonic_predicate ta)
+  ;;
+  ;; CxA reads `ta` on the roster, so `(tb Ind)` loses there; CxUniverse reads a dilemma.
+  (tu/with-terms [ta tb Ind CxA]
+    (let [ws     [(w (list 'genlCx CxA U) U)
+                  (w (list 'disjoint ta tb) U :monotonic)
+                  (w (list ta Ind) U)
+                  (w (list tb Ind) U)
+                  (w (list 'forced_monotonic_predicate ta) CxA)]
+          orders (gen/permutations ws)
+          {fails :failures known :known}
+          (expected-failures {:contexts #{U CxA} :writes ws} orders
+                             {U   {(list ta Ind) true (list tb Ind) true}
+                              CxA {(list ta Ind) true (list tb Ind) false}})]
+      (print-known "declaration below a dilemma" known)
+      (is (empty? fails) (failure-text "declaration below a dilemma" fails (count orders))))))
+
+(deftest a-declaration-below-a-denial-makes-it-inert-only-where-it-is-seen-in-every-order
+  ;;   CxUniverse  (not (ta Ind)) monotonic   (ta Ind) default
+  ;;     └─ CxA    (forced_monotonic_predicate ta)
+  ;;
+  ;; CxA reads the denial inert; CxUniverse reads `(ta Ind)` defeated by it.
+  (tu/with-terms [ta Ind CxA]
+    (let [ws     [(w (list 'genlCx CxA U) U)
+                  (w (list 'not (list ta Ind)) U :monotonic)
+                  (w (list ta Ind) U)
+                  (w (list 'forced_monotonic_predicate ta) CxA)]
+          orders (gen/permutations ws)
+          {fails :failures known :known}
+          (expected-failures {:contexts #{U CxA} :writes ws} orders
+                             {U   {(list ta Ind) false (list 'not (list ta Ind)) true}
+                              CxA {(list ta Ind) true (list 'not (list ta Ind)) false}})]
+      (print-known "declaration below a denial" known)
+      (is (empty? fails) (failure-text "declaration below a denial" fails (count orders))))))
+
 (deftest a-vantage-below-a-dilemma-decides-its-stronger-inherited-reading-in-every-order
   ;;   CxUniverse  (transitiveInArgInverse heavierThan 1 genl) (genl hauler animal)
   ;;               (genl vehicle animal) monotonic

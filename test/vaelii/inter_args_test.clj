@@ -4,7 +4,7 @@
   "The homogeneity constraints — `(interArgs R T)` demands a `T` of every argument of an
   application once one argument is known to be a `T`, and `(interArgAndRest R n T)` makes
   the same demand of the positions from `n` onward.  `interArgs` is `interArgAndRest` at
-  start 1, and CxCore's two forward rules derive each spelling from the other.
+  start 1, and CxUniverse's two forward rules derive each spelling from the other.
 
   Open-world as `interArg` is: the trigger must be positively established, and a target
   is convicted only when the KB places it in the hierarchy outside `T`.  An application
@@ -17,7 +17,8 @@
             [vaelii.impl.checks :as checks]
             [vaelii.test-util :as tu]))
 
-;; CxCore's vocabulary, since the two forward rules relating the spellings are CxCore's.
+;; The fixture loads the upper layer, because the two forward rules relating the spellings
+;; are CxUniverse's.
 ;; A KB per test, because the restart tests open a second KB over the same stores.  The
 ;; constraint-only reading, which is the one that refuses; the entailing reading's
 ;; derivation is `the-entailing-reading-derives-the-suffix-type`, which binds it back.

@@ -164,7 +164,7 @@ nothing about whether the KB holds it. See [belief.md](belief.md).
 
 **`bijection`** ![kb](../.github/badges/cat-kb.svg): `(bijection P)` — the strongest of
 the three **function marks**: `P` is single-valued, one-to-one, total on its declared
-domain and onto its declared range. CxCore rules derive `(injection P)` and
+domain and onto its declared range. `core.txt` rules derive `(injection P)` and
 `(surjection P)`, and those derive the four marks the engine reads. See
 [taxonomy.md](taxonomy.md).
 
@@ -194,7 +194,7 @@ comparison folding. See [canonicalization.md](canonicalization.md).
 
 **Closed predication** ![kb](../.github/badges/cat-kb.svg): A **Predication** with no free variable. What a
 stored `LiteralSentex` holds in its `:sentence` slot, since `checks/check-ground` refuses
-an open one. A CxReflection collection too, `closed_predication`. See
+an open one. A `reflection.txt` collection too, `closed_predication`. See
 [canonicalization.md](canonicalization.md).
 
 **`closed_extent_predicate`** ![kb](../.github/badges/cat-kb.svg): The grant that
@@ -205,7 +205,7 @@ ancestor set, so it is a policy of the theory that closes the extent; a closed
 [naf.md](naf.md).
 
 **`comment`** ![kb](../.github/badges/cat-kb.svg): A documentation sentex —
-`(comment <term> "…")` — that lets the CxCore vocabulary document itself in
+`(comment <term> "…")` — that lets the shipped vocabulary document itself in
 its own representation, read back by `core-context/comment-of`. See
 [inference.md](inference.md).
 
@@ -267,25 +267,15 @@ that is **Superseded** stays placed and is left out of the reports, and a report
 context names only the `contradicts` that context believes and sees. See
 [nmtms.md](nmtms.md#a-nogood-placed-as-a-conclusion).
 
-**CxCore** ![kb](../.github/badges/cat-kb.svg): The vocabulary head — the
-most general context and the upper **Spindle**'s head, seen by every other. Loaded
-by `core-context/load-into`:
-every special predicate the engine interprets, each documented by a `comment`
-sentex. See [contexts.md](contexts.md).
+**CxUniverse** ![kb](../.github/badges/cat-kb.svg): The root context, seen by every
+context the topology wires in. It holds the **Upper layer**, loaded by
+`core-context/load-into`, and is the target of `decontextualized_predicate`
+justifications and of every `genlCx` edge. Sync locks its premises to the shipped
+files. See [contexts.md](contexts.md#the-context-topology).
 
-**CxReflection** ![kb](../.github/badges/cat-kb.svg): The upper **Spindle** member that holds the expression
-lattice — atomic and non-atomic expressions, open and closed, well-formed and ill-formed
-— and the use/mention vocabulary `proposition`, `means`, `denotes` and `expresses`. It
-sees **CxCore**, and **CxUniverse** sees it. See [contexts.md](contexts.md).
-
-**CxUniverse** ![kb](../.github/badges/cat-kb.svg): The upper **Spindle**'s
-collector and the middle spindle's head, free for lifted universal facts and the
-target of `decontextualized_predicate` justifications. See
-[contexts.md](contexts.md).
-
-**CxWell** ![kb](../.github/badges/cat-kb.svg): The middle **Spindle**'s
-collector, transitively seeing the whole ontology; the test-world's individuals
-and fables hang below it. See [contexts.md](contexts.md).
+**CxWell** ![kb](../.github/badges/cat-kb.svg): The context that sees every middle
+theory except the opt-in ones, transitively seeing the whole ontology; the
+test-world's individuals and fables hang below it. See [contexts.md](contexts.md).
 
 ## D
 
@@ -353,7 +343,7 @@ necessary that is positively violated proves `(not (Coll a))` at query time. See
 **Denotational term** ![kb](../.github/badges/cat-kb.svg): The logic sense of *term* —
 an expression that denotes an entity: a symbol, a value such as a number or a string, or
 a NAT. A variable denotes nothing by itself, so it is not one. Spelled in full wherever
-the logic sense is meant, because plain **Term** is the vocabulary sense. A CxReflection
+the logic sense is meant, because plain **Term** is the vocabulary sense. A `reflection.txt`
 collection too, `denotational_term`. See [nat.md](nat.md).
 
 **Derived** ![tms](../.github/badges/cat-tms.svg): A sentex with at least one *valid* justification support — held IN by
@@ -464,7 +454,7 @@ loser at its network label when only the nogood's own reading hides it, so the
 placement does not hide itself. Any other `defeat` or `except` of the loser hides them.
 See [nmtms.md](nmtms.md#a-nogood-placed-as-a-conclusion).
 
-**`expression`** ![kb](../.github/badges/cat-kb.svg): The CxReflection collection of written forms in this KB's own language, what a `(Quote …)` names — a symbol, a value, a variable, or a compound written from them. Below `linguistic`, and disjoint from `relation`, `context` and `language`, which an expression names rather than is. A natural-language sentence is `linguistic` but not an `expression`. See [taxonomy.md](taxonomy.md).
+**`expression`** ![kb](../.github/badges/cat-kb.svg): The `reflection.txt` collection of written forms in this KB's own language, what a `(Quote …)` names — a symbol, a value, a variable, or a compound written from them. Below `linguistic`, and disjoint from `relation`, `context` and `language`, which an expression names rather than is. A natural-language sentence is `linguistic` but not an `expression`. See [taxonomy.md](taxonomy.md).
 
 **Extent** ![backend](../.github/badges/cat-backend.svg): The set of sentexes at
 a secondary root — a context, a functor, or an argument position — each set's
@@ -499,6 +489,13 @@ which in a closed world canonicalizes into the nested NAF
 `(unknown (thereExists ?y (and Body (unknown Head))))`. The binder is local to it;
 the vacuous case (no `?y` satisfies `Body`) reads true. See [naf.md](naf.md).
 
+**Forced-monotonic roster** ![tms](../.github/badges/cat-tms.svg): The predicates whose
+literals go OUT only by retraction: never the loser of a nogood, a denial of one inert,
+and concluded only by a rule whose antecedents are all on it. The global roster is the
+engine's baseline, which every context reads; a `(forced_monotonic_predicate P)` stated in
+any context, CxUniverse's included, puts `P` on it at the contexts that see and believe the
+declaration. See [nmtms.md](nmtms.md#the-forced-monotonic-roster).
+
 **Fork** ![backend](../.github/badges/cat-backend.svg): `core/fork` — a private,
 writable KB over another's stores. Reads resolve fork-first and fall through to
 the base, writes land only in the fork, and the base is never written, so
@@ -508,9 +505,9 @@ decorator in [overlay.md](overlay.md).
 
 **Formula** ![kb](../.github/badges/cat-kb.svg): Recursively — a **Predication**,
 a logical operator applied to formulas, or a quantifier binding variables in a formula. *Open* when it has free variables, *closed* when it does not, and a closed
-formula is a **Sentence**. A CxCore collection too, `formula`. See [naming.md](naming.md).
+formula is a **Sentence**. A `core.txt` collection too, `formula`. See [naming.md](naming.md).
 
-**`formula` (ontology type)** ![kb](../.github/badges/cat-kb.svg): The collection of formulas, declared in CxCore and placed below `non_atomic_expression` in CxReflection. `wff` and `ill_formed` partition it. The formula-stratum grammar sense is **Formula**. See [taxonomy.md](taxonomy.md).
+**`formula` (ontology type)** ![kb](../.github/badges/cat-kb.svg): The collection of formulas, declared in `core.txt` and placed below `non_atomic_expression` in `reflection.txt`. `wff` and `ill_formed` partition it. The formula-stratum grammar sense is **Formula**. See [taxonomy.md](taxonomy.md).
 
 **Forward chaining** ![inference](../.github/badges/cat-inference.svg): The
 semi-naive fixpoint over one agenda for bare and defeasible rules alike. A new
@@ -579,7 +576,7 @@ holds at every moment between its start and its end. See [time.md](time.md).
 
 ## I
 
-**`ill_formed` (ontology type)** ![kb](../.github/badges/cat-kb.svg): The CxReflection collection of formulas
+**`ill_formed` (ontology type)** ![kb](../.github/badges/cat-kb.svg): The `reflection.txt` collection of formulas
 that are not well-formed, so say nothing: some operator has the wrong number of
 arguments, e.g. `(dog Muffet Rex)` for a one-place `dog`. With `wff` it partitions
 `formula`. See [taxonomy.md](taxonomy.md).
@@ -698,7 +695,7 @@ cheapest level that answers. See [levels.md](levels.md).
 **Literal** ![kb](../.github/badges/cat-kb.svg): A **Predication** or its
 negation. What a `LiteralSentex` holds — the `:sentence` slot carrying the predication,
 or `(not S)` for its negation, whose head `not` says which literal it is. A rule's
-antecedent is a vector of literals. Also a CxReflection collection, `literal`, in the
+antecedent is a vector of literals. Also a `reflection.txt` collection, `literal`, in the
 expression-kind lattice below `formula` — documentary, since
 nothing in the engine classifies a compound by its shape. The `LiteralSentex` record is
 the machine-stratum representation of a member of it. See
@@ -754,8 +751,8 @@ function application denoting an entity. Two readings, by declaration. Under
 `(reifiable_function F)` it denotes an object and is **reified** into an opaque
 `nat/`-namespaced constant before it reaches the index. Under
 `(unreifiable_function F)` it stays **structural**, a compound to be evaluated. Named
-as a CxCore collection by `non_atomic_term`, below `non_atomic_expression` and
-`denotational_term` in CxReflection. See [nat.md](nat.md).
+as a `core.txt` collection by `non_atomic_term`, below `non_atomic_expression` and
+`denotational_term` in `reflection.txt`. See [nat.md](nat.md).
 
 **Negation as failure (NAF)** ![inference](../.github/badges/cat-inference.svg):
 Closed-world negation. `(unknown S)` holds iff `S` is not derivable;
@@ -770,7 +767,7 @@ Placed by `settle` at its **Vantage**s as a **`contradicts`**, with a **`defeat`
 weakest member where one is weakest on defeat-class; never thrown. See
 [nmtms.md](nmtms.md).
 
-**`non_atomic_expression`** ![kb](../.github/badges/cat-kb.svg): The CxReflection collection of expressions
+**`non_atomic_expression`** ![kb](../.github/badges/cat-kb.svg): The `reflection.txt` collection of expressions
 with parts, written `(op a…)` — an operator applied to arguments. `formula` and
 `non_atomic_term` are below it and disjoint: a predication when `op` is a predicate, and
 a **NAT** when it is a function. Documentary: no reader classifies a compound argument by
@@ -788,7 +785,7 @@ literal's sign (`sentex/negative?`); the trie keys it under `:false`. See
 
 **Open predication** ![kb](../.github/badges/cat-kb.svg): A **Predication** in which a variable occurs free,
 such as `(dog ?x)`: true or false only once the variable has a value, so never stored as a
-fact. A CxReflection collection too, `open_predication`. See [naming.md](naming.md).
+fact. A `reflection.txt` collection too, `open_predication`. See [naming.md](naming.md).
 
 **Operation log** ![backend](../.github/badges/cat-backend.svg): The file a
 `:disk-snapshot` KB opened with `:oplog?` records each outermost public write into, as
@@ -868,7 +865,7 @@ returns the vector of handles whenever a rule expanded. See
 [canonicalization.md](canonicalization.md).
 
 **`positiveExample` / `negativeExample` / `borderlineExample`** ![kb](../.github/badges/cat-kb.svg):
-CxCore's example vocabulary. `(positiveExample <term> (sentexHandle H))` names a stored
+The example vocabulary of `core.txt`. `(positiveExample <term> (sentexHandle H))` names a stored
 sentex as an example of a term's usage — a true one, a false one, or one deliberately on
 the edge — reusing the `sentexHandle` plus `target_following_predicate` pointing shape, so
 retracting the example sentex tears the annotation down with it. The engine reads none of
@@ -893,7 +890,7 @@ through `sentexes-with-args`. See [indexing.md](indexing.md).
 
 **Predication** ![kb](../.github/badges/cat-kb.svg): A predicate applied to terms — `(dog Muffet)`, `(P ?x)`.
 The base of the formula ladder, and open or closed alike, since the definition says
-nothing about variables. A CxReflection collection too, `predication`, partitioned into
+nothing about variables. A `reflection.txt` collection too, `predication`, partitioned into
 `open_predication` and `closed_predication`. See [naming.md](naming.md).
 
 **Premise** ![tms](../.github/badges/cat-tms.svg): An asserted datum held IN
@@ -1108,7 +1105,7 @@ of rule firings, rather than rejoining the whole KB each pass. See
 Every stored sentex holds one: a non-rule sentence must have no free variable
 (`checks/check-ground`), and a rule's variables are implicitly universal. A
 possibly-open goal is a **Pattern**, not a sentence. The `:sentence` slot keeps the
-readable form for display and matching. A CxCore collection too, `sentence`. See
+readable form for display and matching. A `core.txt` collection too, `sentence`. See
 [canonicalization.md](canonicalization.md).
 
 **Sentex** ![kb](../.github/badges/cat-kb.svg): The unit of knowledge — a
@@ -1130,7 +1127,7 @@ belief-following, and raising contradictions through the same JTMS/ASP path as
 types from the separation marks — a `sibling_disjoint` parent, a `disjoint_metatype`, a
 `partition` or `separating` roster — pair-local and read at the reader. A stated
 `disjoint` is no mark, so a `disjoint` over the pair or over a supertype of each
-contradicts it. Symmetric and forced monotonic. CxCore states
+contradicts it. Symmetric and forced monotonic. `core.txt` states
 `(genl siblingDisjointException orthogonal)`: an exception states an `orthogonal` pair, and
 a `genl` edge between its two types is a clash of the orthogonal it entails. The exemption
 is the exception's alone; an `orthogonal` exempts nothing. See
@@ -1176,15 +1173,6 @@ by a build whose source identity equals the one the image was written under. See
 
 **`spatiotemporal`** ![kb](../.github/badges/cat-kb.svg): An entity with a location in space and time — a physical object, a region, a place. Below both `spatial` and `temporal`. See [space.md](space.md).
 
-**Spindle** ![kb](../.github/badges/cat-kb.svg): The shape the context topology
-is built from — three layers: a **head** every member sees, a set of **members**
-that see the head and not each other, and a **collector** that sees every member.
-The shipped topology is two of them stacked, the *upper* spindle (head CxCore,
-members `kb/upper/`, collector CxUniverse) and the *middle* spindle (head
-CxUniverse, members `kb/middle/`, collector CxWell). A term two members of one
-spindle define or extend belongs at or above that spindle's head, since no member
-sees another. See [contexts.md](contexts.md).
-
 **Spurious miss** ![backend](../.github/badges/cat-backend.svg): A miss of a
 derived-state row whose recompute returns the value a write retired: the write retired
 an entry whose inputs it did not change. Counted while the derived-state instrument runs.
@@ -1217,8 +1205,8 @@ first type is a subtype of the second), `:spec` (the converse), `:coextensional`
 provably empty, with neither subsumption nor disjointness),
 `:unknown` (none of these is provable), or `:inconsistent` (two or more of them at once).
 `disjointness-audit` runs the classification over every unordered pair of the types
-visible from its vantage context (default `CxWell`, the starter spindle's collector, so
-no opt-in theory's type is swept), leaving out each `genl` node for which `relation?`
+visible from its vantage context (default `CxWell`, so no opt-in theory's type is
+swept), leaving out each `genl` node for which `relation?`
 answers true there (a stored arity of two or more), and its
 `:unknown` pairs are the candidates for a missing `disjoint` or `orthogonal` declaration.
 See [taxonomy.md](taxonomy.md).
@@ -1339,6 +1327,11 @@ quantifier's variable. Ground/closed only and never stored. See [naf.md](naf.md)
 
 **`unrepresented_term`** ![kb](../.github/badges/cat-kb.svg): An `expression` with no further decomposition — a string, a number, a keyword, a boolean, or a character, the five partitioning it. See [taxonomy.md](taxonomy.md).
 
+**Upper layer** ![kb](../.github/badges/cat-kb.svg): The upper ontology: every file
+under `resources/kb/upper/`, loaded into **CxUniverse** as one batch. `core.txt` is the
+vocabulary the engine interprets, and each other file is one domain. A vocabulary KB
+holds the upper layer alone. See [contexts.md](contexts.md#the-context-topology).
+
 ## V
 
 **Value** ![kb](../.github/badges/cat-kb.svg): An EDN scalar written in argument position —
@@ -1355,7 +1348,7 @@ reader's **Scoped defeat**. See [nmtms.md](nmtms.md#a-defeat-is-scoped-to-its-va
 **Variable** ![kb](../.github/badges/cat-kb.svg): A `?x` symbol standing for an unknown. Canonically renumbered
 (`?var0`, `?var1`, …) in a stored rule, with the author's spelling kept in
 the **Varmap**. A variable inside a `(Quote …)` is part of the quoted form and is not free
-in the sentence around it. A CxReflection collection too, `variable`. See
+in the sentence around it. A `reflection.txt` collection too, `variable`. See
 [canonicalization.md](canonicalization.md).
 
 **`variable_order_type`** ![kb](../.github/badges/cat-kb.svg): A type whose members may sit at any metatype order — individuals, types, or metatypes alike. Contrast `fixed_order_type`. See [taxonomy.md](taxonomy.md).
@@ -1390,7 +1383,7 @@ scoped. See [contexts.md](contexts.md).
 
 ## W
 
-**`wff` (ontology type)** ![kb](../.github/badges/cat-kb.svg): The CxReflection collection of well-formed
+**`wff` (ontology type)** ![kb](../.github/badges/cat-kb.svg): The `reflection.txt` collection of well-formed
 formulas: every relation, function and connective in one has as many arguments as its
 arity allows, and every quantifier binds a variable. With `ill_formed` it partitions
 `formula`. Not the **WFF (well-formedness)** checks, which are the engine's. See

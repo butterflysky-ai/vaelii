@@ -118,7 +118,7 @@
                                        (implies (bird ?x) (flies ?x))))))))
   (testing "an `ist` frames the sentence it names a context for"
     (is (= [[:sentence '(unary_predicate dog)]]
-           (nm/literals '(ist CxCore (unary_predicate dog))))))
+           (nm/literals '(ist CxUniverse (unary_predicate dog))))))
   (testing "a negation-as-failure query is framed by `unknown` / `thereExists`"
     (is (= [[:antecedent '(bird ?x)] [:antecedent '(nestOf ?x ?y)] [:consequent '(homeless ?x)]]
            (nm/literals '(implies (and (bird ?x) (unknown (thereExists ?y (nestOf ?x ?y))))
@@ -228,7 +228,7 @@
     (is (empty? (nm/problems '(termOfUnit Rod1 (QuantityFn 5 Meter)) 'CxWell)))))
 
 (deftest ist-names-a-context
-  (is (empty? (nm/problems '(ist CxCore (flies Tweety)) 'CxWell)))
+  (is (empty? (nm/problems '(ist CxUniverse (flies Tweety)) 'CxWell)))
   (testing "anything else is not a context name"
     (is (seq (nm/problems '(ist Muffet (flies Tweety)) 'CxWell)))))
 
@@ -237,7 +237,7 @@
   (testing "but is legal inside a rule pattern"
     (is (empty? (nm/problems '(set/inertRule
                                (implies (?pred . ?args) (?pred . ?args)))
-                             'CxCore)))))
+                             'CxUniverse)))))
 
 ;; ---- a problem is data before it is prose --------------------------------
 
@@ -399,7 +399,7 @@
   ;; arguments are well-formed individuals, so it is stored, indexed and believed —
   ;; as a two-place relation nothing reads.  The reader then asks `(isa? kb 'Muffet
   ;; 'Dog)`, gets false, and has no error to search for.  docs/naming.md calls this
-  ;; out by name and CxCore.txt says never to write it; neither is in front of
+  ;; out by name and core.txt says never to write it; neither is in front of
   ;; someone typing, so the public entry point says it.
   (testing "the shape is advised against, and the advice names the right spelling"
     (let [{:keys [id message]} (nm/advice '(isa Muffet Dog))]

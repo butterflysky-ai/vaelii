@@ -61,7 +61,7 @@
   binary predicates with `arg` on both positions."
   [kb {:keys [types branching individuals memberships predicates disjoints]}]
   (let [ctx 'CxBench]
-    (v/assert kb (list 'genlCx ctx 'CxCore) 'CxCore {:chain? false})
+    (v/assert kb (list 'genlCx ctx 'CxUniverse) 'CxUniverse {:chain? false})
     (v/with-deferred-settle kb
       (doseq [i (range types)]
         (v/assert kb (list 'genl (type-name i) (parent-of branching i)) ctx {:chain? false}))

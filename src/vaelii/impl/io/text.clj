@@ -11,7 +11,7 @@
 
   | | what it holds | who reads it |
   |---|---|---|
-  | **text** (here) | premises, in the author's own spelling, no handles | `assert` |
+  | **text** (here) | premises and inert sentexes, in the author's own spelling, no handles | `assert`, `assert-inert` |
   | **export dump** (`io.export` / `io.import`) | every record and justification at its own handle | `import!` |
   | the **store** itself | the live KB | the engine |
 
@@ -29,13 +29,11 @@
   `set/*Rule` / `set/defaultRule` wrappers and its `exceptWhen` exactly as an author
   writes them, because that is what `assert` reads.
 
-  **One wrapper is not part of the sentence**: `(set/monotonic S)`, the known-true
-  class.  A strength is an *option* on the assertion rather than part of the sentence, so
-  there is nowhere in an s-expression for it to go, and a text KB that could not say it
-  would round-trip a KB's monotonic premises down to defaults.  It is peeled by
-  `load-entries!` below into `{:strength :monotonic}` and never reaches the store as a
-  functor.  `:default` is the entry point's own fallback and is written as nothing, which is why
-  no shipped file carries a wrapper.
+  **Two wrappers are not part of the sentence**, because each states how the sentence is
+  written rather than what it says: `(set/monotonic S)` asserts `S` known-true, and
+  `(set/inert S)` stores `S` through `assert-inert`.  `peel-form` takes either off a whole
+  form, and neither reaches the store as a functor.  `:default` is the entry point's own
+  fallback and is written as nothing.
 
   **An `exceptWhen` states a strength per half**, because it asserts two things: the rule,
   and the exception qualifying it.  The outer wrapper is the assertion's own option and
@@ -57,10 +55,10 @@
 
   ## What a text export holds, and what it does not
 
-  **Premises only.**  A derived sentex is what the engine concluded from the premises,
-  so writing it out would store as a premise what the KB believes as a conclusion — a
-  reload would hold it against retraction of everything it followed from.  Chaining
-  puts it back at load, which is the whole point.
+  **Premises and inert sentexes only.**  A derived sentex is what the engine concluded
+  from the premises, so writing it out would store as a premise what the KB believes as a
+  conclusion — a reload would hold it against retraction of everything it followed from.
+  Chaining puts it back at load, which is the whole point.
 
   **No handles.**  A text KB is re-asserted rather than restored, so it lands at
   whatever handles the loading KB mints.  A caller who needs handle identity across the
@@ -73,6 +71,8 @@
   (:require [clojure.edn :as edn]
             [clojure.java.io :as io]
             [clojure.string :as str]
+            [vaelii.impl.jtms :as jtms]
+            [vaelii.impl.kb :as kb]
             [vaelii.impl.naming :as nm]
             [vaelii.impl.opts :as opts]
             [vaelii.impl.protocols :as p]
@@ -83,24 +83,42 @@
   (:import [clojure.lang LineNumberingPushbackReader]
            [java.io File]))
 
-;; ---- the strength wrapper ------------------------------------------------
+;; ---- the entry-point wrappers ------------------------------------------
 
-(defn peel-strength
-  "`[sentence opts]` for one form of a text KB file: a `(set/monotonic S)` wrapper
-  becomes `S` with `{:strength :monotonic}`, and anything else is itself with `nil`.
+(def inert-wrapper
+  "`(set/inert S)` — `S` stored through `assert-inert`: indexed and durable, never a
+  premise.  Read by the text KB format alone, around a whole form; `assert` does not read
+  it."
+  'set/inert)
 
-  The wrapper is refused rather than passed through when it is malformed — a bare
-  `(set/monotonic)` or one wrapping two sentences would otherwise reach `assert` as a
-  sentence whose functor is a namespace-qualified symbol, and be refused there for the
-  wrong reason."
+(defn peel-form
+  "`[sentence opts]` for one form of a text KB file: `(set/monotonic S)` is `S` with
+  `{:strength :monotonic}`, `(set/inert S)` is `S` with `{:inert true}`, which tells the
+  caller to write `S` through `assert-inert`, and anything else is itself with `nil`.
+  `assert` refuses `:inert` as an unknown option, so a caller that does not dispatch on
+  it fails at the write.
+
+  A malformed wrapper is refused `:shape`: one wrapping no sentence or two, and one
+  wrapping the other, since an inert sentex has no strength.  Passed through, each would
+  reach `assert` as a sentence whose functor is a namespace-qualified symbol."
   [form]
-  (if (and (sequential? form) (= sx/strength-wrapper (first form)))
-    (if (= 2 (count form))
-      [(second form) {:strength :monotonic}]
-      (throw (ex-info (str "(" sx/strength-wrapper " …) wraps exactly one sentence, got "
-                           (dec (count form)) ": " (pr-str form))
-                      {:type :shape :form form})))
-    [form nil]))
+  (let [wrapper? #(and (sequential? %) (#{sx/strength-wrapper inert-wrapper} (first %)))]
+    (if (wrapper? form)
+      (let [w (first form)]
+        (cond
+          (not= 2 (count form))
+          (throw (ex-info (str "(" w " …) wraps exactly one sentence, got "
+                               (dec (count form)) ": " (pr-str form))
+                          {:type :shape :form form}))
+
+          (wrapper? (second form))
+          (throw (ex-info (str "(" w " …) wraps a sentence, not another (" (first (second form))
+                               " …): an inert sentex has no strength, and a strength is"
+                               " stated once: " (pr-str form))
+                          {:type :shape :form form}))
+
+          :else [(second form) (if (= w inert-wrapper) {:inert true} {:strength :monotonic})]))
+      [form nil])))
 
 ;; ---- reading ------------------------------------------------------------
 
@@ -137,8 +155,9 @@
                   " read as EDN — " kind)
              {:type :unreadable :file (str source) :line line})))
 
-(defn read-forms
-  "Every form in the text KB file `source` (anything `io/reader` takes), in file order.
+(defn form-spans
+  "Every form in the text KB file `source` (anything `io/reader` takes), in file order, as
+  `{:form f :start line :end line}`: the 1-based lines the form opens and closes on.
   `clojure.edn`, so comments and blank lines added no work and no code can run.  A form
   that does not read is refused as `:unreadable`, carrying `:file` and the `:line` it
   opens on and never the file's text."
@@ -151,7 +170,14 @@
               form (try (edn/read {:eof eof} r)
                         (catch Exception e (throw (unreadable source line e)))
                         (catch StackOverflowError e (throw (unreadable source line e))))]
-          (if (identical? form eof) acc (recur (conj acc form))))))))
+          (if (identical? form eof)
+            acc
+            (recur (conj acc {:form form :start line :end (.getLineNumber r)}))))))))
+
+(defn read-forms
+  "Every form in the text KB file `source`, in file order (`form-spans`)."
+  [source]
+  (mapv :form (form-spans source)))
 
 (defn context-of
   "The context a text KB file asserts into: its name without the `.txt`."
@@ -174,7 +200,7 @@
 
 (defn entries
   "Every `[form context]` a text KB holds, with the files they came from:
-  `{:files [\"CxCore.txt\" …] :entries [[form context] …] :path \"…\"}`.
+  `{:files [\"CxUniverse.txt\" …] :entries [[form context] …] :path \"…\"}`.
 
   `source` is a **directory** of `Cx….txt` files — an `export-text!` destination, or an
   ontology tree an author keeps — or a single such file.  Either way the context of a
@@ -206,9 +232,9 @@
   antecedent fact.  Where there is none the conclusion is *dropped* — a `:no-placement`
   violation, recorded rather than raised — so an edge arriving after the fact it would
   have placed leaves a conclusion nothing re-derives, and the retry loop never sees it,
-  because it retries what **threw**.  The context spindle is what `vaelii.host.starter`
-  keeps in code for the same reason (CxCore, then the upper layer, then the middle),
-  and a directory of files carries no such order.  So the topology goes in first, and
+  because it retries what **threw**.  The layer order is what `vaelii.host.starter` keeps
+  in code for the same reason (the upper ontology, then the middle layer), and a
+  directory of files carries no such order.  So the topology goes in first, and
   everything else is retried against the whole of it.
 
   Deterministic: a stable partition on the sentence's functor, never on arrival."
@@ -218,11 +244,12 @@
 
 (defn load-entries!
   "Assert every `[form context]` of `entries` through `assert!` —
-  `(assert! sentence context opts)` — **order-insensitively**: an entry refused because
+  `(assert! sentence context opts)`, or `(assert-inert! sentence context)` for a form
+  `peel-form` reads as inert — **order-insensitively**: an entry refused because
   content further down the list has not arrived yet is retried rather than fatal.
   Returns how many entries were read.
 
-  `assert!` is passed in rather than required: this sits under `vaelii.core`, and the
+  Both writers are passed in rather than required: this sits under `vaelii.core`, and the
   two callers above it are `vaelii.core/load-text!` and `vaelii.host.seed`.
 
   A KB file's order is its *terms'*, not its dependencies' — blocks run in natural sort
@@ -241,11 +268,13 @@
   still throws — carrying the error it has once everything that could have helped it is
   stored, which is the error worth reporting.  A list that loads clean pays one `try`
   per entry and no second round."
-  [assert! entries]
+  [assert! assert-inert! entries]
   (let [entries (topology-first entries)
         apply!  (fn [[form context]]
-                  (let [[sentence o] (peel-strength form)]
-                    (assert! sentence context o)))
+                  (let [[sentence o] (peel-form form)]
+                    (if (:inert o)
+                      (assert-inert! sentence context)
+                      (assert! sentence context o))))
         attempt (fn [es]
                   (reduce (fn [acc e]
                             (try (apply! e) acc
@@ -323,15 +352,39 @@
   (let [recs (:records kb)]
     (into [] (keep #(p/get-sentex recs %)) (p/premise-ids recs))))
 
+(defn- inert-records
+  "Every inert sentex of `kb` (`assert-inert`), as records: a stored sentex that is no
+  premise and that the TMS holds no node for.  A derived sentex has a node, so the two
+  read apart only over a built network.  Over an unbuilt one (`kb/write-hazards` names
+  `:no-belief` or `:stale-belief`) a record outside the premise roster is either, and
+  this refuses `:unrecovered-kb` rather than write a derived sentex as inert."
+  [kb]
+  (let [recs     (:records kb)
+        tms      (reasoning/tms kb)
+        premises (p/premise-ids recs)
+        ids      (into [] (remove #(or (contains? premises %) (jtms/known-datum? tms %)))
+                       (p/sentex-ids recs))
+        hz       (when (seq ids) (kb/write-hazards kb))]
+    (when (or (:no-belief hz) (:stale-belief hz))
+      (let [msg (str "export-text! over a KB whose belief is not built: " (count ids)
+                     " stored sentexes are neither premises nor TMS nodes, and an inert"
+                     " sentex and a derived one read alike until the network is built."
+                     "  Call (recover kb) and export then.")]
+        (throw (ex-info msg {:type :unrecovered-kb :hazards (vec (sort (keys hz)))
+                             :operation "export-text!" :repair 'recover :message msg}))))
+    (into [] (keep #(p/get-sentex recs %)) ids)))
+
 (defn premise-entries
-  "`[entries skipped]` for `premises`, records of `kb`: each premise as the form a KB file
-  writes it, `{:context c :form f :handles [h …]}`, and the premises there is no text for.
-  `:handles` are the records the form stands for — one, or an exceptWhen meta and the rule
-  it qualifies — so a caller that finds a form it does not want knows what to retract.
+  "`[entries skipped]` for `records` of `kb`, premises and inert sentexes: each as the form
+  a KB file writes it, `{:context c :form f :handles [h …]}`, and the records there is no
+  text for.  `:handles` are the records the form stands for — one, or an exceptWhen meta
+  and the rule it qualifies — so a caller that finds a form it does not want knows what to
+  retract.
 
-  Three kinds of premise, and the second is the one that needs assembling:
+  Three kinds of record, and the second is the one that needs assembling:
 
-  * an ordinary fact or rule is `authored` under its strength wrapper;
+  * an ordinary fact or rule is `authored` under its strength wrapper, and an inert
+    sentex, which has no strength, under `(set/inert …)`;
   * an **exceptWhen meta-sentex** is not written as stored — `(exceptWhen <query>
     (sentexHandle H))` names a handle the reading KB does not have — but as the
     `(exceptWhen <query> <rule>)` wrapper it was asserted as, under whichever strength
@@ -345,14 +398,14 @@
     (`names-a-handle?` for the two ways a sentence spells one).  There
     is no spelling for it: the handle is a fact about this store, and a wrapper around a
     derived rule would assert as a premise something the KB never held as one."
-  [kb premises]
+  [kb records]
   (let [recs     (:records kb)
         meta?    #(sx/exceptWhen-meta? (:sentence %))
         by-rule  (into {} (comp (filter meta?)
                                 (keep #(p/get-sentex recs (sx/exceptWhen-rule-handle (:sentence %))))
                                 (filter #(some? (:strength %)))
                                 (map (juxt :id identity)))
-                       premises)]
+                       records)]
     (reduce
      (fn [[written skipped] sx]
        (let [keep! (fn [form hs] [(conj written {:context (:context sx) :form form :handles hs})
@@ -370,15 +423,18 @@
            ;; weaker class than the rule stands at
            (and (by-rule (:id sx)) (not= :monotonic (:strength sx))) [written skipped]
 
+           (nil? (:strength sx)) (keep! (list inert-wrapper (authored sx)) [(:id sx)])
+
            :else (keep! (with-strength (authored sx) (:strength sx)) [(:id sx)]))))
      [[] []]
-     premises)))
+     records)))
 
 (defn- context-forms
-  "`[{context [form …]} skipped]` for `kb` — the text of every premise, grouped by the
-  context it holds in, and the premises there is no text for (`premise-entries`)."
+  "`[{context [form …]} skipped]` for `kb` — the text of every premise and inert sentex,
+  grouped by the context it holds in, and the records there is no text for
+  (`premise-entries`)."
   [kb]
-  (let [[entries skipped] (premise-entries kb (premise-records kb))]
+  (let [[entries skipped] (premise-entries kb (into (premise-records kb) (inert-records kb)))]
     [(reduce (fn [m {:keys [context form]}] (update m context (fnil conj []) form)) {} entries)
      skipped]))
 
@@ -429,15 +485,15 @@
          "\n")))
 
 (defn write-kb!
-  "Write `kb`'s premises into `dir` as a text KB — one `<Context>.txt` per context —
-  and return a summary:
+  "Write `kb`'s premises and inert sentexes into `dir` as a text KB — one
+  `<Context>.txt` per context — and return a summary:
 
-      {:contexts n :sentences n :skipped n :files [\"CxCore.txt\" …]
+      {:contexts n :sentences n :skipped n :files [\"CxUniverse.txt\" …]
        :bytes n :elapsed-ms n :dir \"…\"}
 
   `opts` narrows what is written: `{:context C}` for that one context's file, `{:ancestor-set C}`
-  for `C` and every context it sees.  Neither, and every context with a premise in it is
-  written.  A key this fn does not read is refused (`:unknown-option`) — a misspelt
+  for `C` and every context it sees.  Neither, and every context with a premise or an inert
+  sentex in it is written.  A key this fn does not read is refused (`:unknown-option`) — a misspelt
   narrowing writes the whole KB under a summary that looks right.
 
   `dir` must be absent or empty.  See the namespace docstring for what a text KB holds

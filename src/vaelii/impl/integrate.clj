@@ -335,9 +335,9 @@
 (defn- respell!
   "Bring one stored sentex into `sentence`, its cache effects walked off the old spelling
   and back on under the new one.  The handle, the TMS node, the premise mark and every
-  justification naming it are untouched, which is the whole point: nothing that rests on
-  this row learns that its spelling moved, because for a re-canonicalization nothing that
-  rests on it is about the spelling.  `rewrite` is `move-row!`'s."
+  justification naming it are untouched: for a re-canonicalization, nothing that rests on
+  the row is about its spelling except the argument-type mints it triggers, which
+  `move-row!` draws again.  `rewrite` is `move-row!`'s."
   [kb sx sentence rewrite]
   ;; the pieces spelled as the row was stop being spelled as the row is
   (put-spellings! kb (:id sx) (rewritten rewrite sentence (written-out kb (:id sx) (:sentence sx))))
@@ -403,9 +403,8 @@
 
   The consequence-side twin of `fold-dependents!`, and it is what lets `symmetrize-row!`
   fold a mirrored pair both of whose rows a rule concluded.  Nothing about a
-  justification is deleted here: it is copied onto the survivor, `doomed` is left
-  supporting nothing, and `fold-row!`'s `jtms/retract!` then sweeps it as it sweeps any
-  ungroundable non-premise datum.
+  justification is deleted here: it is copied onto the survivor, and `fold-row!`'s
+  `take-out!` drops the originals with `doomed`.
 
   A justification naming `survivor` among its own antecedents is skipped: retargeted it
   would conclude a datum from itself, and a datum that grounds itself is groundable for
@@ -434,19 +433,36 @@
             {}
             (vec (jtms/supports tms doomed)))))
 
-(defn take-out!
-  "Take stored row `h` out: drop its premise mark, retract it from the network, and
-  remove from the store what the retraction swept, then the row itself when it is still
-  stored (an inert sentex is no network datum).  `core/retract!`'s storage half, for a
-  caller inside a write or a settle that runs its own follow-through."
-  [kb h]
-  (p/unmark-premise! (:records kb) h)
-  (let [{:keys [removed-sentexes removed-justifications] :as r} (jtms/retract! (reasoning/tms kb) h)
-        gone (into [] (keep #(p/get-sentex (:records kb) %)) removed-sentexes)]
+(defn- apply-removals!
+  "Delete from the stores what a network removal `r` swept: a `jtms/retract!`,
+  `jtms/sweep!` or `jtms/drop-justification!` result."
+  [kb {:keys [removed-sentexes removed-justifications] :as r}]
+  (let [recs (:records kb)
+        gone (into [] (keep #(p/get-sentex recs %)) removed-sentexes)]
     (doseq [sx gone] (sentex-removed! kb sx))
-    (doseq [jid removed-justifications] (p/delete-justification! (:records kb) jid))
-    (special/retire-unjustified-mints! kb r))
-  (when-let [sx (p/get-sentex (:records kb) h)] (sentex-removed! kb sx)))
+    (doseq [jid removed-justifications] (p/delete-justification! recs jid))
+    (special/retire-unjustified-mints! kb r)))
+
+(defn take-out!
+  "Take stored row `h` out of the network and the store: drop its premise mark and every
+  justification concluding it, retract it, and remove from the store what that swept,
+  then the row itself when it is still stored (an inert sentex is no network datum).
+  `core/retract!`'s storage half, for a caller inside a write or a settle that runs its
+  own follow-through.
+
+  The justifications go first: a row a rule concluded is still groundable after the
+  retraction, and deleting its record would leave its node and every justification naming
+  it in the network, each naming a handle with no record."
+  [kb h]
+  (let [tms  (reasoning/tms kb)
+        recs (:records kb)]
+    (p/unmark-premise! recs h)
+    (doseq [jid (vec (jtms/supports tms h))]
+      (let [r (jtms/drop-justification! tms jid)]
+        (p/delete-justification! recs jid)
+        (apply-removals! kb r)))
+    (apply-removals! kb (jtms/retract! tms h))
+    (when-let [sx (p/get-sentex recs h)] (sentex-removed! kb sx))))
 
 (defn- fold-row!
   "Fold the mirrored row `doomed` into `survivor` and take it out of the store: the
@@ -461,9 +477,8 @@
   branch: an **inert** sentex (`assert-inert`) was never a TMS datum, so the retraction
   no-ops over it.
 
-  `fold-supports!` runs **first**, so that by the time the retraction reads the row it
-  supports nothing: the sweep collects an ungroundable non-premise datum, and a row still
-  carrying its own supports would be relabelled back in."
+  `fold-supports!` runs **first**, so the survivor holds a copy of each justification
+  concluding the row before `take-out!` drops the originals."
   [kb doomed survivor witness rewrite]
   ;; read before anything moves: the doomed row's pieces, spelled as it wrote them, go to
   ;; the survivor with everything else it hands over
@@ -487,12 +502,26 @@
                                 (:context (p/get-sentex (:records kb) doomed)))
   (take-out! kb doomed))
 
+(defn- redraw-mints!
+  "Bring the argument-type mints row `h` triggers to the spelling it holds now: draw what
+  that spelling entails, then drop each mint justification it does not draw
+  (`special/redraw-mints`).  `{:new [handle …] :violations [v …]}`, the mints drawn."
+  [kb h]
+  (let [tms         (reasoning/tms kb)
+        [drawn stale] (special/redraw-mints kb h)]
+    (doseq [jid stale]
+      (let [r (jtms/drop-justification! tms jid)]
+        (p/delete-justification! (:records kb) jid)
+        (apply-removals! kb r)))
+    drawn))
+
 (defn move-row!
-  "Bring one stored row `sx` to the spelling `want`, and return the handle it ends up at,
-  or nil when it is spelled `want` already.  `symmetrize-row!` below states the shape and
-  the choice of survivor.  `witness` is the mark handle a folded row's metas are carried
-  on, or nil.  `rewrite` re-spells the row's written spellings (`rewritten`), nil to keep
-  them as written."
+  "Bring one stored row `sx` to the spelling `want`: `{:at handle :new [handle …]
+  :violations [v …]}`, the handle the row ends up at, followed in `:new` by the mints its
+  new spelling drew (`redraw-mints!`), or nil when it is spelled `want` already.
+  `symmetrize-row!` below states the shape and the choice of survivor.  `witness` is the
+  mark handle a folded row's metas are carried on, or nil.  `rewrite` re-spells the row's
+  written spellings (`rewritten`), nil to keep them as written."
   [kb sx want witness rewrite]
   (when (not= want (sx/sentence-of sx))
     (let [tms    (reasoning/tms kb)
@@ -508,15 +537,18 @@
                        (and (bare? self)   (not (bare? mirror))) self
                        (and (bare? mirror) (not (bare? self)))   mirror
                        :else                                    (max self mirror))]
-      (cond
-        ;; nothing to fold: the row is alone under this proposition and only spelled
-        ;; the way the entry point used to spell it
-        (nil? mirror)   (:id (respell! kb sx want rewrite))
-        ;; this row is the one that leaves; the mirror is already the wanted spelling
-        (= doomed self) (do (fold-row! kb self mirror witness rewrite) mirror)
-        ;; the mirror leaves, and this row takes the spelling it vacated
-        :else           (do (fold-row! kb mirror self witness rewrite)
-                            (:id (respell! kb (p/get-sentex (:records kb) self) want rewrite)))))))
+      (let [at (cond
+                 ;; nothing to fold: the row is alone under this proposition and only
+                 ;; spelled the way the entry point used to spell it
+                 (nil? mirror)   (:id (respell! kb sx want rewrite))
+                 ;; this row is the one that leaves; the mirror is already the wanted
+                 ;; spelling
+                 (= doomed self) (do (fold-row! kb self mirror witness rewrite) mirror)
+                 ;; the mirror leaves, and this row takes the spelling it vacated
+                 :else           (do (fold-row! kb mirror self witness rewrite)
+                                     (:id (respell! kb (p/get-sentex (:records kb) self) want rewrite))))
+            {:keys [new violations]} (redraw-mints! kb at)]
+        {:at at :new (into [at] new) :violations violations}))))
 
 (defn spelling-plan
   "`[home entries respelled]` for a piece of a fact written `w` in `ctx`, read through
@@ -544,7 +576,7 @@
 (defn- symmetrize-row!
   "Bring one stored row of a newly symmetric predicate into the argument order its
   readers read (`spelling-plan`'s home, the canonical order while every reader believes
-  the mark), and return the handle it ends up at, or nil when it is spelled so already.
+  the mark): `move-row!`'s result, or nil when it is spelled so already.
 
   With no mirror stored the row is simply re-spelled where it lies.  Nothing else moves,
   which is why the lone case costs no handle: a caller holding it can still retract it,
@@ -554,8 +586,8 @@
   **Which of the pair survives is decided from what supports it, and only then from the
   handle.**  A row that is only a premise leaves cleanly, because `jtms/retract!` is
   exactly the sweep that takes it, so it is preferred as the one to go.  A row a rule
-  concluded leaves through `fold-supports!`, which re-hangs the justifications naming it
-  as their consequence onto the survivor rather than deleting them — belief is recomputed
+  concluded leaves through `fold-supports!`, which copies the justifications naming it
+  as their consequence onto the survivor before the row's own go — belief is recomputed
   from the justifications, never edited around them, and a copy onto the row saying the
   same thing edits nothing.  Between two rows the fold has no other reason to separate,
   the **lower** handle survives: it is the row the KB would hold had the declaration been
@@ -590,7 +622,7 @@
 
   `(commutative P)` installs the group `[:rest 1]` at its own arm (`special/arms`), so it
   re-spells `P`'s stored facts exactly as the other two spellings do and is asked about
-  here on the same terms.  The sugar used to be absent, because a CxCore rule derived
+  here on the same terms.  The sugar used to be absent, because a core.txt rule derived
   `(commutativeInArgAndRest P 1)` from it and that conclusion reached this sweep through
   `chain/place-fact-conclusion`.  That rule is inert now, so the mark carries the sweep
   itself.
@@ -621,25 +653,28 @@
   pairs — `commute-existing`'s walk, for a caller that knows the predicate rather than
   the declaration: a mark revived by a relabel, which no declaration arrives to announce
   (`chain/reconcile-spellings!`).  `witness` is the mark handle a folded row's metas are
-  carried on.  `{:new [handles]}`, or nil when `pred` has no stored rows."
+  carried on.  `{:new [handles] :violations [v]}`, the moved rows and the mints their new
+  spellings drew, or nil when `pred` has no stored rows."
   [kb pred witness]
   (let [idx (:index kb)]
     (when (pos? (reads/stored-count-with-functor idx pred))
       ;; snapshotted before the first write: the fold posts to the roots this walk
       ;; reads, and no index backend promises whether a posting read is a snapshot
       (let [planner (res/spelling-planner kb)]
-        {:new (into []
-                    (keep (fn [h]
-                            (when-let [sx (p/get-sentex (:records kb) h)]
-                              (symmetrize-row! kb planner sx witness))))
-                    (vec (reads/as-stored-with-functor idx pred)))}))))
+        (transduce (keep (fn [h]
+                           (when-let [sx (p/get-sentex (:records kb) h)]
+                             (symmetrize-row! kb planner sx witness))))
+                   (completing #(merge-with into %1 (select-keys %2 [:new :violations])))
+                   {:new [] :violations []}
+                   (vec (reads/as-stored-with-functor idx pred)))))))
 
 (defn commute-existing
   "When a declaration that *re-spells* arrives — `symmetric`, or either commutativity
   relation — bring the named predicate's **already stored** facts into the argument order
-  the declaration puts every later one in.  `{:new [handles]}` — the rows whose spelling
-  moved, which are new content to every rule that reads the canonical one — or nil when
-  `sentence` declares nothing that moves a spelling.
+  the declaration puts every later one in.  `commute-predicate`'s result — the rows whose
+  spelling moved, which are new content to every rule that reads the canonical one, and
+  the mints their spellings drew — or nil when `sentence` declares nothing that moves a
+  spelling.
 
   A declaration has to reach the facts already stored exactly as it reaches the facts that
   follow, which is `equate-existing`'s rule and holds here for a blunter reason: the entry point

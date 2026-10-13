@@ -81,9 +81,9 @@ foreign bridge are not claims about the world at all.
 Four things the questions need live in the **shipped KB** rather than in the tests,
 because a gap a test papers over locally is a gap every other consumer still has.
 
-**The unit table.** `CxMeasure` ships Length in `Meter`, Mass in `Kilogram` and
+**The unit table.** `measure.txt` ships Length in `Meter`, Mass in `Kilogram` and
 Duration in `Second`, so the measure vocabulary is something a query can compute with
-rather than a grammar. The test for admitting a unit is the one `CxCore` applies to
+rather than a grammar. The test for admitting a unit is the one `core.txt` applies to
 its own vocabulary: **a unit belongs when its factor is a definition rather than a
 measurement**. A minute is sixty seconds by stipulation; how much a particular dog weighs
 is not.
@@ -96,7 +96,7 @@ elephant, and two stated comparisons compose into a third off the closure. The t
 of `CxSize` are deliberately not connected: a dog being a larger *kind* than a cat does
 not make this dog heavier than that cat.
 
-**The sign vocabulary, and no numbers at all.** `CxMeasure` also ships `signOf` /
+**The sign vocabulary, and no numbers at all.** `measure.txt` also ships `signOf` /
 `trendOf`, the three `qualitative*` arithmetic relations, the `derivativeOf` edge and
 `greaterInMagnitudeThan` — which is the layer for the questions a person can answer and a
 measure cannot, because nobody has the figure. A tub fills while the tap beats the drain,
@@ -110,7 +110,7 @@ already stored. Both predicates are functional, so a second mother merges rather
 piling up.
 
 **The event calculus, and the fluents to run it on.** `CxChange` ships the inertia
-axioms and `CxTime` the vocabulary they are stated in, so *asleep at four* is a question
+axioms and `time.txt` the vocabulary they are stated in, so *asleep at four* is a question
 about the shipped KB rather than about a theory the test wrote for itself. The fluents are
 the test-world's, because a fluent is contingent: `(AsleepFn Whiskers)` is one animal's
 state, and `CxWell` is where the cast declares its reifiable functions so the natural world

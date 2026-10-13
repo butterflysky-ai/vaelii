@@ -24,7 +24,7 @@
 
 (tu/deftest-kb orthogonal-is-a-declared-term-of-the-grammar
   (is (some? (v/interpreted 'orthogonal))
-      "CxCore declares orthogonal, and the vocabulary roster answers for it")
+      "CxUniverse declares orthogonal, and the vocabulary roster answers for it")
   (is (true? (v/ask? kb '(binary_predicate orthogonal))))
   (is (true? (v/ask? kb '(symmetric orthogonal))))
   (is (true? (v/ask? kb '(type_relation_predicate orthogonal)))))
@@ -414,8 +414,7 @@
 
 (tu/deftest-kb an-exception-over-a-genl-related-pair-is-a-clash-of-the-orthogonal-it-entails
   (is (= #{#{['(siblingDisjointException alphaKind betaKind) 'CxUniverse
-              '#{(genl betaKind alphaKind) (genl siblingDisjointException orthogonal)
-                 (genlCx CxUniverse CxCore)}]}}
+              '#{(genl betaKind alphaKind) (genl siblingDisjointException orthogonal)}]}}
          (every-order kb '[alphaKind betaKind]
                       (fn [{:syms [alphaKind betaKind]}]
                         [[(list 'genl alphaKind 'thing)]
@@ -425,8 +424,7 @@
 
 (tu/deftest-kb a-stated-disjoint-beside-an-exception-of-the-pair-is-a-clash-of-the-exception
   (is (= #{#{['(siblingDisjointException alphaKind betaKind) 'CxUniverse
-              '#{(disjoint alphaKind betaKind) (genl siblingDisjointException orthogonal)
-                 (genlCx CxUniverse CxCore)}]}}
+              '#{(disjoint alphaKind betaKind) (genl siblingDisjointException orthogonal)}]}}
          (every-order kb '[alphaKind betaKind]
                       (fn [{:syms [alphaKind betaKind]}]
                         [[(list 'genl alphaKind 'thing) (list 'genl betaKind 'thing)]
@@ -452,7 +450,7 @@
 ;;
 ;; That two types could overlap says nothing about a subtype or a supertype of either: a
 ;; subtype of one may be disjoint from the other, and a supertype of one may subsume the
-;; other.  CxCore denies both directions of preservation along genl at both positions.
+;; other.  CxUniverse denies both directions of preservation along genl at both positions.
 ;;
 ;; Neither `transitiveInArg` nor `transitiveInArgInverse` is on the forced-monotonic roster,
 ;; so the four denials are stored and believed alike.  Nothing concludes any of the four
@@ -464,13 +462,13 @@
     (not (transitiveInArg orthogonal 1 genl))
     (not (transitiveInArg orthogonal 2 genl))])
 
-(tu/deftest-kb cxcore-denies-preserving-orthogonal-along-genl
+(tu/deftest-kb cxuniverse-denies-preserving-orthogonal-along-genl
   (doseq [s preservation-denials
-          :let [h (v/handle-of kb s 'CxCore)]]
-    (is (some? h) (str (pr-str s) " is stated in CxCore"))
+          :let [h (v/handle-of kb s 'CxUniverse)]]
+    (is (some? h) (str (pr-str s) " is stated in CxUniverse"))
     (is (true? (v/in? kb h)) (str (pr-str s) " is believed")))
   (doseq [s preservation-denials]
-    (is (false? (v/ask? kb (second s) 'CxCore))
+    (is (false? (v/ask? kb (second s) 'CxUniverse))
         (str (pr-str (second s)) " does not hold"))))
 
 (tu/deftest-kb orthogonal-is-not-inherited-down-or-up-genl
@@ -490,32 +488,32 @@
 
 ;; ---- the related-terms links ---------------------------------------------------
 
-(tu/deftest-kb cxcore-links-orthogonal-to-its-neighbours
+(tu/deftest-kb cxuniverse-links-orthogonal-to-its-neighbours
   (doseq [s '[(termsRelated sibling_disjoint disjoint_metatype disjoint siblingDisjointException)
               (seeAlso sibling_disjoint genl)
               (termsRelated genl disjoint orthogonal)
               (genl siblingDisjointException orthogonal)]]
-    (is (some? (v/handle-of kb s 'CxCore)) (str (pr-str s) " is stated in CxCore")))
-  (is (nil? (v/handle-of kb '(termsRelated disjoint orthogonal) 'CxCore))
+    (is (some? (v/handle-of kb s 'CxUniverse)) (str (pr-str s) " is stated in CxUniverse")))
+  (is (nil? (v/handle-of kb '(termsRelated disjoint orthogonal) 'CxUniverse))
       "the pairwise link the two rosters cover is gone"))
 
 ;; ---- the upper ontology's axes ---------------------------------------------------
 
 (def ^:private upper-axes
-  "The pairs of upper-ontology types CxCore states orthogonal: parts of the three
+  "The pairs of upper-ontology types CxUniverse states orthogonal: parts of the three
   partitions of `thing` (by location in space, by location in time, by mass) that cut
   across one another."
   '[[spatial temporal] [aspatial atemporal] [spatial atemporal] [aspatial temporal]
     [intangible spatial] [intangible temporal] [intangible spatiotemporal]])
 
-(tu/deftest-kb cxcore-states-the-upper-axes-orthogonal
+(tu/deftest-kb cxuniverse-states-the-upper-axes-orthogonal
   (let [tx (reasoning/taxonomy kb)]
     (doseq [[a b] upper-axes
             :let [s (list 'orthogonal a b)]]
       (testing (pr-str s)
-        (is (some? (v/handle-of kb s 'CxCore)) "stated in CxCore")
-        (is (true? (v/ask? kb s 'CxCore)) "believed")
-        (is (true? (v/ask? kb (list 'orthogonal b a) 'CxCore)) "in either spelling")
+        (is (some? (v/handle-of kb s 'CxUniverse)) "stated in CxUniverse")
+        (is (true? (v/ask? kb s 'CxUniverse)) "believed")
+        (is (true? (v/ask? kb (list 'orthogonal b a) 'CxUniverse)) "in either spelling")
         (is (= :orthogonal (v/subsumption-status kb a b))
             "the two may overlap and neither subsumes the other")
         (is (false? (v/genl? kb a b)))

@@ -111,7 +111,7 @@
   ;; a context above the channel sees both sides transitively; two negatives:
   (v/assert kb '(genlCx CxUpper CxDeploy) 'CxUniverse {:strength :monotonic})   ; sees both (via CxDeploy)
   (v/assert kb (list 'genlCx 'CxOnlyAtlas (id/context-for 'AgentAtlas)) 'CxUniverse {:strength :monotonic}) ; one side
-  (v/assert kb '(genlCx CxSibling CxCore) 'CxUniverse {:strength :monotonic})   ; neither side
+  (v/assert kb '(genlCx CxSibling CxUniverse) 'CxUniverse {:strength :monotonic})   ; neither side
   (testing "disputed where both sides are readable"
     (is (d/disputed? kb 'CxDeploy) "the channel that sees both")
     (is (d/disputed? kb 'CxUpper)  "and every context that sees that channel"))
@@ -247,8 +247,8 @@
     (is (not (v/isa? kb 'disputeNotified 'binary d/state-context))
         "no declaration before a mark is written")
     (d/mark-notified kb did 1750000000000)
-    (testing "the first mark loads the CxDisputes seed: CxCore in view, both marks declared"
-      (is (v/sees? kb d/state-context 'CxCore))
+    (testing "the first mark loads the CxDisputes seed: CxUniverse in view, both marks declared"
+      (is (v/sees? kb d/state-context 'CxUniverse))
       (is (v/isa? kb 'disputeNotified 'binary d/state-context))
       (is (v/isa? kb 'disputeStale 'ternary d/state-context)))
     (testing "a mark at the wrong arity is stored there and read OUT"

@@ -20,7 +20,7 @@
     other, so it is the sharpest available probe of the merge/reject rule and it is what
     Pace's matrix uses.
 
-  The merge-or-nogood rule itself is not new and is not ours to invent.  CxCore's
+  The merge-or-nogood rule itself is not new and is not ours to invent.  CxUniverse's
   comment on `functional`:
 
       two symbols both known true (monotonic) derive (equals V1 V2) and merge, so

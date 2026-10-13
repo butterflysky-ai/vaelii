@@ -90,7 +90,8 @@
   "Load the CxRegistry vocabulary into `kb` from resources/kb/koinii/CxRegistry.txt.
   Koinii KB files are not auto-discovered (the starter only walks upper/ and
   middle/), so this explicit loader is how the registry context comes into being.
-  Requires CxCore already loaded (CxRegistry wires `(genlCx CxRegistry CxCore)`).
+  Requires the upper ontology already loaded (CxRegistry wires `(genlCx CxRegistry
+  CxUniverse)`).
   Returns kb."
   [kb]
   (load-seed-context kb 'CxRegistry))
@@ -161,11 +162,11 @@
 
 (defn agent-context
   "Create/lift `agent-id`'s per-agent context under the channel `deploy-ctx` so the
-  channel sees it — `(genlCx deploy-ctx CxAtlas)` — and root it under `CxCore` so the
-  agent speaks the core vocabulary.  Both edges are monotonic topology.  Returns the
+  channel sees it — `(genlCx deploy-ctx CxAtlas)` — and root it under `CxUniverse` so the
+  agent speaks the shipped vocabulary.  Both edges are monotonic topology.  Returns the
   agent context symbol."
   [kb deploy-ctx agent-id]
-  (place-agent-context #(v/assert kb %1 %2 %3) deploy-ctx agent-id 'CxCore))
+  (place-agent-context #(v/assert kb %1 %2 %3) deploy-ctx agent-id 'CxUniverse))
 
 ;; ---- the auth extension point: authenticate a principal (policy-conditional) --------
 

@@ -293,6 +293,20 @@
            [(contains? (:believed v) '(rr Zed)) (contains? (:believed v) '(happy Zed))
             (:out v)]))))
 
+(deftest a-roster-declaration-forces-its-predicate-only-where-it-is-seen
+  ;; CxA sees CxU and states (forced_monotonic_predicate ta); CxU holds a dilemma and a
+  ;; denial beside a default membership
+  (let [r (b/believe (world ['(genlCx CxA CxU) 'CxUniverse :monotonic]
+                            ['(forced_monotonic_predicate ta) 'CxA]
+                            ['(disjoint ta tb) 'CxU :monotonic]
+                            ['(ta Ind) 'CxU] ['(tb Ind) 'CxU]
+                            ['(not (ta Jay)) 'CxU :monotonic] ['(ta Jay) 'CxU])
+                     [disjoint-double])
+        at (fn [c] (mapv #(contains? (believed-at r c) %)
+                         '[(ta Ind) (tb Ind) (ta Jay) (not (ta Jay))]))]
+    (is (= [true false true false] (at 'CxA)) "CxA: the rival loses and the denial is inert")
+    (is (= [true true false true] (at 'CxU)) "CxU: a dilemma, and the denial defeats (ta Jay)")))
+
 (deftest scenario-b-a-released-edge-leaves-no-clash-at-the-context-that-reads-the-release
   ;; CxB sees CxA and CxD. CxA: (genl chi dog) :default; CxD: (not (genl chi dog))
   ;; :monotonic; CxB: (chi Kit) :default, (cat Kit) :monotonic, (disjoint dog cat)

@@ -21,7 +21,7 @@ An entry names the alternative, says what the KB states instead, and gives the r
 
 **Alternative:** `(genl event spatiotemporal)`: every event happens somewhere and somewhen.
 
-**Instead:** `event` is temporal, through `(genl situation temporal)` in CxCore, and the KB states no place for an event as such.
+**Instead:** `event` is temporal, through `(genl situation temporal)` in `core.txt`, and the KB states no place for an event as such.
 
 **Why:** some events have a time and no place. A contract expiring, a debt falling due and a term of office ending each happen at a time and nowhere in particular, and each can cause things. Requiring a place would either exclude them from `event` or force an invented location.
 
@@ -32,7 +32,7 @@ An entry names the alternative, says what the KB states instead, and gives the r
 
 **Instead:** `(orthogonal A B)` states that A and B overlap and neither subsumes the other, for example `made` and `biological`.
 
-**Why:** the types on different axes are neither disjoint nor nested. A bred animal is made and biological. Left unstated, every such pair reads `:unknown` in the disjointness audit, which hides the pairs that are open questions among hundreds that are settled. Stating them disjoint would be false. `orthogonal` records the settled overlap, so the audit's unknowns are the real open questions.
+**Why:** the types on different axes are neither disjoint nor nested. A bred animal is made and biological. Left unstated, every such pair reads `:unknown` in the disjointness audit, which hides the pairs that are open questions among hundreds that are settled. Stating them disjoint would be false. `orthogonal` records the settled overlap, so the audit's unknowns are the real open questions. An `orthogonal` is not inherited along `genl` ([taxonomy.md](taxonomy.md#disjointness)), so `abstract.txt` states each overlapping pair below `(orthogonal biological made)` as its own sentence, such as `(orthogonal organism made)` for a cloned sheep and `(orthogonal body_part natural)` for a heart.
 
 
 ## Time and change
@@ -55,6 +55,24 @@ An entry names the alternative, says what the KB states instead, and gives the r
 **Instead:** no `capability` type. The second argument of `hasCapability` and `capabilityType` is an event kind: flying and travelling are kinds of event.
 
 **Why:** an ability is an ability to take part in a kind of event, and the event vocabulary already carries the structure abilities need. `(genl flying travelling)` makes "can fly implies can travel" fall out of the event hierarchy with no parallel ability hierarchy to keep in step, and travelling being a `causal_event` is stated once, for the events and the abilities together.
+
+
+### An event's doer has no type
+
+**Alternative:** type `doneBy`'s second argument as `agent`, `animal` or `organism`, so that only something that can act brings an event about.
+
+**Instead:** `abstract.txt` declares no type on the second argument of `doneBy` or of its spec `performedBy`.
+
+**Why:** a machine, a process or a storm brings events about as well as a person or an animal does. `agent` names a registered participant rather than something that can act, and no type below `thing` covers every doer. A type on the position would conclude every doer a member of it under the assertive reading, a machine included. `performedBy`, the intentional case, carries the narrower claim.
+
+
+### Food and body part overlap
+
+**Alternative:** `(disjoint food body_part)`: something eaten is not a part an organism grew.
+
+**Instead:** `abstract.txt` states `(orthogonal food body_part)`.
+
+**Why:** a leg of lamb and a chicken wing are each a body part and food at once. A `disjoint` over the pair places a clash for every such membership. A KB that needs the two kept apart for its own purpose states a separation over narrower kinds of its own.
 
 
 ### Biology properties have genls

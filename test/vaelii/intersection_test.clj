@@ -10,7 +10,7 @@
       (a generator stamps a concrete-functor rule per intersection fact, since the
       membership consequent's predicate is a variable).
 
-  Binary and ternary arities; general arity is future work. See CxCore."
+  Binary and ternary arities; general arity is future work. See CxUniverse."
   (:require [clojure.test :refer [deftest is testing use-fixtures]]
             [vaelii.core :as v]
             [vaelii.test-util :as tu]))
@@ -155,7 +155,7 @@
            [[r k] (v/ask? kb (list 'genl sub comb) r)]))))
 
 (defn- build-ix
-  "A fresh CxCore KB holding the world's contexts and `steps` asserted in that order;
+  "A fresh vocabulary KB holding the world's contexts and `steps` asserted in that order;
   calls `f` with the KB and each step's handles, inside the net-neutrality check."
   [t steps f]
   (let [world (ix-world t)]

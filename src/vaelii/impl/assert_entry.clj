@@ -274,6 +274,14 @@
 ;; A `set/defaultRule` wrapper sets `:defeasible` on the record, so the one rule path
 ;; below handles every flavour — do not add a second entry point per flavour.
 
+(defn aligned-exception
+  "The exception `exc`, in the author's variable names, in the canonical variables of the
+  rule whose canonical→author varmap as written is `author-vm`: the query
+  `assert-exceptWhen-meta!` stores."
+  [exc author-vm]
+  (let [inv (set/map-invert author-vm)]                             ; {?x ?var0}
+    (sx/canonical-exception (map #(sx/canon (res/substitute % inv)) exc) (keys author-vm))))
+
 (defn assert-exceptWhen-meta!
   "Store one exceptWhen exception against the rule at `rule-handle` as a
   belief-following `(exceptWhen <aligned-query> (sentexHandle rule-handle))`
@@ -295,35 +303,33 @@
     (when-not (and rsx (rules/rule? rsx))
       (throw (ex-info (str "exceptWhen names handle " rule-handle ", which is not a rule")
                       {:type :not-well-formed :handle rule-handle :exception (vec exc)})))
-    (let [inv (set/map-invert author-vm)]                           ; {?x ?var0}
-      ;; the rule's author variables stand in for its antecedents: they are what binds
-      (sx/check-exception-closed (vec (vals author-vm)) exc)
-      (let [aligned (sx/canonical-exception (map #(sx/canon (res/substitute % inv)) exc)
-                                            (keys author-vm))
-            meta-s  (sx/exceptWhen-meta aligned rule-handle)]
-        ;; Each conjunct is held to the naming invariants, like every other literal a
-        ;; rule carries.  `check-rule-sentence` runs `nm/check!` on `rules/inner-rule`,
-        ;; which has already peeled the query off, and nothing else reached it — so
-        ;; `nm/literals`' `:exception` role and the "exceptWhen exception" wording in
-        ;; `literal-roles` existed with nothing on the assert path calling them, and
-        ;; `(exceptWhen (lives_in ?x cold_place) …)` stored the snake_case-arity-2
-        ;; literal `docs/naming.md` says is refused.  The store holding what the front
-        ;; entry point refuses is the structure of corruption these checks exist to stop.
-        (run! #(nm/check! (:naming kb) % context) aligned)
-        (checks/check-no-imperative meta-s)
-        (checks/check-no-defeat meta-s)
-        (checks/check-exceptWhen-stratified kb rule-handle (rules/watched-predicates aligned) context)
-        (let [strength   (get opts :strength :default)
-              [h s new?] (kb/find-or-create-sentex kb meta-s context strength)]
-          (when new?
-            (mark-premise kb h strength)
-            (integrate/sentex-added kb s h)          ; index-exceptWhen-meta + queue the re-check
-            ;; If the rule already migrated before this exception existed, migration never
-            ;; saw the exception — re-point it onto the live twin(s) now, or the twin fires
-            ;; unguarded (docs/equality.md, the meta-after-merge case).
-            (special/migrate-meta-onto-twins kb s)
-            (when-not *defer-settle?* (settle/settle kb)))  ; sweep what the new exception now blocks
-          h)))))
+    ;; the rule's author variables stand in for its antecedents: they are what binds
+    (sx/check-exception-closed (vec (vals author-vm)) exc)
+    (let [aligned (aligned-exception exc author-vm)
+          meta-s  (sx/exceptWhen-meta aligned rule-handle)]
+      ;; Each conjunct is held to the naming invariants, like every other literal a
+      ;; rule carries.  `check-rule-sentence` runs `nm/check!` on `rules/inner-rule`,
+      ;; which has already peeled the query off, and nothing else reached it — so
+      ;; `nm/literals`' `:exception` role and the "exceptWhen exception" wording in
+      ;; `literal-roles` existed with nothing on the assert path calling them, and
+      ;; `(exceptWhen (lives_in ?x cold_place) …)` stored the snake_case-arity-2
+      ;; literal `docs/naming.md` says is refused.  The store holding what the front
+      ;; entry point refuses is the structure of corruption these checks exist to stop.
+      (run! #(nm/check! (:naming kb) % context) aligned)
+      (checks/check-no-imperative meta-s)
+      (checks/check-no-defeat meta-s)
+      (checks/check-exceptWhen-stratified kb rule-handle (rules/watched-predicates aligned) context)
+      (let [strength   (get opts :strength :default)
+            [h s new?] (kb/find-or-create-sentex kb meta-s context strength)]
+        (when new?
+          (mark-premise kb h strength)
+          (integrate/sentex-added kb s h)          ; index-exceptWhen-meta + queue the re-check
+          ;; If the rule already migrated before this exception existed, migration never
+          ;; saw the exception — re-point it onto the live twin(s) now, or the twin fires
+          ;; unguarded (docs/equality.md, the meta-after-merge case).
+          (special/migrate-meta-onto-twins kb s)
+          (when-not *defer-settle?* (settle/settle kb)))  ; sweep what the new exception now blocks
+        h))))
 
 (defn ist-parts
   "The `[context sentence]` an `(ist Ctx S)` names, or nil when the form is not one — a
@@ -555,16 +561,20 @@
                 ;; came from `constraint-checks`, so `entailment-check` already ran the
                 ;; definitional constraint check over them before the store, and the
                 ;; materializer need not run it a second time (special/inadmissible).
-                args  (merge-with into
-                                  (special/deduce-arg-types kb ents h context (not bulk?))
-                                  ;; ...and the declarations stated below this context,
-                                  ;; at the contexts that see both
-                                  (special/deduce-below kb sentence h context))
-                back  (special/entail-existing kb sentence h)
+                ;; A bulk load draws none of the three orders: `record-arg-types`
+                ;; records them after the load, and each mint's admissibility check
+                ;; walks the stored rule graph.
+                args  (when-not bulk?
+                        (merge-with into
+                                    (special/deduce-arg-types kb ents h context true)
+                                    ;; ...and the declarations stated below this context,
+                                    ;; at the contexts that see both
+                                    (special/deduce-below kb sentence h context)))
+                back  (when-not bulk? (special/entail-existing kb sentence h))
                 ;; ...and the third order of the same three ingredients: a `genl` edge
                 ;; between predicates brings stored sub-predicate facts under the
                 ;; declarations already written above them
-                down  (special/entail-under-edge kb sentence)
+                down  (when-not bulk? (special/entail-under-edge kb sentence))
                 ;; ...and, when this sentence is a `defn*` collection definition, the
                 ;; forward rule(s) it expands into — derived rule sentexes justified by
                 ;; this fact, so retracting or defeating it withdraws the rule and

@@ -34,7 +34,7 @@ none. *Specified* declarations produce a report a caller asks for.
 ## Instance: the declaration stamps a rule
 
 `predAllInstance` and `predInstanceAll` are **rule generators**
-([generators.md](generators.md)). The CxCore declaration beside each one is a rule whose
+([generators.md](generators.md)). The `core.txt` declaration beside each one is a rule whose
 consequent is a rule:
 
 ```clojure
@@ -135,7 +135,7 @@ subtype arm still convicts on its own: nothing derives a `genl` edge for a fille
 kind the checker excused as evidence-free still violates.
 
 **The function marks derive both.** `(injection P)`, `(surjection P)` and `(bijection P)`
-are declared of a predicate rather than of a pair of collections, and CxCore rules read
+are declared of a predicate rather than of a pair of collections, and `core.txt` rules read
 only the quantified side — the domain off `(arg P 1 D)` for totality, the range off
 `(arg P 2 R)` for ontoness — to derive `(predAllSpecified P D)` and
 `(predSpecifiedAll P R)`; the filler types are the audit's to derive:

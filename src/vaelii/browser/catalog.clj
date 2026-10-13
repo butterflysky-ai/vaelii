@@ -14,7 +14,7 @@
 
   | kind         | content                                             | loader |
   |--------------|-----------------------------------------------------|--------|
-  | `:core`      | the CxCore vocabulary head alone               | `vaelii.host.core-context` |
+  | `:core`      | the upper ontology alone, in CxUniverse             | `vaelii.host.core-context` |
   | `:starter`   | the shipped schema-only ontology                    | `vaelii.host.starter` |
   | `:generated` | synthesized from numbers — types, rules, a fwd mix  | `vaelii.host.io.generate` |
   | `:corpus`    | a translated sentence corpus (OpenCyc)              | a foreign reader, `:cyc-corpus` |
@@ -61,8 +61,8 @@
             [vaelii.core :as v]
             [vaelii.host.core-context :as core-context]
             [vaelii.host.io.generate :as generate]
-            [vaelii.host.spindle :as spindle]
-            [vaelii.host.starter :as starter])
+            [vaelii.host.starter :as starter]
+            [vaelii.host.sync :as sync])
   (:import (java.io File)))
 
 ;; ---- the shipped sources -------------------------------------------------
@@ -73,14 +73,14 @@
   the same keys back out of the params map."
   [{:id      "core"
     :kind    :core
-    :name    "Core vocabulary"
-    :blurb   "CxCore alone — the predicates the engine interprets, and nothing else."
-    :scale   "392 sentexes"
+    :name    "Upper vocabulary"
+    :blurb   "The upper ontology alone — the predicates the engine interprets and the upper types, all in CxUniverse."
+    :scale   "3,000+ sentexes"
     :options [{:key :chain? :type :flag :label "Forward-chain after loading" :default false}]}
    {:id      "starter"
     :kind    :starter
     :name    "Starter ontology"
-    :blurb   "The shipped schema: the spindle head, the upper spindle's members, and the middle spindle's theories. No individuals."
+    :blurb   "The shipped schema: the upper ontology in CxUniverse and the middle theories below it. No individuals."
     :scale   "1,600+ asserted / 3,200+ stored"
     :default? true
     :options [{:key :chain? :type :flag :label "Forward-chain after loading" :default false}]}
@@ -92,7 +92,7 @@
     :repeat? true                                        ; loadable many times over, at different shapes
     :options (concat
               [{:key :base :type :choice :label "Base vocabulary" :default "core"
-                :choices [["core" "Core vocabulary"] ["starter" "Starter ontology"]]}]
+                :choices [["core" "Upper vocabulary"] ["starter" "Starter ontology"]]}]
               (for [k generate/knobs] (assoc k :type :slider))
               [{:key :seed :type :number :label "Seed" :default 1 :min 0 :max 1000000}
                {:key :chain? :type :flag :label "Forward-chain after loading" :default false}
@@ -852,7 +852,7 @@
   (let [open! (fn [] (let [[kb where] (open-kb-for params)] (note-kb! kb where) kb))]
     (case kind
       :core     (let [kb (open!)]
-                  (progress! {:phase :vocabulary :done 0 :note "CxCore"})
+                  (progress! {:phase :vocabulary :done 0 :note "the upper ontology"})
                   (core-context/load-into kb)
                   (chain-asked kb params progress! {}))
       :starter  (let [kb (open!)]
@@ -861,7 +861,7 @@
                   (chain-asked kb params progress! {}))
       :generated (generate/load-into (open!) params {:on-progress progress!})
       :corpus   (let [kb (open!)]
-                  (progress! {:phase :vocabulary :done 0 :note "CxCore"})
+                  (progress! {:phase :vocabulary :done 0 :note "the upper ontology"})
                   (core-context/load-into kb)
                   ;; the corpus reader ships as a plugin, so it is asked for rather
                   ;; than required (docs/foreign.md).  Its own `:chain?` chains per
@@ -911,28 +911,30 @@
                       {:type :unknown-source :kind kind})))))
 
 (defn- sync-now!
-  "Sync `kb`'s shipped spindle (`spindle/sync-spindle!`), file the report on entry `key`
-  as `:spindle` and log it.  Returns the report.
+  "Sync `kb`'s shipped contexts (`sync/sync!`), file the report on entry `key` as
+  `:sync` and log it.  Returns the report.
 
   A sync that throws is filed and logged as `{:error message}` rather than rethrown: the
-  KB loaded, and a spindle this engine could not bring current is a fact to report about
-  it, not a reason to refuse the load."
-  [key kb]
-  (let [report (try (spindle/sync-spindle! kb)
-                    (catch Exception e {:error (or (ex-message e) (str (class e)))}))]
-    (put-entry! key #(assoc % :spindle report))
-    (trove/log! {:level (if (or (:error report) (seq (:refused report))) :warn :info)
-                 :id    ::spindle-synced
-                 :msg   (if-let [err (:error report)]
-                          (str "the shipped spindle of " key " was not synced: " err)
-                          (str "synced the shipped spindle of " key ": " (:added report)
-                               " added, " (:removed report) " retracted, "
-                               (count (:refused report)) " refused"))
-                 :data  (assoc report :key key)})
-    report))
+  KB loaded, and shipped contexts this engine could not bring current is a fact to report about
+  it, not a reason to refuse the load.  `ships` is `sync/premises`, read once by a
+  caller that syncs more than one KB."
+  ([key kb] (sync-now! key kb nil))
+  ([key kb ships]
+   (let [report (try (if ships (sync/sync! kb ships) (sync/sync! kb))
+                     (catch Exception e {:error (or (ex-message e) (str (class e)))}))]
+     (put-entry! key #(assoc % :sync report))
+     (trove/log! {:level (if (or (:error report) (seq (:refused report))) :warn :info)
+                  :id    ::shipped-synced
+                  :msg   (if-let [err (:error report)]
+                           (str "the shipped contexts of " key " were not synced: " err)
+                           (str "synced the shipped contexts of " key ": " (:added report)
+                                " added, " (:removed report) " retracted, "
+                                (count (:refused report)) " refused"))
+                  :data  (assoc report :key key)})
+     report)))
 
 (defn- sync-after-rebuild!
-  "Sync `kb`'s shipped spindle once the belief rebuild behind its image finishes, as a
+  "Sync `kb`'s shipped contexts once the belief rebuild behind its image finishes, as a
   writing job of its own.  A daemon thread waits for `v/write-hazards` to empty, and gives
   up when the rebuild fails or the entry stops holding `kb` (it was unloaded).  A writer
   held by another job is waited out, since the sync is owed to this KB whenever it runs."
@@ -945,8 +947,8 @@
                (not (identical? kb (:kb (entry key)))) nil
 
                (:failed (v/rebuild-progress kb))
-               (trove/log! {:level :warn :id ::spindle-synced
-                            :msg (str "the shipped spindle of " key " was not synced: the"
+               (trove/log! {:level :warn :id ::shipped-synced
+                            :msg (str "the shipped contexts of " key " were not synced: the"
                                       " belief rebuild failed, and writes stay refused")
                             :data {:key key}})
 
@@ -955,7 +957,7 @@
 
                :else
                (when (= ::busy
-                        (try (jobs/submit {:label  (str "Sync the shipped spindle of " key)
+                        (try (jobs/submit {:label  (str "Sync the shipped contexts of " key)
                                            :kind   :sync
                                            :writes kb
                                            :entry  key}
@@ -964,13 +966,13 @@
                                (if (= :job-busy (:type (ex-data e))) ::busy (throw e)))))
                  (Thread/sleep 2000)
                  (recur)))))
-         (str "vaelii-spindle-sync " key))
+         (str "vaelii-shipped-sync " key))
     (.setDaemon true)
     (.start)))
 
-(defn- sync-spindle
-  "Bring a loaded store's or dump's shipped spindle up to this engine's
-  (`vaelii.host.spindle`): inline when `kb` accepts writes, which a served browser's
+(defn- sync-shipped
+  "Bring a loaded store's or dump's shipped contexts up to this engine's
+  (`vaelii.host.sync`): inline when `kb` accepts writes, which a served browser's
   recover leaves it doing, and after the rebuild when belief is being rebuilt behind an
   image.  A store opened without a recover accepts no writes and is left as it is.  The
   other source kinds are built from this engine's own files and are already in sync.
@@ -980,12 +982,51 @@
     (let [hz (v/write-hazards kb)]
       (cond
         (empty? hz)
-        (do (progress! {:phase :spindle :done 0 :note "syncing the shipped spindle"})
+        (do (progress! {:phase :sync :done 0 :note "syncing the shipped contexts"})
             (sync-now! key kb))
 
         (:stale-belief hz)
         (do (sync-after-rebuild! key kb)
             {:deferred true})))))
+
+(defn sync-loaded!
+  "Sync the shipped contexts of every entry that holds a KB in this process and accepts
+  writes, as one `:sync` job: the shipped files are read once (`sync/premises`), and
+  each entry's report is filed on it as `:sync` (`sync-now!`).  What the development
+  browser runs when a shipped KB file changes on disk (`vaelii.browser.web`).  Returns the
+  job id, or nil when no entry qualifies.  Throws `{:type :job-busy}` while another job
+  holds this process's writer."
+  []
+  (let [ks (filterv #(and (in-process? %) (empty? (v/write-hazards (:kb (entry %)))))
+                    (:order @state))]
+    (when (seq ks)
+      (jobs/submit {:label  "Sync the shipped contexts of every loaded KB"
+                    :kind   :sync
+                    :writes true}
+                   (fn [_]
+                     (let [ships (sync/premises)]
+                       {:synced (into {} (for [k ks :let [kb (:kb (entry k))] :when kb]
+                                           [k (sync-now! k kb ships)]))}))))))
+
+(defn held-premises
+  "`sync/held` of entry `key`'s KB, or nil unless that KB is in this process and
+  accepts writes."
+  [key]
+  (when-let [kb (and (in-process? key) (:kb (entry key)))]
+    (when (empty? (v/write-hazards kb))
+      (sync/held kb))))
+
+(defn write-back!
+  "Write to the shipped files what entry `key`'s KB holds in its exact contexts and `base`
+  does not, and remove what `base` holds and the KB does not (`sync/write-back!`).
+  `base` is an earlier `held-premises` of the same entry.  Returns `[held report]`, the
+  report nil when nothing changed, or nil when `held-premises` is."
+  [key base]
+  (when-let [now (held-premises key)]
+    (let [changes {:add    (vals (apply dissoc now (keys base)))
+                   :remove (vals (apply dissoc base (keys now)))}]
+      [now (when (or (seq (:add changes)) (seq (:remove changes)))
+             (sync/write-back! (:kb (entry key)) changes))])))
 
 (defn- entry-key
   "The key an entry is filed under: the source id, suffixed when that source can be
@@ -1080,7 +1121,7 @@
                             summary  (run-load src params progress! note-kb!)
                             ;; while the entry still reads `:running`, so the browser's
                             ;; writes wait for it (`write-blocked?`)
-                            _        (sync-spindle key src progress!)]
+                            _        (sync-shipped key src progress!)]
                         ;; a cancelled or failed load leaves whatever had landed in its
                         ;; stores; `unload!` is what takes those down
                         ;; `:progress` settles with the status, as it does on the job
@@ -1164,7 +1205,7 @@
 
 (defn- refuse-while-a-job-writes!
   "Throw `:still-writing` when a job other than entry `e`'s loader claims its KB as the
-  KB it writes — a chaining run or a spindle sync (`jobs/kb-writer`).  A loader claims no
+  KB it writes — a chaining run or a shipped-context sync (`jobs/kb-writer`).  A loader claims no
   KB by identity (it opens its own), so the loader arm of `unload!` answers for that one."
   [e key]
   (when-let [w (jobs/kb-writer (:kb (entry key)))]
@@ -1189,7 +1230,7 @@
 
   - **its loader has not stopped.**  Cancellation is cooperative, so the stores are still
     the loader's until its thread returns.  Refused as `:still-stopping`, and retryable.
-  - **another job writes it.**  A chaining run or a spindle sync claims the KB as its
+  - **another job writes it.**  A chaining run or a shipped-context sync claims the KB as its
     writer in the job registry, and the browser's chain holds the write monitor `:run-in`
     takes for its whole run.  Refused as `:still-writing`, naming the job, and asked
     **before** `:run-in` is entered — so the answer does not wait for the job, which a
@@ -1567,7 +1608,7 @@
 
   Every running job is stopped **first** and waited for, and the entries come second:
   `unload!` clears the stores an entry holds, and an export walking one of them would be
-  reading a KB as it emptied, and a chaining run or a spindle sync would be writing
+  reading a KB as it emptied, and a chaining run or a shipped-context sync would be writing
   one.  `unload!` refuses both outright (`:still-exporting`,
   `:still-writing`), so a job not waited for here leaves its entry forgotten and its
   stores unreleased.  The cancels are issued together and the waits overlap, each bounded

@@ -154,8 +154,8 @@
 (def ^:private base-ctx 'CxHotBase)
 
 (defn- build-contexts! [kb]
-  (doseq [[sub super] [[base-ctx 'CxCore] [mid-ctx base-ctx] [leaf-ctx mid-ctx]]]
-    (v/assert kb (list 'genlCx sub super) 'CxCore {:chain? false})))
+  (doseq [[sub super] [[base-ctx 'CxUniverse] [mid-ctx base-ctx] [leaf-ctx mid-ctx]]]
+    (v/assert kb (list 'genlCx sub super) 'CxUniverse {:chain? false})))
 
 (defn- build-excepts!
   "`e` believed `(except (sentexHandle H))` facts, each hiding a **decoy** — a fact no
@@ -268,7 +268,7 @@
   "A `genl` tree of `depth` levels and `branching` children per node, rooted at `hr_t0`
   — so `specs(hr_t0)` is the whole tree and `specs` of a leaf is one node."
   [kb ^long depth ^long branching]
-  (v/assert kb (list 'genlCx est-ctx 'CxCore) 'CxCore {:chain? false})
+  (v/assert kb (list 'genlCx est-ctx 'CxUniverse) 'CxUniverse {:chain? false})
   (v/with-deferred-settle kb
     (doseq [i (range 1 (tree-size depth branching))]
       (v/assert kb (list 'genl (type-name i) (type-name (quot (dec i) branching)))

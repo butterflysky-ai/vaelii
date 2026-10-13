@@ -42,7 +42,13 @@
   edges put above one, because the engine satisfies such an antecedent with a claim
   nobody stored (docs/inference.md, \"Antecedents nothing stored\"), and an `unknown` or
   `exceptWhen` conjunct on a part of some `covering`, which level 6 answers through
-  `CoveringProver`. The reference models neither reading."
+  `CoveringProver`. The reference models neither reading.
+
+  **A roster declaration** `(forced_monotonic_predicate T)` of an ordinary type `T`
+  (`roster-declaration?`) puts `T` on the roster at the contexts that see it and nowhere
+  else (docs/reference.md D17): there a membership of `T` is never a loser and a denial of
+  one is inert, and a rule concluding one fires there only as a roster rule
+  (`vaelii.ref.believe/derive-at`)."
   (:require [clojure.set :as set]
             [clojure.string :as str]
             [vaelii.impl.predicates :as predicates]
@@ -80,7 +86,7 @@
 
 (def ^:private refused-wrappers
   '#{set/backwardRule set/inertRule set/solveRule set/assumptionRule set/hardConstraint
-     set/softConstraint set/monotonic})
+     set/softConstraint set/monotonic set/inert})
 
 (def ^:private special-words
   (into '#{not and implies unknown exceptWhen genl genlCx thereExists forall}
@@ -145,10 +151,16 @@
   (and (genl-edge? s) (every? camel-case-predicate? (rest s))))
 
 (defn forced?
-  "Is the sentence `s` on the forced-monotonic roster: its functor is in
+  "Is the sentence `s` on the global forced-monotonic roster: its functor is in
   `forced-monotonic`, or `s` is a `predicate-genl?` edge."
   [s]
   (and (seq? s) (or (contains? forced-monotonic (first s)) (predicate-genl? s))))
+
+(defn roster-declaration?
+  "Is `s` a `(forced_monotonic_predicate T)` declaration of an ordinary predicate `T`."
+  [s]
+  (and (seq? s) (= 'forced_monotonic_predicate (first s)) (= 2 (count s))
+       (ordinary-predicate? (second s))))
 
 (defn- literal?
   "Is `l` an atomic formula over an ordinary predicate whose arguments are constant
@@ -276,8 +288,8 @@
            (contains? direction-wrappers (first s)) (contains? refused-wrappers (first s)))))
 
 (defn write-kind
-  "The kind of the sentence `s`: `:rule`, `:genlCx`, `:genl`, `:declaration`, `:denial`
-  or `:fact`. Throws `:unsupported` for a sentence outside the v1 fragment."
+  "The kind of the sentence `s`: `:rule`, `:genlCx`, `:genl`, `:declaration`,
+  `:roster-declaration`, `:denial` or `:fact`. Throws `:unsupported` for a sentence outside the v1 fragment."
   [s]
   (cond
     (rule-form? s) (do (parse-rule s) :rule)
@@ -289,6 +301,7 @@
     (if (every? #(and (symbol? %) (not (variable? %))) (rest s))
       :genl
       (unsupported "a genl edge between non-constant terms" {:sentence s}))
+    (roster-declaration? s) :roster-declaration
     (declaration? s)
     (if (every? #(or (integer? %) (and (symbol? %) (not (variable? %)) (not= 'genlCx %)))
                 (rest s))
@@ -315,7 +328,7 @@
   "The context the engine stores write `w` in: the write's own context, a genlCx edge
   included. The engine moves every genlCx edge into CxUniverse only while
   `(forced_decontextualized_predicate genlCx)` is stored (docs/contexts.md,
-  \"forced_decontextualized_predicate\"), which CxCore's vocabulary asserts and v1
+  \"forced_decontextualized_predicate\"), which CxUniverse's vocabulary asserts and v1
   refuses, so a v1 KB holds an edge where it was written."
   [w]
   (:context w))

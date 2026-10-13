@@ -44,7 +44,7 @@ variable and `foo` is an atom. Here:
 | `CapitalCamelCase` | an **individual** | `Fido`, `Tom` |
 | `camelCase` | a predicate | `parentOf`, `genl` |
 | `snake_case` | a type, which is a unary predicate | `physical_object` |
-| `Cx` + `CapitalCamelCase` | a context | `CxCore` |
+| `Cx` + `CapitalCamelCase` | a context | `CxWell` |
 
 These are not style. `assert` reads a symbol's role off its spelling and **refuses** a
 sentence that breaks one, with `ex-info` carrying `:type :naming`. A snake_case functor
@@ -65,7 +65,8 @@ the same invariants as a fact.
 their written order is not recoverable and cannot be a lever. A conjunctive goal is
 ordered by a **cost-based planner** under sideways information passing, not left to right,
 and `query-plan` will show you what it chose. Left-recursion is not a state a rule can be
-in. → [inference.md](inference.md)
+in. → [inference.md](inference.md),
+[oe-principles.md](oe-principles.md#truth-not-provability)
 
 **There is no cut**, and nothing else prunes a branch by fiat. The nearest things are a
 budget (`:max-results`, `:max-ms`) and a tactician mode that reduces the answer set and

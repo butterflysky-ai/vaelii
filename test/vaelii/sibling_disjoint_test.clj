@@ -196,9 +196,9 @@
       (is (tu/stored-in-clash? kb (list c pip) 'CxUniverse)))))
 
 (tu/deftest-kb the-exception-canonicalizes-both-orders-to-one-handle
-  ;; symmetric — as CxCore declares it — so (siblingDisjointException a b) and (… b a)
-  ;; sort to one canonical sentence and share a handle (the bare test KB has no CxCore, so
-  ;; the mark is asserted here to stand in for it)
+  ;; symmetric — as core.txt declares it — so (siblingDisjointException a b) and (… b a)
+  ;; sort to one canonical sentence and share a handle (the bare test KB loads no upper
+  ;; layer, so the mark is asserted here to stand in for it)
   (let [a (tu/tmp-type) b (tu/tmp-type)]
     (v/assert kb (list 'symmetric 'siblingDisjointException) 'CxUniverse)
     (v/assert kb (list 'siblingDisjointException a b) 'CxUniverse)

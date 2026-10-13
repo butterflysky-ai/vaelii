@@ -91,6 +91,10 @@ first place is `vaelii.browser.reload` (`hot-reloading`), layered over that hand
 together with every loaded namespace that requires one of them, transitively, in
 dependency order. A plain file edit reaches the running server with no REPL, and an
 engine edit does too.
+An edit to a shipped KB file under `resources/kb/upper/` or `resources/kb/middle/` is
+synced into every loaded KB by a job the next request submits, and a write to the starter
+is written back into those files (`kb-file-syncing`;
+[catalog.md](catalog.md#a-loaded-kb-states-this-engines-shipped-contexts)).
 
 **A KB loaded before an engine edit keeps answering after the reload.** Re-evaluating a
 `defprotocol` defines a new interface and empties the protocol's extension map, and
@@ -155,7 +159,7 @@ request log either, which [operations.md](operations.md) states as the trade it 
 | Route | Shows |
 |-------|-------|
 | `/` | the **upper ontology**: what the KB is in four numbers, then the genlCx context lattice, the genl type tree (from `thing`), the documented terms (the `comment` sentexes), and its disjointness. Every one of them is **bounded**, and where the whole is too long to read the page shows the top of a ranking rather than the first fifty of an order nobody chose — this is the first page opened against a KB whose size the reader did not choose (below) |
-| `/stats` (`?clashes=1`) | **statistics**: headline counts (contexts, types, stored sentexes, and the contradiction / conflict / violation tallies), a contexts-by-size table ranked largest-first, and the actual dilemmas / conflicts / dropped-derivation violations when non-empty — each violation naming the run that dropped it. The contexts table and the three ledgers are one screen each and continue on scroll. `?clashes=1` additionally asks the **standing disjointness question** (below), which is computed on demand rather than filed; its clash list stops at 50 with a `showing 50 of N` line and does not continue |
+| `/stats` (`?clashes=1`) | **statistics**: headline counts (contexts, types, stored sentexes, and the contradiction / conflict / violation tallies), a contexts-by-size table ranked largest-first, and the actual dilemmas / conflicts / dropped-derivation violations when non-empty — each ledger violation naming the run that dropped it, and each `:forced-conclusion` entry, which `violations` reads off the stored firings, naming none. The contexts table and the three ledgers are one screen each and continue on scroll. `?clashes=1` additionally asks the **standing disjointness question** (below), which is computed on demand rather than filed; its clash list stops at 50 with a `showing 50 of N` line and does not continue |
 | `/find?q=<pattern>` | **term search** over the KB's vocabulary: every term whose name matches (a query with no regex metacharacter is a case-insensitive substring match, so `DOG` finds `dog`; a query carrying one is a regular expression under `re-find`, so `^parent` anchors), each linked to its term page — the header search box points here. A pattern resolving to a single term (the only match, or an exact-name match) **jumps straight to that term's page** (`HX-Push-Url`) |
 | `/term?q=<term>` | a **term**: a drawn picture of where it sits (below), then every sentex containing it grouped by the **index root** that reaches it — functor `[:predicate-extent]`, argument-position `[:argument-slot pos]` (the roster the predicate-agnostic read unions the scoped roots over), context `[:context-root]`, and the term-index `[:term-index]` remainder (rules, deeper nestings) — each group carrying its cheap count (O(1) for the roots; one O(1) read per predicate at the slot for the argument groups) |
 | `/sentex/:id` | a **sentex** (atomic or rule): its **belief state** (IN, or the `why-not` reason — superseded / defeated / unsupported — with the restatement, contradictors, the declarations a placed defeat convicts through, or missing antecedents that explain it), its supporting justifications (justifications concluding it), its dependents (justifications using it as an argument), and its terms |
@@ -297,12 +301,14 @@ edge once per asserting context would be. One edge in two contexts is one edge; 
 is not context-scoped and does not label an edge with a context.
 
 **It says what it left out**, with the count, in a caption under the picture: *showing 8 of
-up to 5,000 direct subtypes*. A truncated picture that does not announce itself is worse
-than no picture and worse here than in a list, because a picture reads as complete. The
-count is **exact** where the row was small enough to be read whole, and the
-argument-root bound otherwise — an over-count across every binary predicate at that
-position — which is why the wording differs. The centre term is never subject to a cap: a
-stated root that is not drawn reads as orphans.
+37 direct subtypes*. A truncated picture that does not announce itself is worse
+than no picture and worse here than in a list, because a picture reads as complete. A
+taxonomy row reads at most 501 direct neighbours, so its count is **exact** up to 500,
+and a node with more draws no row and says *more than 500 direct subtypes, too many to
+draw; they are listed below*. A relation flank's count is exact where the row was read
+whole, and the argument-root bound otherwise — an over-count across every binary
+predicate at that position — worded *showing 8 of up to 4,812 related terms*. The centre
+term is never subject to a cap: a stated root that is not drawn reads as orphans.
 
 **Drawn with no library.** `vaelii.browser.svg` is a node, an edge, an arrowhead and the
 arithmetic that lays out a row, a column or a ring — pure, KB-free, tested on hand-built
@@ -313,7 +319,11 @@ Node colour is `term-class`'s class resolving to the same `--t-type` … `--t-co
 properties the links beside it use, so the picture is theme-aware for free and cannot drift
 from the text. Every node is an `<a href="/term?q=…">` — the graph is navigation, not
 decoration — and clicking one is the whole interaction model: no pan, no zoom, no drag, no
-physics.
+physics. The picture is drawn unscaled, and a picture larger than its box scrolls inside
+the box. The box leaves `overscroll-behavior` at its default, so a wheel turn the box
+cannot use, past its edge or along an axis with no overflow, scrolls the page. `contain`
+would keep that turn in the box and leave the page still under a pointer resting on the
+graph.
 
 **The text stays.** Every term the picture draws is a row in the index groups under it —
 the `genl` sentexes an argument group lists are the edges it drew — so the rows are the
@@ -329,7 +339,7 @@ Every browser session gets a **sandbox**: a scratch context of its own, hung bel
 `CxWell`. `vaelii.browser.sandbox`.
 
 The asymmetry is the whole design, and it is not a permission check. `genlCx` already
-decides what a context can see; hanging the sandbox at the bottom of the spindle means
+decides what a context can see; hanging the sandbox below CxWell means
 everything shipped flows *in* — every type, every relation, every rule is usable — and
 nothing flows *out*, because no shipped context names it. A reader can therefore be wrong
 in any way they like without touching the ontology.

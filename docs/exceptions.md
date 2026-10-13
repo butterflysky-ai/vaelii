@@ -1070,7 +1070,10 @@ stores the meta.
 **The exception amends the rule in place.** Because it is a separate assertion, `bird ⇒
 flies` and `bird ⇒ flies exceptWhen penguin` name the **same** rule handle: adding an
 exception does not fork a second rule, it amends the one rule, and retracting the
-exception restores it. A rule can carry several independent exceptions (block-if-any).
+exception restores it. `handle-of` on the `exceptWhen` sentence answers the meta-sentex's
+handle, the one `assert` returns, so `retract!` on it removes the exception and leaves the
+rule (`public_api_test/handle-of-an-exceptWhen-answers-the-exception-assert-returned`). A
+rule can carry several independent exceptions (block-if-any).
 **The exception is deliberately not part of the rule's identity** — it is not in the trie
 key ([indexing.md](indexing.md)) — because a rule that forked on acquiring one would leave
 every justification the original licensed hanging off a handle nothing concludes.

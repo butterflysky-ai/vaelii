@@ -1,32 +1,36 @@
 ;; SPDX-License-Identifier: SSPL-1.0
 ;; Copyright © 2026 Vaelii LLC and the Vaelii contributors.
 (ns vaelii.seed-test
-  "Ontology KB files: declarative KB content held as plain text under resources/kb/,
-  one file per context, the file name the context, the sub-directory the layer.
-  Every context present is discovered and loaded on kb start (vaelii.host.starter)."
+  "Ontology KB files: declarative KB content held as plain text under resources/kb/.
+  An upper file is named for its domain and loads into CxUniverse; a middle file is named
+  for its context.  Every file present is discovered and loaded on kb start
+  (vaelii.host.starter)."
   (:require [clojure.test :refer [deftest is testing use-fixtures]]
             [vaelii.core :as v]
+            [vaelii.host.core-context :as core-context]
             [vaelii.host.seed :as seed]
             [vaelii.test-util :as tu]))
 
 (use-fixtures :each (tu/neutral-fresh tu/fresh))
 
 (deftest the-kb-files-are-on-the-classpath
-  (testing "the vocabulary head is read as a non-empty list of sentences"
-    (let [ss (seed/read-sentences 'CxCore)]
+  (testing "the vocabulary file is read as a non-empty list of sentences"
+    (let [ss (seed/read-sentences "core" "upper")]
       (is (seq ss))
       (is (every? seq? ss) "every form is an s-expression")))
-  (testing "a layer file reads by (context, dir), by symbol or string alike"
-    (is (seq (seed/read-sentences 'CxOrganism "upper")))
-    (is (= (seed/read-sentences 'CxOrganism "upper")
-           (seed/read-sentences "CxOrganism" "upper")))))
+  (testing "a layer file reads by name, as a symbol or a string, with or without .txt"
+    (is (seq (seed/read-sentences 'CxBiology "middle")))
+    (is (= (seed/read-sentences 'CxBiology "middle")
+           (seed/read-sentences "CxBiology" "middle")
+           (seed/read-sentences "CxBiology.txt" "middle")))))
 
-(deftest every-context-in-a-layer-is-discovered
+(deftest every-file-in-a-layer-is-discovered
   ;; the point of layer discovery: a KB is added by dropping a file, no code change
-  (testing "upper holds the definitional contexts, sorted"
-    (is (= '[CxAbstract CxLife CxMeasure CxOrganism
-             CxReflection CxSociety CxSpace CxTime]
-           (seed/layer-contexts "upper"))))
+  (testing "upper holds the domain files, sorted, and the loader reads core.txt first"
+    (is (= ["abstract.txt" "core.txt" "life.txt" "measure.txt" "organism.txt"
+            "reflection.txt" "society.txt" "space.txt" "time.txt"]
+           (seed/layer-files "upper")))
+    (is (= "core.txt" (first (core-context/upper-files)))))
   (testing "middle holds the theory contexts"
     (is (= '[CxAnatomy CxBiology CxChange CxComputing CxKinship
              CxMereology CxNormalPhysicalConditions CxPerception CxSize CxSocial
@@ -78,17 +82,18 @@
     (testing "and what could load, did"
       (is (some? (v/handle-of kb (list dog2_t Nobody2) 'CxUniverse))))))
 
-(tu/deftest-kb a-layer-context-loads-into-its-own-context
-  ;; the file name is the context — CxOrganism.txt lands in CxOrganism, on
-  ;; top of the CxCore vocabulary, and the genl closure is built from the file.
-  (seed/load-context kb 'CxCore)
-  (seed/load-context kb 'CxOrganism "upper")
+(tu/deftest-kb a-middle-file-loads-into-its-own-context
+  ;; the file name is the context: CxBiology.txt lands in CxBiology, over the upper
+  ;; layer, and its rules fire from the file
+  (tu/load-core! kb)
+  (seed/load-context kb 'CxBiology "middle")
   (testing "its sentences land in the context the file names"
-    (is (seq (v/sentexes-matching kb '(genl dog mammal) 'CxOrganism)))
-    (is (empty? (v/sentexes-matching kb '(genl dog mammal) 'CxCore))))
-  (testing "and the genl closure is built from the file"
+    (is (seq (v/sentexes-matching kb '(capabilityType bird flying) 'CxBiology)))
+    (is (empty? (v/sentexes-matching kb '(capabilityType bird flying) 'CxUniverse))))
+  (testing "and its edges are stored in CxUniverse, where every edge is"
+    (is (seq (v/sentexes-matching kb '(genlCx CxBiology CxUniverse) 'CxUniverse))))
+  (testing "and its rules read the upper layer's genl closure"
     (tu/with-terms [Rex]
-      (v/assert kb (list 'dog Rex) 'CxOrganism)
-      (is (v/isa? kb Rex 'mammal))
-      (is (v/isa? kb Rex 'animal))              ; the whole biological chain is in this one file
-      (is (not (v/isa? kb Rex 'plant))))))
+      (v/assert kb (list 'dog Rex) 'CxBiology)
+      (is (v/isa? kb Rex 'organism 'CxBiology))
+      (is (v/ask? kb (list 'mortal Rex) 'CxBiology)))))

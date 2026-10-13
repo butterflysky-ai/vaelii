@@ -25,11 +25,11 @@
       ;; the world context is wired below the vocabulary one, as the starter wires
       ;; every real context: the matching fan-out and the disjointness check are
       ;; context-scoped, so an unwired reader would see the facts but not the edges
-      (v/assert kb '(genlCx CxNaturalWorld CxCore) 'CxCore)
-      (v/assert kb '(genl animal thing) 'CxCore)
-      (v/assert kb '(genl dog animal) 'CxCore)
-      (v/assert kb '(genl cat animal) 'CxCore)
-      (v/assert kb '(disjoint dog cat) 'CxCore)
+      (v/assert kb '(genlCx CxNaturalWorld CxUniverse) 'CxUniverse)
+      (v/assert kb '(genl animal thing) 'CxUniverse)
+      (v/assert kb '(genl dog animal) 'CxUniverse)
+      (v/assert kb '(genl cat animal) 'CxUniverse)
+      (v/assert kb '(disjoint dog cat) 'CxUniverse)
       (v/assert kb '(dog Muffet) 'CxNaturalWorld)
       (let [server (serve/start kb {:port 0})]
         (try

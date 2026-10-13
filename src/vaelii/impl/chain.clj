@@ -1936,15 +1936,18 @@
   "The informant of every justification a placed nogood stores (`place-nogood!`)."
   exc/nogood-informant)
 
-(defn- context-edge?
-  "Is the sentex at `h` a `genlCx` edge?"
+(defn- placement-witness?
+  "Is the sentex at `h` a `genlCx` edge or a roster declaration
+  (`forced_monotonic_predicate`, `forced_monotonic_between_predicates`): an antecedent a
+  placement reads beside its nogood's members and grounds?"
   [kb h]
-  (= 'genlCx (nm/functor (:sentence (p/get-sentex (:records kb) h)))))
+  (contains? '#{genlCx forced_monotonic_predicate forced_monotonic_between_predicates}
+             (nm/functor (:sentence (p/get-sentex (:records kb) h)))))
 
 (defn- placement-justifications
   "The justifications under `nogood-informant` of the placed sentexes `hs` that `keep?`
-  holds of, each with its `:core`: its antecedents but the `genlCx` edges, the members and
-  grounds of the nogood it places."
+  holds of, each with its `:core`: its antecedents but the `genlCx` edges and the roster
+  declarations (`placement-witness?`), the members and grounds of the nogood it places."
   [kb hs keep?]
   (let [tms (reasoning/tms kb)]
     (into []
@@ -1952,7 +1955,7 @@
                 (distinct)
                 (keep #(jtms/justification tms %))
                 (filter #(and (= nogood-informant (:informant %)) (keep? %)))
-                (map (fn [j] (assoc j :core (into #{} (remove #(context-edge? kb %))
+                (map (fn [j] (assoc j :core (into #{} (remove #(placement-witness? kb %))
                                                   (:antecedents j))))))
           hs)))
 
@@ -2080,29 +2083,105 @@
                        (remove (set members) core))
                  (= :supertype (membership/kind-of (decide/write-view tax) (:records kb) members))))))
 
+(defn- declared-members
+  "`{member {declaration context}}`: each member of `members` defeasible in the network
+  and on the roster only by declarations off the global roster
+  (`decide/literal-declarations`), with its declarations IN in the network.  Empty for
+  almost every nogood."
+  [kb members]
+  (let [tax  (reasoning/taxonomy kb)
+        tms  (reasoning/tms kb)
+        recs (:records kb)]
+    (into {} (keep (fn [h]
+                     (when (strength/defeasible? (or (jtms/defeat-class tms h) :default))
+                       (let [ds (into {} (filter #(jtms/network-in? tms (key %)))
+                                      (some->> (p/get-sentex recs h) :sentence
+                                               (decide/literal-declarations tax)))]
+                         (when (seq ds) [h ds])))))
+          members)))
+
+(defn- subsets
+  "The non-empty subsets of `xs`, smallest first."
+  [xs]
+  (sort-by count (rest (reduce (fn [ss x] (into ss (map #(conj % x)) ss)) [#{}] xs))))
+
+(defn- choices
+  "Every way to pick one `[declaration context]` per member of `ms` from `dm`, as vectors."
+  [dm ms]
+  (reduce (fn [cs m] (for [c cs, d (nm/sort-by-content-key (comp nm/print-key val) compare (dm m))]
+                       (conj c d)))
+          [[]] (sort ms)))
+
+(defn- declared-placements
+  "`[context antecedents verdict]` for the nogood over `members` with the declared members
+  `dm` (`declared-members`), from the `[context antecedents]` `placements`.  Each
+  placement keeps the verdict the global roster gives, which rests on no declaration.
+  Each set of declarations whose verdict names a loser that verdict and no smaller set
+  names is a further placement, at the maximal contexts that see the placement and those
+  declarations, resting on them: the second verdict at the readers that see a declaration
+  (docs/nmtms.md, \"The forced-monotonic roster\").  A declaration leaving takes only the
+  placements resting on it, so none is placed again."
+  [kb dm placements verdict-of]
+  (binding [tax/*network-belief* true]
+    (let [tax    (reasoning/taxonomy kb)
+          base-v (verdict-of #{})
+          ms     (sort (keys dm))]
+      (into []
+            (mapcat
+             (fn [[pctx antes]]
+               (loop [ts (subsets ms) got {base-v [#{}]} out [[pctx antes base-v]]]
+                 (if-let [t (first ts)]
+                   (let [v (verdict-of t)]
+                     (if (some #(every? t %) (got v))
+                       (recur (rest ts) got out)
+                       (recur (rest ts) (update got v (fnil conj []) t)
+                              (if (map? v)
+                                (into out
+                                      (for [s    (choices dm t)
+                                            :let [ctxs (cons pctx (map val s))]
+                                            p    (res/exception-aware-placements
+                                                  kb (into (vec antes) (map key) s) ctxs)]
+                                        [p (-> (set antes) (into (map key) s)
+                                               (into (visibility-support tax p ctxs)))
+                                         v]))
+                                out))))
+                   out))))
+            placements))))
+
 (defn- place-justified!
   "Place the nogood over the handles `members` at each `[context antecedents]` of
   `placements`: `(contradicts …)` naming the members in content order, and, when
   `decide/verdict` over the members' classes in the network names a unique weakest member
   `L`, `(defeat (sentexHandle L))`, each justified under `nogood-informant` at `:default`
-  by the antecedents.  Every justification an earlier placement of the same members
+  by the antecedents.  The verdict reads the global roster (`decide/global-reading`); a
+  member on the roster only by a declaration adds the placements of the verdicts the
+  declarations give (`declared-placements`).  Every justification an earlier placement of the same members
   stored under a core `owns?` takes that `placements` no longer gives is dropped, and the
   sweep collects a placed sentex it leaves unsupported.  Returns the handles it created.
   With `placements` empty this removes the nogood's placements `owns?` takes.  With the
   context set `within`, only the placements in it are compared, and the caller passes
-  only the `placements` in it (`placed-justifications-within`)."
+  only the `placements` in it (`placed-justifications-within`); a nogood with a declared
+  member reads them all, and keeps those in it."
   ([kb members placements owns?] (place-justified! kb members placements owns? nil))
   ([kb members placements owns? within]
    (let [tms     (reasoning/tms kb)
          tax     (reasoning/taxonomy kb)
          recs    (:records kb)
          members (set members)
-         verdict (decide/verdict #(or (jtms/defeat-class tms %) :default)
-                                 #(boolean (some->> (p/get-sentex recs %) :sentence
-                                                    (decide/roster-literal? tax)))
-                                 members)
-         ss      (when (seq placements) (placed-sentences kb members verdict))
-         want    (into #{} (for [[pctx antes] placements, s ss] [s pctx (set antes)]))
+         global  (decide/global-reading tax)
+         verdict (fn [forced]
+                   (decide/verdict #(or (jtms/defeat-class tms %) :default)
+                                   #(boolean (or (contains? forced %)
+                                                 (some-> (p/get-sentex recs %) :sentence
+                                                         (as-> s (decide/roster-literal? tax s global)))))
+                                   members))
+         dm      (declared-members kb members)
+         entries (cond->> (if (empty? dm)
+                            (let [v (verdict #{})] (map (fn [[pctx antes]] [pctx antes v]) placements))
+                            (declared-placements kb dm placements verdict))
+                   within (filter #(contains? within (first %))))
+         want    (into #{} (for [[pctx antes v] entries, s (placed-sentences kb members v)]
+                             [s pctx (set antes)]))
          have    (into {} (comp (filter #(and (= members (:members %)) (owns? (:core %))))
                                 (map (juxt :jid :key)))
                        (if within
@@ -2139,7 +2218,8 @@
          ctxs (into [] (comp (map #(:context (p/get-sentex recs %))) (distinct)) core)]
      (place-justified! kb members
                        (for [pctx (cond->> (res/exception-aware-placements kb core ctxs)
-                                    within (filter within))]
+                                    (and within (empty? (declared-members kb members)))
+                                    (filter within))]
                          [pctx (into core (visibility-support tax pctx ctxs))])
                        #(= core %)
                        within))))
@@ -2841,9 +2921,12 @@
         adm      (when-not existing (checks/constraint-admission kb conseq pctx))
         v        (when-not existing (fact-violation kb rule conseq pctx adm))
         ;; ...and the roster check, which a stored conclusion owes as well: a firing it
-        ;; convicts is stored, held void and reported, so it supports nothing while the
-        ;; roster rules it out and supports its conclusion once the roster stops
-        forced   (when-not v (checks/forced-conclusion-violation kb (:rule-handle rule) conseq))]
+        ;; convicts is stored and held void, so it supports nothing while the roster rules
+        ;; it out and supports its conclusion once the roster stops
+        forced   (when-not v (checks/forced-conclusion-violation kb (:rule-handle rule) conseq))
+        ;; logged when void at some reader, held void in the network when void at every
+        ;; one (`checks/network-void?`)
+        void?    (and forced (checks/network-void? kb (:rule-handle rule) conseq))]
     (if v
       (drop-fact-conclusion! kb rule conseq pctx all-antes bindings subs v)
       (let [[h s new?] (if existing
@@ -2851,9 +2934,6 @@
                          (let [[h s] (kb/create-sentex kb conseq pctx)] [h s true]))
             ;; the dedup key, built once for the question and the add that follows it
             jkey       (jtms/justification-key (:name rule) all-antes subs)]
-        (when forced
-          (violations/report kb [(assoc forced :sentence conseq :context pctx
-                                        :rule (:rule-handle rule))]))
         ;; a new conclusion takes its forced memberships before anything can label it
         (when new? (checks/force-sentex! kb s))
         ;; the derivation-path choke point: a derived genl edge reaches the closure,
@@ -2877,7 +2957,12 @@
                 inf  (:name rule)
                 just (jtms/->just jid inf (kb/antecedent-order kb (remove #(= inf %) all-antes))
                                   h bindings strength subs)]
-            (when forced (jtms/set-forced (reasoning/tms kb) :void [jid] true))
+            (when void? (jtms/set-forced (reasoning/tms kb) :void [jid] true))
+            ;; a convicted firing is logged once, as its justification is added;
+            ;; `core/violations` reads its entry off the stored firing
+            (when forced
+              (violations/log-entries kb [(assoc forced :sentence (:sentence s) :context pctx
+                                                 :rule (:rule-handle rule))]))
             (p/put-justification (:records kb) just)
             (jtms/add-justification (reasoning/tms kb) just jkey)
             ;; a guard that holds below the placement, or a `:default` blocker at it,
@@ -2999,7 +3084,7 @@
           ;; valid firing makes that right.  A void one leaves the node OUT from its
           ;; creation, so no settle's region names it: reconcile its caches here, as
           ;; `recover` does for every stored declaration.
-          (when (and forced new?) (special/reconcile-belief-change kb [h]))
+          (when (and void? new?) (special/reconcile-belief-change kb [h]))
           (-> (if new? [h] [])
               (into-some (special/minted-seeds kb (:new mig)))
               (into-some (:new lift))
@@ -3205,6 +3290,13 @@
                      hs))]
     (into #{} (comp (remove current) (filter #(kind-of recs %))) ms)))
 
+(def ^:private plan-batch
+  "The most nogoods of one call `plan-sets` reads the routes of before it writes their
+  placements: past it, the rest are read and written a batch at a time, in the same
+  content order, so the reads a pass holds are bounded by the batch and not by the
+  family."
+  4096)
+
 (defn- plan-sets*
   [kb reach full reached nogoods-of kind-of routes-of owns?]
   (let [tms     (reasoning/tms kb)
@@ -3220,14 +3312,25 @@
         within  (fn [ms] (when-not (or (fms ms) (fstale ms)) under))
         removes (mapv (fn [ms] [ms [] (within ms)])
                       (nm/sort-by-content-key #(content-key kb %) nm/compare-form stale))
-        places  (into [] (comp (filter (fn [ng] (every? #(jtms/network-in? tms %) (:members ng))))
-                               (map (fn [{ms :members :as ng}]
-                                      (let [w (within ms)]
-                                        [ms (route-placements kb ms (routes-of ng) w) w]))))
-                      (nm/sort-by-content-key #(content-key kb (:members %)) nm/compare-form ngs))]
+        plan    (fn [ngs] (into [] (comp (filter (fn [ng] (every? #(jtms/network-in? tms %) (:members ng))))
+                                         (map (fn [{ms :members :as ng}]
+                                                (let [w (within ms)]
+                                                  ;; a declared member's verdicts read every placement
+                                                  [ms (route-placements kb ms (routes-of ng)
+                                                                        (when (and w (empty? (declared-members kb ms))) w))
+                                                   w]))))
+                                ngs))
+        write   (fn [planned] (into [] (mapcat (fn [[ms ps w]] (place-justified! kb ms ps (fn [core] (owns? ms core)) w)))
+                                    planned))
+        [ngs more] (split-at plan-batch (nm/sort-by-content-key #(content-key kb (:members %)) nm/compare-form ngs))
+        places  (plan ngs)]
+    ;; a placement's writes move no route, witness or member label another nogood of the
+    ;; family reads, so a batch read after the batches before it were written reads what
+    ;; it would have read before them, and the writes keep their content order
     (fn []
-      (into [] (mapcat (fn [[ms ps w]] (place-justified! kb ms ps (fn [core] (owns? ms core)) w)))
-            (into removes places)))))
+      (into (write (into removes places))
+            (mapcat #(write (tax/with-neighbours (atom {}) (fn [] (plan %)))))
+            (partition-all plan-batch more)))))
 
 (defn- plan-sets
   "`place-sets!` with its reads taken now and its writes deferred: a fn of no arguments
@@ -3235,7 +3338,8 @@
   family over many terms reads every term's routes before it places the first, so the
   routes share the witnesses `*witnesses*` holds: a placement's writes move no route,
   witness or member label another term's nogood reads (docs/nmtms.md, \"The placement
-  pass\").  The reads hold the scoped walks' neighbours and edge supporters
+  pass\").  Past `plan-batch` nogoods, the fn reads and writes the rest a batch at a time.
+  The reads hold the scoped walks' neighbours and edge supporters
   (`tax/with-neighbours`), since no write runs among them."
   [kb reach full reached nogoods-of kind-of routes-of owns?]
   (tax/with-neighbours (atom {}) #(plan-sets* kb reach full reached nogoods-of kind-of routes-of owns?)))
@@ -3452,17 +3556,66 @@
         (and (decide/placements-owed? c) (reads/stores-opposed? (:index kb)))
         (membership/moved? c) (related/moved? c) (tuple/moved? c) (arity/moved? c))))
 
+(def ^:private roster-declaration-kinds
+  "The roster property each roster declaration functor gives its predicate."
+  '{forced_monotonic_predicate          :forced-monotonic
+    forced_monotonic_between_predicates :forced-between-predicates})
+
+(defn- declarations-in
+  "The roster declarations stored in a context of `ctxs`, belief unread."
+  [kb ctxs]
+  (when (seq ctxs)
+    (into [] (mapcat #(reads/as-stored-with-functor-in (:index kb) % ctxs))
+          (sort (keys roster-declaration-kinds)))))
+
+(defn declaration-reach
+  "The facts whose nogoods' verdicts and whose readings the roster declaration `s` stated
+  in `c` moves, or nil when `s` declares no predicate off the global roster
+  (`decide/global?`): the stored facts of its predicate, and the stored denials of them a
+  negation pair holds, stated in a context that a context at or below `c` sees
+  (`tax/contexts-seen-with-global`).  The closures are unscoped: a placement reads the
+  network, a superset over every reader (`decide/write-view`)."
+  [kb s c]
+  (let [tax  (reasoning/taxonomy kb)
+        recs (:records kb)
+        idx  (:index kb)
+        kind (when (and (seq? s) (= 2 (count s)) (symbol? (second s)))
+               (roster-declaration-kinds (first s)))
+        pred (when kind (second s))]
+    (when (and pred (symbol? c) (not (decide/global? tax kind pred)))
+      (let [seen (tax/contexts-seen-with-global
+                  tax c (first (reads/as-stored-contexts-with-functor-global idx pred)))]
+        (when (seq seen)
+          (concat (reads/as-stored-with-functor-in idx pred seen)
+                  (filter #(let [d (:sentence (p/get-sentex recs %))]
+                             (and (sx/negation? d) (= pred (nm/functor (second d)))))
+                          (when (reads/stores-opposed? idx)
+                            (reads/as-stored-opposed-in idx seen)))))))))
+
+(defn- declared-reach
+  "`declaration-reach` of each stored roster declaration among the handles `hs`."
+  [kb hs]
+  (let [recs (:records kb)]
+    (into #{} (mapcat #(let [{s :sentence c :context} (p/get-sentex recs %)]
+                         (declaration-reach kb s c)))
+          hs)))
+
 (defn place-inherited!
   "Find the inherited clashes (`discovery/discover-inherited!`) and place each found one
   at its vantages, the most general contexts that read it whole, justified by its members
   (the stored claim and the reading's reasons) and the `genlCx` edges each vantage sees
   them over, and remove the placements of each member set no longer found
   (`place-justified!`), in content order.  Returns the handles created.  A clash whose
-  memo entry was carried keeps its placements.  A rebuild's settle places too
+  memo entry was carried keeps its placements, unless a member is among the facts a roster
+  declaration that moved reaches (`declared-reach`).  A rebuild's settle places too
   (docs/nmtms.md, \"A `recover` places the nogoods its store does not hold\").  `moves`
   is the pass's `genlCx` moves (`special/drain-context-moves!`)."
   [kb region {:keys [reach first?]}]
-  (let [{:keys [found left]} (discovery/discover-inherited! kb region reach first?)
+  (let [;; a roster declaration arriving, or stated where a `genlCx` move reaches, moves
+        ;; the verdicts of the clashes over its predicate's facts (`declared-reach`)
+        moved (when (seq (decide/declared (reasoning/taxonomy kb)))
+                (declared-reach kb (into (vec @region) (declarations-in kb (:below @reach)))))
+        {:keys [found left]} (discovery/discover-inherited! kb region reach first? moved)
         tax   (reasoning/taxonomy kb)
         recs  (:records kb)
         owns? (fn [ms] (let [ms (set ms)] #(= ms %)))]
@@ -3516,6 +3669,10 @@
             ;; consequence closure), drained once a pass
             fresh  (into fresh (remove (set fresh))
                          (jtms/consequence-closure (reasoning/tms kb) (special/except-moved kb)))
+            ;; a roster declaration arriving, or stated where a `genlCx` move reaches,
+            ;; moves the verdicts over its predicate's facts with no relabel of them
+            fresh  (into fresh (remove (set fresh))
+                         (declared-reach kb (into fresh (declarations-in kb (:below reach)))))
             psets  (placed-members kb fresh)
             placed (into #{} cat psets)
             made   (binding [*witnesses* (volatile! nil)]
@@ -4236,8 +4393,9 @@
                                                        (integrate/mark-witness kb pred))]
                                        (integrate/fold-row-home! kb planner sx w))))))
                       hs)
-        rows    (into (sorted-set) (filter #(p/get-sentex recs %)) (concat hs split folded))]
-    (-> split (into folded) (into (mapcat #(ensure-respellings! kb planner %)) rows))))
+        rows    (into (sorted-set) (filter #(p/get-sentex recs %))
+                      (concat hs split (map :at folded)))]
+    (-> split (into (mapcat :new) folded) (into (mapcat #(ensure-respellings! kb planner %)) rows))))
 
 (defn reconcile-spellings!
   "Bring the stored rows of every predicate in `preds` — the ones whose permuting marks
@@ -4379,7 +4537,7 @@
                                                                  kb sx home witness
                                                                  #(binding [nat/*withheld* (or w #{})]
                                                                     (nat/respelled kb %)))))
-                                                at          (or h' h)]
+                                                at          (or (:at h') h)]
                                             (cond-> (sync-respellings!
                                                      kb at
                                                      (into {}
@@ -4391,7 +4549,7 @@
                                                                              (sort (mapcat (fn [g] (tax/prop-supporters tax :reifiable g))
                                                                                            (remove w2 (reified-fns kb s)))))]]))
                                                            r))
-                                              h' (conj h')))))))
+                                              h' (into (:new h'))))))))
                                    (map :id (nm/sort-by-content-key #(vector (sx/sentence-of %) (:context %))
                                                                     (nat/respell-region kb f)))))))
                         (sort fns)))]

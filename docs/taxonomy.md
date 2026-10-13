@@ -20,10 +20,10 @@ transitivity without running it is the **inert rule** (`set/inertRule`,
 browsable like any other rule, and chaining in neither direction. [why an inert rule
 rather than a forward one](defenses.md#an-inert-rule-records-transitivity-not-a-forward-rule)
 
-`CxCore.txt` states no rule for `genl`'s transitivity, inert or otherwise: `genl`
+`core.txt` states no rule for `genl`'s transitivity, inert or otherwise: `genl`
 carries its account in the `comment` on the predicate, where the closure is described,
 and `(transitive genl)` classifies it without handing it to the generic prover. The two
-inert rules CxCore does state record the `commutative` / `commutativeInArgAndRest` bridge.
+inert rules `core.txt` does state record the `commutative` / `commutativeInArgAndRest` bridge.
 
 ## genl: the type hierarchy
 
@@ -71,7 +71,7 @@ exact relations; `unary_predicate` / `unary_function` and their binary and terna
 specialize those relation-wide classes. `relationTypeByArity` owns the shared mapping;
 `predicateTypeByArity` and `functionTypeByArity` are its `genl` specializations, and one
 generator stamps, per mapping fact, the rule classifying a relation from its asserted
-`arity`, with no parallel rule families. CxCore ships **three** mapping facts, over
+`arity`, with no parallel rule families. `core.txt` ships **three** mapping facts, over
 `unary`, `binary` and `ternary`. The predicate and function types reach them through
 their `genl` edges, so a `(predicateTypeByArity unary_predicate 1)` beside them would
 classify a unary function as a predicate. The two specializations stay declared for a KB
@@ -108,10 +108,10 @@ specializations and `arityMin` are on the forced-monotonic roster
 whatever strength it was written at, and a firing concluding one from a non-roster
 antecedent is held void. The minted `(arity R 2)` → `(binary R)` rule reads a roster antecedent, so its
 firings stand. Every reader of an arity reads the exact-class membership beside the
-`(arity P n)` table: the arity nogoods ([Arity](#arity)), the argument-position check
-(`checks/declared-arity`), `kb/relation-arity` and `kb/relation?` behind `describe`,
-`disjointness-audit` and the quality and integrity passes, and
-the prover answering `admitsArgnum`. The conclusion is **relation-wide** and has to be:
+`(arity P n)` table: the arity nogoods, the argument-position check, `describe`, the
+prover answering `admitsArgnum` and the integrity pass through `arity/relation-length`
+([Arity](#arity)), and `kb/relation?` behind `disjointness-audit`. The conclusion is
+**relation-wide** and has to be:
 `arity` covers functions, so a rule concluding `(binary_predicate R)` from `(arity R 2)`
 would make every shipped binary function a predicate and clash with `(disjoint predicate
 function)`. `binary` carries no kind, which is what an arity actually says. An arity no
@@ -120,7 +120,7 @@ classified only by its own `fixed_arity_function`.
 
 The `genl` edges on the arity classes run downward only: a `binary_predicate` is `binary`
 and is a `predicate`. None of them says that a relation which is `binary` **and** a
-`predicate` is a `binary_predicate`, and CxCore does not state that half either. A
+`predicate` is a `binary_predicate`, and `core.txt` does not state that half either. A
 `(defnSufficient binary_predicate (and (arity ?x 2) (predicate ?x)))` ([defns.md](defns.md))
 would say it, and the six of them measure 748 justifications and 600 ms of a 3.2 s
 starter load for 36 memberships: `(predicate ?x)` matches every class membership of
@@ -232,7 +232,8 @@ walks the `:derived?` subset (`special/integrate-transitive`) plus what
 A row naming a functor on the forced-monotonic roster (`genlCx`, a relation mark,
 `disjoint`, `sibling_disjoint`, an arity binding, an equality, a `genl` between predicates) is
 reached only by a firing whose rule reads roster literals alone: any other firing
-concluding one is stored, held void and reported as `:forced-conclusion`, and the rule
+concluding one is stored and held void, `core/violations` reads a `:forced-conclusion`
+entry for it, and the rule
 stays stored ([nmtms.md](nmtms.md#the-forced-monotonic-roster)). The conclusion's arm
 installs it and the chainer then reconciles its caches to belief
 (`special/reconcile-belief-change`), so a conclusion held void takes effect neither live
@@ -825,7 +826,11 @@ any scope, since a scoped adjacency is a subset of the global one, and no type o
 reached through it, so the order the walk reaches the others in, and the path it names, are
 unchanged. A walk that climbs a broad ancestor set to a narrow target then expands the
 types between the two
-(`settle_region_cost_test/a-witness-walk-expands-a-bounded-number-of-nodes-off-the-targets-down-closure`).
+(`settle_region_cost_test/a-witness-walk-expands-a-bounded-number-of-nodes-off-the-targets-down-closure`). A source with an edge
+straight to the target that the walk's first threshold admits names that edge without a
+walk (`direct-witness`): the breadth-first walk would pop the target first as that edge's
+end. A route search whose source has one step, and that step ends at the target, returns
+that step as the only route (`every-uncovered-route`).
 
 A third walk answers a third question. `tax/general-reach-supports` returns every route
 that no other route **covers**, where a route covers another when each reader that sees
@@ -902,7 +907,10 @@ Three mechanisms declare that types share no instance; all are closed under `gen
   not a `genl` of `Y`, and `Y` is not a `genl` of `X`. It does not say that anything is an
   instance of both, and it exempts the pair from no separation. Symmetric, so
   `(orthogonal Y X)` is the same sentex, and forced monotonic. It derives nothing — no
-  shared instance is minted for it — and fills no taxonomy cache.
+  shared instance is minted for it — and fills no taxonomy cache. It is not inherited
+  along `genl`: two overlapping types can have subtypes that share no instance, so
+  `(orthogonal X Y)` says nothing of a subtype of `X` or `Y`, and a KB states each
+  overlapping pair it means.
 
   **What contradicts it is a clash.** A separation of the pair a reader sees — a
   `disjoint`, a `partition` or `separating` roster, a `disjoint_metatype` or a
@@ -913,7 +921,7 @@ Three mechanisms declare that types share no instance; all are closed under `gen
   believed, and the membership nogood of an instance of both types stands wherever the
   separation stands.
 
-  **A `siblingDisjointException` states one too.** CxCore states
+  **A `siblingDisjointException` states one too.** `core.txt` states
   `(genl siblingDisjointException orthogonal)`, so `ask` and `match` answer
   `(orthogonal X Y)` from a stored exception, and the related-types family reads an
   exception as the orthogonal it entails: the candidate index keeps each fact whose
@@ -976,7 +984,7 @@ is a clash exactly as `Muffet` being both a `dog` and a `cat` is. The same widen
 type_relation_predicate)` refuses a link whose first argument is not classified
 type-level. A **value** is typed by what it *is* rather than by what somebody
 asserted: `checks/value-kind` reads its EDN kind, and the kinds sit in the lattice
-(CxCore) precisely so the comparison can be made — a `string` is not a `dog`, and `arg`
+(`core.txt`) precisely so the comparison can be made — a `string` is not a `dog`, and `arg`
 says so. There is one per leaf kind a sentence can carry, and the set is complete on
 purpose: a kind with no name is one both argument checks must wave through, which is a
 hole in a declaration rather than a policy. A **compound** stays outside that lattice: what
@@ -991,7 +999,7 @@ applications, exactly as an unclassified symbol exempts itself.
 Open-world is unchanged for a **symbol**: a term carrying no type membership at all
 still cannot violate anything.
 
-**The family takes types.** CxCore declares every argument of `disjoint`,
+**The family takes types.** `core.txt` declares every argument of `disjoint`,
 `sibling_disjoint`, `covering`, `separating` and `partition` a subtype of `thing`
 (`genlArg`, `argAndRestGenl`), and the assertive reading mints that edge for each
 argument it names ([argtypes.md](argtypes.md)). Nothing reads a name's
@@ -1127,11 +1135,10 @@ overlap, and the KB names no instance in the overlap. Both reads are facts-only,
 the same `context` as the shared instance.
 
 `disjointness-audit kb` runs the classification over every unordered pair of distinct
-types **visible from its vantage context** (default `CxWell`, the starter spindle's
-collector) and returns `{:types :pairs :by-status :pairs-data}`. The swept type set is
+types **visible from its vantage context** (default `CxWell`) and returns `{:types :pairs :by-status :pairs-data}`. The swept type set is
 `types` read at that same context: a node touched by no edge the vantage sees is outside
 the sweep, the way an opt-in theory's own type is outside `CxWell`'s. A relation that a
-`genl` edge between relations names, such as `performedBy` under `doneBy` or CxCore's
+`genl` edge between relations names, such as `performedBy` under `doneBy` or `core.txt`'s
 `siblingDisjointException` under `orthogonal`, is a node of the hierarchy and not a type,
 so the audit leaves it out. `relation?` decides it at the audit's vantage context: an arity
 of two or more, read from `(arity P n)` or an exact-arity class, or a `variable_arity`
@@ -1147,6 +1154,13 @@ for a missing `disjoint` or `orthogonal` declaration: no subsumption relates the
 declaration separates them, and neither a declaration, a shared instance nor a shared
 subtype shows they can overlap — so the modeller decides which they are. The audit reads
 only, and writes nothing.
+
+`disjointness_audit_test`'s `disjointness-coverage-ratchet` holds the starter KB's audit
+at its current values: a floor on the `:disjoint` pair count, a floor on the disjoint
+fraction and a ceiling on the unknown fraction. A removed separation lowers all three. A
+type added in the same change whose pairs are mostly `:disjoint` raises the disjoint
+fraction, and offsets the removal in the fractions before it offsets it in the count, so
+the count floor fails removals the two fractions pass.
 
 ### What a declaration reaches back over
 
@@ -1305,7 +1319,7 @@ first ([nmtms.md](nmtms.md#1-order-independence)).
 
 ### The three partitions of `thing`
 
-CxCore divides `thing` three ways, each with a `partition`, so each pair is separated and
+`core.txt` divides `thing` three ways, each with a `partition`, so each pair is separated and
 covers `thing`:
 
 | partition | the first part | the second part |
@@ -1314,25 +1328,37 @@ covers `thing`:
 | `(partition thing temporal atemporal)` | a location in time | none |
 | `(partition thing tangible intangible)` | mass | no mass |
 
-`genl` edges in CxCore relate the parts across the three divisions. `tangible` is below
+`genl` edges in `core.txt` relate the parts across the three divisions. `tangible` is below
 `spatiotemporal`, which is below `spatial` and `temporal`. `aspatial` and `atemporal` are
 below `intangible`, and `nowhere_never` is below both. No edge or disjointness relates
 `intangible` to `spatial`: a region of space is `spatiotemporal` and `intangible`.
 
-CxCore places `spatiotemporal` and `nowhere_never` by `genl` edges, not by
+Two more partitions sit beside the three. `(partition thing causal acausal)` divides
+`thing` by whether it can be a cause. `causal` is below `temporal`, and `atemporal` is
+below `acausal`. `(partition temporal uninterrupted intermittent)` divides what is in time
+by whether it has a gap: an `uninterrupted` thing is present at every moment between its
+start and its end, and an `intermittent` one is absent at some moment between them.
+`time` and `situation` each divide the same way. `uninterrupted_time` is the intersection
+of `uninterrupted` and `time`, and `time_point` and `time_interval` partition it.
+`situation` is partitioned into `fluent` and `happening`. `uninterrupted_situation` is the
+intersection of `uninterrupted` and `situation`, and `static_situation` and `event`
+partition it. `static_situation` is the intersection of `uninterrupted` and `fluent`, and
+`event` the intersection of `uninterrupted` and `happening`.
+
+`core.txt` places `spatiotemporal` and `nowhere_never` by `genl` edges, not by
 `intersection`: a thing stated `spatial` and `temporal` is not concluded
 `spatiotemporal`, and a thing stated `aspatial` and `atemporal` is not concluded
 `nowhere_never`.
 
 A kind with no location in any space sits below `aspatial`, which separates it from
-`spatial` and from every CxSpace argument. `organization` (CxCore),
-`quantity` (CxMeasure) and `fluent` (CxTime) are below `aspatial`.
-`context`, `relation`, `measure` and `linguistic` are below `nowhere_never` in CxCore.
+`spatial` and from every argument `space.txt` types. `organization` (`core.txt`)
+and `quantity` (`measure.txt`) are below `aspatial`.
+`context`, `relation`, `measure` and `linguistic` are below `nowhere_never` in `core.txt`.
 `language`, `unrepresented_term`, `symbol`, `formula` and `non_atomic_term` are below
-`linguistic` in CxCore, and the value kinds `string`, `number`, `keyword`, `boolean` and
-`character` are below `unrepresented_term`. Every spindle member therefore reads each of
+`linguistic` in `core.txt`, and the value kinds `string`, `number`, `keyword`, `boolean` and
+`character` are below `unrepresented_term`. Every context therefore reads each of
 these kinds as disjoint from `spatial`. The rest of the `expression` lattice is in
-CxReflection, where `expression` is below `linguistic`. `ontology_test` pins each separation from
+`reflection.txt`, where `expression` is below `linguistic`. `ontology_test` pins each separation from
 the contexts that read it.
 
 ## Predicate metadata
@@ -1621,14 +1647,14 @@ the roster and is weighed as a member of an inherited nogood.
   is its own whole chain, names no second sentex to weigh, and is admitted exactly as an
   `asymmetric` predicate's is. Its disjointness `(disjoint transitive anti_transitive)`
   holds beside that: no predicate is declared both.
-- `(equivalence_relation P)` — no engine code: three shipped CxCore forward rules derive
+- `(equivalence_relation P)` — no engine code: three shipped `core.txt` forward rules derive
   `(symmetric P)`, `(transitive P)` and `(reflexive P)`, each a real mark the engine
   enforces in turn. A `(genl equivalence_relation symmetric)` subsumption edge would answer
   the *query* but would not set the `:symmetric` property the enforcement reads, since a
   genl-inherited membership is not a stored `symmetric` sentex the mark ingestion sees — so
   the rules, which materialize that sentex, are the minimal correct expression.
 - `(injection P)`, `(surjection P)`, `(bijection P)` — the composite **function marks**,
-  no engine code either: eight shipped CxCore rules derive what the engine already
+  no engine code either: eight shipped `core.txt` rules derive what the engine already
   enforces and audits. Each mark splits into two halves, and the split is what the family
   is for. The **enforced** half is `(functional P)` and `(functionalInArg P 1)`, merged or
   decided as a nogood exactly as a directly written mark is. The **audited**
@@ -1726,7 +1752,7 @@ Predicates are **reified** and classified in the genl hierarchy under `predicate
 - by algebra — `symmetric` / `asymmetric` / `transitive` / `reflexive` / `functional`,
   each a subtype of `binary_predicate`.
 
-**The three arity classes separate each other**, as three `(disjoint …)` pairs in CxCore.
+**The three arity classes separate each other**, as three `(disjoint …)` pairs in `core.txt`.
 A predicate takes one number of arguments, so a second classification is refused where it
 is written (`:disjoint`) rather than stored and convicted a step later as two values in
 the `functional` `(arity P N)` table. It is stated pairwise and **not** as
@@ -1740,14 +1766,14 @@ marks above are separated from `unary_predicate` and `ternary_predicate` along w
 The algebraic marks are **the classification itself** — no derived `…Predicate` twin.
 Each mark is one predicate doing two jobs: `(symmetric siblingOf)` maintains the
 `:symmetric` taxonomy property (canonicalization, the generic prover) **and**, through
-`(genl symmetric binary_predicate)` in CxCore, *is* a membership in a `binary_predicate`
+`(genl symmetric binary_predicate)` in `core.txt`, *is* a membership in a `binary_predicate`
 subtype. The mark is a `decontextualized_predicate`, so `(symmetric P)` is stated once and
 seen KB-wide (the definitional reads and the structural ones agree). A bare KB, which
 declares no lift, keeps `transitive` and the other definitional marks in their declaring
 context, and the engine lifts `symmetric` and the three commutativity marks on every KB,
 since they decide a sentex's stored key
 ([contexts.md](contexts.md#where-a-relation-property-is-read-from)). A bare KB holds the
-forced-monotonic roster's engine baseline as a CxCore KB does, so an arity binding or a
+forced-monotonic roster's engine baseline as a vocabulary KB does, so an arity binding or a
 `disjoint` declaration stated `:default` is never a loser on it
 ([nmtms.md](nmtms.md#the-forced-monotonic-roster)). Arity memberships are likewise direct (the starter loops every
 subtype of `thing` into `unary_predicate`). So `isa? siblingOf symmetric`, `isa? siblingOf
@@ -1847,9 +1873,9 @@ an exact-class membership (`tax/exact-arity-classes`: the relation-wide `unary` 
 `variable_arity` membership (`variable_arity`, `variable_arity_predicate` or
 `variable_arity_function`) and `(arityMin P M)`. A membership off the roster binds through
 its type's `genl` edges only at roster strength: a `:monotonic` membership `(T P)` binds
-P's length to `n` at a reader that believes it at `:monotonic`, sees it, and sees a path of
-`genl` edges from `T` to an exact-arity class of arity `n`, each edge with a `:monotonic`
-supporter stated in the reader's ancestor set (`arity/meta-visible`). CxCore states its
+P's length to `n` when it is believed at `:monotonic` and a path of `genl` edges leads
+from `T` to an exact-arity class of arity `n`, each edge with a `:monotonic` supporter
+(`arity/meta-held`). `core.txt` states its
 metatypes' edges into the exact classes and the shipped predicate memberships of those
 metatypes `:monotonic`, so `(transitive P)` binds two arguments wherever its edge to
 `binary_predicate` is `:monotonic`. A `:default` membership or edge binds nothing, since a
@@ -1858,20 +1884,37 @@ binding reaches P alone: a predicate below P takes P's length only through P's r
 bindings. The reference model does not model arity, so it settles nothing about that
 reading.
 
-**Two readings of an arity.** The arity nogood reads the bindings above. Every other
-reader of a relation's arity (`kb/relation-arity` for the provers, `describe` and the
-quality pass, `kb/relation?`, and the argument-position check's `own-arity`) reads the
-believed one: an `(arity P n)` declaration, else any believed membership whose type
-reaches an exact-arity class through believed edges. A believed arity off the roster is a
-description of P, and the nogood does not enforce it. Two exact lengths one reader sees bind nothing there; `(functional arity)` and
-the pairwise `disjoint` of the three relation-wide classes report them. Open-world: a
-predicate nothing binds takes a tuple of any length.
+**One reading of an arity.** `arity/relation-length` answers what binds a relation's
+length, its own binding or the one exact length it inherits through `genl`, and the
+argument-position check, the arity nogood, `describe`, `admitsArgnum` and the
+undeclared-arity pass call it. `describe` reports the length as `:arity` and the
+predicate it is bound on as `:arity-via`. `arity/released?` reports a `variable_arity`
+membership stated in any context as the release, which `admitsArgnum` and the
+undeclared-arity pass read beside the length. An engine grammar term's length is its `:shape`
+(`vaelii.impl.predicates`): its argument count, or a floor at it for a shape with an
+optional or variadic tail, and no KB binding moves it. The `arity` or `arityMin` `core.txt`
+ships for an engine term states the same length. A relation's length is the same
+at every context, an exception to context scoping: the rule reads the bindings stated in
+any context and the `genl` edges above the relation over the unscoped closure. A reader
+therefore binds a length through an edge or a binding its ancestor set does not see.
+`kb/relation?` reads the believed arity from the reader's context instead, and falls back
+to an inherited length of two or more where no visible declaration answers. Two
+exact lengths bind nothing; `(functional arity)` and the pairwise `disjoint` of the three
+relation-wide classes report them. Open-world: a predicate nothing binds takes a tuple of
+any length.
 
 A tuple that breaks the binding is a **one-member nogood** whose ground is the binding. A
 `:default` tuple is OUT at every reader that sees the binding, with everything resting
 only on it; a `:monotonic` one is a hard clash, believed and reported in `conflicts` with
 the binding under `:grounds`. Nothing refuses a wrong-length tuple, so the stored set is
-the same whichever of the tuple, the binding and the edges arrived first.
+the same whichever of the tuple, the binding and the edges arrived first. `core.txt` declares
+the fourteen binding functors `decontextualized_predicate`, so every binding has a copy in
+CxUniverse ([contexts.md](contexts.md#what-the-shipped-ontology-declares-it-of)), and every
+reader that sees CxUniverse sees a binding stated in any context. A `genl` edge between
+predicates is not decontextualized, and the nogood of an inherited length is placed only
+where one context sees the tuple and the edges. With `(genl P Q)` stated in one context
+and `Q`'s binding in CxUniverse, a tuple of `P` stated in a sibling context that breaks
+`Q`'s length is believed at every context.
 
 `(variable_arity P)` releases a predicate from one exact length. `lessThan` has `arityMin`
 two and reads a chain of any length (`(lessThan 1 2 3)` is `1 < 2 < 3`); the membership is
@@ -1881,7 +1924,7 @@ what says so, rather than the check carrying a roster of predicates it quietly s
 **A predicate that binds no length takes its super-predicates'**, and only then: a
 `fatherOf` tuple is a `parentOf` tuple, so a ternary `fatherOf` fact is a ternary
 `parentOf` tuple that `(binary_predicate parentOf)` says does not exist. The super-predicates
-are those above it through `genl` edges stated in the reader's ancestor set. The
+are those above it through any `genl` edge. The
 restriction to predicates that bind nothing is what keeps this a *check* rather than a
 preserved fact: `(arity fatherOf ?n)` answers the one value somebody wrote of `fatherOf`,
 and nothing where nobody wrote one. Supers that disagree bind nothing, and a
@@ -1917,13 +1960,13 @@ already says about its predicate:
   `unary_predicate` / `binary_predicate` / `ternary_predicate` membership. A rule
   concludes the class from `(arity P N)` and no rule concludes an arity
   ([Arity](#arity)), so a predicate written only as a class member has no `arity`
-  sentex, and the check reads both spellings (`own-arity`). **`variable_arity`
+  sentex, and the check reads both spellings (`arity/relation-length`). **`variable_arity`
   releases this arm too**: such a predicate reads a tuple of any length from its declared
   arity upward, so a position past that length is one its tuples really do reach and a
   constraint on it fires on the tuples long enough to have it — refusing the declaration
   while the same KB admits those very facts is the reading no arrival order makes
   coherent. The release is read off the predicate's **own** memberships, since
-  `checks/inherited-arity` already declines to bind when a super carries the mark.
+  `arity/relation-length` already declines to bind when a super carries the mark.
 - **A constraint disagreeing with the predicate's `relation_kind`** — `genlArg` on an
   `instance_relation_predicate`, or `arg` on a `type_relation_predicate`.
 
@@ -1977,7 +2020,7 @@ not one until it is read as the membership every type carries. A position is typ
 when a `genlArg` names it **or** when its predicate is a `type_relation_predicate`, the
 mark saying that of every position at once; that second half is how `genl`'s second
 argument is constrained, since it deliberately carries no declaration of its own
-(CxCore says why).
+(`core.txt` says why).
 
 Four restrictions keep the arm to what it can actually prove:
 
@@ -1989,13 +2032,13 @@ Four restrictions keep the arm to what it can actually prove:
   its author meant; an existential is skipped because its variables are local.
 - **Declared disjointness only**, so the arm stays as open-world as the ground one. The
   value kinds carry the declaration that makes the case above bite — each is an
-  `unrepresented_term`, which CxCore places below `linguistic`, and `(disjoint linguistic
+  `unrepresented_term`, which `core.txt` places below `linguistic`, and `(disjoint linguistic
   relation)` separates it from every predicate, text and a number each being a thing no
   relation is, and `number` carrying `integer` with it.
   `symbol` is below `linguistic` too: a symbol is what `(Quote dog)` names, not what `dog`
   written in a sentence denotes, so a variable asked for a symbol at one end and a type at
   the other is refused. `(disjoint function predicate)` is derived from
-  CxCore's `(partition relation function truth_valued_relation)` and `(partition
+  `core.txt`'s `(partition relation function truth_valued_relation)` and `(partition
   truth_valued_relation logical_constant predicate)` rather than stated; it is what
   `function`'s own comment has always said in prose, and it is what refuses
   `(implies (result ?f ?t) (genl ?f ?t))`: `?f` is asked for a function at one end and

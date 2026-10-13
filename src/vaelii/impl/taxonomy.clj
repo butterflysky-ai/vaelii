@@ -658,11 +658,9 @@
 
 (defn- of-relation?
   "Does taxonomy key `k` belong to `rel-key`: `:genl`, `:genlCx`, or `:flat` for every
-  flat-cache key?"
+  flat-cache key (`kv/key-relation`)?"
   [rel-key k]
-  (if (= :flat rel-key)
-    (not (contains? #{:genl :genlCx} (nth k 0)))
-    (= rel-key (nth k 0))))
+  (= rel-key (kv/key-relation k)))
 
 (defn- raw-supporters
   "`{k {handle ctx}}` for every key of `rel-key` with a stored supporter in a raw
@@ -1403,23 +1401,46 @@
         (assoc-in t [:commuting a] gs')
         (update t :commuting dissoc a)))))
 
+(defn- named-ops
+  "`op` (`:post` or `:retire`) for each stored positive `except` and `defeat` naming
+  `handle`, under `[rel functor ctx]` of the `:tax-named` family: two count reads, and the
+  naming facts' contexts and handles when one is stored.  A probe's handle, which is not
+  an integer, reads nothing."
+  [idx op rel handle]
+  (when (integer? handle)
+    (for [f     [sx/except-functor sx/defeat-functor]
+          :when (reads/stored-naming? idx f handle)
+          [c hs] (reads/as-stored-naming-by-context idx f handle)
+          h     hs]
+      [op :tax-named [rel f c] h])))
+
 (defn- post!
   "Post `handle`, stated in `ctx`, as a supporter of taxonomy key `k` in `tax`'s index
-  store, in one batch: the `:tax-support` leaf `(conj k ctx)` and `handle`'s
-  `:tax-installs` set, before the in-memory write that installs `k`.  Answers `k`'s
-  supporters when the post made `handle` the only one, `{handle ctx}`, which the write
-  then needs no read for; else nil."
+  store, in one batch: the `:tax-support` leaf `(conj k ctx)`, `handle`'s
+  `:tax-installs` set and the `:tax-named` entries of the facts naming it, before the
+  in-memory write that installs `k`.  Answers `k`'s supporters when the post made `handle`
+  the only one, `{handle ctx}`, which the write then needs no read for; else nil."
   [tax k handle ctx]
-  (when (= 1 (first (p/family-apply! (:index @tax) [[:post :tax-support (conj k ctx) handle]
-                                                    [:post :tax-installs [handle] k]])))
-    {handle ctx}))
+  (let [idx (:index @tax)]
+    (when (= 1 (first (p/family-apply! idx (into [[:post :tax-support (conj k ctx) handle]
+                                                  [:post :tax-installs [handle] k]]
+                                                 (named-ops idx :post (kv/key-relation k) handle)))))
+      {handle ctx})))
 
 (defn- retire!
   "Take `handle` out of taxonomy key `k`'s supporters in `tax`'s index store, from
-  whichever context it is stated in: true when it was one."
+  whichever context it is stated in, and the facts naming it out of `k`'s relation in the
+  `:tax-named` family when `handle` installs no other key of the relation: true when it
+  was one."
   [tax k handle]
-  (some? (first (p/family-apply! (:index @tax) [[:retire :tax-support (conj k p/any-context) handle]
-                                                [:retire :tax-installs [handle] k]]))))
+  (let [idx (:index @tax)
+        rel (kv/key-relation k)
+        was (some? (first (p/family-apply! idx [[:retire :tax-support (conj k p/any-context) handle]
+                                                [:retire :tax-installs [handle] k]])))]
+    (when-let [ops (seq (named-ops idx :retire rel handle))]
+      (when-not (some #(= rel (kv/key-relation %)) (reads/as-stored-installed-keys idx handle))
+        (p/family-apply! idx (vec ops))))
+    was))
 
 (defn- add-supported
   "Record `handle` as asserting the flat-cache key `k` from `ctx`, installing the entry,
@@ -2536,7 +2557,7 @@
   on exactly the case that needs the slow one.
 
   This is the common shape rather than an optimisation for a corner: a KB states its
-  merges in `CxCore`, or in the context doing the reading, and either way every
+  merges in `CxUniverse`, or in the context doing the reading, and either way every
   supporter is visible.  A reader pays one memoized `visible?` per supporter of a class
   that is a handful of terms — against `scoped-class`'s reachability walk and preference
   election, which is the cost this exists to skip."
@@ -3923,6 +3944,16 @@
                  (into parent (map (fn [x] [x n])) fresh)
                  (inc i)))))))
 
+(defn- direct-witness
+  "The witness `bfs-witness-path` names from `sub` to `super` over the adjacency `adj` when
+  `sub` has an edge straight to `super` that `admit?` allows, or nil for the walk to
+  answer.  The walk pops `sub`, queues `super` as the end of that edge, and pops it as the
+  end of a one-edge path, so the path is that edge and its witness is `(witness [sub
+  super])`; a nil witness is left to the walk."
+  [adj sub super admit? witness]
+  (when (and (some #(= super %) (adj sub)) (admit? [sub super]))
+    (when-let [w (witness [sub super])] [w])))
+
 (defn reach-support
   "A witness for `sub →* super` in relation `rel-key`, as the `[handle ctx]` of one
   supporter per edge along a single path — or nil when `context` sees no such path.
@@ -3973,24 +4004,30 @@
            ;; it is held by this call alone
            reaches? (delay (let [up      (closure-of tax rel-key :fwd sub)
                                  between (closure-while tax rel-key :rev super #(contains? up %))]
-                             #(contains? between %)))]
-       (if (nil? supporter-class)
-         (bfs-witness-path sub super nbrs (fn [_] true)
-                           #(edge-supporter tax t rel-key % scope) reaches?)
+                             #(contains? between %)))
+           direct #(direct-witness adj sub super %1 %2)]
+       ;; a walk from a source with no edge it sees finds no path
+       (cond
+         (empty? (adj sub))     nil
+         (nil? supporter-class)
+         (let [witness #(edge-supporter tax t rel-key % scope)]
+           (or (direct (fn [_] true) witness)
+               (bfs-witness-path sub super nbrs (fn [_] true) witness reaches?)))
+         :else
          ;; each edge's class read once for both thresholds
          (let [ranks (java.util.HashMap.)
                rank  (fn [e]
                        (or (.get ranks e)
                            (let [r (strength/rank-of (edge-class t rel-key e scope supporter-class))]
                              (.put ranks e r)
-                             r)))]
-           (some (fn [threshold]
-                   (bfs-witness-path
-                    sub super nbrs
-                    (fn [e] (>= (long (rank e)) (long (strength/rank-of threshold))))
-                    #(strongest-edge-supporter tax t rel-key % scope supporter-class)
-                    reaches?))
-                 [:monotonic :default])))))))
+                             r)))
+               admit (fn [threshold] (fn [e] (>= (long (rank e)) (long (strength/rank-of threshold)))))
+               witness #(strongest-edge-supporter tax t rel-key % scope supporter-class)]
+           ;; the first threshold's walk is the one an edge straight to `super` ends
+           (or (direct (admit :monotonic) witness)
+               (some (fn [threshold]
+                       (bfs-witness-path sub super nbrs (admit threshold) witness reaches?))
+                     [:monotonic :default]))))))))
 
 (defn context-specificity
   "How specific context `c` is, as the size of its `genlCx` ancestor set; 0 for a supporter
@@ -4089,6 +4126,22 @@
   [tax f]
   (reduce (fn [m c] (max m (context-specificity tax c))) 0 f))
 
+(defn- trail-order
+  "The content order of two partial routes the queue key of `uncovered-routes` ties, each
+  a trail of `[node [handle ctx] key]` steps from the start: by each step's printed node,
+  then its supporter's key, or its printed context where it has none.  Two trails equal
+  here name the same route."
+  [a b]
+  (let [n (min (count a) (count b))]
+    (loop [i 0]
+      (if (< i n)
+        (let [[na wa ka] (nth a i)
+              [nb wb kb] (nth b i)
+              c (compare [(nm/print-key na) (or ka (nm/print-key (nth wa 1)))]
+                         [(nm/print-key nb) (or kb (nm/print-key (nth wb 1)))])]
+          (if (zero? c) (recur (inc i)) c))
+        (compare (count a) (count b))))))
+
 (defn uncovered-routes
   "Every route `start →* goal` whose label no other route's covers (`covers?`), as a
   vector of routes, each the `[handle ctx]` supporters along it with the `goal` end
@@ -4096,7 +4149,9 @@
   exists.
 
   `step` maps a node to its outgoing steps `[next [handle ctx] rank hid?]` in content
-  order, one per supporter a route may name for that edge.  `rank` is the supporter's
+  order, one per supporter a route may name for that edge, with an optional fifth
+  element: the supporter's content key, which orders the supporters of one step where
+  their contexts do not (the printed context otherwise).  `rank` is the supporter's
   strength rank, or nil where strength takes no part, and `hid?` is true when an except
   can hide the supporter.  A route's label is its weakest rank, the floor of its
   supporters' contexts (`context-floor`) and the set of its hidable supporters.
@@ -4107,14 +4162,17 @@
   stated in contexts one reader sees, that is one route per node.
 
   The queue orders by rank, then by the specificity of the floor's most specific member,
-  then by length, then by the printed terms of the step and the printed floor.  Of two
-  routes with equal labels the walk keeps the one it pops first, so the kept route is a
-  function of the content, and the routes come back in that order."
+  then by length, then by the printed terms of the step and the printed floor, and two
+  routes equal on all of those by their printed terms and supporter keys from `start`
+  on (`trail-order`), so the order is total.  Of two routes with equal labels the walk
+  keeps the one it pops first, so the kept route is a function of the content, and the
+  routes come back in that order."
   [tax start goal step]
   (if (= start goal)
     [[]]
     (let [pq       (java.util.PriorityQueue. 16 ^java.util.Comparator
-                                             (fn [a b] (compare (nth a 0) (nth b 0))))
+                                             (fn [a b] (let [c (compare (nth a 0) (nth b 0))]
+                                                         (if (zero? c) (trail-order (nth a 5) (nth b 5)) c))))
           ;; a walk meets few distinct labels — one, where every edge is stated in
           ;; contexts one reader sees — so a label carries its own queue key, is built
           ;; once, and is passed along unchanged by every step that does not move the
@@ -4130,21 +4188,21 @@
                              (when (pos? (.size labels)) (vreset! one? false))
                              (.put labels k l)
                              l))))
-          push!    (fn [l node from path len]
+          push!    (fn [l node from path len trail]
                      (.add pq [[(nth l 3) (nth l 4) len (nm/print-key node)
                                 (nm/print-key from) (nth l 5)]
-                               node l path len]))
+                               node l path len trail]))
           lcovers? (fn [a b] (covers? tax a b))
           covered? (fn [ls l] (some #(lcovers? % l) ls))
           keep-in  (fn [ls l] (conj (filterv #(not (lcovers? l %)) ls) l))
           routes   (fn [found] (mapv (fn [[_ path]] (vec (rseq path))) found))]
-      (push! (label nil #{} nil) start "" [] 0)
+      (push! (label nil #{} nil) start "" [] 0 [])
       (loop [held {}, found [], flabels []]
         ;; one label in the whole walk and a route found under it: every entry still
         ;; queued carries that label, which the route covers, so the walk is over
         (if (and (seq found) @one?)
           (routes found)
-          (if-let [[_ node l path len] (.poll pq)]
+          (if-let [[_ node l path len trail] (.poll pq)]
             (let [rank (nth l 0), floor (nth l 1), hid (nth l 2)]
               (cond
                 (or (covered? flabels l) (covered? (get held node) l))
@@ -4157,7 +4215,7 @@
                 :else
                 (let [held (update held node (fnil keep-in []) l)
                       len2 (inc len)]
-                  (doseq [[n2 w r hid?] (step node)
+                  (doseq [[n2 w r hid? k] (step node)
                           :let  [c  (nth w 1)
                                  h? (and hid? (not (contains? hid (nth w 0))))
                                  l2 (if (and (or (nil? r) (and rank (<= rank r)))
@@ -4171,7 +4229,7 @@
                                              (if h? (conj (or hid #{}) (nth w 0)) hid)))]
                           :when (not (or (covered? (get held n2) l2)
                                          (covered? flabels l2)))]
-                    (push! l2 n2 node (conj path w) len2))
+                    (push! l2 n2 node (conj path w) len2 (conj trail [n2 w k])))
                   (recur held found flabels))))
             (routes found)))))))
 
@@ -4214,6 +4272,16 @@
                (pass-held [::sorted rel-key scope node]
                           #(nm/sort-by-content-key nm/print-key compare (adj node))))))))
 
+(defn- every-uncovered-route
+  "`uncovered-routes` from `start` to `goal` over `step`, answered without the walk when
+  `start`'s one step ends at `goal`: every route begins with a step from `start`, and the
+  walk returns the route it finds at `goal` through that step alone."
+  [tax start goal step]
+  (let [s (when (not= start goal) (step start))]
+    (if (and (= 1 (count s)) (= goal (nth (first s) 0)))
+      [[(nth (first s) 1)]]
+      (uncovered-routes tax start goal step))))
+
 (defn general-reach-supports
   "Every witness for `sub →* super` in `rel-key` that `context` sees and no other witness
   covers (`uncovered-routes`), each the `[handle ctx]` of one supporter per edge along a
@@ -4232,7 +4300,7 @@
   the same edges name the same witnesses whatever order they were built in
   (docs/nmtms.md)."
   [tax rel-key sub super context]
-  (uncovered-routes tax sub super (edge-steps tax rel-key context nil nil)))
+  (every-uncovered-route tax sub super (edge-steps tax rel-key context nil nil)))
 
 (defn reach-supports
   "Every witness for `sub →* super` in `rel-key` that `context` sees and no other witness
@@ -4245,7 +4313,7 @@
   ([tax rel-key sub super context supporter-class]
    (reach-supports tax rel-key sub super context supporter-class nil))
   ([tax rel-key sub super context supporter-class hidable]
-   (uncovered-routes tax sub super (edge-steps tax rel-key context supporter-class hidable))))
+   (every-uncovered-route tax sub super (edge-steps tax rel-key context supporter-class hidable))))
 
 (defn reach-strength
   "The defeat class of the **strongest** route `sub →* super` in `rel-key` that `context`
@@ -4499,6 +4567,47 @@
   uses it to refuse a cycle, which is a property of the whole edge set."
   [tax sub super]
   (reachable-in? tax :genlCx sub super))
+
+(defn contexts-seen-with-global
+  "The contexts of `xs` that a context at or below `c` sees, through every active
+  `genlCx` edge: `x` at or above `c`, at or below `c`, or sharing a descendant with `c`.
+  The last test walks the contexts below `c` and those below `x` one step each in turn
+  and stops when one walk ends.  The walk below `c` is one for the call, and once it ends
+  one walk up from its contexts answers every `x`, so the call costs the smaller of
+  `c`'s down-set and the `xs`' down-sets together, plus that upward walk, and never
+  builds the larger down-set."
+  [tax c xs]
+  (let [up    (context-up-global tax c)
+        kids  #(seq (context-children-global tax %))
+        ;; one step of a depth-first walk of the contexts at or below a start: the stack
+        ;; holds child seqs, so a context with n children costs one step, not n
+        step  (fn [[seen stack]]
+                (let [s     (peek stack)
+                      n     (first s)
+                      stack (if-let [more (next s)] (conj (pop stack) more) (pop stack))]
+                  (if (contains? seen n)
+                    [seen stack]
+                    [(conj seen n) (if-let [cs (kids n)] (conj stack cs) stack)])))
+        start (fn [a] [#{a} (if-let [cs (kids a)] (list cs) ())])
+        done? #(empty? (second %))
+        ;; the walk below `c`, one for the whole call: each `x`'s walk advances it a step
+        ;; per step of its own, so the `xs` together advance it through `c`'s down-set at
+        ;; most once
+        wc    (volatile! (start c))
+        ;; the contexts at or above a context at or below `c`, once that walk ended: one
+        ;; upward walk, each context visited once
+        above (delay (loop [seen (first @wc), stack (vec (first @wc))]
+                       (if-let [n (peek stack)]
+                         (let [ps (into [] (remove seen) (context-parents-global tax n))]
+                           (recur (into seen ps) (into (pop stack) ps)))
+                         seen)))
+        ;; `x` and `c` share a descendant, found in the smaller of their down-sets
+        shares? (fn [x]
+                  (loop [wx (start x)]
+                    (cond (done? @wc) (contains? @above x)
+                          (done? wx)  (boolean (some #(genlCx?-global tax % c) (first wx)))
+                          :else       (do (vswap! wc step) (recur (step wx))))))]
+    (into #{} (filter #(or (contains? up %) (genlCx?-global tax % c) (shares? %))) xs)))
 
 (defn sees? "Does context k see assertions in context y?" [tax k y]
   (if-some [scope (relation-scope tax :genlCx k)]
@@ -5600,6 +5709,19 @@
           rest* (requirement-choices (rest reqs))]
       (conj rest* c))))
 
+(defn- leg-witnesses
+  "Lazy seq of witness context sets, one per choice of a path for each `[from to]` leg in
+  `legs` and of a context per requirement: the path requirements accumulate onto `acc`,
+  followed by `extra`.  The legs recurse instead of nesting one `for` binding each: every
+  nested binding lengthens the AOT class file name, and eight of them pass the 255-byte
+  limit of ext4 and APFS."
+  [rel legs acc extra]
+  (if-let [[[from to] & more] (seq legs)]
+    (for [p (path-requirements rel from to #{})
+          w (leg-witnesses rel more (into acc p) extra)]
+      w)
+    (requirement-choices (into acc extra))))
+
 (defn disjointness-witnesses
   "Lazy seq of **witness context sets** for the provable disjointness of `a` and
   `b`: each is the supporting contexts of one complete derivation — a genl path
@@ -5631,10 +5753,7 @@
     (concat
      (for [x as, y bs
            :when (and (not= x y) (contains? pairs #{x y}))
-           :let  [d (req [:disjoint #{x y}])]
-           pa (path-requirements rel a x #{})
-           pb (path-requirements rel b y #{})
-           w  (requirement-choices (cond-> (into pa pb) d (conj d)))]
+           w (leg-witnesses rel [[a x] [b y]] [] (keep req [[:disjoint #{x y}]]))]
        w)
      (for [m (:disjoint-metatypes t)
            :let  [ms (get members m #{})]
@@ -5642,10 +5761,7 @@
            x as, y bs
            :when (and (not= x y) (contains? ms x) (contains? ms y)
                       (not (genl?-global tax x y)) (not (genl?-global tax y x)))  ; genl-related overlap, never disjoint
-           :let  [reqs (keep req [[:metatype m] [:member m x] [:member m y]])]
-           pa (path-requirements rel a x #{})
-           pb (path-requirements rel b y #{})
-           w  (requirement-choices (into (into pa pb) reqs))]
+           w (leg-witnesses rel [[a x] [b y]] [] (keep req [[:metatype m] [:member m x] [:member m y]]))]
        w)
      ;; the sibling-disjoint arm: `x` and `y` are non-genl-related proper specializations
      ;; of a marked parent `c`, so the derivation rests on the paths up to each separated
@@ -5656,12 +5772,7 @@
            :when (and (not= x y) (not= x c) (not= y c)
                       (genl?-global tax x c) (genl?-global tax y c)
                       (not (genl?-global tax x y)) (not (genl?-global tax y x)))
-           pa (path-requirements rel a x #{})
-           pb (path-requirements rel b y #{})
-           px (path-requirements rel x c #{})
-           py (path-requirements rel y c #{})
-           w  (requirement-choices
-               (cond-> (into (into (into pa pb) px) py) mreq (conj mreq)))]
+           w (leg-witnesses rel [[a x] [b y] [x c] [y c]] [] (when mreq [mreq]))]
        w)
      ;; the cover arm: `(partition W P1 P2 …)` and `(separating W P1 P2 …)` separate their
      ;; parts, so the roster reads the way a metatype's member set does and the derivation
@@ -5674,9 +5785,7 @@
            x as, y bs
            :when (and (not= x y) (contains? psx x) (contains? psx y)
                       (not (genl?-global tax x y)) (not (genl?-global tax y x)))
-           pa (path-requirements rel a x #{})
-           pb (path-requirements rel b y #{})
-           w  (requirement-choices (cond-> (into pa pb) creq (conj creq)))]
+           w (leg-witnesses rel [[a x] [b y]] [] (when creq [creq]))]
        w))))
 
 ;; ---- predicate properties -----------------------------------------------
@@ -5889,7 +5998,7 @@
 
 (def exact-arity-classes
   "What each exact-arity class membership says the arity is: `sx/exact-arity-classes`,
-  read here by `kb/relation-arity`, the checks and the provers."
+  read here by `kb/relation?` and the quality and integrity passes."
   sx/exact-arity-classes)
 
 (defn declared-arity
@@ -6029,7 +6138,7 @@
   the small side against the large one — `props`' own trade, and `matches-hierarchical`
   makes it for `symmetric` a few lines above the caller.  Iterating the entries rather
   than the key set is what keeps a retrieval off an allocation: the key set would be built
-  and thrown away once per matched literal, and on a KB carrying the CxCore bridge every
+  and thrown away once per matched literal, and on a KB carrying core.txt's bridge every
   symmetric predicate is in this table.
 
   Nil rather than an empty set, so the caller's gate is a `nil?` and the common answer

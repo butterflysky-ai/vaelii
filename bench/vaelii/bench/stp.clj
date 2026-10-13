@@ -49,7 +49,6 @@
   (:require [vaelii.core :as v]
             [vaelii.host.core-context :as core-context]
             [vaelii.impl.observe :as observe]
-            [vaelii.host.seed :as seed]
             [vaelii.impl.stp :as stp]))
 
 ;; ---- the network under test ---------------------------------------------
@@ -178,14 +177,13 @@
 (def ^:private C 'CxUniverse)
 
 (defn- fresh-kb
-  "The CxCore grammar, the measure vocabulary and unit table, the temporal vocabulary, and
-  the metric prover registered — the configuration a KB reasoning about gaps is in."
+  "The upper layer (the grammar, the measure vocabulary and unit table, the temporal
+  vocabulary) and the metric prover registered — the configuration a KB reasoning about
+  gaps is in."
   []
   (let [kb (v/open-kb {:backend :memory :space 45 :recover? false})]
     (v/clear! kb)
     (core-context/load-into kb)
-    (seed/load-context kb 'CxMeasure "upper")
-    (seed/load-context kb 'CxTime "upper")
     (v/add-prover kb (stp/stp-prover))
     kb))
 

@@ -1,16 +1,15 @@
-;; CxMeasure — the theory of measurement: the two measure terms (QuantityFn and
+;; measure.txt — the theory of measurement: the two measure terms (QuantityFn and
 ;; QuantityIntervalFn, unreifiable_function applications that stay structural so a
 ;; magnitude and its unit remain readable), the unit table the quantity provers
 ;; normalize against (dimensionOf / conversionFactor), and the five comparisons they
 ;; compute (sameQuantity / quantityLessThan / quantityGreaterThan and the two
-;; or-equal forms). Sees CxCore; CxUniverse sees it, so a measure is
-;; comparable from every context.
+;; or-equal forms). Loaded into CxUniverse with the rest of kb/upper/.
 ;;
 ;; A comparison is never stored — the provers compute it from ground measures against
 ;; the table, and two measures of different dimensions are simply not comparable. See
 ;; docs/quantity.md.
 ;;
-;; The units themselves ship, and the test for one is the same test CxCore applies
+;; The units themselves ship, and the test for one is the same test core.txt applies
 ;; to its vocabulary: a unit belongs here when its factor is a **definition** rather than
 ;; a measurement. A minute is sixty seconds by stipulation, so the table can state it;
 ;; how much a particular dog weighs is a measurement, so it cannot. Three dimensions are
@@ -25,12 +24,9 @@
 ;; qualitative* relations do arithmetic over them, derivativeOf joins a rate to the
 ;; quantity it is the rate of, and greaterInMagnitudeThan resolves the one ambiguous
 ;; entry in the addition table. It belongs beside the measures rather than in a context
-;; of its own for the reason CxSpace holds four calculi: it is about the same quantities
+;; of its own for the reason space.txt holds four calculi: it is about the same quantities
 ;; the measures measure, and a KB usually has the sign where it has no figure. See
 ;; docs/sign.md.
-
-(genlCx CxMeasure CxCore)
-(genlCx CxUniverse CxMeasure)
 
 (comment Centimeter "A hundredth of a metre.")
 (dimensionOf Centimeter Length)
@@ -62,6 +58,8 @@
 (arg dimensionOf 2 physical_dimension)
 
 (comment Duration "The dimension of extent in time. Its base unit is Second, and an interval's length is measured in it.")
+;; time_interval is the kind of thing a Duration measures.
+(termsRelated time_interval Duration)
 
 (comment Gram "A thousandth of a kilogram.")
 (dimensionOf Gram Mass)
@@ -150,6 +148,12 @@
 (comment quantity
          "A magnitude that has a sign and can change, such as a water level or the rate a tap runs at. The sign vocabulary relates quantities: signOf and trendOf give one a value, derivativeOf joins a rate to its quantity, and the three qualitative relations and greaterInMagnitudeThan relate two or three of them. A quantity is not a measure: a measure is a figure in a unit, and a quantity is what a measure would measure.")
 (genl quantity aspatial)
+;; A quantity changes over time, so it is temporal.  It causes nothing itself.  A quantity
+;; is the magnitude, and the water level being 3 m is a fluent about it, so a quantity is
+;; no situation.
+(genl quantity temporal)
+(genl quantity acausal)
+(set/monotonic (disjoint quantity situation))
 
 (comment QuantityFn
          "(QuantityFn ?magnitude ?unit) means the measure of ?magnitude ?unit. So (QuantityFn 5 Kilogram) is five kilograms. An unreifiable_function application, a structural NAT: it stays structural instead of being minted into an opaque constant, so the magnitude and the unit are still readable inside the sentence, and the quantity provers normalize it through the dimensionOf and conversionFactor facts.")

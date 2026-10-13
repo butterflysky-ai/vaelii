@@ -67,11 +67,11 @@
 
 (tu/deftest-kb an-uncompilable-pattern-is-refused-at-the-assert-entry-point
   (testing "a pattern that does not compile is a :bad-pattern refusal"
-    (let [problems (v/check kb (list 'matchesPattern "x" "(") 'CxCore)]
+    (let [problems (v/check kb (list 'matchesPattern "x" "(") 'CxUniverse)]
       (is (= :bad-pattern (:type (first problems)))
           "the unclosed group is reported, not left to fail silently at query time")))
   (testing "a compilable pattern raises no problem"
-    (is (empty? (v/check kb (list 'matchesPattern "x" ipv4-pattern) 'CxCore))
+    (is (empty? (v/check kb (list 'matchesPattern "x" ipv4-pattern) 'CxUniverse))
         "a valid pattern is admitted")))
 
 ;; ---- 5. a rule antecedent on matchesPattern or integer is computed ----

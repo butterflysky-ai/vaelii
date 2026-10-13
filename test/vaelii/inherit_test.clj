@@ -434,7 +434,7 @@
   ;; states is not a licence it holds.
   ;;
   ;; The pair lives here rather than in `context_scoping_test` because it cannot be
-  ;; built on a KB carrying CxCore: `transitive` is a `decontextualized_predicate`
+  ;; built on a KB carrying the upper layer: `transitive` is a `decontextualized_predicate`
   ;; there, so every declaration is lifted into CxUniverse and every context sees
   ;; it (that is the *control*, and it is stated over there).  This KB has no such
   ;; declaration, so nothing lifts and the scoped read is observable.
@@ -459,7 +459,7 @@
   ;; context, so the store answers the mirror of a fact from a context that cannot see the
   ;; mark.  The engine lifts each statement of one into CxUniverse whatever the KB
   ;; declares (`special/deduce-lifts`), so every other reader answers as the store does —
-  ;; here, with no `decontextualized_predicate` anywhere, as on a KB carrying CxCore.
+  ;; here, with no `decontextualized_predicate` anywhere, as on a KB carrying the upper layer.
   (doseq [[kind mark] [[:symmetric #(list 'symmetric %)]
                        [:commutative #(list 'commutative %)]
                        [nil #(list 'commutativeInArgs % 1 2)]
@@ -637,17 +637,17 @@
   ;; `genl` reads the engine's cached type closure, `partOf` is walked over stored facts,
   ;; and the position's reach is their union — the same argument descending a type chain
   ;; and a part chain at once.
-  (tu/with-terms [equipment_t lathe_t Spindle partOf hazard]
+  (tu/with-terms [equipment_t lathe_t Chuck partOf hazard]
     (v/with-deferred-settle kb
       (v/assert kb (list 'transitive partOf) 'CxUniverse)
       (v/assert kb (list 'genl lathe_t equipment_t) 'CxUniverse)
-      (v/assert kb (list partOf Spindle equipment_t) 'CxUniverse)
+      (v/assert kb (list partOf Chuck equipment_t) 'CxUniverse)
       (v/assert kb (list 'transitiveInArgInverse hazard 1 'genl) 'CxUniverse)
       (v/assert kb (list 'transitiveInArgInverse hazard 1 partOf) 'CxUniverse)
       (v/assert kb (list hazard equipment_t) 'CxUniverse))
     (is (v/ask? kb (list hazard lathe_t) 'CxUniverse)
         "down the cached type closure: a kind of equipment")
-    (is (v/ask? kb (list hazard Spindle) 'CxUniverse)
+    (is (v/ask? kb (list hazard Chuck) 'CxUniverse)
         "down the stored part chain: a part of the equipment")
     (is (not (v/ask? kb (list hazard 'TmpBystander) 'CxUniverse))
         "and a term on neither chain inherits nothing")))
