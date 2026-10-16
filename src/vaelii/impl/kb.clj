@@ -151,13 +151,17 @@
     :adapter          the Apache-2.0 sibling that carries the store, absent for one this
                       repository holds.  Its arm resolves lazily, so the SSPL engine never
                       loads a driver for a backend nobody selected.
+    :ctor             the adapter's record-store constructor, the var `adapter-ctor`
+                      resolves.
     :decorator?       not a store: `:overlay` decorates whatever the frozen base resolved
                       to, which is why `open-kb` resolves it itself and every axis function
                       here refuses the name."
   {:memory  {:durable? false :persisted-index? false :image? false}
    :disk    {:durable? true  :persisted-index? true  :image? true}
-   :sqlite  {:durable? true  :persisted-index? false :image? false :adapter "com.vaelii/sqlite"}
-   :pg      {:durable? true  :persisted-index? true  :image? true  :adapter "com.vaelii/postgres"}
+   :sqlite  {:durable? true  :persisted-index? false :image? false :adapter "com.vaelii/sqlite"
+             :ctor 'vaelii.sqlite.record-store/sqlite-record-store}
+   :pg      {:durable? true  :persisted-index? true  :image? true  :adapter "com.vaelii/postgres"
+             :ctor 'vaelii.postgres.record-store/pg-record-store}
    :overlay {:decorator? true}})
 
 (def ^:private durable-under-log-index
@@ -388,36 +392,32 @@
     (mem/drop-index-space! (mount/meta-space space))
     nil))
 
-(defn- sqlite-record-store-ctor
-  "The `com.vaelii/sqlite` adapter's record-store constructor, resolved **lazily** — the
-  same trick `create-tms` uses for the dense TMS — so the SSPL engine never loads the
-  SQLite driver unless a KB selects `:sqlite`.  Throws a clear missing-adapter error when
-  the Apache-2.0 sibling is not on the classpath, rather than a bare
-  `FileNotFoundException` from the resolve."
-  []
-  (or (try (requiring-resolve 'vaelii.sqlite.record-store/sqlite-record-store)
-           (catch java.io.FileNotFoundException _ nil))
-      (throw (ex-info (str "backend :sqlite needs the vaelii-sqlite adapter (com.vaelii/sqlite) "
-                           "on the classpath — an Apache-2.0 sibling the engine does not depend "
-                           "on, so add it to your project to select the :sqlite backend.")
-                      {:type :missing-adapter :records :sqlite
-                       :coordinate (:adapter (record-axes :sqlite))}))))
-
-(defn- pg-record-store-ctor
-  "The `com.vaelii/postgres` adapter's record-store constructor, resolved **lazily** —
-  the same trick `create-tms` uses for the dense TMS — so the SSPL engine never loads a
-  JDBC driver unless a KB selects `:pg-memory`, `:pg-disk-log` or `:pg-snapshot`.  Throws a clear
-  missing-adapter error when the Apache-2.0 sibling is not on the classpath, rather than
-  a bare `FileNotFoundException` from the resolve."
-  []
-  (or (try (requiring-resolve 'vaelii.postgres.record-store/pg-record-store)
-           (catch java.io.FileNotFoundException _ nil))
-      (throw (ex-info (str "the :pg record backend needs the vaelii-postgres adapter "
-                           "(com.vaelii/postgres) on the classpath — an Apache-2.0 sibling the "
-                           "engine does not depend on, so add it to your project to select "
-                           ":pg-memory, :pg-disk-log or :pg-snapshot.")
-                      {:type :missing-adapter :records :pg
-                       :coordinate (:adapter (record-axes :pg))}))))
+(defn- adapter-ctor
+  "The record-store constructor of the sibling adapter carrying `records` (`record-axes`'
+  `:ctor`), resolved **lazily**, so the SSPL engine never loads a driver unless a KB
+  selects that axis.  Throws `:missing-adapter` naming the coordinate when the adapter is
+  not on the classpath, and when loading it fails on a namespace it requires, which is
+  what a `checkouts/` link without the adapter's dependencies causes."
+  [records]
+  (let [{:keys [adapter ctor]} (record-axes records)
+        sibling (name (symbol adapter))
+        refuse (fn [found cause]
+                 (throw (ex-info (str "the " records " record backend needs the vaelii-" sibling
+                                      " adapter (" adapter ") on the classpath with its "
+                                      "dependencies" found " — an Apache-2.0 sibling the engine "
+                                      "does not depend on, so add it to your project as a "
+                                      "dependency (in this repository, `lein with-profile "
+                                      "+with-" sibling "`).")
+                                 {:type :missing-adapter :records records :coordinate adapter}
+                                 cause)))]
+    (try (requiring-resolve ctor)
+         (catch java.io.FileNotFoundException _
+           (refuse "" nil))
+         (catch clojure.lang.Compiler$CompilerException e
+           (let [cause (.getCause e)]
+             (if (instance? java.io.FileNotFoundException cause)
+               (refuse (str "; loading it failed (" (.getMessage cause) ")") e)
+               (throw e)))))))
 
 (defn- pg-spec
   "The `:pg` opt as a db-spec map.  A string is a JDBC URL, which is the spelling an
@@ -446,10 +446,10 @@
    :sqlite (fn [opts]
              (let [dir (disk/disk-dir opts)]
                (.mkdirs (java.io.File. ^String dir))
-               ((sqlite-record-store-ctor) {:dbtype "sqlite" :dbname (str dir "/records.sqlite")})))
+               ((adapter-ctor :sqlite) {:dbtype "sqlite" :dbname (str dir "/records.sqlite")})))
    ;; the database is named by the caller and nothing here derives one: a KB that
    ;; silently took a default server is a KB whose records are somewhere nobody said
-   :pg     (fn [opts] ((pg-record-store-ctor) (pg-spec (:pg opts))))})
+   :pg     (fn [opts] ((adapter-ctor :pg) (pg-spec (:pg opts))))})
 
 (defn- record-store-for
   "The `RecordStore` for the record axis, opened by its `record-arms` arm.

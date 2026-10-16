@@ -125,6 +125,23 @@
   [f]
   (try (f) nil (catch clojure.lang.ExceptionInfo e (ex-data e))))
 
+(defn- adapters-failing
+  "Run `f` with each sibling adapter's namespace failing to load by throwing `(thrown)`.
+  A `checkouts/` link or a `+with-` profile can put an adapter on this classpath, so an
+  absence claim states the absence instead of reading it off the classpath."
+  [thrown f]
+  (let [resolve requiring-resolve]
+    (with-redefs [requiring-resolve
+                  (fn [sym]
+                    (if (#{"vaelii.sqlite.record-store" "vaelii.postgres.record-store"}
+                         (namespace sym))
+                      (throw (thrown))
+                      (resolve sym)))]
+      (f))))
+
+(defn- absent []
+  (java.io.FileNotFoundException. "Could not locate vaelii/x/record_store__init.class"))
+
 (deftest an-unknown-selection-names-the-axis-it-belongs-to
   (is (thrown-with-msg? clojure.lang.ExceptionInfo #"unknown KB backend"
                         (v/open-kb {:backend :nonesuch})))
@@ -170,14 +187,26 @@
   ;; `:unknown-backend` — and a caller catching that to fall back on `:memory` did the
   ;; wrong thing twice over: the name is legal, and the fix is a coordinate in the
   ;; project rather than a different backend.
-  (are [opts records coord]
-       (= {:type :missing-adapter :records records :coordinate coord}
-          (select-keys (refusal #(v/open-kb opts)) [:type :records :coordinate]))
-    {:backend :sqlite}                    :sqlite "com.vaelii/sqlite"
-    {:backend :pg-memory :pg "jdbc:postgresql://h/d"} :pg "com.vaelii/postgres")
-  (is (thrown-with-msg? clojure.lang.ExceptionInfo #"com\.vaelii/sqlite"
-                        (v/open-kb {:backend :sqlite}))
-      "and the message names the coordinate to add"))
+  (adapters-failing
+   absent
+   #(do (are [opts records coord]
+             (= {:type :missing-adapter :records records :coordinate coord}
+                (select-keys (refusal (fn [] (v/open-kb opts))) [:type :records :coordinate]))
+          {:backend :sqlite}                                :sqlite "com.vaelii/sqlite"
+          {:backend :pg-memory :pg "jdbc:postgresql://h/d"} :pg     "com.vaelii/postgres")
+        (is (thrown-with-msg? clojure.lang.ExceptionInfo #"com\.vaelii/sqlite"
+                              (v/open-kb {:backend :sqlite}))
+            "and the message names the coordinate to add")))
+  (testing "an adapter whose source loads without its dependencies"
+    ;; a `checkouts/` link adds the adapter's source and none of its dependencies
+    (adapters-failing
+     #(clojure.lang.Compiler$CompilerException.
+       "vaelii/postgres/record_store.clj" 1 1
+       (java.io.FileNotFoundException. "Could not locate next/jdbc__init.class"))
+     #(let [e (is (thrown-with-msg? clojure.lang.ExceptionInfo #"loading it failed .*next/jdbc"
+                                    (v/open-kb {:backend :pg-memory :pg "jdbc:postgresql://h/d"})))]
+        (is (= {:type :missing-adapter :records :pg :coordinate "com.vaelii/postgres"}
+               (select-keys (ex-data e) [:type :records :coordinate])))))))
 
 (deftest one-number-names-both-of-a-KBs-stores
   ;; The index is a function of the records, so the two are shared or separate as one
@@ -445,12 +474,14 @@
                                   (v/open-kb {:backend :memory :pg {:dbname "nope"}})))]
       (is (= [:pg] (:unknown (ex-data e))))))
   (testing "the adapter is not the engine's to carry"
-    ;; core has no JDBC dependency, so selecting :pg here reaches the lazy resolve and
-    ;; finds nothing — the missing-adapter error, not a FileNotFoundException.  The
-    ;; adapter's own suite is where a live :pg KB is exercised.
-    (is (thrown-with-msg? clojure.lang.ExceptionInfo #"needs the vaelii-postgres adapter"
-                          (v/open-kb {:backend :pg-memory
-                                      :pg {:dbtype "postgresql" :dbname "nope"}})))))
+    ;; selecting :pg reaches the lazy resolve, which finds no adapter — the
+    ;; missing-adapter error, not a FileNotFoundException.  The adapter's own suite is
+    ;; where a live :pg KB is exercised.
+    (adapters-failing
+     absent
+     #(is (thrown-with-msg? clojure.lang.ExceptionInfo #"needs the vaelii-postgres adapter"
+                            (v/open-kb {:backend :pg-memory
+                                        :pg {:dbtype "postgresql" :dbname "nope"}}))))))
 
 (deftest the-pg-pairings-name-a-records-axis-and-an-index-axis
   (is (= {:records :pg :index :memory} (kb/backend-axes {:backend :pg-memory})))

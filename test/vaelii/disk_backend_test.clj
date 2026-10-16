@@ -501,7 +501,7 @@
   ;; the store.
   (let [records (mem/memory-record-store {:space [::pg-stand-in]})
         opened  (fn [dir url]
-                  (with-redefs-fn {#'kb/pg-record-store-ctor (fn [] (fn [_spec] records))}
+                  (with-redefs-fn {#'kb/adapter-ctor (fn [_records] (fn [_spec] records))}
                     (fn []
                       (try (v/open-kb {:records :pg :index :disk-log :dir dir
                                        :pg url :recover? false})
