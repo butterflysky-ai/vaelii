@@ -730,6 +730,28 @@
       (doall (for [_ (range 40)]
                (nanos (dotimes [_ 100] (doall (res/match-pattern kb goal 'CxPerf)))))))))
 
+(defn- ground-goal-under-a-wide-fan
+  "A ground binary goal `(pWfTop WfA WfB)` read uncached, under n sub-predicates of
+  `pWfTop`, every other one across a `genlInverse` edge, ten of which store a fact on
+  other terms.
+
+  A matcher reads a goal once per member of its functor's fan, and the fan with a
+  `genlInverse` edge in it was walked again per read, so the cost of a goal no member
+  answers grew with the members.  A forward join tests one per row: a `different` test
+  under 6,104 such members cost 76 ms.  The slot rosters cut the fan to the members storing
+  the goal's arguments, and the walked fan is held for the clock stretch."
+  [n]
+  (let [kb (fresh-kb)]
+    (v/with-deferred-settle kb
+      (doseq [i (range n)]
+        (v/assert kb (list (if (even? i) 'genl 'genlInverse) (symbol (str "pWf" i)) 'pWfTop)
+                  'CxPerf {:strength :monotonic}))
+      (doseq [i (range 10)]
+        (v/assert kb (list (symbol (str "pWf" i)) 'WfC 'WfD) 'CxPerf {:strength :monotonic})))
+    (let [goal '(pWfTop WfA WfB)]
+      (doall (for [_ (range 40)]
+               (nanos (dotimes [_ 100] (doall (res/matches-visible kb goal 'CxPerf false)))))))))
+
 (def ^:private separated-types
   "Types under each side of the one declaration in `disjoint-enumeration` — the part of
   that KB the goal is actually about, held fixed while the vocabulary around it grows."
@@ -6002,6 +6024,16 @@
     :sizes     [64 2048]
     :max-ratio 2.0
     :run       trigger-keys-beside-rules}
+
+   ;; Measured 2026-10-16 per batch of 100 reads: 0.611 ms at 64 and 0.518 ms at 2,048
+   ;; (0.85x).  Reading every member and walking the fan per read, 42.2 ms against
+   ;; 1,404 ms (33x).
+   {:name      :ground-goal-under-a-wide-fan
+    :group     :index
+    :claim     "a ground goal no member answers costs the same however many sub-predicates its functor has"
+    :sizes     [64 2048]
+    :max-ratio 2.0
+    :run       ground-goal-under-a-wide-fan}
 
    {:name      :overlay-selectivity
     :group     :index

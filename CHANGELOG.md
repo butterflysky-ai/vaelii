@@ -11,6 +11,25 @@ several releases is still a grep for the name you call. The full entry prose for
 released version is in this file's git history, at the tag of the release that shipped
 it — `git show v0.16.0:CHANGELOG.md`.
 
+## Unreleased
+
+### Fix: performance
+
+- **A goal on a predicate with many sub-predicates reads only the members that can answer
+  it.** A literal's matches are read once per member of its functor's fan, so a ground
+  `(different A B)` under 3,054 sub-predicates and 3,050 `genlInverse` ones cost 76 ms,
+  and a forward join tests one per row: re-recording the refusals of a recover fired four
+  rules joining `(different ?b ?a)` over 108,571 `genl` rows, and the recover took 14 hours. The fan is
+  now cut to the members whose slot rosters hold every ground argument of the goal, and
+  each member left is read as before. `tax/signed-closure` holds its walk of a fan with
+  a `genlInverse` edge for the change clock's stretch. `provers/shadowing-channels` asks
+  `res/concludes?`, which stops at the first rule bucket it finds, where it built the
+  whole `concluding-rule-handles` set. `res/without-unbelieved-spellings` reads the
+  `reifiable_function` marks only when a match reaches it. The same goal costs 0.5 ms.
+  Perf check `ground-goal-under-a-wide-fan` pins the growth.
+
+  *Class:* **Fix** (the same answers, sooner).
+
 ## 0.27.0 — 2026-10-15 — "Arity clashes held inert and `:monotonic` class memberships stored, `predExistsAll` scoped universal-first, `:pg-snapshot` and `:recover? :trust`, `genlInverse` and `closedExtentForArg`"
 
 | Area | Change |

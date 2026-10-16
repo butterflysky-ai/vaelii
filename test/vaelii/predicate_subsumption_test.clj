@@ -30,6 +30,7 @@
             [vaelii.core :as v]
             [vaelii.impl.reads :as reads]
             [vaelii.impl.resolution :as res]
+            [vaelii.impl.rules :as vr]
             [vaelii.impl.sentex :as sx]
             [vaelii.impl.taxonomy :as tax]
             [vaelii.impl.types.reasoning :as reasoning]
@@ -459,3 +460,81 @@
       (is (= (tax/genls tx fatherOf 'CxUniverse) (res/super-predicates kb fatherOf 'CxUniverse)))
       (is (empty? (res/swapped-sub-predicates kb parentOf 'CxUniverse)))
       (is (empty? (res/swapped-super-predicates kb fatherOf 'CxUniverse))))))
+
+;; ---- a wide fan: read only the members that can hold the goal's arguments ------------
+
+(defn- wide-fan!
+  "A binary `top` with `n` predicates under it, one in three across a `genlInverse` edge
+  and one in five marked `symmetric`, and a fact on a few of them.  Answers `top`."
+  [kb n [A B C]]
+  (let [top (tu/fresh-term :predicate "top")
+        ps  (vec (repeatedly n #(tu/fresh-term :predicate "member")))]
+    (doseq [[i p] (map-indexed vector ps)]
+      (v/assert kb (list (if (zero? (mod i 3)) 'genlInverse 'genl) p top) 'CxUniverse {:strength :monotonic})
+      (when (zero? (mod i 5)) (v/assert kb (list 'symmetric p) 'CxUniverse)))
+    (doseq [[p x y] [[(ps 0) A B] [(ps 1) A B] [(ps 2) B A] [(ps 5) B C] [(ps 7) C A] [(ps 10) A C]]]
+      (v/assert kb (list p x y) 'CxUniverse {:strength :monotonic}))
+    (v/assert kb (list 'not (list (ps 4) A C)) 'CxUniverse {:strength :monotonic})
+    top))
+
+(tu/deftest-kb a-wide-fan-answers-what-reading-every-member-answers
+  ;; `slot-cut` leaves out the members whose slot rosters miss a ground argument; the
+  ;; members left are read as the uncut fan reads them, so the two answer one set
+  (tu/with-terms [A B C D]
+    (let [top   (wide-fan! kb 90 [A B C])
+          raw   (fn [s] (res/raw-match kb s '?ctx))
+          whole #(proj (res/fanned-match kb % '?ctx raw res/lazy-mapcat false))
+          cut   #(proj (res/fanned-match kb % '?ctx raw res/lazy-mapcat true))]
+      (doseq [pat [(list top A B) (list top B A) (list top A C) (list top C A) (list top A D)
+                   (list top A '?y) (list top '?x A) (list top '?x C) (list top D '?y)
+                   (list top '?x '?y) (list top 3 '?y)
+                   (list 'not (list top A C)) (list 'not (list top '?x C))]]
+        (is (= (whole pat) (cut pat)) (pr-str pat)))
+      (testing "and it reaches what the members store"
+        (is (seq (cut (list top A B))))
+        (is (seq (cut (list top '?x A))))))))
+
+(tu/deftest-kb a-wide-fan-reads-only-the-members-holding-its-arguments
+  (tu/with-terms [A B C D]
+    (let [top   (wide-fan! kb 90 [A B C])
+          reads (atom 0)
+          raw   (fn [s] (swap! reads inc) (res/raw-match kb s '?ctx))
+          n     (fn [pat indexed?] (reset! reads 0)
+                  (dorun (res/fanned-match kb pat '?ctx raw res/lazy-mapcat indexed?))
+                  @reads)]
+      (testing "uncut, every member is read"
+        (is (= 91 (n (list top A D) false))))
+      (testing "cut, only the members storing both arguments"
+        (is (zero? (n (list top A D) true)))
+        (is (<= (n (list top A B) true) 3)))
+      (testing "a goal naming no indexable argument reads them all"
+        (is (= 91 (n (list top '?x '?y) true)))))))
+
+(tu/deftest-kb concludes?-answers-whether-a-rule-concludes-the-goal
+  (tu/with-terms [fatherOf parentOf sonOf likes]
+    (is (false? (res/concludes? kb parentOf nil)))
+    (let [rule (v/assert-rule kb [(list sonOf '?y '?x)] (list fatherOf '?x '?y)
+                              'CxUniverse {:direction :backward})]
+      (is (false? (res/concludes? kb parentOf nil)))
+      (let [edge (v/assert kb (list 'genl fatherOf parentOf) 'CxUniverse {:strength :monotonic})]
+        (is (true? (res/concludes? kb parentOf nil)))
+        (v/retract! kb edge))
+      (v/retract! kb rule))
+    (testing "a variable-consequent rule concludes every predicate"
+      (v/assert kb (list 'set/forwardRule (vr/rule-sentence [(list likes '?p '?x '?y)] '(?p ?x ?y)))
+                'CxNaturalWorld)
+      (is (true? (res/concludes? kb parentOf nil))))
+    (doseq [p [parentOf fatherOf sonOf likes]]
+      (is (= (boolean (seq (res/concluding-rule-handles kb p nil))) (res/concludes? kb p nil)) (pr-str p)))))
+
+(tu/deftest-kb the-signed-fan-follows-its-edges
+  ;; memoized on the change clock, so an edge arriving or leaving moves the next read
+  (tu/with-terms [childOf parentOf sonOf]
+    (let [tx  (reasoning/taxonomy kb)
+          fan #(tax/signed-closure tx :down parentOf 'CxUniverse)]
+      (v/assert kb (list 'genlInverse childOf parentOf) 'CxUniverse {:strength :monotonic})
+      (is (= [#{parentOf} #{childOf}] (fan)))
+      (let [edge (v/assert kb (list 'genl sonOf childOf) 'CxUniverse {:strength :monotonic})]
+        (is (= [#{parentOf} #{childOf sonOf}] (fan)))
+        (v/retract! kb edge)
+        (is (= [#{parentOf} #{childOf}] (fan)))))))

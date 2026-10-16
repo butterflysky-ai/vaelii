@@ -555,6 +555,31 @@
        :else
        (into var-conseq (by-conseq pred))))))
 
+(defn concludes?
+  "Is `concluding-rule-handles` non-empty, asked in every context — the same buckets,
+  read until the first one holding a rule.
+
+  `provers/shadowing-channels` asks only this, once per goal.  Built as the whole set, the
+  answer cost a probe per spec of the goal's predicate whatever the first probe found: a
+  ground `(different A B)` under 3,054 sub-predicates and 3,050 swapped ones took 12 ms,
+  and a forward join tests one per row.  The variable-consequent catch-all is read first,
+  since a rule filed there concludes every predicate, so a KB holding one answers in one
+  read.
+
+  It reads every context, past the reader's ancestor set, because the answer only decides
+  whether a computed prover may answer alone: a rule the reader cannot see sends the goal
+  down the union path, which costs time and never an answer."
+  [kb pred context]
+  (let [idx  (:index kb)
+        held (fn [k] (seq (reads/as-stored-rules-by-consequent-global idx k)))]
+    (boolean
+     (or (held p/var-consequent-key)
+         (cond
+           (sx/variable? pred) (seq (reads/as-stored-rules-in-global idx :rule))
+           (symbol? pred)      (let [[st sw] (tax/signed-closure (reasoning/taxonomy kb) :down pred context)]
+                                 (or (some held st) (some held sw)))
+           :else               (held pred))))))
+
 (defn rule-visible-from?
   "May a rule stored in `rule-ctx` answer a goal asked from `context`?
 
@@ -1478,7 +1503,9 @@
                                     (entries-at kb ents view-context))]
                          (vswap! memo assoc p v)
                          v))))
-            rr   (reified-reading kb view-context)]
+            ;; forced by the first match: it reads every `reifiable_function` mark, 1.4 ms
+            ;; under 2,061 of them, and most reads answer nothing
+            rr   (delay (reified-reading kb view-context))]
         (remove (fn [[_ b stored]]
                   (let [s (sx/sentence-of stored)]
                     (or (when-not (:antecedent stored)
@@ -1486,7 +1513,7 @@
                             (not= s (sx/sentence-of
                                      (sx/sentex (read-spelling goal b s) view-context
                                                 (spelling-opts tax e))))))
-                        (boolean (and rr (rr s))))))
+                        (boolean (when-let [rr @rr] (rr s))))))
                 matches)))))
 
 (defn sub-predicates
@@ -1528,6 +1555,46 @@
   [kb f context]
   (second (tax/signed-closure (reasoning/taxonomy kb) :up f context)))
 
+(def ^:private slot-cut-min
+  "The fewest members a fan holds before `slot-cut` reads the slot rosters to cut it.  A
+  smaller fan is read whole: its member reads are few, and the roster reads would be most
+  of what the cut costs."
+  64)
+
+(defn- slot-cut
+  "The predicates holding a stored fact that names every indexable ground argument of
+  `body` at some position, read off the slot rosters (`reads/as-stored-predicates-at-arg`),
+  or nil when `body` has no such argument.
+
+  A member read costs a pattern build and an index probe whether or not anything is
+  stored under it, so a fan is linear in the closure: `(different A B)` under 3,054
+  sub-predicates and 3,050 swapped ones took 54 ms for no match, and a forward join tests
+  one per row.  A member's matches unify with the goal under some arrangement of its
+  arguments, so each holds every ground argument at some position, and a member outside
+  this set has none.  The set over-approximates (a roster outlives a disbelieved fact) and
+  never drops a match, so each member left is read exactly as the uncut fan reads it,
+  mirror, arrangements and spellings included.  Read without the fan, so a goal whose
+  arguments no fact names costs the roster reads alone."
+  [kb body]
+  (let [idx   (:index kb)
+        n     (dec (count body))
+        held  (fn [a] (into #{} (mapcat #(reads/as-stored-predicates-at-arg idx % a)) (range 1 (inc n))))
+        terms (filterv sx/indexable-term? (rest body))]
+    (when (seq terms)
+      (reduce (fn [acc a]
+                (if (empty? acc)
+                  (reduced acc)
+                  (let [h (held a)]
+                    (if (< (count h) (count acc)) (into #{} (filter acc) h) (into #{} (filter h) acc)))))
+              (held (first terms)) (rest terms)))))
+
+(defn- within
+  "The members of `members` in the set `cut`, iterating the smaller of the two."
+  [members cut]
+  (if (< (count cut) (count members))
+    (into #{} (filter members) cut)
+    (into #{} (filter cut) members)))
+
 (defn fanned-match
   "The fan-out itself, shared by every matcher that does one: decompose `sentence` into
   the functor that fans and the rebuild that puts it back, take that functor's closure
@@ -1554,38 +1621,49 @@
     takes of the same set.
   * **A `genlInverse` member is read swapped.**  The closure is `tax/signed-closure`,
     whose odd-parity members a binary literal reads with arguments 1 and 2 exchanged
-    (docs/inference.md, \"`genlInverse`: the fan with the arguments swapped\")."
-  [kb sentence vantage raw mapcat-fn]
-  (let [neg? (sx/negation? sentence)
-        body (if neg? (second sentence) sentence)
-        f    (when (sequential? body) (first body))]
-    (if (and (symbol? f) (not (sx/variable? f)))
-      (let [[fan swapped] (tax/signed-closure (reasoning/taxonomy kb) (if neg? :up :down) f vantage)
-            ;; a `genlInverse` reading swaps arguments 1 and 2, so only a binary
-            ;; literal takes one
-            swapped (if (= 3 (count body)) swapped #{})]
-        (cond
-          (and (= 1 (count fan)) (empty? swapped))
-          (raw sentence)
+    (docs/inference.md, \"`genlInverse`: the fan with the arguments swapped\").
 
-          (empty? swapped)
-          (let [rebuild (if neg?
-                          (fn [f'] (list sx/not-functor (cons f' (rest body))))
-                          (fn [f'] (cons f' (rest body))))]
-            (mapcat-fn (fn [f'] (raw (rebuild f'))) fan))
+  `indexed?` says `raw` reads the KB's index, as `raw-match` does, so the slot rosters
+  bound what it can return and a wide fan is cut to the members they list (`slot-cut`).
+  The rete alpha matcher reads its own memories, so it passes none."
+  ([kb sentence vantage raw mapcat-fn] (fanned-match kb sentence vantage raw mapcat-fn false))
+  ([kb sentence vantage raw mapcat-fn indexed?]
+   (let [neg? (sx/negation? sentence)
+         body (if neg? (second sentence) sentence)
+         f    (when (sequential? body) (first body))]
+     (if (and (symbol? f) (not (sx/variable? f)))
+       (let [[fan swapped] (tax/signed-closure (reasoning/taxonomy kb) (if neg? :up :down) f vantage)
+             ;; a `genlInverse` reading swaps arguments 1 and 2, so only a binary
+             ;; literal takes one
+             swapped (if (= 3 (count body)) swapped #{})
+             cut     (when (and indexed? (<= slot-cut-min (+ (count fan) (count swapped))))
+                       (slot-cut kb body))
+             [fan swapped] (if cut [(within fan cut) (within swapped cut)] [fan swapped])]
+         (cond
+           (and (empty? fan) (empty? swapped))
+           ()
 
-          :else
-          ;; each member of the fan is read as written, and each swapped member with its
-          ;; two arguments exchanged, so a stored `(P a b)` under `(genlInverse P Q)`
-          ;; binds the pattern `(Q ?x ?y)` as `?x = b`, `?y = a`
-          (let [[_ x y] body
-                rebuild (fn [[f' swap?]]
-                          (let [b (if swap? (list f' y x) (cons f' (rest body)))]
-                            (if neg? (list sx/not-functor b) b)))]
-            (mapcat-fn (fn [m] (raw (rebuild m)))
-                       (concat (map #(vector % false) (nm/sort-by-content-key nm/print-key compare fan))
-                               (map #(vector % true) (nm/sort-by-content-key nm/print-key compare swapped)))))))
-      (raw sentence))))
+           (and (= 1 (count fan)) (contains? fan f) (empty? swapped))
+           (raw sentence)
+
+           (empty? swapped)
+           (let [rebuild (if neg?
+                           (fn [f'] (list sx/not-functor (cons f' (rest body))))
+                           (fn [f'] (cons f' (rest body))))]
+             (mapcat-fn (fn [f'] (raw (rebuild f'))) fan))
+
+           :else
+           ;; each member of the fan is read as written, and each swapped member with its
+           ;; two arguments exchanged, so a stored `(P a b)` under `(genlInverse P Q)`
+           ;; binds the pattern `(Q ?x ?y)` as `?x = b`, `?y = a`
+           (let [[_ x y] body
+                 rebuild (fn [[f' swap?]]
+                           (let [b (if swap? (list f' y x) (cons f' (rest body)))]
+                             (if neg? (list sx/not-functor b) b)))]
+             (mapcat-fn (fn [m] (raw (rebuild m)))
+                        (concat (map #(vector % false) (nm/sort-by-content-key nm/print-key compare fan))
+                                (map #(vector % true) (nm/sort-by-content-key nm/print-key compare swapped)))))))
+       (raw sentence)))))
 
 (defn match-pattern
   "Seq of [handle bindings] for stored sentexes matching `sentence` within
@@ -1613,7 +1691,8 @@
   ([kb sentence context vantage]
    (fanned-match kb sentence vantage
                  (fn [s] (raw-match kb s context))
-                 lazy-mapcat)))
+                 lazy-mapcat
+                 true)))
 
 (defn matches-visible*
   "The reference nested fan-out: `|context-up| × |specs|` trie walks.  `matches-visible`

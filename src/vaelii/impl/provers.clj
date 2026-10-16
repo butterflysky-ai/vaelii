@@ -192,16 +192,16 @@
   root-intersection gate on any declaration naming this predicate,
   `tax/inverses-under` is one map read on a KB declaring no inverses, and
   `datetime/time-term?` reads the goal's own arguments.
-  `concluding-rule-handles` is the one that is not — it probes the consequent index once
-  per member of `pred`'s spec closure, so this is O(specs) index reads per goal however
-  few rules conclude anything, and `cond->` evaluates every test rather than stopping at
-  the first channel found.  Its own docstring carries the number."
+  `res/concludes?` is the one that is not — it probes the consequent index per member of
+  `pred`'s spec closure until one holds a rule, so a goal no rule concludes costs O(specs)
+  index reads, and `cond->` evaluates every test rather than stopping at the first
+  channel found.  Its own docstring carries the number."
   [kb goal context]
   (when (sequential? goal)
     (let [pred (nm/functor goal)]
       (cond-> #{}
         (seq (inherit/positions kb pred context))            (conj :preserving)
-        (seq (res/concluding-rule-handles kb pred context)) (conj :rules)
+        (res/concludes? kb pred context)                    (conj :rules)
         (seq (tax/inverses-under (reasoning/taxonomy kb) pred context)) (conj :inverse)
         (some datetime/time-term? (nm/args goal))             (conj :calendar)))))
 

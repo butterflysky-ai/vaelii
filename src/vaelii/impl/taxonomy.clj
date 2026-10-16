@@ -6412,24 +6412,45 @@
   the fan it always read.  Otherwise a walk over `[predicate parity]` states, each state
   taking the `genl` closure of its predicate and crossing every visible `genlInverse` edge
   out of a member of it with the parity flipped, so a chain composes however its `genl`
-  and `genlInverse` edges alternate and terminates on a cycle of either."
+  and `genlInverse` edges alternate and terminates on a cycle of either.
+
+  The walk crosses a `genlInverse` hop per member of every closure it takes, so it is
+  linear in the fan, and a matcher asks it per goal: 6–8 ms for a fan of 6,104 under
+  `different`, three times per `(different A B)` a forward join tests.  So the walked
+  answer is memoized in the closure memo, stamped on the change clock — a hop's
+  visibility reads belief, and every write, label move and taxonomy change moves the
+  clock (`observe/note-change`).  The memo holds one clock stretch: a new stamp drops the
+  entries of the old one, so it never grows past the fans one stretch asks about."
   [tax dir p context]
-  (let [close (if (= dir :down) #(specs tax % context) #(genls tax % context))]
+  (let [close (if (= dir :down) #(specs tax % context) #(genls tax % context))
+        walk  (fn []
+                (loop [todo [[p false]] seen #{[p false]} straight #{} swapped #{}]
+                  (if-let [[n odd] (peek todo)]
+                    (let [cl   (close n)
+                          nxt  (into [] (comp (mapcat (fn [s] (genl-inverse-hop tax dir s context)))
+                                              (distinct)
+                                              (map (fn [x] [x (not odd)]))
+                                              (remove seen))
+                                     cl)]
+                      (recur (into (pop todo) nxt)
+                             (into seen nxt)
+                             (if odd straight (into straight cl))
+                             (if odd (into swapped cl) swapped)))
+                    [straight swapped])))]
     (if (genl-inverse-free? tax)
       [(close p) #{}]
-      (loop [todo [[p false]] seen #{[p false]} straight #{} swapped #{}]
-        (if-let [[n odd] (peek todo)]
-          (let [cl   (close n)
-                nxt  (into [] (comp (mapcat (fn [s] (genl-inverse-hop tax dir s context)))
-                                    (distinct)
-                                    (map (fn [x] [x (not odd)]))
-                                    (remove seen))
-                           cl)]
-            (recur (into (pop todo) nxt)
-                   (into seen nxt)
-                   (if odd straight (into straight cl))
-                   (if odd (into swapped cl) swapped)))
-          [straight swapped])))))
+      (if-let [memo (:closure-memo @tax)]
+        (let [stamp (observe/change-clock)
+              k     [dir p context]
+              held  (get @memo ::signed)]
+          (or (when (= stamp (:stamp held)) (get (:closures held) k))
+              (let [v (walk)]
+                (swap! memo update ::signed
+                       (fn [h] (if (= stamp (:stamp h))
+                                 (assoc-in h [:closures k] v)
+                                 {:stamp stamp :closures {k v}})))
+                v)))
+        (walk)))))
 
 (defn- visible-flat-supporters
   "The supporters of flat-cache key `k` a reader at `context` can use, as `[handle ctx]`

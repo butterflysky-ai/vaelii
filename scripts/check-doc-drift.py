@@ -1277,9 +1277,11 @@ E16_GLOBAL_ROSTER = {
     ("src/vaelii/impl/chain.clj", "declaration-reach"),
     ("src/vaelii/impl/resolution.clj", "defeated-index"),
     ("src/vaelii/impl/settle.clj", "belief-before"),
-    # A rule read with no reader context: `concluding-rule-handles`' unscoped arities, a
-    # stratification check over every rule, and three whole-KB reports.
+    # A rule read with no reader context: `concluding-rule-handles`' unscoped arities and
+    # `concludes?`, the shadowing check that probes the same buckets, a stratification
+    # check over every rule, and three whole-KB reports.
     ("src/vaelii/impl/resolution.clj", "concluding-rule-handles"),
+    ("src/vaelii/impl/resolution.clj", "concludes?"),
     ("src/vaelii/impl/checks.clj", "stratification-readers"),
     ("src/vaelii/impl/checks.clj", "declared-firings"),
     ("src/vaelii/impl/chain.clj", "rule-firing-report"),
