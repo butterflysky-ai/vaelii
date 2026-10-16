@@ -471,6 +471,14 @@ map is in RAM and whose log buys the restart.
   `backend_parity_test`'s "identical across every pair" is a claim about the pairs that
   run by default and not about this one — a backend whose tests need a server is covered
   by the adapter's own run against one, not by the matrix.
+- **An adapter from this repository.** The `+with-sqlite` and `+with-postgres` profiles
+  add the released adapter jar to any lein task, and the jar's pom brings its drivers:
+  `lein with-profile +with-postgres browser`, or `lein with-profile
+  +with-postgres,+with-sqlite uberjar` for a standalone jar that opens both. The default
+  `lein uberjar` and the published pom carry neither. `scripts/link-checkouts.sh` links
+  the adapters' live source, which shadows the jar's namespaces. A link without the
+  profile has no drivers, and selecting the backend then refuses with `:missing-adapter`,
+  naming the namespace that failed to load.
 - **A derived index** — the RAM map, the dense postings, the columnar trie — holds
   nothing that is not recomputable, so it is never written. Over durable records that
   costs one `reindex` per open (below); in exchange, every density experiment can be run

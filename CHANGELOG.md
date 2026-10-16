@@ -13,6 +13,22 @@ it — `git show v0.16.0:CHANGELOG.md`.
 
 ## Unreleased
 
+### Additive
+
+- **`+with-postgres`, `+with-sqlite` and `+with-foreign` add the published siblings to any
+  lein task, the uberjar included.** `lein with-profile +with-postgres browser` opens a
+  `:pg-*` KB from this checkout, `lein with-profile +with-postgres,+with-sqlite uberjar`
+  builds a standalone jar that opens both, and the `Dockerfile`'s `PROFILES` build
+  argument builds the image that way. The default uberjar and the published pom carry no
+  adapter. `scripts/link-checkouts.sh` links all three siblings' live source. An adapter
+  that loads without its dependencies refuses with `:missing-adapter`, naming the
+  namespace that failed, instead of a `CompilerException`.
+  [storage.md](docs/storage.md#backend-selection-two-independent-axes),
+  [foreign.md](docs/foreign.md#exercising-one-from-here).
+
+  *Migration:* `scripts/with-foreign.sh <task>` is gone; run `lein with-profile
+  +with-foreign <task>`.
+
 ### Fix: performance
 
 - **A goal on a predicate with many sub-predicates reads only the members that can answer

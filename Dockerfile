@@ -17,17 +17,24 @@ RUN curl -fsSL https://raw.githubusercontent.com/technomancy/leiningen/stable/bi
 
 WORKDIR /build
 
+# `--build-arg PROFILES=+with-postgres,+with-sqlite` adds the published siblings
+# (project.clj's `+with-` profiles) to the jar, so the image opens `:pg-*` and
+# `:sqlite` KBs; `+with-foreign` adds the foreign-format readers.  Empty builds the
+# engine alone.
+ARG PROFILES=""
+
 # `project.clj` alone, and resolve against it, so that editing a source file does
 # not re-resolve the whole dependency graph on every build.  Everything in
-# `:dependencies` comes from Clojars or Maven Central and the uberjar path
-# activates no profile, so this layer needs no local artifact and no checkout.
+# `:dependencies` and the `+with-` profiles come from Clojars or Maven Central, so
+# this layer needs no local artifact and no checkout.
 COPY project.clj ./
-RUN lein deps
+RUN lein ${PROFILES:+with-profile "$PROFILES"} deps
 
 COPY . .
-# `:target-path "target/%s"` puts it under the profile's own directory, and the
+# The standalone jar lands in target/uberjar/ whatever profiles are active, and the
 # name carries the version — glob rather than spell a version that moves.
-RUN lein uberjar && mv target/uberjar/*-standalone.jar /build/vaelii.jar
+RUN lein ${PROFILES:+with-profile "$PROFILES"} uberjar \
+ && mv target/uberjar/*-standalone.jar /build/vaelii.jar
 
 # ---- run ------------------------------------------------------------------
 FROM eclipse-temurin:25-jre AS run

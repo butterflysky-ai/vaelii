@@ -51,20 +51,14 @@ lein run -m vaelii.web
 The cost is that a checkout is on every command's classpath, so the build stops matching a
 shipped one; [foreign.md](foreign.md) has the trade in full.
 
-**An ad-hoc dependency add** names a published jar for the one command you prefix, without
-a checkout:
+**The `+with-foreign` profile** adds Clojars' latest released reader, without a checkout:
 
 ```sh
-lein update-in :dependencies conj \
-  '[com.vaelii/vaelii-foreign "RELEASE" :exclusions [com.vaelii/vaelii]]' -- run -m vaelii.web
+lein with-profile +with-foreign run -m vaelii.web
 ```
 
-`"RELEASE"` takes Clojars' latest; name a concrete version to pin one. A snapshot you are
-developing is not on Clojars, so `lein install` it from the plugin first (`cd
-../vaelii-foreign && lein install`) and name that version — a stale install does not fail
-loudly, it silently lacks whatever namespaces were added since. `scripts/with-foreign.sh`
-wraps this command, defaulting the task to `browser` and reading `FOREIGN_VERSION` for the
-pin.
+Pinning a version, or naming one `lein install`ed from the plugin, is
+[foreign.md](foreign.md#exercising-one-from-here).
 
 ## cyc-tiny, the Cyc fixture the plugin ships
 

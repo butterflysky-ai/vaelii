@@ -59,7 +59,6 @@ SCRIPTS=(
   scripts/lib/suite-marks.sh
   scripts/update-badges.sh
   scripts/link-checkouts.sh
-  scripts/with-foreign.sh
   scripts/run-bench-caches.sh
   scripts/stage-mine.sh
   scripts/lib/start.sh

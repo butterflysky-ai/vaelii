@@ -207,6 +207,20 @@
              :with-clingo {:jvm-opts [~(str "-Djna.library.path="
                                             (or (System/getenv "VAELII_CLINGO_LIB")
                                                 "/opt/homebrew/lib"))]}
+             ;; the published Apache-2.0 siblings, one profile each: `lein with-profile
+             ;; +with-postgres browser`, `lein with-profile +with-postgres,+with-sqlite
+             ;; uberjar`. Each adds the sibling's jar, whose pom brings its drivers, so
+             ;; this file restates no driver version. `"RELEASE"` survives the release
+             ;; carve's -SNAPSHOT strip, so an engine cut forces no sibling release. The
+             ;; exclusion keeps a released engine jar off a classpath whose `src/` is the
+             ;; engine. A `scripts/link-checkouts.sh` link shadows the jar's namespaces
+             ;; with the sibling's live source (docs/storage.md, docs/foreign.md).
+             :with-postgres {:dependencies [[com.vaelii/postgres "RELEASE"
+                                             :exclusions [com.vaelii/vaelii]]]}
+             :with-sqlite   {:dependencies [[com.vaelii/sqlite "RELEASE"
+                                             :exclusions [com.vaelii/vaelii]]]}
+             :with-foreign  {:dependencies [[com.vaelii/vaelii-foreign "RELEASE"
+                                             :exclusions [com.vaelii/vaelii]]]}
              ;; static analysis, dev-only so none of it reaches an uberjar. Keep
              ;; lein-cloverage's version in step with scripts/coverage.sh, which injects
              ;; the same plugin at the root level so `cloverage` registers under

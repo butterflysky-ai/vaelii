@@ -116,19 +116,23 @@ lein browser   # a corpus load through the catalog
 lein repl      # a foreign dump through import-dump
 ```
 
-An ad-hoc dependency add names a published jar — or one `lein install`ed from the plugin —
-for the one command you prefix, without a checkout:
+The `+with-foreign` profile adds Clojars' latest released jar, without a checkout, to any
+task, `uberjar` included:
+
+```sh
+lein with-profile +with-foreign browser
+lein with-profile +with-foreign uberjar   # a standalone jar that reads foreign formats
+```
+
+The profile excludes the plugin's own dependency on a *released* vaelii, so that jar does
+not land beside the `src/` this checkout is editing. With a link as well, the linked source
+shadows the jar's namespaces. To pin a version, or name one `lein install`ed from the
+plugin, add the dependency for one command instead:
 
 ```sh
 lein update-in :dependencies conj \
-  '[com.vaelii/vaelii-foreign "RELEASE" :exclusions [com.vaelii/vaelii]]' -- browser
+  '[com.vaelii/vaelii-foreign "0.19.0" :exclusions [com.vaelii/vaelii]]' -- browser
 ```
-
-The `:exclusions` drops the plugin's own dependency on a *released* vaelii, so that jar
-does not land beside the `src/` this checkout is editing. Name a concrete version in place
-of `"RELEASE"` to pin one. `scripts/with-foreign.sh` wraps that command: it runs `browser`
-by default, takes another task as its arguments, and reads `FOREIGN_VERSION` to pin the
-reader.
 
 The two routes differ in blast radius, and the link's matters: Leiningen puts a checkout
 on **every** command's classpath, so a linked build discovers five formats where a shipped

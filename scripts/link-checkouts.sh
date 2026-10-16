@@ -1,56 +1,34 @@
 #!/usr/bin/env bash
-# scripts/link-checkouts.sh [-f] [PREFIX] [SUFFIX] — wire up the dev-local
-# checkout symlink so Leiningen resolves the foreign-format readers from live
-# source instead of an installed snapshot jar:
+# scripts/link-checkouts.sh [-f] [PREFIX] [SUFFIX] — link the published Apache-2.0
+# siblings into checkouts/, so Leiningen resolves them from live source instead of a
+# released jar:
 #
-#   checkouts/vaelii-foreign -> ../../vaelii-foreign
+#   checkouts/vaelii-foreign  -> ../../vaelii-foreign
+#   checkouts/vaelii-postgres -> ../../vaelii-postgres
+#   checkouts/vaelii-sqlite   -> ../../vaelii-sqlite
 #
-# The readers reach into `vaelii.impl.*`, which this engine is free to change. A
-# checkout is how that break surfaces the moment it lands rather than at
-# somebody's next `lein install`. A stale snapshot is the failure it avoids, and
-# that failure is quiet: the jar does not fail loudly, it silently lacks whatever
-# namespaces were added since.
+# The siblings reach into `vaelii.impl.*`, which this engine is free to change, and a
+# link surfaces that break when it lands rather than at the next sibling release.
 #
-# checkouts/ is gitignored, so the link is not committed — rerun after a fresh
-# clone. Idempotent (ln -snf). A missing target is skipped with a WARN unless
-# -f / --force is given (a dangling link is harmless and resolves once the
-# sibling is cloned).
+# A link adds a sibling's source to EVERY command's classpath and none of its
+# dependencies. The `+with-foreign`, `+with-postgres` and `+with-sqlite` profiles
+# (project.clj) add the released jar, whose pom brings the dependencies, and the
+# linked source shadows the jar's namespaces: `lein with-profile +with-postgres
+# browser`. Without the profile, opening a `:pg-*` or `:sqlite` KB refuses with
+# `:missing-adapter`, naming the namespace that failed to load. The suite's absence
+# tests stub the adapter's load instead of reading the classpath, so `lein gate` is
+# the same with and without the links.
 #
-# **A checkout puts the plugin on EVERY command's classpath**, including
-# `lein test`'s. That is safe for the suite, whose absence claims read the SOURCE
-# TREE and the extension point rather than the classpath:
+# checkouts/ is gitignored, so the links are not committed: rerun after a fresh
+# clone. Idempotent (ln -snf). A missing target is skipped with a WARN unless -f /
+# --force is given (a dangling link resolves once the sibling is cloned). Only a
+# published sibling is named here, because this script ships and every repo it names
+# must be one a reader can clone.
 #
-#   * `no-reader-ships-in-this-tree` stats src/vaelii/impl/foreign and
-#     resources/vaelii/foreign.edn IN THIS REPO;
-#   * `nothing-outside-the-extension-point-names-a-reader` greps this repo's src/ and test/;
-#   * `the-extension-point-holds-no-compile-time-reference` reads the plugin file;
-#   * the runtime tests use synthetic kinds (:no-such-format, :test-format) and a
-#     temp-dir manifest, so a real plugin on the path is not what they measure.
-#
-# Measured 2026-07-31, one tree, the link as the only variable: **2408 tests /
-# 120,061 assertions either way**, identical to the digit, 0 failures. The link
-# adds no test and no assertion, and `lein test` does not pick up a checkout's
-# test namespaces. vaelii.foreign-contract-test is green at 8 tests / 30
-# assertions with the plugin on the path.
-#
-# What DOES change is that a linked build discovers five formats where the
-# shipped build discovers none, so a foreign read that works on your machine may
-# be the link rather than the code. That is a repl and browser concern, not a
-# test one. Without the sibling checked out, add the published reader as an ad-hoc
-# dependency instead, which `scripts/with-foreign.sh` wraps — the from-checkout form
-# of the coordinate a real consumer puts in its own project (docs/foreign.md).
-#
-# vaelii-foreign is the only sibling linked, because it is the only other
-# published one. This script ships, so every repo it names has to be a repo the
-# reader can clone — an unpublished sibling named here is a dead end for
-# everybody who is not the maintainer. Those are wired up in profiles.clj, by
-# hand, and profiles.clj is gitignored and local, which is where they belong.
-#
-# PREFIX / SUFFIX wrap the *target repo dir name* so a modified sibling clone can
-# be linked while the checkout name stays fixed (Leiningen matches a checkout by
-# the project.clj it finds, not by the directory name):
-# `link-checkouts.sh "" -wip` points checkouts/vaelii-foreign at
-# ../../vaelii-foreign-wip.
+# PREFIX / SUFFIX wrap the *target repo dir name* so a modified sibling clone can be
+# linked while the checkout name stays fixed (Leiningen matches a checkout by the
+# project.clj it finds, not by the directory name): `link-checkouts.sh "" -wip` points
+# checkouts/vaelii-foreign at ../../vaelii-foreign-wip.
 { # one brace group, read whole before it runs: scripts/lint-shellcheck.sh says why
 set -euo pipefail
 cd "$(dirname "$0")/.."   # repo root
@@ -60,7 +38,7 @@ force=0
 while [[ "${1:-}" == -* ]]; do
   case "$1" in
     -f|--force) force=1; shift ;;
-    -h|--help)  sed -n '2,17p' "$0"; exit 0 ;;
+    -h|--help)  sed -n '2,31p' "$0"; exit 0 ;;
     --) shift; break ;;
     *)  echo "unknown option: $1" >&2; exit 2 ;;
   esac
@@ -84,5 +62,7 @@ link() {
 }
 
 link vaelii-foreign vaelii-foreign
+link vaelii-postgres vaelii-postgres
+link vaelii-sqlite vaelii-sqlite
 exit
 }
