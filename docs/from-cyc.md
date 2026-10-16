@@ -83,7 +83,7 @@ be decided → [solving.md](solving.md).
 | `siblingDisjointExceptions` (plural) | `siblingDisjointException` | exempts one pair from the separation marks: the sibling mark, a `disjoint_metatype` and a `partition` or `separating` roster, not a stated `disjoint`; read at the reader, so a context that does not see it reads the pair separated, and pair-local |
 | `SymmetricBinaryPredicate` | `(symmetric P)` | |
 | `AsymmetricBinaryPredicate` | `(asymmetric P)` | convicts a claim whose **converse** is believed; it does not make `P` irreflexive, and `(P a a)` is admitted |
-| `genlInverse` | an inert `genlInverse` declaration, or a forward rule | vaelii declares `genlInverse` as an inert predicate with no inference path; a working inverse is a forward rule, and `(inverse P Q)` is the stronger biconditional |
+| `genlInverse` | `genlInverse` | same reading: binary `genl` with arguments 1 and 2 swapped, read by the matching fan, so a fact, a rule antecedent and a justification all see it; `(inverse P Q)` is the stronger biconditional |
 | `unk` | `unknown` | negation as failure, ground-only, evaluated at level 6 and storing nothing. A conjunctive argument is joined, so its conjuncts may share a quantifier's variable, and `forall` is sugar for the nested case → [naf.md](naf.md) |
 | — | `(contradictions kb)` | no Cyc equivalent: the pairs that coexist, ordered by content |
 | `assertedMoreSpecifically` | — | no equivalent. Specificity is behavioral: a stated specific claim undercuts an inherited general one, so nothing is derived to arbitrate → [inherit.md](inherit.md) |
@@ -100,12 +100,10 @@ with its own handle rather than an absence:
 
 `(inverse P Q)` is the inverse that `ask?`, `query` and a transitive walk read; a forward
 rule's antecedent does not join it ([inference.md](inference.md#where-the-machinery-stops)).
-vaelii declares an inert
-`genlInverse` too, and the declaration carries no inference path, so a working
-one-directional inverse is a forward rule. `(inverse P Q)` is stronger than that
-forward rule in three ways: it is stored under an unordered key so one declaration installs
-both directions, a predicate may declare **several** partners and all are live, and a
-partner declared on a sub-predicate answers the super-predicate's goal.
+`(genlInverse P Q)` is the one-directional form, binary `genl` with the arguments
+swapped. The matching fan reads it, so a forward rule's antecedent joins it and the
+firing's justification names the edge. `(inverse P Q)` holds in both directions: one
+declaration is stored under an unordered key and installs both.
 
 ## Well-formedness: assertive by default
 

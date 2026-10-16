@@ -262,14 +262,14 @@ The tables are generated from the register by `lein regen-goldens`, and
 | M2 | Touched window | `jtms` | handle | M1 | E5 K, E10 K, E16 W, E17 W | write | journal | no |  |  |
 | M3 | Belief hold | `jtms` | global | M1 | E6 K | settle | index | no |  |  |
 | M4 | Justification dedup | `jtms` | handle | justifications | E5 W | pass | pass | no | `:justification-dedup` |  |
-| J1 | Candidate journal | `decide` | handle | N1 N3 N5 | E1 K, E3 K, E4 K, E7 K, E8 K, E9 K, E15 K, E17 R, E18 R, E22 K | write | journal | no |  |  |
+| J1 | Candidate journal | `decide` | handle | N1 N5 | E1 K, E3 K, E4 K, E7 K, E8 K, E9 K, E15 K, E17 R, E18 R, E22 K | write | journal | no |  |  |
 | J2 | Candidates by context | `decide` | context | J1 N1 | E1 K, E3 K, E4 K, E8 K, E15 K, E17 R, E18 R | read | cache | no |  |  |
 | J4 | Flat context moves | `taxonomy` | value | T2 | E8 K, E9 K, E17 R | write | journal | no |  |  |
 | J5 | Relation moves | `taxonomy` | node | T1 | E7 K, E8 K, E17 R, E18 R | write | journal | taxonomy |  |  |
 | J6 | Placement edge cursor | `decide` | global | J5 | E17 R, E18 R, E22 Q | settle | counter | state |  |  |
 | N1 | Converse candidates | `decide.tuple` | handle | index records T2 | E1 K, E3 K, E4 K, E7 K, E9 K, E17 R, E18 R | write | cache | state |  |  |
 | N2 | Tuple mark candidates | `decide.tuple` | value | index records T1 T2 | E1 K, E3 K, E4 K, E7 G, E8 G, E9 K, E17 R, E18 R, E22 G | read | cache | state |  |  |
-| N3 | Arity candidates | `decide.arity` | functor | index records T1 J5 N8 | E1 K, E3 K, E4 K, E7 K, E8 K, E9 K, E17 R, E18 R, E22 K | write | cache | state |  |  |
+| N3 | Arity inert shapes | `decide.arity` | functor | index records M1 T1 J5 N8 | E1 K, E3 K, E5 K, E7 G, E8 G, E17 R, E18 R, E22 Q | write | cache | state |  |  |
 | N5 | Membership candidates | `decide.membership` | term | index records T1 T2 J5 | E1 K, E3 K, E4 K, E7 K, E8 K, E9 S, E17 R, E18 R, E22 K | read | cache | state |  |  |
 | N6 | Related declaration candidates | `decide.related` | handle | index records T1 J5 | E1 K, E3 K, E4 K, E7 K, E8 K, E9 K, E17 R, E18 R, E22 K | read | cache | state |  |  |
 | N7 | Inherited clashes | `decide.inherited` | value | D3 | E15 W, E17 R, E18 R | settle | index | state |  |  |
@@ -318,12 +318,12 @@ The tables are generated from the register by `lein regen-goldens`, and
 | E1 | `stored` | `kb/create-sentex` | handle, sentence, context | T5 T7 J1 J2 N1 N2 N3 N5 N6 N8 X1 X3 R1 R2 R3 R6 R9 R10 R13 K10 K11 |
 | E2 | `integrated` | `special/integrate-sentex`, `special/derived-sentex-added`, `special/integrate-twin` | handle, functor | S5 T4 T5 T7 X1 X3 R1 R2 R3 K10 K11 |
 | E3 | `removed` | `integrate/sentex-removed!` | record, except target | S5 T4 T5 T7 J1 J2 N1 N2 N3 N5 N6 N8 X1 X3 D3 Q7 R1 R2 R3 R6 R8 R9 R10 R13 K10 K11 |
-| E4 | `respelled` | `kb/respell-sentex!` | old and new sentex, one handle | T5 T7 J1 J2 N1 N2 N3 N5 N6 X1 X3 R1 R2 R3 R6 R8 R9 R10 R13 K10 K11 |
-| E5 | `relabelled` | `jtms/supersede`, `jtms/ensure-node`, `jtms/add-premise`, `jtms/suspend-premise`, `jtms/add-justification`, `jtms/restrength-informant`, `jtms/set-forced`, `jtms/relabel`, `jtms/set-blocked`, `jtms/retract!`, `jtms/sweep!`, `jtms/drop-justification!` | the handles of the region, held in the network | T5 T7 M1 M2 M4 X1 X3 R1 R2 R3 K10 K11 |
+| E4 | `respelled` | `kb/respell-sentex!` | old and new sentex, one handle | T5 T7 J1 J2 N1 N2 N5 N6 X1 X3 R1 R2 R3 R6 R8 R9 R10 R13 K10 K11 |
+| E5 | `relabelled` | `jtms/supersede`, `jtms/ensure-node`, `jtms/add-premise`, `jtms/suspend-premise`, `jtms/add-justification`, `jtms/restrength-informant`, `jtms/set-forced`, `jtms/relabel`, `jtms/set-blocked`, `jtms/retract!`, `jtms/sweep!`, `jtms/drop-justification!` | the handles of the region, held in the network | T5 T7 M1 M2 M4 N3 X1 X3 R1 R2 R3 K10 K11 |
 | E6 | `held` | `settle/hold-belief!`, `settle/publish-belief!` | hold token | T5 T7 M3 X1 X3 Q4 R1 R2 R3 K10 K11 |
 | E7 | `edge` | `taxonomy/add-genl`, `taxonomy/del-genl!`, `taxonomy/add-genlCx`, `taxonomy/del-genlCx!` | handle, edge, context | T1 T5 T7 T11 J1 J5 N1 N2 N3 N5 N6 N8 X1 X3 R1 R2 R3 K10 K11 |
 | E8 | `edge-belief` | `special/reconcile-belief-change`, `taxonomy/refresh-beliefs` | moved handles, or nil for all | T1 T2 T3 T4 T5 T7 T11 J1 J2 J4 J5 N2 N3 N5 N6 N8 X1 X3 Q5 R1 R2 R3 K10 K11 |
-| E9 | `declared` | `taxonomy/add-supported`, `taxonomy/del-supported!` | handle, [kind key], context | T2 T5 T7 T11 J1 J4 N1 N2 N3 N5 N6 X1 X3 R1 R2 R3 K10 K11 |
+| E9 | `declared` | `taxonomy/add-supported`, `taxonomy/del-supported!` | handle, [kind key], context | T2 T5 T7 T11 J1 J4 N1 N2 N5 N6 X1 X3 R1 R2 R3 K10 K11 |
 | E10 | `roster` | `checks/force-reach!` | predicate | T5 T7 M1 M2 X1 X3 R1 R2 R3 K10 K11 |
 | E11 | `equality` | `taxonomy/add-equality`, `taxonomy/del-equality!` | handle, pair | T3 T5 T7 X1 X3 Q5 R1 R2 R3 K10 K11 |
 | E12 | `except` | `special/recheck-except` | except, target, context | T5 T7 X1 X3 R1 R2 R3 K10 K11 |

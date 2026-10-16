@@ -871,7 +871,7 @@
   checked and only the rendered document has them."
   [body]
   ;; `(?s)` because the content is the newlines being checked, and `.` does not cross one
-  (some-> (re-find #"(?s)<span class=\"sx-rule\">(.*?)@ <a class=\"sx t-context\"" body)
+  (some-> (re-find #"(?s)<span class=\"sx-rule\">(.*?)<span class=\"cx-in\"> in </span><a class=\"sx t-context\"" body)
           second
           (str/replace #"<[^>]+>" "")
           (str/replace #"&quot;" "\"")
@@ -905,6 +905,28 @@
       (is (not (str/includes? body "sx-rule")))
       (is (nil? (rule-lines body)))
       (is (not (re-find #"</a>\n" body)) "and no row carries a newline of its own"))))
+
+(deftest a-comment-marks-up-its-formulas-variables-terms-and-doc-pages
+  (let [body (:body (GET "/term" "q=measureInUnit"))
+        text (re-find #"(?s)<span class=\"sx t-str\">&quot;.*?&quot;</span>" body)]
+    (is (some? text) "the comment's text is one white literal")
+    (testing "the text between the quotes is set in --prose, the quotes outside it"
+      (is (str/starts-with? text "<span class=\"sx t-str\">&quot;<span class=\"str-text\">"))
+      (is (str/ends-with? text "</span>&quot;</span>")))
+    (testing "a formula renders as a sentence, its parens coloured by depth"
+      (is (str/includes? text "<span class=\"rb1\">(</span><a class=\"sx t-pred\" href=\"/term?q=measureInUnit\">")))
+    (testing "a variable takes the variable colour"
+      (is (str/includes? text "<span class=\"t-var\">?magnitude</span>")))
+    (testing "a word spelled as a stored term links as that term, and English stays text"
+      (is (str/includes? text "href=\"/term?q=QuantityFn\""))
+      (is (str/includes? text " holds of five kilograms. ")))
+    (testing "a docs page links to the public repository"
+      (is (str/includes? text "href=\"https://github.com/vaelii/vaelii/blob/develop/docs/quantity.md\""))))
+  (testing "a parenthetical with commas, or headed by no stored term, stays text"
+    (let [known? '#{dog}]
+      (is (nil? (#'web/comment-formula known? "(dog, cat)")))
+      (is (nil? (#'web/comment-formula known? "(the default)")))
+      (is (= '(dog ?x) (#'web/comment-formula known? "(dog ?x)"))))))
 
 (deftest a-row-is-a-circle-and-a-sentence
   ;; Every case the badge distinguishes is one colour, so a word beside it says the
@@ -1375,6 +1397,48 @@
       (is (not (contains? up [near_sub near_top])))
       (is (= #{[near_mid near_top] [near_sub near_mid]} down)))))
 
+(defn- grown-contexts
+  "One side of the taxonomy view of context `c`, as `[context from]` pairs per row."
+  [dir hops c]
+  (let [grow (ns-resolve 'vaelii.browser.web 'grow)]
+    (mapv (fn [row] (into #{} (map (juxt :term :from)) row))
+          (:rows (grow tu/*kb* 'genlCx dir hops c 6)))))
+
+(tu/deftest-kb a-stated-genlCx-to-a-farther-context-is-not-drawn-as-a-direct-neighbour
+  ;; `CxNearLeaf → CxNearMid → CxNearTop`, and `(genlCx CxNearLeaf CxNearTop)` is stated
+  ;; beside them
+  (tu/with-terms [CxNearLeaf CxNearMid CxNearTop]
+    (v/assert kb (list 'genlCx CxNearMid CxNearTop) 'CxUniverse)
+    (v/assert kb (list 'genlCx CxNearLeaf CxNearMid) 'CxUniverse)
+    (v/assert kb (list 'genlCx CxNearLeaf CxNearTop) 'CxUniverse)
+    (testing "above the lowest context: the middle context, and the top context above the middle one"
+      (let [[row1 row2] (grown-contexts :up 2 CxNearLeaf)]
+        (is (= #{[CxNearMid CxNearLeaf]} row1))
+        (is (= #{[CxNearTop CxNearMid]} row2)))
+      (let [ys (node-ys (svg-of (:body (GET "/term" (str "q=" CxNearLeaf)))))]
+        (is (< (ys (str CxNearTop)) (ys (str CxNearMid)) (ys (str CxNearLeaf))))))
+    (testing "below the top context: the middle context, and the lowest context below the middle one"
+      (let [[row1 row2] (grown-contexts :down 2 CxNearTop)]
+        (is (= #{[CxNearMid CxNearTop]} row1))
+        (is (= #{[CxNearLeaf CxNearMid]} row2)))
+      (let [ys (node-ys (svg-of (:body (GET "/term" (str "q=" CxNearTop)))))]
+        (is (< (ys (str CxNearTop)) (ys (str CxNearMid)) (ys (str CxNearLeaf))))))))
+
+(tu/deftest-kb a-context-page-draws-both-sides-of-a-genlCx-diamond
+  ;; `CxDiaLeaf` reaches `CxDiaTop` through `CxDiaLeft` and through `CxDiaRight`, and
+  ;; `(genlCx CxDiaLeaf CxDiaTop)` is stated beside them
+  (tu/with-terms [CxDiaLeaf CxDiaLeft CxDiaRight CxDiaTop]
+    (v/assert kb (list 'genlCx CxDiaLeft CxDiaTop) 'CxUniverse)
+    (v/assert kb (list 'genlCx CxDiaRight CxDiaTop) 'CxUniverse)
+    (v/assert kb (list 'genlCx CxDiaLeaf CxDiaLeft) 'CxUniverse)
+    (v/assert kb (list 'genlCx CxDiaLeaf CxDiaRight) 'CxUniverse)
+    (v/assert kb (list 'genlCx CxDiaLeaf CxDiaTop) 'CxUniverse)
+    (is (= #{[CxDiaLeft CxDiaLeaf] [CxDiaRight CxDiaLeaf]} (first (grown-contexts :up 1 CxDiaLeaf))))
+    (is (= #{[CxDiaLeft CxDiaTop] [CxDiaRight CxDiaTop]} (first (grown-contexts :down 1 CxDiaTop))))
+    (let [ys (node-ys (svg-of (:body (GET "/term" (str "q=" CxDiaLeaf)))))]
+      (is (= (ys (str CxDiaLeft)) (ys (str CxDiaRight))))
+      (is (< (ys (str CxDiaTop)) (ys (str CxDiaLeft)) (ys (str CxDiaLeaf)))))))
+
 ;; ---- hide derived, and the picture ---------------------------------------
 
 (tu/deftest-kb hiding-derived-rows-leaves-the-concept-graph-as-drawn
@@ -1638,9 +1702,61 @@
         (is (re-find #"Defeated" (:body r)))
         (is (re-find #"contradicted by" (:body r)))))))
 
-(tu/deftest-kb a-defeat-a-separation-caused-names-the-separation-on-the-sentex-and-term-pages
+(tu/deftest-kb a-sentence-dims-by-its-own-belief-in-a-row-and-inside-a-meta-sentex
+  (tu/with-terms [flies Tweety Polly CxNest]
+    (let [out  (v/assert kb (list flies Tweety) CxNest {:strength :default})
+          in   (v/assert kb (list flies Polly) CxNest)
+          _    (v/assert kb (list 'not (list flies Tweety)) CxNest {:strength :monotonic})
+          body (:body (GET "/term" (str "q=" flies)))
+          row  #(re-find (re-pattern (str "(?s)<li[^>]*data-h=\"" % "\"[^>]*>.*?</li>")) body)
+          meta #(str (#'web/render-form (web/view kb {}) (list 'except (list 'sentexHandle %))))]
+      (is (re-find #"class=\"sx-out\"" (str (row out))))
+      (is (re-find #"class=\"sx-in\"" (str (row in))))
+      (is (not (re-find #"sx-out" (str (row in)))))
+      (testing "a nested sentence carries its own class, which resets the outer one's --lit"
+        (is (re-find #"\"sx-out\"" (meta out)))
+        (is (re-find #"\"sx-in\"" (meta in)))))))
+
+(tu/deftest-kb the-sentex-page-of-an-inert-denial-names-the-literal-and-its-roster-declaration
+  (tu/with-terms [dog_kind cat_kind]
+    (let [s    (list 'disjoint dog_kind cat_kind)
+          h    (v/assert kb s 'CxUniverse)
+          d    (v/assert kb (list 'not s) 'CxUniverse)
+          decl (v/handle-of kb '(forced_monotonic_predicate disjoint) 'CxUniverse)
+          body (:body (GET (str "/sentex/" d)))]
+      (is (re-find (re-pattern (str "(?s)It denies .*?/sentex/" h "\".*?which this context believes")) body))
+      (is (str/includes? body "is on the forced-monotonic roster, which every KB holds."))
+      (is (re-find (re-pattern (str "declared by .*?/sentex/" decl "\"")) body))
+      (testing "the badge stands before the sentence, not in the heading"
+        (is (re-find #"<h2[^>]*>Sentex <span class=\"muted\">#" body))
+        (is (re-find (re-pattern (str "(?s)<p class=\"sx-item\"><a class=\"badge-link\" href=\"/sentex/" d "\""))
+                     body))))))
+
+(tu/deftest-kb a-ground-compound-term-opens-with-a-link-to-its-term-page
+  (tu/with-terms [likes Ann]
+    (let [view (web/view kb {})
+          html #(str (#'web/render-form view %))]
+      (is (str/includes? (html (list likes Ann '(FruitFn Apple)))
+                         (str "[:a {:class \"rb2\", :href \"/term?q="
+                              (#'web/url-enc (pr-str '(FruitFn Apple))) "\"")))
+      (is (not (re-find #":href \"/term\?q=%28FruitFn" (html (list likes Ann '(FruitFn ?x)))))
+          "an open compound is not a term with a page")
+      (is (not (re-find #"\[:a \{:class \"rb1\"" (html (list likes Ann '(FruitFn Apple)))))
+          "a literal's own paren is not a link"))))
+
+(tu/deftest-kb the-history-draws-each-literal-by-handle-in-the-order-given
+  (tu/with-terms [likes Ann Bob]
+    (let [a    (v/assert kb (list likes Ann Bob) 'CxUniverse)
+          b    (v/assert kb (list likes Bob Ann) 'CxUniverse)
+          body (:body (GET "/history/literals" (str "handles=" b "," a)))]
+      (is (re-find (re-pattern (str "(?s)badge-link\" href=\"/sentex/" b "\".*badge-link\" href=\"/sentex/" a "\""))
+                   body))
+      (is (re-find (re-pattern (str "data-href=\"/sentex/" a "\"")) body) "with its remove button")
+      (is (= "" (:body (GET "/history/literals" "handles=12,x"))) "a list that does not read"))))
+
+(tu/deftest-kb an-inert-tuple-a-separation-caused-names-the-separation-on-the-sentex-and-term-pages
   ;; `(disjoint gladdenOf saddenOf)` mints `(genl gladdenOf thing)` through CxUniverse's
-  ;; `(genlArg disjoint 1 thing)`, and `(unary_predicate thing)` then defeats the tuple.
+  ;; `(genlArg disjoint 1 thing)`, and `(unary_predicate thing)` then holds the tuple inert.
   ;; The mint is the entailing reading's, so the test pins it: under the constraint-only
   ;; reading the tuple stays believed and no page names the separation.
   (tu/with-entailing
@@ -1649,7 +1765,7 @@
             sep  (v/assert kb (list 'disjoint gladdenOf saddenOf) 'CxUniverse)
             ref  (re-pattern (str "through .*?/sentex/" sep "\\b"))]
         (is (false? (v/in? kb fact)))
-        (is (re-find #"convicted through" (:body (GET (str "/sentex/" fact)))))
+        (is (re-find #"bound through" (:body (GET (str "/sentex/" fact)))))
         (is (re-find ref (:body (GET (str "/sentex/" fact)))))
         (is (re-find ref (:body (GET "/term" (str "q=" gladdenOf)))))))))
 

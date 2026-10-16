@@ -624,6 +624,12 @@
   ([conn level goal] (call conn :lookup [level goal]))
   ([conn level goal context] (call conn :lookup [level goal context])))
 
+(defn max-context-children
+  "The **maximal** contexts that inherit from context `c`: the contexts that reach `c` over
+  one `genlCx` edge with no other such context strictly above them."
+  [conn c]
+  (call conn :max-context-children [c]))
+
 (defn max-specs
   "The **maximal** subtypes of type `t`: its direct children (`direct-specs`) with no other
   direct child of `t` strictly above them."
@@ -635,6 +641,12 @@
   of, closed under genl."
   [conn m]
   (call conn :metatype-members [m]))
+
+(defn min-context-parents
+  "The **minimal** contexts context `c` inherits from: the contexts `c` reaches over one
+  `genlCx` edge with no other such context strictly below them."
+  [conn c]
+  (call conn :min-context-parents [c]))
 
 (defn min-genls
   "The **minimal** supertypes of type `t`: its direct parents (`direct-genls`) with no

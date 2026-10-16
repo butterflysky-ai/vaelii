@@ -62,9 +62,9 @@
 ;; `constraint-descension-test`'s `a-declarations-own-checks-read-its-own-predicates-
 ;; arity` holds the near half: a sub-predicate carrying `(ternary_predicate fatherOf)` may
 ;; declare its own third position however binary its supers are.  The far half is a
-;; sub-predicate carrying **nothing** — where `arity/own-length` answers nil and
-;; `arity/relation-length` falls through to the hierarchy — and reading `own-length` there
-;; admits a constraint on a position the predicate provably does not have.
+;; sub-predicate carrying **nothing**, whose length `arity/relation-length` reads from the
+;; bindings above it.  A check that read only the predicate's own bindings there would
+;; admit a constraint on a position the predicate provably does not have.
 
 (tu/deftest-kb an-inherited-arity-refuses-a-position-the-sub-predicate-never-declared
   (tu/with-terms [parentOf fatherOf]

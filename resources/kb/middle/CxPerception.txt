@@ -3,7 +3,7 @@
 ;; context opts in by placing itself under CxPerception.
 ;;
 ;; Arg 1 of every relation here names the perceiver and carries no arg declaration:
-;; vaelii's `agent` names a registered koinii participant
+;; vaelii's `registered_agent` names a registered koinii participant
 ;; (resources/kb/koinii/CxRegistry.txt), which is a membership mark for an
 ;; adjudication registry rather than a general type for an entity with agency, and
 ;; the upper ontology ships no such type, so no type below `thing` covers the

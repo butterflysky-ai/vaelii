@@ -4,6 +4,7 @@
   "Tests for vaelii.core/argue — four-valued epistemic status queries."
   (:require [clojure.test :refer [deftest is testing use-fixtures]]
             [vaelii.core :as v]
+            [vaelii.impl.inference :as inf]
             [vaelii.test-util :as tu]))
 
 (use-fixtures :each (tu/neutral-fresh tu/fresh))
@@ -50,6 +51,24 @@
         (is (seq (:for-derivation r)))
         (is (= (list has_fur Muffet) (:goal (first (:for-derivation r)))))
         (is (= :rule (:via (first (:for-derivation r)))))))))
+
+(tu/deftest-kb argue-stops-a-ground-goal-search-at-its-first-answer
+  ;; The stored fact answers (fed Muffet) at the root.  Ten rules also conclude it, and
+  ;; a search run past the first answer expands each of their children.
+  (tu/with-terms [fed Muffet]
+    (v/assert kb (list fed Muffet) 'CxUniverse)
+    (dotimes [_ 10]
+      (tu/with-terms [source]
+        (v/assert-rule kb [(list source '?x)] (list fed '?x) 'CxUniverse
+                       {:direction :backward})))
+    (let [steps (atom 0)
+          step! inf/step!]
+      ;; the 1-arity calls the 2-arity through the var, so only the 2-arity counts
+      (with-redefs [inf/step! (fn ([sess] (step! sess))
+                                ([sess dl] (swap! steps inc) (step! sess dl)))]
+        (is (= :true (:verdict (v/argue kb (list fed Muffet) 'CxUniverse {:max-depth 2})))))
+      (is (= 3 @steps)
+          "one step for the side that holds, and two for the other: its root and the empty frontier"))))
 
 (tu/deftest-kb argue-derives-through-a-rewrite-whose-residual-repeats-a-conjunct
   ;; (a K) rewrites to (b K) ∧ (e K), and (e K) to (b K) ∧ (f K): the second (b K) folds

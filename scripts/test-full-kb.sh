@@ -10,7 +10,7 @@
 #      which grows with the store. Otherwise it installs the image it finds. The
 #      upgraded image is KB-DIR's, so the next run, another checkout at the same source,
 #      and any other open of it install it rather than recover it again.
-#   2. KB-DIR is cloned to $VAELII_FULL_KB_WORK/run-<pid> (default target/full-kb), an APFS
+#   2. KB-DIR is cloned to $VAELII_FULL_KB_WORK/run-<pid> (default testbench/full-kb), an APFS
 #      clone (`cp -c`) that shares its blocks, which the test JVM opens as
 #      VAELII_FULL_KB_DIR, and which is deleted after: the probes write into the KB they
 #      open.
@@ -42,7 +42,7 @@ if [ ! -d "$KB/records" ]; then
   exit 2
 fi
 
-WORK="${VAELII_FULL_KB_WORK:-$ROOT/target/full-kb}"
+WORK="${VAELII_FULL_KB_WORK:-$ROOT/testbench/full-kb}"
 mkdir -p "$WORK" || exit 1
 
 VAELII_HEAP="${VAELII_HEAP:-44g}"

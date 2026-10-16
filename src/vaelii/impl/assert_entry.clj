@@ -25,7 +25,6 @@
             [clojure.string :as str]
             [vaelii.impl.chain :as chain]
             [vaelii.impl.checks :as checks]
-            [vaelii.impl.decide :as decide]
             [vaelii.impl.imperative :as imperative]
             [vaelii.impl.integrate :as integrate]
             [vaelii.impl.jtms :as jtms]
@@ -40,8 +39,7 @@
             [vaelii.impl.strength :as strength]
             [vaelii.impl.taxonomy :as tax]
             [vaelii.impl.types.reasoning :as reasoning]
-            [vaelii.impl.violations :as violations]
-            [vaelii.impl.wiring :refer [*defer-settle?*]]))
+            [vaelii.impl.violations :as violations]))
 
 (def ^:dynamic *premise-audit*
   "When bound to an atom, every premise mark on the assert path first records the
@@ -174,7 +172,7 @@
                    (rules/forward-sentex? s')
                    (not (rules/forward-sentex? stored)))
           (chain/chain-all kb [h] opts))
-        (when-not *defer-settle?* (settle/settle kb))))))
+        (settle/settle-write kb (:chain? opts true))))))
 
 (defn- assert-rule-sentence
   "Assert a rule **as written** — any `set/*Rule` wrapper included, since the sentex
@@ -240,7 +238,7 @@
                                     (into (special/transitive-rule-seeds kb s)))
                              opts))
           (violations/report kb (:violations mig)))
-        (when-not *defer-settle?* (settle/settle kb)))
+        (settle/settle-write kb (:chain? opts true)))
       (do
         (reconcile-rule-slots! kb h s sentence context opts)
         ;; `find-or-create-sentex` hands back the stored record and drops the strength
@@ -268,7 +266,7 @@
             ;; returns.  A class move alone moves none, nothing in the engine defeating
             ;; a rule — but the *first* mark of a rule that was only ever concluded puts
             ;; it IN, and that revives whatever it licenses.
-            (when-not *defer-settle?* (settle/settle kb))))))
+            (settle/settle-write kb (:chain? opts true))))))
     h))
 
 ;; A `set/defaultRule` wrapper sets `:defeasible` on the record, so the one rule path
@@ -328,7 +326,7 @@
           ;; saw the exception — re-point it onto the live twin(s) now, or the twin fires
           ;; unguarded (docs/equality.md, the meta-after-merge case).
           (special/migrate-meta-onto-twins kb s)
-          (when-not *defer-settle?* (settle/settle kb)))  ; sweep what the new exception now blocks
+          (settle/settle-write kb (:chain? opts true)))  ; sweep what the new exception now blocks
         h))))
 
 (defn ist-parts
@@ -485,11 +483,7 @@
         ;; the labeller's forced memberships go in before the mark, so a denial of a
         ;; roster literal is never IN (docs/nmtms.md, "The forced-monotonic roster")
         (checks/force-sentex! kb s)
-        (let [was (jtms/premise-strength (reasoning/tms kb) h)]
-          (mark-premise kb h strength)
-          ;; a stored premise's class rising moves the arity nogoods it can ground
-          (when (and was (not= was (jtms/premise-strength (reasoning/tms kb) h)))
-            (decide/note-reading-moved! kb h)))
+        (mark-premise kb h strength)
         (when permuted?
           (integrate/note-premise-spelling! kb h (:sentence s) sentence strength prior))
         ;; The add-side choke point: the sentex is reflected into every cache
@@ -581,10 +575,14 @@
                 ;; everything it concluded (docs/defns.md).  A non-`defn*` sentence pays
                 ;; one functor read and returns the empty result.
                 dfn   (special/materialize-defn-rules kb sentence h context)
+                ;; ...and the class membership a metatype route derives, from this
+                ;; membership, or from the memberships this `genl` edge or class rise
+                ;; brings onto a route (`chain/arity-classes-moved!`)
+                cls   (chain/arity-classes-moved! kb [s] false)
                 mig   (update mig :violations into
                               (concat (:violations lift) (:violations args)
                                       (:violations back) (:violations down)
-                                      (:violations dfn)))]
+                                      (:violations dfn) (:violations cls)))]
             ;; The seeds feed `chain-all` and nothing else, so an assert that does not
             ;; chain computes none.
             (when (:chain? opts true)
@@ -598,6 +596,7 @@
                    ;; the companion rule goes on the agenda so it fires over the
                    ;; facts already stored, the way a minted generator rule does
                    (into (:new dfn))
+                   (into (:new cls))
                    ;; a minted type makes this fact matchable at a type it did
                    ;; not have, so it goes on the agenda for the same reason the
                    ;; genl seeds below do — a rule on `(animal ?x)` must fire off
@@ -623,7 +622,8 @@
             ;; (docs/equality.md, "Interactions — Disjointness").  The ledger itself
             ;; accumulates and is emptied only by `clear-violations!`.
             (violations/report kb (:violations mig))))
-        ;; an unchained assert seeds no chaining from the `genlCx` moves it settles
-        (when-not *defer-settle?*
-          (binding [special/*seed-moves?* (:chain? opts true)] (settle/settle kb)))
+        ;; an unchained assert seeds no chaining from the `genlCx` moves it settles, and a
+        ;; bulk one draws no argument types over them
+        (binding [special/*entail-moves?* (not bulk?)]
+          (settle/settle-write kb (:chain? opts true)))
         h))))

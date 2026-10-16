@@ -195,7 +195,7 @@
 (tu/deftest-kb ^:slow three-roommates-a-long-argument-over-the-wire
   (let [^Server server (serve/start kb {:port 0 :token nil})
         port (serve/port server)
-        conn #(vc/client "localhost" port {:token nil :timeout-ms 5000})]
+        conn #(vc/client "localhost" port {:token nil})]
     (try
       ;; the apartment is configured with its common-sense house rules (server-side);
       ;; the three roommates are remote and only ever state FACTS — stances are derived

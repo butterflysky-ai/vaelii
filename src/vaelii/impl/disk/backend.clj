@@ -53,7 +53,9 @@
       rebuilds the index from the records on open.  `:disk-memory` and `:disk-dense` write
       the same files and read back correctly as `:disk-columnar`;
     * `index/kv.log` with no `records/` → `:pg-disk-log`, a local index over records on a
-      server, which `open-kb` refuses until the caller names the server (`:pg`).
+      server, which `open-kb` refuses until the caller names the server (`:pg`);
+    * `index/trie.csr` with no `records/` → `:pg-snapshot`, the images of a KB whose
+      records are on a server, refused the same way.
 
   An open under the wrong backend returns an empty KB and throws nothing: a
   `:disk-snapshot` or `:disk-columnar` store opened as `:disk-log` finds no index log, so
@@ -68,7 +70,8 @@
                                       (f "index" "trie.csr") :disk-snapshot
                                       (f "index" "kv.log")   :disk-log
                                       :else                  :disk-columnar)
-      (f "index" "kv.log")          :pg-disk-log)))
+      (f "index" "kv.log")          :pg-disk-log
+      (f "index" "trie.csr")        :pg-snapshot)))
 
 (defn- register-or-close!
   "Register `entry` with the durability daemon and return `[store id]` — closing the
@@ -173,6 +176,19 @@
   fork's overlay."
   [dir]
   (store-for dir :overlay-meta))
+
+(defn claim-dir!
+  "Take `dir`'s single-writer lock and make its registry entry, for a KB that keeps its
+  images in `dir` while its records are elsewhere (`:pg-snapshot`).  No component opens
+  there, so nothing else would take the lock; `close-dir!` writes the images and releases
+  it as for any directory.  A second claim in this JVM is a no-op."
+  [dir]
+  (let [cdir (canonical-dir dir)]
+    (locking stores
+      (when-not (lock/held? cdir)
+        (lock/acquire! cdir)
+        (swap! stores update cdir #(or % {:dir cdir :dur-ids {}}))))
+    nil))
 
 (defn register-index-snapshot!
   "Register `save-fn` (a thunk) as `dir`'s derived-index snapshot writer.

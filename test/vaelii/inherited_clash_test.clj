@@ -822,3 +822,27 @@
                                                          (:sentence (:inherited %))))
                             (inherited-reports kb down_kind))
                       (v/ask? kb (list plain_kind lower_kind) U)])))))))
+
+(tu/deftest-kb a-recover-asks-the-memberships-stored-claims-reach-and-none-of-an-unclaimed-predicate
+  ;; `disjoint` separates every `plain_kind` membership from the preserved `down_kind`.
+  ;; With no `down_kind` claim stored, recover's discovery asks none of the 41; once
+  ;; `(down upper)` is stored it asks that claim and `(plain lower)`, the one membership
+  ;; it reaches.  The `::asked` log line counts the questions.
+  (tu/with-terms [down_kind plain_kind upper_kind lower_kind]
+    (let [recover! (fn []
+                     (let [asked (atom [])]
+                       (binding [trove/*log-fn* (fn [_ns _coords _level id payload]
+                                                  (when (= :vaelii.impl.discovery/asked id)
+                                                    (swap! asked conj (:data (force payload)))))]
+                         (v/recover kb))
+                       (:asked (first @asked))))]
+      (v/assert kb (list 'transitiveInArgInverse down_kind 1 'genl) U mono)
+      (v/assert kb (list 'disjoint down_kind plain_kind) U mono)
+      (v/assert kb (list 'genl lower_kind upper_kind) U mono)
+      (v/assert kb (list plain_kind lower_kind) U mono)
+      (dotimes [_ 40] (v/assert kb (list plain_kind (tu/tmp-ind "Beast")) U))
+      (is (= 0 (recover!)))
+      (v/assert kb (list down_kind upper_kind) U mono)
+      (is (= 1 (count (inherited-reports kb down_kind))))
+      (is (= 2 (recover!)))
+      (is (= 1 (count (inherited-reports kb down_kind)))))))

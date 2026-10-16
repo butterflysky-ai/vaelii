@@ -108,7 +108,7 @@ specializations and `arityMin` are on the forced-monotonic roster
 whatever strength it was written at, and a firing concluding one from a non-roster
 antecedent is held void. The minted `(arity R 2)` → `(binary R)` rule reads a roster antecedent, so its
 firings stand. Every reader of an arity reads the exact-class membership beside the
-`(arity P n)` table: the arity nogoods, the argument-position check, `describe`, the
+`(arity P n)` table: the inert-tuple test, the argument-position check, `describe`, the
 prover answering `admitsArgnum` and the integrity pass through `arity/relation-length`
 ([Arity](#arity)), and `kb/relation?` behind `disjointness-audit`. The conclusion is
 **relation-wide** and has to be:
@@ -130,7 +130,7 @@ intersection would cost it again for a membership nothing reads.
 
 The classification is read for its arity, and the relation-wide class answers that
 without the intersection: `(arity P 2)` derives `(binary P)` through the generator above,
-and `tax/exact-arity-classes` — the roster the arity nogoods and the quality readings
+and `tax/exact-arity-classes` — the roster the inert-tuple test and the quality readings
 share — holds all nine spellings, so `(binary P)`, `(binary_predicate P)` and
 `(binary_function F)` each declare an arity a reader enforces. A KB that wants the kind membership as well writes the
 `defnSufficient` itself, in its own context, and pays for it there.
@@ -483,28 +483,14 @@ every type an instance holds with `genl?`.
 is the union of what it makes of the parts; `genls-global-among` is the union with a
 filter, the closure cut to a set of marked terms. Each answer holds a few terms or none.
 Nothing enters the LRU: the caller's memo keeps the answers for one pass over a still
-taxonomy. The arity candidate index (`arity/recompute-arity`) asks the cut to the bound
-predicates only for a functor whose own length differs from one above it: where every type
-binds its own length, the cut to the bound predicates is the closure again. It asks the
-union for the exact lengths stored at or above a type through `genls-global-union-held`,
+taxonomy. `arity/bound-above` asks the cut to the bound predicates for a functor that
+binds no length of its own. The arity family asks the union for the exact lengths stored at or above a type through `genls-global-union-held`,
 which reads and hands each answer to a store the caller keeps, here the arity length
 entries' weighted LRU (`arity/lengths-of`), so the ancestors a type shares with one read
 before are not read again. Asked without a memo, `genls-global-among` walks down from
 each marked term instead, pruned by the depth potential as `genl?` is, so a type deep in
 a chain costs the marked terms' descendants and not its own ancestors:
 `provers/support-answers-reading` asks it of every installed edge's upper end.
-
-**A property every subtype inherits is spread down, not read up.** A length arriving at a
-type reaches the subtypes that miss it by `specs-global-while`: a walk down from the type
-through every active edge that enters a subtype only while the caller's predicate holds,
-here "misses one of the arriving lengths", each subtype's lengths read with the arriving
-one left out. A subtype holding them all stops the walk, since every type below it holds
-them too, so a binding arriving above bound types costs the edges to its children; `lein
-perf`'s `bound-type-load` holds it. The arity length entries of the subtypes it reaches
-take the length.
-`genls-global-while` is the same walk up: the arity index keeps every type at or above a
-functor whose own length differs from one above it, and a functor joining that set walks up
-only to the types the set does not hold yet.
 
 **Most scoped reads are the global read.** A node's global closure records the contexts
 its edges rest on (`closure-needs`: the one supporting context of each edge the closure
@@ -975,6 +961,45 @@ Three mechanisms declare that types share no instance; all are closed under `gen
   **The exemption is the exception's alone.** A stated `orthogonal` exempts nothing, and
   the predicate `genl` edge carries no exemption from the exception up to it.
 
+**A separation answers a denial.** With `(S x)` believed and visible from the reader,
+and `S` separated from `T` there, `query` answers `(not (T x))` and `argue` of `(T x)`
+answers `:false` (`provers/DisjointnessNegationProver`, [inference.md](inference.md)).
+The denial is read at the query and never stored, so it leaves when the membership or the
+separation leaves. Only a ground goal is answered: `(not (T ?x))` binds nothing from it.
+`res/separation-denials` is the read, and it returns the witnesses: the denying
+memberships, and the declarations and `genl` edges each denial rests on.
+
+**The denial climbs only `:monotonic` edges.** A denial read through a `:default` `genl`
+edge contraposes a default, and a default does not contrapose: "a `pa` is typically a
+`pb`" does not exclude `Xy` being an atypical `pa` outside `pb`. So the read holds both
+sides of the separation to one rule:
+
+- **`T`'s side.** Every `genl` edge from `T` up to the separated supertype holds at
+  `:monotonic`, read as the widest-bottleneck floor (`tax/reach-support` with a
+  `supporter-class`, [Strength of a subsumption path](#strength-of-a-subsumption-path)).
+  With `(genl pa pb)` at `:default`, `(disjoint pc pb)` and `(pc Xy)`, `argue (pa Xy)`
+  answers `:unknown`; with the edge at `:monotonic` it answers `:false`.
+- **`S`'s side.** The membership `(S x)` that does the denying reaches its separated
+  supertype through `:monotonic` edges as well. A `:default` edge on that side applies
+  forward, and it can be defeated for this `x`: `core.txt` states `(genl tangible
+  uninterrupted)` at `:default` and partitions `temporal` into `uninterrupted` and
+  `intermittent`, and a monotonic `(intermittent WatchOfTheseus)` defeats the edge for the
+  watch, so `intermittent` denies neither `made` nor `natural` of it
+  (`ontology_test/the-watch-of-theseus-is-intermittent`). Reading the believed inherited
+  membership and capping the denial at `:default` is the other reading, and the larger
+  one; the engine takes the monotonic rule on both sides.
+- **A disjoint metatype's membership** `(M T)` is an ordinary fact, so it separates here
+  only at `:monotonic`. The declarations themselves (`disjoint`, `partition`,
+  `sibling_disjoint`, `disjoint_metatype`, `separating`) and the part edges a `covering`
+  installs are on the forced-monotonic roster and hold while believed
+  (`res/holding-class`).
+- **A `siblingDisjointException`** the reader sees exempts its pair from the read, as it
+  does from `disjoint?` (`tax/route-exempted?`).
+
+The rule is the defense in [defenses.md](defenses.md); the cover family reads the same
+denial ([The coverage inference is gated on explicit
+negation](#the-coverage-inference-is-gated-on-explicit-negation)).
+
 **All three separating mechanisms — `disjoint`, `disjoint_metatype` and `sibling_disjoint` — separate any term, not only individuals.** `checks/checkable-term?`
 admits every non-variable symbol, so the predicate meta-ontology is enforced the same
 way the domain is: `(relation_kind …)` is a `disjoint_metatype` over
@@ -1280,6 +1305,18 @@ negations and **not** the declaration, which is `disjoint`'s rule and is there f
 `disjoint`'s reason: a nogood that could defeat the cover would read a taxonomy without
 it on the next pass, find no violation, and revive it.
 
+A separation's denial rules out a part as a stated one does ([A separation answers a
+denial](#disjointness)). With `(covering W A B)`, `(disjoint S A)` and `(disjoint T B)`,
+the memberships `(W X)`, `(S X)` and `(T X)` refute the cover, and the nogood is `{(W X),
+(S X), (T X)}`: each denying membership is a member, and the separations and the `genl`
+edges they climb are grounds. The write that completes it names those memberships as the
+sentexes it opposes (`checks/cover-refutations`), so it is stored and placed, never
+refused, and the settle forms the same nogood from what is stored
+(`membership/term-nogoods`), so `contradictions` lists the cover `argue` reads as
+refuted (`order_independence_test/a-cover-a-separation-denies-every-part-of-is-one-nogood-in-every-order`).
+The separation answers here under the same soundness rule as at the query: an edge it
+climbs at `:default` rules out no part.
+
 ### `partition` and `separating` add no separation mechanism of their own
 
 A separating roster is recorded the way a `disjoint_metatype`'s member set is: held
@@ -1575,8 +1612,8 @@ the roster and is weighed as a member of an inherited nogood.
   the super's: `tax/inverses-under` is that set, and it consults the spec closure only
   where some inverse exists at all, so a KB declaring none pays one lookup.
 - `(arity P n)` — the declared arity, cached for the argument-position check and
-  `kb/relation-arity`; the arity nogoods read it from the candidate index
-  ([Arity](#arity)).
+  `kb/relation-arity`; the inert-tuple test reads it off the binding family
+  (`arity/relation-length`, [Arity](#arity)).
 - `(functional P)` — a *constraint*: two believed tuples `(P a b)` and `(P a c)` with
   `b` distinct from `c` collide (`checks/functional-clashes`). A collision of two symbols
   whose members are both `:monotonic` derives `(equals b c)` and merges
@@ -1866,27 +1903,31 @@ convict harder the less a context sees.
 ### Arity
 
 A tuple is held to the length its predicate is **bound** to, and a tuple that breaks it is
-placed as a nogood ([nmtms.md](nmtms.md#the-nogood-families)). Four spellings
+held inert in the `:out` forced set ([nmtms.md](nmtms.md#the-forced-monotonic-roster)). Four spellings
 bind, every one of them on the forced-monotonic roster and read as storage: `(arity P N)`,
 an exact-class membership (`tax/exact-arity-classes`: the relation-wide `unary` /
 `binary` / `ternary` and their six predicate and function specializations), a
 `variable_arity` membership (`variable_arity`, `variable_arity_predicate` or
 `variable_arity_function`) and `(arityMin P M)`. A membership off the roster binds through
-its type's `genl` edges only at roster strength: a `:monotonic` membership `(T P)` binds
-P's length to `n` when it is believed at `:monotonic` and a path of `genl` edges leads
-from `T` to an exact-arity class of arity `n`, each edge with a `:monotonic` supporter
-(`arity/meta-held`). `core.txt` states its
+its type's `genl` edges only at roster strength. When a membership `(T P)` is stored as a
+fact at `:monotonic` and a path of `genl` edges IN at `:monotonic` leads from `T` to an
+exact-arity class `C`, the engine stores `(C P)` in CxUniverse
+(`chain/sync-arity-classes!`). The membership and the supporters of one path's edges are
+the antecedents of its `arityClass` justification, which `why` reports
+(`arity/class-paths` picks the path). An edge's supporter is the sentence installing it: a
+`genl` edge, or a `partition`, `covering` or `separating` declaration for each part. The class membership goes OUT when the membership or
+an edge leaves, unless another path or an assertion supports it. `core.txt` states its
 metatypes' edges into the exact classes and the shipped predicate memberships of those
 metatypes `:monotonic`, so `(transitive P)` binds two arguments wherever its edge to
-`binary_predicate` is `:monotonic`. A `:default` membership or edge binds nothing, since a
-binding goes OUT only by retraction ([reference.md](reference.md) decision 11). The
+`binary_predicate` is `:monotonic`. A `:default` membership or edge derives nothing, since
+a binding goes OUT only by retraction ([reference.md](reference.md) decision 11). The
 binding reaches P alone: a predicate below P takes P's length only through P's roster
 bindings. The reference model does not model arity, so it settles nothing about that
 reading.
 
 **One reading of an arity.** `arity/relation-length` answers what binds a relation's
 length, its own binding or the one exact length it inherits through `genl`, and the
-argument-position check, the arity nogood, `describe`, `admitsArgnum` and the
+argument-position check, the inert-tuple test, `describe`, `admitsArgnum` and the
 undeclared-arity pass call it. `describe` reports the length as `:arity` and the
 predicate it is bound on as `:arity-via`. `arity/released?` reports a `variable_arity`
 membership stated in any context as the release, which `admitsArgnum` and the
@@ -1899,22 +1940,32 @@ any context and the `genl` edges above the relation over the unscoped closure. A
 therefore binds a length through an edge or a binding its ancestor set does not see.
 `kb/relation?` reads the believed arity from the reader's context instead, and falls back
 to an inherited length of two or more where no visible declaration answers. Two
-exact lengths bind nothing; `(functional arity)` and the pairwise `disjoint` of the three
-relation-wide classes report them. Open-world: a predicate nothing binds takes a tuple of
-any length.
+exact lengths of one relation bind nothing, and the pair is stored as one `contradicts`
+(below). Open-world: a predicate nothing binds takes a tuple of any length.
 
-A tuple that breaks the binding is a **one-member nogood** whose ground is the binding. A
-`:default` tuple is OUT at every reader that sees the binding, with everything resting
-only on it; a `:monotonic` one is a hard clash, believed and reported in `conflicts` with
-the binding under `:grounds`. Nothing refuses a wrong-length tuple, so the stored set is
-the same whichever of the tuple, the binding and the edges arrived first. `core.txt` declares
-the fourteen binding functors `decontextualized_predicate`, so every binding has a copy in
-CxUniverse ([contexts.md](contexts.md#what-the-shipped-ontology-declares-it-of)), and every
-reader that sees CxUniverse sees a binding stated in any context. A `genl` edge between
-predicates is not decontextualized, and the nogood of an inherited length is placed only
-where one context sees the tuple and the edges. With `(genl P Q)` stated in one context
-and `Q`'s binding in CxUniverse, a tuple of `P` stated in a sibling context that breaks
-`Q`'s length is believed at every context.
+A tuple that breaks the binding is **inert**: the settle puts it in the `:out` forced set
+([nmtms.md](nmtms.md#the-forced-monotonic-roster)), at `:default` and at `:monotonic` alike, so it is
+stored, never believed, forms no nogood and fires no rule, and what rests only on it is
+OUT. `why-not` answers `:inert` with `:binding`, `{:length n :via p :grounds [h …]}` (or
+`:min m` for a floor): the bindings stating the length and, for a length inherited from
+`p`, the supporters of one path of `genl` edges from the functor to `p`. `conflicts`
+reports one `:arity` conflict per inert tuple, the tuple as its member and those handles
+as its grounds. Nothing refuses a wrong-length tuple, at `assert` or at `try-assert`, so
+the stored set is the same whichever of the tuple, the binding and the edges arrived
+first, and a recover rebuilds the same `:out` members (`arity/drain!`). `core.txt`
+declares the fourteen binding functors `decontextualized_predicate`, so every binding has
+a copy in CxUniverse ([contexts.md](contexts.md#what-the-shipped-ontology-declares-it-of)).
+The length is read off the bindings of every context and the `genl` edges of every
+context, so a tuple is inert at every context, one that sees neither its binding nor the
+edges to it included.
+
+Hiding a binding or an edge does not release the length. An `except` of a binding hides
+the binding's sentence from reads in its subtree, as it hides any sentence, and the
+length stays bound at every context, so the tuples breaking it stay inert there too. A
+placed defeat or an `except` of a `genl` edge hides the edge at a vantage and leaves it IN
+in the network, which the length reads, so an inherited length stays bound as well. A
+binding OUT in the network (a binding a rule concluded, whose antecedents left) binds
+nothing.
 
 `(variable_arity P)` releases a predicate from one exact length. `lessThan` has `arityMin`
 two and reads a chain of any length (`(lessThan 1 2 3)` is `1 < 2 < 3`); the membership is
@@ -1932,13 +1983,16 @@ and nothing where nobody wrote one. Supers that disagree bind nothing, and a
 carrying it.
 
 **A predicate that binds a length is held to match its super-predicates'.** Two
-predicates a `genl` edge relates whose own exact lengths differ are a nogood of their
-bindings, `:arity-descension`, read wherever both bindings and the edges between them are
-visible, and neither end `variable_arity`. Every member is on the roster, so the nogood is
-a hard clash: all of it stays believed, and `conflicts` reports it. Neither the edge nor a
-declaration is refused, in either arrival order. The tuple rule still reads a predicate's
-own binding first, so a `fatherOf` declared ternary under a binary `parentOf` holds its
-ternary tuples, and the report names the pair.
+predicates a `genl` edge relates whose own exact lengths differ are a pair, as are two
+exact lengths of one predicate, and neither releases the other's tuples: the predicate
+keeps its own length (the precedence above). The settle stores one `(contradicts bf bg)`
+in CxUniverse for each distinct pair of the two relations' CxUniverse binding copies,
+justified by the two copies, at `:arity-descension` (`chain/sync-arity-pairs!`). It
+searches no route and places no `defeat`, since both members are on the roster and stay
+believed. `why` names the two bindings and no `genl` path, and `conflicts` reports the
+pair. The pairs are kept in step with the bindings and the predicate `genl` edges over
+the unscoped closure, so a pair stands at every context. Neither the edge nor a
+declaration is refused, in either arrival order. A `variable_arity` end forms no pair.
 
 A specialization therefore does not carry a signature of its own. This is the one point
 where an arity constraint is stricter than the argument constraints beside it, and the

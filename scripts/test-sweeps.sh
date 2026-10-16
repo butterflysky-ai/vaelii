@@ -72,7 +72,7 @@
 #   ./scripts/test-sweeps.sh --fail-fast
 #
 # Env:
-#   TEST_SWEEPS_OUT   log directory (default target/test-sweeps)
+#   TEST_SWEEPS_OUT   log directory (default logs/test-sweeps)
 #   SUITE_PROGRESS    marks | lines | auto (default: marks on a terminal, lines into
 #                     anything else — `test-backends.sh` says why)
 #
@@ -143,7 +143,7 @@ else
   SWEEPS=("${SWEEP_NAMES[@]}")
 fi
 
-OUT_DIR="${TEST_SWEEPS_OUT:-target/test-sweeps}"
+OUT_DIR="${TEST_SWEEPS_OUT:-logs/test-sweeps}"
 mkdir -p "$OUT_DIR"
 
 RUN_NS_COUNT=$(selected_ns_count "$SELECTOR")

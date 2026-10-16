@@ -434,8 +434,9 @@ The further conditions are where a declaration reads differently from a rule:
   `binary_predicate`, and a rule covers one arity only, so the predicate's arity must
   be the rule's. A `genl` edge holds at every arity a predicate takes, so a variable-arity
   predicate is not reported under it.
-- **One direction of an inverse is not `inverse`.** `genlInverse` states one direction,
-  and the engine draws no inference from it, so a single swapping rule is not reported.
+- **One direction of an inverse is not `inverse`.** A single swapping rule states one
+  direction, which is `genlInverse` rather than `inverse`, and the pass suggests no
+  `genlInverse`, so such a rule is not reported.
 
 Three differences remain between a reported rule and its declaration, and the finding
 does not weigh them. `transitiveInArg` answers a ground goal only and leaves an open one

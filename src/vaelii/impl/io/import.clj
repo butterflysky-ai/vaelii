@@ -478,7 +478,7 @@
   takes a dump id a later frame claims, and are returned as `:expansions`, `[[first-handle
   handle] …]`, for `mark-expanded-premises`.
 
-  Returns `{:sx-meta {dump-id {:handle h :rule? bool :strength s}} :embedding #{handle}
+  Returns `{:sx-meta {dump-id {:handle h :rule? bool :strength s}} :embedding [handle]
   :collapsed n :minted n :expanded {:frames n :records n} :expansions [...] :frames n
   :refused {…} :fingerprint {…} :naming {…}}` — the source of the old→new id map
   and the premise decisions, plus the handles whose stored content names another sentex
@@ -499,7 +499,7 @@
   (let [records   (:records kb)
         seen      (volatile! {})         ; [sentence context] -> handle
         sx-meta   (volatile! {})
-        embed     (volatile! #{})
+        embed     (volatile! [])         ; in the order stored, a handle once
         collapsed (volatile! 0)
         minted    (volatile! 0)
         frames-n  (volatile! 0)          ; what the stream yielded, for the torn check
@@ -543,8 +543,9 @@
                                        (p/write-record! sink rec)))]
                           (vswap! seen assoc k hh)
                           (fprint hh rec)                ; only what actually got stored
+                          ;; here, not for a collapse: its handle is listed already
+                          (when (embeds-handle? (sx/sentence-of rec)) (vswap! embed conj hh))
                           hh))]
-                (when (embeds-handle? (sx/sentence-of rec)) (vswap! embed conj h))
                 h))]
         (doseq [frame frames]
           (tick!)
@@ -604,16 +605,30 @@
   the identity, so the embedded number already names the record it named in the source
   and there is nothing to rewrite — which is the point of preserving them.
 
-  Returns `{:rewritten n :dropped n :deleted #{handle}}`, and the deleted handles are
-  not a statistic.  They are records this import stored and has now removed, while
-  `old->new` — built from `sx-meta`, which a delete does not touch — goes on resolving
-  their dump ids: every later reference to one lands on a handle the store no longer
-  holds.  So the caller takes them out of the map (`forget-deleted`) before anything
-  reads it."
+  The rewrite can make two records one.  The sentex pass collapses by the sentence as
+  the dump spelled it, and two rules that collapsed there leave each meta-sentex naming
+  its own dump id: `(exceptWhen q (sentexHandle 7))` and `(exceptWhen q (sentexHandle
+  9))` are two keys until both ids resolve to the one rule.  So a rewritten record whose
+  canonical form an earlier record of this pass already holds is deleted and **merged**
+  onto it, the collapse the sentex pass would have made had the ids been resolved, and
+  the caller points the id map at the survivor (`follow-merged`).  Only records that
+  embed a handle can meet this way, since only their sentences change, and every one of
+  them is in `handles`.
+
+  Returns `{:rewritten n :dropped n :deleted #{handle} :merged {handle survivor}}`, and
+  the deleted handles are not a statistic.  They are records this import stored and has
+  now removed, while `old->new` — built from `sx-meta`, which a delete does not touch —
+  goes on resolving their dump ids: every later reference to one lands on a handle the
+  store no longer holds.  So the caller takes them out of the map (`forget-deleted`)
+  before anything reads it."
   [kb handles old->new]
   (let [records   (:records kb)
         rewritten (volatile! 0)
-        deleted   (volatile! (transient #{}))]
+        deleted   (volatile! (transient #{}))
+        held      (volatile! (transient {}))    ; [sentence context] -> the handle holding it
+        merged    (volatile! (transient {}))]
+    ;; in the order the sentex pass stored them, so the survivor of a merge is the record
+    ;; stored first, as it is for a collapse there
     (doseq [h handles :let [rec (p/get-sentex records h)] :when rec]
       (let [resolved (volatile! true)
             sentence (walk/postwalk
@@ -625,13 +640,32 @@
                           x))
                       (:sentence rec))]
         (if @resolved
-          (do (p/put-sentex records (assoc (res/kb-sentex kb sentence (:context rec))
-                                           :id h :strength (:strength rec)))
-              (vswap! rewritten inc))
+          (let [built (res/kb-sentex kb sentence (:context rec))
+                k     [(sx/sentence-of built) (:context built)]]
+            (if-let [survivor (get @held k)]
+              (do (p/delete-sentex! records h)
+                  (vswap! merged assoc! h survivor))
+              (do (p/put-sentex records (assoc built :id h :strength (:strength rec)))
+                  (vswap! held assoc! k h)
+                  (vswap! rewritten inc))))
           (do (p/delete-sentex! records h)
               (vswap! deleted conj! h)))))
     (let [gone (persistent! @deleted)]
-      {:rewritten @rewritten :dropped (count gone) :deleted gone})))
+      {:rewritten @rewritten :dropped (count gone) :deleted gone
+       :merged (persistent! @merged)})))
+
+(defn- follow-merged
+  "`sx-meta` and `old->new` with every handle `rewrite-embedded-handles!` merged away
+  replaced by the handle it merged onto — `{:sx-meta m :old->new m}`.  Unlike a dropped
+  meta-sentex, a merged one still exists, at its survivor's handle, so a dump id that
+  named it goes on resolving: a justification resting on it rests on the survivor, and
+  its premise mark joins the survivor's, the strongest kept (`mark-premises-by-strength`)."
+  [sx-meta old->new merged]
+  (if (empty? merged)
+    {:sx-meta sx-meta :old->new old->new}
+    (let [moved (into [] (comp (filter (fn [[_ h]] (contains? merged h))) (map key)) old->new)]
+      {:sx-meta  (reduce (fn [m did] (update-in m [did :handle] merged)) sx-meta moved)
+       :old->new (reduce (fn [m did] (update m did merged)) old->new moved)})))
 
 (defn- forget-deleted
   "`sx-meta` and `old->new` with every dump id whose record `rewrite-embedded-handles!`
@@ -721,7 +755,7 @@
   or raises the failure itself — so the one exit this function is written for is exactly
   the one that would leave the descriptor open."
   [frames]
-  (try
+  (with-open [_ (frames/closer frames)]
     (doseq [frame frames]
       (when (seq (:out frame))
         (throw (ex-info (str "the dump names a justification with a non-empty :out "
@@ -732,8 +766,7 @@
                              " justifications carry no :out, or drop the key from the"
                              " frame")
                         {:type :naf-justification :out (vec (:out frame))
-                         :consequence (:consequence frame) :justification (:id frame)}))))
-    (finally (frames/close-frames! frames))))
+                         :consequence (:consequence frame) :justification (:id frame)}))))))
 
 (defn- import-justifications!
   "Stream the `Justification` frames against the old→new id map.  Every handle a
@@ -882,10 +915,10 @@
       ;; never the whole file, which on a corpus dump is a provenance map per record.
       (let [records (:records kb)
             n       (volatile! 0)
-            ;; bound before the walk, so the file is closed on the way out whether the
-            ;; stream ran to its end or a write threw part-way through it
+            ;; closed on the way out whether the stream ran to its end or a write threw
+            ;; part-way through it, by a closer that holds the file and not the frames
             fs      (read-fn f compression)]
-        (try
+        (with-open [_ (frames/closer fs)]
           (doseq [chunk (partition-all provenance-chunk fs)]
             (let [entries (into []
                                 (comp (filter #(and (sequential? %) (= 2 (count %))))
@@ -895,8 +928,7 @@
                                 chunk)]
               (when (seq entries)
                 (cap/put-all-provenance records entries)
-                (vswap! n + (count entries)))))
-          (finally (frames/close-frames! fs)))
+                (vswap! n + (count entries))))))
         @n))))
 
 ;;; ── the index: replay it, or rebuild it ───────────────────────────────
@@ -962,27 +994,27 @@
   derive (`kv/justification-family-entry?`), since that path stores none; the count
   checked is the stream's."
   [kb dir compression read-fn expected records-only?]
-  (let [frames (volatile! nil)
-        read-n (volatile! 0)]
+  (let [read-n (volatile! 0)]
     (try
-      (let [stream (vreset! frames (read-fn (io/file dir frames/index-dir frames/index-entry-file)
-                                            compression))
-            n      (snapshot/install-entries!
-                    (:index kb)
-                    (sequence (comp (map #(do (vswap! read-n inc) %))
-                                    (remove #(and records-only? (kv/justification-family-entry? %))))
-                              stream))
-            n      (if records-only? @read-n n)]
-        (when-not (= (long n) (long expected))
-          (trove/log! {:level :warn :id ::index-short
-                       :msg (str "index entry stream holds " n " entries, index.edn says "
-                                 expected)})
-          :entries-truncated))
+      (let [stream (read-fn (io/file dir frames/index-dir frames/index-entry-file) compression)]
+        ;; the closer holds the file and not the seq, so the entries installed stay
+        ;; collectable: a dump of a large KB holds more entries than the heap does
+        (with-open [_ (frames/closer stream)]
+          (let [n (snapshot/install-entries!
+                   (:index kb)
+                   (sequence (comp (map #(do (vswap! read-n inc) %))
+                                   (remove #(and records-only? (kv/justification-family-entry? %))))
+                             stream))
+                n (if records-only? @read-n n)]
+            (when-not (= (long n) (long expected))
+              (trove/log! {:level :warn :id ::index-short
+                           :msg (str "index entry stream holds " n " entries, index.edn says "
+                                     expected)})
+              :entries-truncated))))
       (catch Exception e
         (trove/log! {:level :warn :id ::index-unreadable
                      :msg (str "index entry stream unreadable: " (ex-message e))})
-        :entries-truncated)
-      (finally (frames/close-frames! @frames)))))
+        :entries-truncated))))
 
 (defn- install-index!
   "Put the index in place: replay the dump's entries when they can be proved to describe
@@ -1353,6 +1385,9 @@
         ;; no reader below can reach a dump id whose record this import has removed.
         {:keys [sx-meta old->new orphaned]}
         (forget-deleted sx-meta old->new (:deleted rewrite))
+        ;; a merged record is not gone: its dump ids name the survivor from here on
+        {:keys [sx-meta old->new]} (follow-merged sx-meta old->new (:merged rewrite))
+        collapsed (+ (long collapsed) (count (:merged rewrite)))
         {:keys [premises provenance dropped dropped-orphaned]}
         (if ours?
           ;; ours says it directly: justifications are justifications, and a premise is a

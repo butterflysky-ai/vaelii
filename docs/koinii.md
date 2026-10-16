@@ -194,7 +194,8 @@ hand-built `{:id … :admin? true}` included, and `ingest` refuses a map claimin
 `:authenticated? true` without one (`:koinii/identity-unverified`). A plain
 `vaelii.core/assert` into `CxRegistry` passes no koinii check at all.
 
-The registry itself carries three facts per agent — a membership mark (`agent`), a display
+The registry itself carries three facts per agent — a membership mark
+(`registered_agent`), a display
 name (`displayNameOf`), and a **trust value** (`trustLevel`). Trust is a *mutable number*,
 not a fixed rank (decision D3): an operator-assigned tier at bootstrap, overwritten by earned
 reputation later. `trustLevel` is `functional`, so an update retracts the old value and

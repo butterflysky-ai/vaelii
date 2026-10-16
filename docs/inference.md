@@ -440,13 +440,10 @@ pins hardest: `(not (dog Muffet))` does **not** satisfy `(not (animal ?x))`, sin
 non-dog may be any other animal. Polarity does not cross either, in either direction. The
 up set is bounded by the hierarchy's depth where the down set is a whole subtree, so the
 negative fan is the cheaper of the two per pattern; the cost lands on the other side
-instead, in which rules an arriving negation reaches. There `rules/trigger-keys`
-enumerates from the **rule roster** rather than from the spec closure: a negation triggers
-the `[:not q]` keys for the specs `q` of its body's predicate, and reading them off the
-antecedent keys some stored rule reads (`reads/as-stored-rule-keys`, the rule index's root
-level) costs one `genls` test per such key instead of one index probe per type under the
-predicate — an arriving `(not (thing X))` would otherwise probe once per type in the KB. A
-KB whose rules read no negation pays one set read.
+instead, in which rules an arriving negation reaches. A negation triggers the `[:not q]`
+keys for the specs `q` of its body's predicate, and `rules/trigger-keys` intersects that
+closure with the antecedent keys some stored rule reads, from the smaller side
+([indexing.md §3](indexing.md#3-the-rule-index)).
 
 **The two things a subsumption match owes beyond the match reverse with it.** A firing
 that climbed an edge names a witness for the path it climbed, and under a negation that
@@ -496,6 +493,60 @@ the predicate extent), so the candidate set was always the coarse one and it is
 default assert-then-query flow a forward-capable rule has already materialized the
 subtype conclusion, so this only *adds* answers where forward has not run it — a
 backward-only rule, `{:chain? false}`, or a goal past the forward run's depth.
+
+### `genlInverse`: the fan with the arguments swapped
+
+`(genlInverse P Q)` is binary `genl` with arguments 1 and 2 swapped: a `(P a b)` tuple is
+a `(Q b a)` tuple. The fan reads it beside `genl`, so a stored `(childOf Bob Tom)` under
+`(genlInverse childOf parentOf)` answers `(parentOf Tom Bob)`, satisfies a
+`(parentOf ?x ?y)` antecedent with `?x = Tom` and `?y = Bob`, and is reached by a rule
+concluding `childOf` for a `parentOf` goal. It licenses no converse: a stored
+`(parentOf Tom Bob)` answers no `childOf` goal.
+
+The edges are not edges of the `genl` relation. Every type read, placement and
+disjointness check walks that closure, and a swapped member in it would be read as a
+plain spec there. They are a flat-cache entry (`tax/add-genl-inverse`), held both ways
+round, and `tax/signed-closure` walks the two together with a **parity bit**: a `genl`
+edge keeps it and a `genlInverse` edge flips it. The closure answers two sets, the
+predicates reached at even parity, which are read as written, and those reached at odd
+parity, which are read with the two arguments exchanged. So a chain swaps exactly when it
+holds an odd number of `genlInverse` edges, and two of them in a row answer what one
+`genl` edge answers. `res/sub-predicates` and `res/super-predicates` are the even sets,
+`res/swapped-sub-predicates` and `res/swapped-super-predicates` the odd ones. A KB
+declaring no `genlInverse` reads the `genl` closure itself, one map read deciding it.
+
+Every reader of the fan takes the swap from those two sets:
+
+- `res/fanned-match`, and through it `match-pattern` and the rete alpha matcher, reads a
+  swapped member with its arguments exchanged. Only a binary literal takes one.
+- `res/match1` and `res/subsuming-unify` unify a swapped fact or consequent with its
+  arguments exchanged, positive against the spec set and negated against the genl set.
+  The contrapositive is the same as `genl`'s: a stored `(not (parentOf Tom Bob))` answers
+  `(not (childOf Bob Tom))`.
+- `rules/trigger-keys` and `res/concluding-rule-handles` read both sets.
+- `chain/subsumption-links` records the parity a link was reached at, and
+  `tax/signed-reach-support` names one supporter per `genl` and `genlInverse` edge along
+  the path with the fewest `genlInverse` edges. The firing's justification therefore names
+  the `genlInverse` edges as it names `genl` ones. A default edge caps the conclusion at
+  `:default`, and an `except` on the edge hides the swapped reading from the context
+  holding the except.
+- `special/subsumption-seeds` re-seeds the facts a `genlInverse` edge newly brings under
+  a rule, so a conclusion does not depend on whether the edge or the fact arrived last.
+
+Five readers take less than the full swap, and each is recorded here:
+
+- `res/matches-hierarchical` hands a binary literal with a swapped spec to the reference
+  fan-out, since its argument-root reads do not exchange arguments. The answer is the
+  same and the cost is the reference fan's.
+- An open-functor pattern (`with-open-functor-supers`) binds its functor variable to the
+  even supers only. A swapped super would need the arguments exchanged as well.
+- A descent placement (`chain/descent-placements`) places a firing over a `genlInverse`
+  link once, over the route with the fewest `genlInverse` edges, where a `genl` link
+  places it once per uncovered route. The witness of such a link is not held in
+  `*witnesses*`, because it reads the flat cache that the `genl` read scope does not key.
+- A predicate reached both by `genl` and by `genlInverse` from one antecedent is
+  witnessed over its `genl` path, whichever reading the match took.
+- The probe-size estimate in `inherit/extent-size` counts the even fan only.
 
 This is the predicate dimension of the hierarchical query `(p a ?x)@c`; the context
 dimension is the genlCx up-closure (`matches-visible`), and both are answered
@@ -940,6 +991,32 @@ position each spliced literal landed on), which the proof replay reads. Without 
 collapse a rule graph containing a cycle adds a conjunct per turn. `inference_test`'s three-rule cycle (`(alpha ?x) ∧ (beta ?x) ⇒ (paired ?x)`,
 and `paired` concluding each half) runs dry at depth 6 in under 200 nodes with the
 collapse, and the test pins that bound.
+
+**A residual that asks its own goal again builds no child** (`restates-goal?`). An
+`intersection` stamps a rule whose consequent is a spec of each of its antecedents, so
+`(acausal ?x) ∧ (event ?x) ⇒ (acausal_event ?x)` answers the goal `(acausal X)` through
+`subsuming-unify` and splices `(acausal X)` back into the child. The same holds for a
+residual literal that asks a spec of the goal over the goal's arguments: `(closed_expression
+X)` in place of `(expression X)`. Such a child is dropped when the restating residual
+literal lands at a depth no larger than the goal's, the collapse raised no carried
+literal's depth, and the child's window opens nothing the parent's had closed. Each answer
+of that child derives the goal within the depth the parent gave it, and the shallowest such
+derivation reaches the answer through a sibling, because its top rewrite does not ask the
+goal again. A carried literal equal to the goal does not count: a conjunction holding two
+copies of one goal would drop the rewrite of each. On the starter, the open
+`(acausal ?x)` query in `CxWell` with one recursive `believes` rule expands 37 and 844
+nodes at depths 1 and 2 without the drop, and over 180,000 in 90 s at depth 3 without
+finishing. With it the query expands 10, 19, 28 and 37 nodes at depths 1 to 4 and
+returns the same 582 answers. The ground goal `(intangible Foo1)` expands 41 and 910
+nodes at depths 1 and 2 without the drop and does not finish depth 3 in 60 s; with it,
+9 at every depth.
+`inference_test`'s `a-residual-that-asks-its-own-goal-again-builds-no-node` pins one node
+per depth at depth 8, where building those children expands 19,531.
+
+**An interrupted thread stops the search between two expansions.** `step!` reads the
+thread's interrupt flag before it pops a node and throws `InterruptedException`, leaving
+the session as it was, so `future-cancel` on a running `query`, `query-status` or `argue`
+stops it within one expansion. No code inside an expansion reads the flag.
 
 Dedup is global rather than per-path — a key is claimed with a compare-and-set before a
 node is enqueued, and a second arrival at an equivalent node is dropped. The key is the
@@ -2252,7 +2329,8 @@ Built-in provers (`default-provers`, held per-KB in an atom):
   so the goal and the rule antecedent are answered by one mechanism. Closed only.
   `:compute`, 100. See [naf.md](naf.md).
 - **ClosedExtentProver** — a ground `(not (P …))` where `P`'s extent is declared complete
-  from the asking context: the positive goal runs through the registry and no answer
+  from the asking context, by `closed_extent_predicate` or by a `closedExtentForArg`
+  whose argument value the goal holds: the positive goal runs through the registry and no answer
   *is* the negative answer. Ground only, for `unknown`'s reason. `:compute`, partial
   (50) — it augments the stored `(not (P a))` `FactProver` answers. See
   [naf.md](naf.md).
@@ -2273,6 +2351,13 @@ Built-in provers (`default-provers`, held per-KB in an atom):
   and a `Coll` with no necessary in its ancestor set leaves it inapplicable. Ground only.
   `:compute`, partial (50) — it augments the stored `(not (Coll a))` and
   `ClosedExtentProver`. See [defns.md](defns.md).
+- **DisjointnessNegationProver** — a ground `(not (T a))` proved by a believed
+  membership `(S a)` visible from the asking context whose type `S` a visible separation
+  keeps apart from `T`, with every `genl` edge the separation climbs on either side
+  holding at `:monotonic` (`res/separation-denials`). Open-world: it fires on a stated
+  membership, never on an unprovable one, and a `T` no separation reaches
+  (`tax/separable?`) leaves it inapplicable. Ground only. `:lookup`, partial (50). See
+  [taxonomy.md](taxonomy.md#disjointness).
 - **CoveringProver** — a ground unary membership goal `(Part a)` for a `Part` some visible
   `(covering W …)` names: with `(W a)` believed and every other part believed **not** to
   hold of `a`, the remaining part holds. Explicit negation only, never an unprovable part.

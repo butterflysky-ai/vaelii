@@ -382,6 +382,29 @@
           (str "what a stored defeat pages in a recover must be flat in the facts beside it ("
                (defeat 20) " -> " (defeat 200) ")")))))
 
+(deftest a-recover-pages-the-mints-not-the-store
+  ;; A `recover`'s settle brings every record IN, and the mint withdrawal asks the stored
+  ;; mints the whole question when fewer are stored than the region holds.  What is priced
+  ;; is the difference one stored mint makes, and it must not grow with the facts beside it.
+  (tu/with-shipped-config
+    (binding [checks/*assertive-arg-types?* true
+              checks/*prune-subsumed-mints?* true]
+      (let [probe (fn [population mint?]
+                    (let [kb (fresh)]
+                      (dotimes [i population]
+                        (v/assert kb (list 'rfPlain (ind "RfP" i) 'RfQ) 'CxPerf {}))
+                      (when mint?
+                        (v/assert kb '(genl rf_owner thing) 'CxPerf {:strength :monotonic})
+                        (v/assert kb '(arg rfOwns 1 rf_owner) 'CxPerf {:strength :monotonic})
+                        (v/assert kb '(rfOwns RfA RfThing) 'CxPerf {}))
+                      (prof/start)
+                      (v/recover kb)
+                      (reduce + 0 (vals (:fetches (prof/stop))))))
+            mint  (fn [population] (- (long (probe population true)) (long (probe population false))))]
+        (is (= (mint 20) (mint 200))
+            (str "what a stored mint pages in a recover must be flat in the facts beside it ("
+                 (mint 20) " -> " (mint 200) ")"))))))
+
 (deftest the-instrument-counts-nothing-when-off
   ;; The budgets are only meaningful if the call sites add no work when nobody is collecting.
   (testing "a workload outside `start`/`stop` records no fetch"

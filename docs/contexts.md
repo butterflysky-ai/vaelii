@@ -172,12 +172,16 @@ Data hangs below CxWell.
   `kb/middle/` file is one of the seven theories when it states `(genlCx CxWell <its
   context>)`, and an opt-in theory when it does not.
 
-**CxUniverse is locked to the shipped files.** `vaelii.host.sync/sync!` makes
-CxUniverse's premises exactly what the shipped files produce, with two exceptions: a
-`genlCx` premise, which CxUniverse stores whichever context states it, and a sentex that
-is not a premise (a lifted copy, a rule firing). A premise an author writes into
-CxUniverse is retracted at the next sync, and a shipped premise held at another strength
-is restated at the shipped one. `assert` does not refuse a premise written into
+**CxUniverse is locked to the shipped files where it speaks the engine's vocabulary.**
+`vaelii.host.sync/sync!` makes CxUniverse's premises about the engine's own terms exactly
+what the shipped files produce, with three exceptions: a premise naming a term no shipped
+premise names, which is about an author's vocabulary; a `genlCx` premise, which CxUniverse
+stores whichever context states it; and a sentex that is not a premise (a lifted copy, a
+rule firing). A premise an author writes into CxUniverse naming only shipped terms is
+retracted at the next sync, and a shipped premise held at another strength is restated at
+the shipped one. The cost of the vocabulary rule is a premise the engine stopped shipping
+together with the last mention of a term in it: the term is no longer the engine's, and
+the premise stays. `assert` does not refuse a premise written into
 CxUniverse. An author's own vocabulary goes in a context of the author's own
 ([Adding a context](#adding-a-context)), which sync does not read.
 
@@ -785,7 +789,8 @@ claim about `P` and not that theory's — and `genlCx` carries the forced varian
 The fourteen length bindings (`sx/arity-binding-functors`: `arity`, `arityMin`, the nine
 exact-arity classes and the three `variable_arity` classes) carry it at `:monotonic`, so a
 copy keeps its binding's strength and a relation's length reads the same at every context
-([taxonomy.md](taxonomy.md#arity)).
+([taxonomy.md](taxonomy.md#arity)). A tuple breaking that length is inert at every
+context, and two lengths that disagree are one `contradicts` stored in CxUniverse.
 **No domain relation carries either**, and two things hold that line:
 
 - **A domain fact is what a theory is for.** A marriage, an ownership, a location holds

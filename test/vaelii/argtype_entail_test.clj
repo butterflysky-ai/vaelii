@@ -1040,6 +1040,29 @@
     (is (= {:tt false :sub false} (reading false)))
     (is (= {:tt true :sub true} (reading true)))))
 
+(tu/deftest-kb a-bulk-loaded-genlCx-edge-draws-nothing-until-recorded
+  ;; Every other premise and the fact are stored first, so the `genlCx` edge that shows
+  ;; `CxUp`'s declaration to `CxDown` is the arrival that draws `(sub Bee)`, in the settle
+  ;; that drains it: the batch's closing settle when `deferred?`, the assert's own when not.
+  (doseq [deferred? [true false]]
+    (let [reading (fn [bulk? record?]
+                    (tu/with-neutral-kb [kb tu/fresh]
+                      (let [{:keys [sub achieves Ann Bee CxDown] :as t} (chain-terms)
+                            ps          (chain-premises t)
+                            [_ edge cx] (first (filter #(= :cx (first %)) ps))]
+                        (with-entailing
+                          (doseq [[_ s c] (remove #(= :cx (first %)) ps)] (v/assert kb s c))
+                          (v/assert kb (list achieves Ann Bee) CxDown)
+                          (binding [v/*bulk-load?* bulk?]
+                            (if deferred?
+                              (v/with-deferred-settle kb (v/assert kb edge cx))
+                              (v/assert kb edge cx)))
+                          (when record? (v/record-arg-types kb))
+                          (some? (v/handle-of kb (list sub Bee) CxDown))))))]
+      (testing (str "deferred? " deferred?)
+        (is (= [true false true]
+               [(reading false false) (reading true false) (reading true true)]))))))
+
 (tu/deftest-kb record-arg-types-is-idempotent
   (tu/with-neutral-kb [kb tu/fresh]
     (let [{:keys [achieves Ann Bee CxDown] :as t} (chain-terms)]
@@ -1081,8 +1104,8 @@
 (tu/deftest-kb an-entailment-of-a-length-its-type-denies-is-read-out
   ;; `(t Rex)` is what the declaration entails, and `t` is declared binary — so the
   ;; entailment is a tuple of a length its binding denies.  No refusal reads a binding
-  ;; (docs/taxonomy.md, "Arity"): the fact and its entailment are both stored, and a
-  ;; reader that sees the binding takes the entailment OUT as an arity nogood.
+  ;; (docs/taxonomy.md, "Arity"): the fact and its entailment are both stored, and the
+  ;; entailment is inert.
   (tu/with-terms [t rel Rex Mary CxWorld]
     (with-entailing
       (a-context kb CxWorld)
@@ -1583,21 +1606,22 @@
 (defn- separation-row
   "The belief and the clash grounds the separation `sep` leaves over the tuple `fact` of a
   relation it names, as a value the fresh terms of one order do not vary: whether `fact`
-  is believed (nil when it is not stored), the grounds `why-not` names for its defeat, and
-  the grounds of each `:arity-descension` report, with `sep` and `(unary_predicate thing)`
-  read as `:separation` and `:binding`."
+  is believed (nil when it is not stored), the grounds of the binding `why-not` names for
+  it inert, and the grounds of each `:arity-descension` report, with `sep` and
+  `(unary_predicate thing)` read as `:separation` and `:binding`."
   [kb sep fact ctx]
   (let [sep   (some->> (v/handle-of kb sep ctx) (v/sentex kb) :sentence)
         named #(cond (= sep %) :separation (= '(unary_predicate thing) %) :binding :else %)
         h     (v/handle-of kb fact ctx)]
     {:fact     (when h (believed? kb fact ctx))
-     :defeat   (when (and h (not (believed? kb fact ctx)))
-                 (into #{} (map (comp named :sentence)) (:grounds (v/why-not kb h))))
+     :inert    (when (and h (not (believed? kb fact ctx)))
+                 (into #{} (map #(named (:sentence (v/sentex kb %))))
+                       (:grounds (:binding (v/why-not kb h)))))
      :descends (into #{} (comp (filter #(= :arity-descension (:kind %)))
                                (map #(into #{} (map (comp named :sentence)) (:grounds %))))
                      (concat (v/conflicts kb) (v/contradictions kb)))}))
 
-(tu/deftest-kb a-tuple-of-a-relation-a-separation-names-is-defeated-naming-the-separation-in-every-order
+(tu/deftest-kb a-tuple-of-a-relation-a-separation-names-is-inert-naming-the-separation-in-every-order
   (doseq [[decls sep-of] [[['(genlArg disjoint 1 thing)]
                            (fn [r s _] (list 'disjoint r s))]
                           [['(genlArg partition 1 thing) '(argAndRestGenl partition 2 thing)]
@@ -1617,14 +1641,16 @@
                         :sep  (v/assert kb sep CxWorld)
                         :fact (v/assert kb (list gladdenOf Cal Dee) CxWorld)))
                     [order (separation-row kb sep (list gladdenOf Cal Dee) CxWorld)])))))]
-      (is (= #{{:fact false :defeat #{:separation :binding} :descends #{}}}
+      (is (= #{{:fact false :inert #{:separation :binding} :descends #{}}}
              (set (map second results)))
-          (str (first decls) ": " (pr-str (remove #(= {:fact false :defeat #{:separation :binding}
+          (str (first decls) ": " (pr-str (remove #(= {:fact false :inert #{:separation :binding}
                                                        :descends #{}}
                                                       (second %))
                                                   results)))))))
 
-(tu/deftest-kb a-relation-a-separation-names-clashes-with-its-own-binding-naming-the-separation-in-every-order
+(tu/deftest-kb a-relation-a-separation-names-pairs-its-own-binding-with-the-one-above-in-every-order
+  ;; the separation's mint puts parentOf under thing, and the two CxUniverse bindings
+  ;; are one pair, which names its members and no path (docs/taxonomy.md, "Arity")
   (let [results
         (for [order (permutations [:decl :bind :own :sep])]
           (tu/with-neutral-kb [kb tu/fresh]
@@ -1636,12 +1662,12 @@
                   (doseq [step order]
                     (case step
                       :decl (v/assert kb '(genlArg disjoint 1 thing) CxWorld {:strength :monotonic})
-                      :bind (v/assert kb '(unary_predicate thing) CxWorld {:strength :monotonic})
-                      :own  (v/assert kb (list 'binary_predicate parentOf) CxWorld {:strength :monotonic})
+                      :bind (v/assert kb '(unary_predicate thing) 'CxUniverse {:strength :monotonic})
+                      :own  (v/assert kb (list 'binary_predicate parentOf) 'CxUniverse {:strength :monotonic})
                       :sep  (v/assert kb sep CxWorld)))
                   [order (separation-row kb sep (list parentOf Cal Dee) CxWorld)])))))]
-    (is (= #{{:fact nil :defeat nil :descends #{#{:separation}}}} (set (map second results)))
-        (pr-str (remove #(= {:fact nil :defeat nil :descends #{#{:separation}}} (second %)) results)))))
+    (is (= #{{:fact nil :inert nil :descends #{#{}}}} (set (map second results)))
+        (pr-str (remove #(= {:fact nil :inert nil :descends #{#{}}} (second %)) results)))))
 
 ;; ---- order independence --------------------------------------------------
 

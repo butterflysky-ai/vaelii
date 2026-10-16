@@ -84,9 +84,6 @@
     (is (holds-genl 'ipv4_address 'ip_address CPT))
     (is (holds-genl 'ipv6_address 'ip_address CPT))
     (is (holds-genl 'ip_address 'string CPT)))
-  (testing "a software tool is not placed under CxUniverse's tool"
-    (is (not (holds-genl 'software_tool 'tool CPT)))
-    (is (v/disjoint? kb 'software_tool 'tool CPT)))
   (testing "the separations"
     (is (v/disjoint? kb 'read_only_software_tool 'write_capable_software_tool CPT))
     (is (v/disjoint? kb 'computational_system 'event CPT))

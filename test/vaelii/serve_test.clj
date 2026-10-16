@@ -36,7 +36,8 @@
   (:import [java.io ByteArrayInputStream File]
            [java.nio.file Files]
            [java.nio.file.attribute FileAttribute]
-           [org.eclipse.jetty.server Server ServerConnector]))
+           [org.eclipse.jetty.server Server ServerConnector]
+           [org.eclipse.jetty.util.thread QueuedThreadPool]))
 
 (use-fixtures :each (tu/neutral-fresh tu/fresh))
 
@@ -712,6 +713,63 @@
             (is (= (mapv #(v/handle-of kb % CxServe) batch) hs))
             (is (= n (v/sentex-count kb)))))
         (finally (.stop ^Server server))))))
+
+(tu/deftest-kb a-server-stop-interrupts-the-worker-and-not-the-op
+  ;; docs/operations.md, "An op runs on a thread the HTTP server does not own".  Jetty's
+  ;; stop interrupts a worker still busy after the pool's stop timeout.  The op waits for a
+  ;; monitor this test holds, so the interrupt lands before the op starts, and `admit`
+  ;; reads the flag on the thread the op runs on.  The stop waits for a thread blocked on
+  ;; the monitor: the worker parks on its body read too, and an interrupt there sends no op.
+  (tu/with-terms [dog CxServe]
+    (let [monitor     (Object.)
+          interrupted (promise)
+          server      (jetty/run-jetty (fn [req]
+                                         (serve/handle-op kb (sub/registry) monitor req
+                                                          (fn []
+                                                            (deliver interrupted
+                                                                     (.isInterrupted (Thread/currentThread)))
+                                                            nil)))
+                                       {:port 0 :join? false :host "127.0.0.1"})
+          conn        (client/client "127.0.0.1" (serve/port server) {:token nil})
+          batch       (mapv #(list dog (symbol (str "Dog" %))) (range 200))
+          stored      #(count (v/sentexes-matching kb (list dog '?x) CxServe))]
+      (.setStopTimeout ^QueuedThreadPool (.getThreadPool ^Server server) 200)
+      (locking monitor
+        (future (try (client/call conn :assert-many [batch CxServe]) (catch Exception _ nil)))
+        (is (tu/await-blocked-on monitor 30000) "the op is queued on the monitor")
+        (.stop ^Server server))
+      (is (false? (deref interrupted 30000 :never-ran)))
+      (locking monitor
+        (is (= 200 (stored))))
+      (is (nat-int? (v/assert kb (list dog 'DogAfter) CxServe))))))
+
+(tu/deftest-kb a-stopping-daemon-answers-parked-polls-finishes-the-op-inside-the-monitor-and-refuses-the-rest
+  ;; `serve/start` runs `stop-ops` as its server begins to stop.  This test holds the
+  ;; monitor in place of an op in progress.
+  (tu/with-terms [dog Rex CxServe]
+    (let [{:keys [monitor registry] :as state} (#'serve/daemon-state)
+          handler (#'serve/handler kb {:token nil} state)
+          token   (:token (sub/watch registry kb nil nil))
+          parked  (future (sub/poll registry token 0 {:wait-ms 30000}))
+          stopped (promise)]
+      (is (loop [n 0]
+            (cond (= 1 (:parked @registry)) true
+                  (< n 2000) (do (Thread/sleep 5) (recur (inc n)))
+                  :else false))
+          "the poll is parked")
+      (locking monitor
+        (future (#'serve/stop-ops state) (deliver stopped true))
+        (is (= {:events [] :cursor 0 :lagged 0} (deref parked 5000 :still-parked))
+            "the parked poll answers before the op in progress finishes")
+        (is (= :waiting (deref stopped 200 :waiting))))
+      (is (true? (deref stopped 30000 false)))
+      (is (= [] (:events (deref (future (sub/poll registry token 0 {:wait-ms 30000}))
+                                5000 {:events :still-parked})))
+          "a poll after the stop does not park")
+      (sub/unwatch registry token)
+      (is (= {:status 503 :type :stopping}
+             (select-keys (post-op handler :assert [(list dog Rex) CxServe]) [:status :type])))
+      (is (nil? (v/handle-of kb (list dog Rex) CxServe))))))
 
 (tu/deftest-kb a-re-sent-write-answers-what-operations-md-says
   ;; the re-send table in docs/operations.md, row by row; `:export`'s row is

@@ -3,47 +3,60 @@
 # Copyright © 2026 Vaelii LLC and the Vaelii contributors.
 """Draw the upper-ontology genl graph as one standalone SVG.
 
-Reads the KB authoring surface (the `resources/kb/*.txt` files) directly, the same
-surface the placement tests reason over, and emits an is-a diagram:
+The edges come from vaelii: scripts/ontology-edges.clj loads the upper ontology (with
+--include-middle, the starter) into an in-memory KB and prints the believed taxonomy,
+so an edge a cover roster or an intersection installs is drawn beside a stated genl.
+The export is cached under target/, keyed by the KB files, that script and src/. The
+diagram has:
 
-  - one node per type that appears in a `(genl sub super)`,
-  - one edge per `(genl sub super)`, arrow pointing at the more general `super`,
+  - one node per type below `thing` (with --predicates, also the genl components that
+    relate predicates, which have no edge to `thing`),
+  - one edge per minimal genl, the transitive reduction (with --all-edges, every direct
+    edge, a redundant stated genl included), arrow pointing at the more general super,
   - node fill tinted by the file the term is *defined* in (its `(comment term …)`),
-  - edge colour set by the file the `genl` is *written* in.
+  - edge colour set by the file whose sentence installs the edge.
 
-An edge whose colour differs from its child node's fill is a genl written in a file
-other than the one that documents its subject.
+The KB loads every upper file into CxUniverse, so the two file colours are read off the
+`resources/kb/*.txt` text. An edge whose colour differs from its child node's fill is a
+genl written in a file other than the one that documents its subject; an edge no file
+sentence installs is grey.
 
 Four layout engines, none required to be installed:
 
-  - dot        Graphviz ranks the DAG general-at-top and minimises crossings; fitted to
-               a landscape sheet by --ratio, label size set by --text-scale. Widest,
-               because dot spreads each rank of leaves across a row.
+  - dot        Graphviz ranks the DAG and minimises crossings. It lays out a handful of
+               candidates (rank direction, label wrapping at underscores, leaf-fan
+               staggering by `unflatten`, root-tree packing) and keeps the most compact. --direction down keeps `thing`
+               at the top, at about four times as wide as tall for the upper ontology.
+               Label size is set by --text-scale.
   - gridfold   a left-to-right dendrogram whose wide terminal fans fold into grids, so
-               the leaves stack instead of stretching; landscape, keeps arrows and the
-               edge-context colours, no dependency. The auto fallback when dot is absent.
+               the leaves stack instead of stretching; it keeps the most compact of
+               several fold widths. Keeps arrows and the edge-context colours, no
+               dependency. The auto fallback when dot is absent.
   - icicle     a space-filling partition: depth is the column, a box is as tall as the
                leaves under it, leaves reach the right edge. Fills the sheet; tree edges
                become shared borders and only the multiple-inheritance genl draw.
   - dendrogram the plain left-to-right tree, portrait (about as tall as it has leaves).
 
-Parsing the text is enough because every genl line is a single ground `(genl sub super)`;
-no KB is booted by any engine.
-
 Usage:
-  scripts/ontology-graph.py [--out FILE] [--include-middle] [--include CX ...]
+  scripts/ontology-graph.py [--out FILE] [--include-middle] [--predicates] [--all-edges]
   scripts/ontology-graph.py --engine {auto,dot,gridfold,icicle,dendrogram}
   scripts/ontology-graph.py --engine dot --ratio 0.72 --text-scale 1.4
   scripts/ontology-graph.py --engine gridfold --out target/upper.svg
 
-`--ratio` chooses the layout's shape and `--text-scale` its label size independently:
-pick the aspect you want to print, then raise the text scale until the labels read.
-The two compose because label text grows against the fixed rank and node spacing, so a
-larger scale is a larger share of the ink and survives the fit-to-page shrink.
+`--ratio` is the height / width of the page or window the drawing fills. dot and
+gridfold keep the candidate layout that shows the labels largest on it. No layout is
+stretched to the ratio: spreading nodes apart adds whitespace and shrinks every label
+once the drawing is scaled to fit. `--text-scale` sets the dot label size against the
+fixed node spacing.
+
+In a browser the SVG covers the window: its shorter side fills the window and the
+longer side scrolls.
 """
 import argparse
 import collections
 import glob
+import hashlib
+import json
 import math
 import os
 import re
@@ -70,44 +83,103 @@ CONTEXT_COLORS = {
 }
 FALLBACK = ("#777777", "#e6e6e6")
 
-GENL_RE = re.compile(r"\(genl\s+(\S+)\s+([^\s)]+)\)\s*$")
-COMMENT_RE = re.compile(r"\(comment\s+(\S+)\s")
+TOKEN_RE = re.compile(r';[^\n]*|"(?:\\.|[^"\\])*"|[()]|[^\s()";]+')
+
+# A cover installs one (genl part whole) per part, the whole first; an intersection
+# installs one (genl combined conjunct) per conjunct, the combined type first.
+COVERS = ("partition", "covering", "separating")
 
 
-def kb_files(include_middle, extra):
-    """The .txt files to read: every upper file, `core.txt` first, then optionally middle,
-    then any explicit `extra` context names."""
+def kb_files(include_middle):
+    """The .txt files the KB loads: every upper file, `core.txt` first, then optionally
+    middle."""
     files = [os.path.join(REPO, "resources/kb/upper/core.txt")]
     files += sorted(f for f in glob.glob(os.path.join(REPO, "resources/kb/upper/*.txt"))
                     if os.path.basename(f) != "core.txt")
     if include_middle:
         files += sorted(glob.glob(os.path.join(REPO, "resources/kb/middle/*.txt")))
-    for cx in extra:
-        p = os.path.join(REPO, "resources/kb", cx + ".txt")
-        if os.path.exists(p):
-            files.append(p)
-        elif os.path.exists(os.path.join(REPO, "resources/kb/upper", cx + ".txt")):
-            files.append(os.path.join(REPO, "resources/kb/upper", cx + ".txt"))
     return files
 
 
+EDGES_CLJ = os.path.join(REPO, "scripts/ontology-edges.clj")
+
+
+def engine_edges(files, include_middle, predicates):
+    """The believed genl edges as (sub, super, minimal) from scripts/ontology-edges.clj,
+    read from target/ when an export for the same KB files, script and src/ is there."""
+    flags = (["middle"] if include_middle else []) + (["predicates"] if predicates else [])
+    key = hashlib.sha1(" ".join(flags).encode())
+    for f in files + [EDGES_CLJ]:
+        with open(f, "rb") as fh:
+            key.update(fh.read())
+    for cmd in (["git", "rev-parse", "HEAD:src"], ["git", "diff", "HEAD", "--", "src"]):
+        key.update(subprocess.run(cmd, cwd=REPO, capture_output=True, check=True).stdout)
+    cache = os.path.join(REPO, "target", f"ontology-edges-{key.hexdigest()[:16]}.json")
+    if not os.path.exists(cache):
+        print("loading the ontology into vaelii (about 30 s) …", file=sys.stderr)
+        out = subprocess.run(["lein", "run", "-m", "clojure.main", EDGES_CLJ] + flags,
+                             cwd=REPO, capture_output=True, text=True)
+        if out.returncode != 0:
+            sys.exit(f"ontology-edges.clj failed:\n{out.stderr[-2000:]}")
+        os.makedirs(os.path.dirname(cache), exist_ok=True)
+        with open(cache, "w", encoding="utf-8") as fh:
+            fh.write(out.stdout.strip().splitlines()[-1])
+    with open(cache, encoding="utf-8") as fh:
+        return [tuple(row) for row in json.load(fh)["edges"]]
+
+
+def forms(text):
+    """The top-level forms of a KB file as nested lists of token strings, comments
+    dropped."""
+    stack = [[]]
+    for tok in TOKEN_RE.findall(text):
+        if tok.startswith(";"):
+            continue
+        if tok == "(":
+            stack.append([])
+        elif tok == ")":
+            done = stack.pop()
+            stack[-1].append(done)
+        else:
+            stack[-1].append(tok)
+    return stack[0]
+
+
+def genl_edges(form):
+    """The (sub, super) edges a top-level ground form installs: a `genl`, a cover or an
+    `intersection`, unwrapped from a `set/…` strength wrapper. A rule installs none."""
+    if form and form[0].startswith("set/") and len(form) == 2 and isinstance(form[1], list):
+        form = form[1]
+    if len(form) < 3 or not all(isinstance(t, str) for t in form):
+        return []
+    head, args = form[0], form[1:]
+    if head == "genl":
+        return [(args[0], args[1])]
+    if head in COVERS:
+        return [(part, args[0]) for part in args[1:]]
+    if head == "intersection":
+        return [(args[0], conjunct) for conjunct in args[1:]]
+    return []
+
+
 def parse(files):
-    """Return (edges, home). `edges` is a list of (sub, super, context); `home` maps a
-    term to the context of its first `(comment term …)`."""
-    edges = []
+    """Return (written, home): `written` maps a (sub, super) edge to the file whose
+    sentence installs it, and `home` maps a term to the file of its first
+    `(comment term …)`. Only the colours read these; the edges are the engine's."""
+    written = {}
     home = {}
     for f in files:
         cx = os.path.splitext(os.path.basename(f))[0]
         with open(f, encoding="utf-8") as fh:
-            for line in fh:
-                m = GENL_RE.match(line)
-                if m:
-                    edges.append((m.group(1), m.group(2), cx))
-                    continue
-                c = COMMENT_RE.match(line)
-                if c:
-                    home.setdefault(c.group(1), cx)
-    return edges, home
+            text = fh.read()
+        for form in forms(text):
+            if not isinstance(form, list):
+                continue
+            for edge in genl_edges(form):
+                written.setdefault(edge, cx)
+            if len(form) >= 2 and form[0] == "comment" and isinstance(form[1], str):
+                home.setdefault(form[1], cx)
+    return written, home
 
 
 # ---- spanning tree ------------------------------------------------------
@@ -240,18 +312,19 @@ def dendrogram(roots, children, depth):
     return {n: (cx[depth[n]], y[n] * ROW_H) for n in y}
 
 
-def gridfold_layout(roots, children, depth):
+def gridfold_layout(roots, children, depth, fold_cols=FOLD_COLS):
     """The dendrogram, but a parent whose children are all leaves and number at least
-    FOLD_MIN packs them into a grid to its right rather than one tall column. Folding the
-    wide terminal fans (a genus and its species, a predicate and its properties) is what
-    turns the portrait dendrogram into a landscape sheet: the fans are most of the leaves,
-    and a grid of them is a few rows tall instead of a dozen."""
+    FOLD_MIN packs them into a grid of at most `fold_cols` columns to its right rather
+    than one tall column. Folding the wide terminal fans (a genus and its species, a
+    predicate and its properties) is what turns the portrait dendrogram into a landscape
+    sheet: the fans are most of the leaves, and a grid of them is a few rows tall instead
+    of a dozen."""
     cx = column_centres(set(depth), depth)
     pos = {}
     row = [0.0]  # next free row, boxed so the closure can advance it
 
     def cols_for(n):
-        return min(FOLD_COLS, max(1, math.ceil(math.sqrt(n))))
+        return min(fold_cols, max(1, math.ceil(math.sqrt(n))))
 
     def walk(v):
         kids = children.get(v, [])
@@ -282,6 +355,20 @@ def gridfold_layout(roots, children, depth):
         walk(r)
         row[0] += ROOT_GAP
     return pos
+
+
+def best_gridfold(roots, children, depth, target):
+    """The gridfold layout over each fold width in FOLD_WIDTHS with the smallest
+    `sheet_area` for `target`."""
+    def area(pos):
+        mnx, mxx, mny, mxy = bbox(pos)
+        return sheet_area(mxx - mnx, mxy - mny, target)
+
+    return min((gridfold_layout(roots, children, depth, cols) for cols in FOLD_WIDTHS),
+               key=area)
+
+
+FOLD_WIDTHS = (1, 2, 3, 4, 6, 8, 12, 16)
 
 
 # ---- svg ----------------------------------------------------------------
@@ -386,27 +473,44 @@ def svg(pos, depth, home, edges, margin=28, legend_cx=None):
 
 # ---- graphviz path ------------------------------------------------------
 
-def to_dot(nodes, edges, home, depth, ratio, text_scale=1.0):
-    """A DOT document for `dot`. General terms rank above specific ones: a genl edge is
-    emitted `super -> sub [dir=back]`, so `dot` puts the super on the higher rank and the
-    arrowhead still points at the super. `ratio` (height / width) fits the drawing to a
-    landscape sheet; `text_scale` multiplies the label point size while the rank and node
-    spacing stay fixed, so raising it enlarges the text relative to the layout."""
+def wrap_label(name, width):
+    """`name` broken after an underscore into lines of at most `width` characters where
+    its parts allow, joined by DOT's `\\n`; unchanged when `width` is 0."""
+    if not width:
+        return name
+    lines = [""]
+    for part in re.findall(r"[^_]+_?", name):
+        if lines[-1] and len(lines[-1]) + len(part) > width:
+            lines.append(part)
+        else:
+            lines[-1] += part
+    return "\\n".join(lines)
+
+
+def to_dot(nodes, edges, home, depth, rankdir="TB", packmode="graph", text_scale=1.0,
+           wrap=0):
+    """A DOT document for `dot`. General terms rank before specific ones: a genl edge is
+    emitted `super -> sub [dir=back]`, so `dot` puts the super on the earlier rank and the
+    arrowhead still points at the super. `packmode` arranges the separate root trees
+    (Graphviz's `packmode` values); `text_scale` multiplies the label point size while the
+    rank and node spacing stay fixed, so raising it enlarges the text relative to the
+    layout. A `wrap` above 0 breaks each label into lines of about that many characters
+    (`wrap_label`), which narrows the boxes."""
     def colors(cx):
         return CONTEXT_COLORS.get(cx, FALLBACK)
 
     fs = round(11 * text_scale, 1)
-    ratio_attr = "" if ratio in ("none", "", None) else f"ratio={ratio}, "
     out = ["digraph ontology {",
-           f'  graph [rankdir=TB, {ratio_attr}ranksep=0.55, nodesep=0.18, '
-           f'margin=0, bgcolor="white"];',
+           f'  graph [rankdir={rankdir}, pack=true, packmode="{packmode}", ranksep=0.55, '
+           f'nodesep=0.18, margin=0, bgcolor="white"];',
            f'  node [shape=box, style="rounded,filled", fontname="Helvetica", '
            f'fontsize={fs}, height=0.30, margin="0.09,0.03", penwidth=1.4, '
            f'fontcolor="#111"];',
            '  edge [penwidth=1.1, arrowsize=0.7];']
     for n in sorted(nodes):
         line, fill = colors(home.get(n))
-        out.append(f'  "{n}" [fillcolor="{fill}", color="{line}", '
+        out.append(f'  "{n}" [label="{wrap_label(n, wrap)}", fillcolor="{fill}", '
+                   f'color="{line}", '
                    f'tooltip="{n} — defined in {home.get(n) or "?"}, depth {depth[n]}"];')
     for sub, sup, cx in edges:
         line = colors(cx)[0]
@@ -415,13 +519,70 @@ def to_dot(nodes, edges, home, depth, ratio, text_scale=1.0):
     return "\n".join(out)
 
 
-def render_dot(dot_text):
-    """Run `dot -Tsvg`, returning the SVG text, or None when Graphviz is not installed."""
-    if not shutil.which("dot"):
-        return None
+def render_dot(dot_text, stagger=0):
+    """Run `dot -Tsvg`, returning the SVG text. A `stagger` above 0 first runs
+    `unflatten -l stagger -f -c stagger`, which spreads a wide fan of leaves over that many
+    ranks."""
+    if stagger:
+        dot_text = subprocess.run(["unflatten", "-l", str(stagger), "-f", "-c", str(stagger)],
+                                  input=dot_text, capture_output=True, text=True,
+                                  check=True).stdout
     proc = subprocess.run(["dot", "-Tsvg"], input=dot_text, capture_output=True,
                           text=True, check=True)
     return proc.stdout
+
+
+def sheet_area(w, h, target):
+    """The area of the smallest sheet of aspect `target` (height / width) holding a w × h
+    drawing, or the drawing's own area when `target` is None. Every engine keeps the
+    candidate layout with the smallest: the labels are one size in every candidate, so
+    the smallest sheet is the one that shows them largest when it is scaled to a page or
+    window of that shape."""
+    return w * h if target is None else max(w, h / target) * max(h, w * target)
+
+
+def best_dot(nodes, edges, home, depth, target, text_scale, rankdirs=None, roots=1):
+    """Lay out every candidate in `rankdirs` (default RANKDIRS) × WRAPS × STAGGERS, and
+    × PACKMODES when there is more than one root tree, and return the SVG of the one
+    with the smallest `sheet_area`. No layout is stretched toward `target`. Returns None
+    when Graphviz is not installed."""
+    if not shutil.which("dot"):
+        return None
+    staggers = STAGGERS if shutil.which("unflatten") else (0,)
+    packmodes = PACKMODES if roots > 1 else PACKMODES[:1]
+    best = None
+    for rankdir in rankdirs or RANKDIRS:
+        for packmode in packmodes:
+            for wrap in WRAPS:
+                text = to_dot(nodes, edges, home, depth, rankdir, packmode, text_scale, wrap)
+                for stagger in staggers:
+                    doc = render_dot(text, stagger)
+                    w, h = map(float, re.search(
+                        r'viewBox="[\d.]+ [\d.]+ ([\d.]+) ([\d.]+)"', doc).groups())
+                    sheet = sheet_area(w, h, target)
+                    if best is None or sheet < best[0]:
+                        best = (sheet, doc)
+    return best[1]
+
+
+RANKDIRS = ("TB", "LR")
+DIRECTIONS = {"auto": RANKDIRS, "down": ("TB",), "right": ("LR",)}
+PACKMODES = ("graph", "array_c2", "array_c3", "array_c4", "array_c6")
+STAGGERS = (0, 2, 4)
+WRAPS = (0, 16, 10)
+
+
+def fit_to_window(svg_text):
+    """Size the root element in a browser to cover its window: the drawing scales until
+    it fills both window axes, so its shorter side fills the window and the longer side
+    scrolls. The width and height attributes stay for tools that read no CSS."""
+    m = re.search(r'<svg\b[^>]*?viewBox="[\d.]+ [\d.]+ ([\d.]+) ([\d.]+)"', svg_text)
+    if not m:
+        return svg_text
+    aspect = float(m.group(1)) / float(m.group(2))
+    style = (f'style="display:block; width:max(100vw, {aspect:.4f} * 100vh); '
+             f'height:max(100vh, 100vw / {aspect:.4f})"')
+    return svg_text.replace("<svg ", f"<svg {style} ", 1)
 
 
 def inject_legend(svg_text, legend_cx, scale=1.0):
@@ -493,8 +654,7 @@ def icicle_svg(roots, children, depth, home, edges, legend_cx, ratio, leaf_h=17,
     ncols = max(depth.values()) + 1
     band = 26 * (len(legend_cx) + 1) + 20
     height = total * leaf_h
-    ratio_f = 0.62 if ratio in ("none", "", None) else float(ratio)
-    width = height / ratio_f
+    width = height / (ratio or 0.62)
     colw = width / ncols
 
     boxes = {}  # node -> (x0, y0, x1, y1)
@@ -582,18 +742,30 @@ def main():
                     default="auto",
                     help="auto uses Graphviz dot when present, else gridfold; gridfold "
                     "and icicle and dendrogram are the built-in, dependency-free layouts")
-    ap.add_argument("--ratio", default="0.72",
-                    help="dot/icicle: drawing height / width, ~0.72 for a landscape sheet")
+    ap.add_argument("--ratio", type=float, default=None,
+                    help="height / width of the page or window to fill (0.72 for "
+                    "landscape): dot and gridfold keep the candidate that shows the labels "
+                    "largest on it, icicle draws to it; omitted, the smallest drawing wins")
+    ap.add_argument("--direction", choices=sorted(DIRECTIONS), default="auto",
+                    help="dot: down roots the tree at the top, right at the left; auto "
+                    "keeps whichever is more compact for --ratio")
     ap.add_argument("--text-scale", type=float, default=1.0,
                     help="dot only: multiply label point size (raise to read a chosen ratio)")
     ap.add_argument("--include-middle", action="store_true",
-                    help="also read resources/kb/middle/*.txt")
-    ap.add_argument("--include", nargs="*", default=[],
-                    help="extra files to read, by path under resources/kb without .txt (e.g. koinii/CxRegistry)")
+                    help="load the starter (upper + resources/kb/middle) instead of upper")
+    ap.add_argument("--predicates", action="store_true",
+                    help="also draw the genl components outside thing, which relate "
+                    "predicates")
+    ap.add_argument("--all-edges", action="store_true",
+                    help="draw every direct genl edge, not only the transitive reduction")
     args = ap.parse_args()
 
-    files = kb_files(args.include_middle, args.include)
-    edges, home = parse(files)
+    files = kb_files(args.include_middle)
+    written, home = parse(files)
+    edges = [(sub, sup, written.get((sub, sup)))
+             for sub, sup, minimal in engine_edges(files, args.include_middle,
+                                                   args.predicates)
+             if minimal or args.all_edges]
 
     nodes = set()
     for a, b, _ in edges:
@@ -608,14 +780,15 @@ def main():
 
     depth = longest_depth(nodes, parents)
 
-    seen = {home[n] for n in nodes if home.get(n)} | {cx for _, _, cx in edges}
+    seen = {home[n] for n in nodes if home.get(n)} | {cx for _, _, cx in edges if cx}
     legend_cx = [c for c in CONTEXT_COLORS if c in seen] + sorted(
         c for c in seen if c not in CONTEXT_COLORS)
 
     doc = None
     used = args.engine
     if args.engine in ("auto", "dot"):
-        doc = render_dot(to_dot(nodes, edges, home, depth, args.ratio, args.text_scale))
+        doc = best_dot(nodes, edges, home, depth, args.ratio, args.text_scale,
+                       DIRECTIONS[args.direction], sum(1 for n in nodes if not parents[n]))
         if doc is None and args.engine == "dot":
             sys.exit("dot: Graphviz is not installed (try --engine gridfold)")
         if doc is not None:
@@ -631,9 +804,10 @@ def main():
                       legend_cx=legend_cx)
             used = "dendrogram"
         else:  # gridfold, and the auto fallback
-            doc = svg(gridfold_layout(roots, children, depth), depth, home, edges,
+            doc = svg(best_gridfold(roots, children, depth, args.ratio), depth, home, edges,
                       legend_cx=legend_cx)
             used = "gridfold"
+    doc = fit_to_window(doc)
 
     if args.out == "-":
         sys.stdout.write(doc)

@@ -405,6 +405,43 @@
       [(:out acc) (:fold acc)
        (when (:fold acc) (mapv #(get (:idx acc) (:sentence %)) literals))])))
 
+(defn- restates-goal?
+  "Does the rewrite's residual ask the goal it replaced again, or something stronger, so
+  that the parent reaches every answer of the child through a sibling?  True when a
+  residual literal would answer `g`, the goal under the head unifier, as a rule
+  consequent does (`res/subsuming-unify` binding nothing: the goal itself, or the goal's
+  arguments under a spec of its functor) and lands at a depth no larger than
+  `goal-depth`, the goal's depth in the parent; the collapse raised no carried literal's
+  depth; and the child's `window` reopens nothing left of the parent's `from`.
+
+  Each answer of such a child derives the goal within the depth the parent gave it, since
+  both leaves and `subsuming-unify` answer a goal from its spec.  The shallowest
+  derivation of the goal does not ask the goal again at its top rewrite, so the sibling
+  that rewrites the goal through that rule reaches the answer.  The last two conditions
+  keep a child the parent does not dominate: one that gives a literal more depth, or one
+  that may rewrite a literal the parent's window had closed.  A carried literal equal to
+  the goal does not count: the parent holds it beside the goal, and two copies of one
+  goal would each see the other and drop both rewrites.
+
+  `spliced` is the conjunction before the collapse, `slots` the collapse's map from each
+  spliced position to its place in `kept` (nil when nothing folded), and positions `i` up
+  to `i + arity` are the residual's."
+  [kb context g goal-depth from window spliced kept slots i arity]
+  (let [i     (long i)
+        end   (+ i (long arity))
+        depth (fn [^long p] (long (:depth (if slots (nth kept (nth slots p)) (nth spliced p)))))]
+    (boolean
+     (and (>= (long window) (long from))
+          (or (nil? slots)
+              (every? (fn [^long p] (= (long (:depth (nth spliced p))) (depth p)))
+                      (concat (range i) (range end (count spliced)))))
+          (some (fn [^long p]
+                  (and (<= (depth p) (long goal-depth))
+                       (= res/no-bindings
+                          (res/subsuming-unify kb g (:sentence (nth spliced p))
+                                               res/no-bindings context))))
+                (range i end))))))
+
 (defn- children
   "The nodes reachable from this one by rewriting one literal through one rule.
 
@@ -429,7 +466,10 @@
   rule's guard keep speaking about `?var0` when `?var0` here means something else.
 
   The spliced conjunction then goes through `collapse-repeats`, which is what keeps a
-  cyclic rule graph from growing the residual a conjunct at a time."
+  cyclic rule graph from growing the residual a conjunct at a time.
+
+  A child whose residual asks the goal it rewrote again is not built (`restates-goal?`):
+  the rest of the search reaches every answer its subtree would."
   [kb node context defeated]
   (let [{:keys [literals guards supports tree-depth from nvars answer-terms derived]} node]
     (for [i     (range (long from) (count literals))
@@ -456,8 +496,10 @@
                  ;; difference.  A fold left of `i` also shortens the prefix, which moves
                  ;; the first residual literal one position left per fold; `fold` is at or
                  ;; below both indices, so one `min` covers the two.
-                 window (if fold (min (long i) (long fold)) (long i))
-                 [canon vm] (sx/canonical-conjunction (mapv :sentence mixed))
+                 window (if fold (min (long i) (long fold)) (long i))]
+          :when (not (restates-goal? kb context (res/substitute sentence b) depth from
+                                     window spliced mixed slots i (count resid)))
+          :let  [[canon vm] (sx/canonical-conjunction (mapv :sentence mixed))
                  vm-inv (set/map-invert vm)]]
       {:literals     (mapv (fn [l s] (assoc l :sentence s)) mixed canon)
        :from         window
@@ -670,12 +712,20 @@
 
   `dl` is the `System/nanoTime` instant a leaf's walk stops at (`budget/interruptible`;
   nil, the 1-arity, is none).  A node the deadline stops inside goes back on the frontier
-  as it was, and the answer is `::budget/interrupted`."
+  as it was, and the answer is `::budget/interrupted`.
+
+  A thread interrupted before the step throws `InterruptedException` and expands nothing."
   ([sess] (step! sess nil))
   ([{:keys [kb context queue nodes counter stats seen strategy leaf-solver est-override
             proof? defeated truncated]
      :as sess}
     dl]
+   ;; An interrupted thread stops here, between two expansions, with the session intact:
+   ;; nothing else in the search reads the flag, and a cancelled future would otherwise
+   ;; run its search to the depth bound.  `Thread/interrupted` clears the flag, as a
+   ;; thrown `InterruptedException` does.
+   (when (Thread/interrupted)
+     (throw (InterruptedException. "the node engine's search was interrupted")))
    (let [q0 @queue]
      (when-let [[[_ _ id] q'] (queue-pop q0)]
        (reset! queue q')

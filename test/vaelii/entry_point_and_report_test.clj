@@ -64,10 +64,10 @@
 
 ;; ---- arity: the pair with a binding to describe -------------------------
 ;;
-;; A tuple of a length its binding breaks is stored in every order and each reader
-;; decides it, so the two halves are one reading: the same hard clash at `:monotonic`,
-;; grounded on the same binding, whichever of the tuple, the declaration and the edge
-;; arrived last (docs/taxonomy.md, "Arity").
+;; A tuple of a length its binding breaks is stored in every order and held inert at
+;; either strength, so the two halves are one reading: the same conflict, grounded on the
+;; same binding, whichever of the tuple, the declaration and the edge arrived last
+;; (docs/taxonomy.md, "Arity").
 
 (defn- arity-reading
   "`[believed? [[kind sides grounds] …]]` for `fact` at `strength` in a KB `setup` wrote,
@@ -81,7 +81,7 @@
        (mapv (juxt :kind #(mapv :sentence (:sides %)) #(mapv :sentence (:grounds %)))
              (v/conflicts kb))])))
 
-(deftest an-arity-nogood-reads-the-same-whichever-arrives-last
+(deftest an-inert-tuple-reads-the-same-whichever-arrives-last
   (tu/with-terms [parentOf fatherOf A B C]
     (let [declaration (list 'binary_predicate parentOf)
           edge        (list 'genl fatherOf parentOf)]
@@ -99,12 +99,11 @@
           (let [late   (fn [kb] (doseq [s ingredients] (v/assert kb s 'CxUniverse)))
                 first* (fn [kb] (v/assert kb fact 'CxUniverse {:strength :monotonic})
                          (doseq [s ingredients] (v/assert kb s 'CxUniverse)))]
-            (is (= [true [[:arity [fact] [declaration]]]]
+            (is (= [false [[:arity [fact] [declaration]]]]
                    (arity-reading late fact :monotonic)
-                   (arity-reading first* fact :monotonic))
-                "a :monotonic tuple is one hard clash grounded on the declaration, in both orders")
-            (is (= [false []] (arity-reading late fact :default))
-                "and a :default one is OUT, with nothing to report")))))))
+                   (arity-reading first* fact :monotonic)
+                   (arity-reading late fact :default))
+                "one conflict grounded on the declaration, in both orders and at either strength")))))))
 
 ;; ---- disjointness: every trigger, one nogood ----------------------------
 ;;

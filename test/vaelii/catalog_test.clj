@@ -1070,6 +1070,11 @@
         (cat/unload! "mine")
         (is (nil? (cat/entry "mine")))))))
 
+(def ^:private retired-note
+  "A CxUniverse premise this engine does not ship that names only shipped terms, so the
+  sync retracts it (`sync/vocabulary`)."
+  '(comment mammal "a note this engine does not ship"))
+
 (deftest every-loaded-kb-is-synced-by-one-job
   ;; what the development browser submits when a shipped KB file changes on disk
   (let [kb (doto (v/open-kb {:backend :memory :space (beside-the-block ::sync-loaded)
@@ -1077,13 +1082,13 @@
              (tu/clear-kb!)
              (tu/load-starter!))]
     (try
-      (v/assert kb '(unary_predicate shipped_retired_kind) 'CxUniverse)
+      (v/assert kb retired-note 'CxUniverse)
       (cat/register! "mine" "My KB" kb {:source (cat/source "starter")})
       (let [job (cat/sync-loaded!)]
         (is (some? job))
         (jobs/wait job 120000)
         (is (= {:added 0 :removed 1 :refused []} (:sync (cat/entry "mine"))))
-        (is (nil? (v/handle-of kb '(unary_predicate shipped_retired_kind) 'CxUniverse))))
+        (is (nil? (v/handle-of kb retired-note 'CxUniverse))))
       (cat/unload! "mine")
       (testing "no entry, no job"
         (is (nil? (cat/sync-loaded!))))
@@ -1097,7 +1102,7 @@
               (tu/clear-kb!)
               (tu/load-starter!))]
     (try
-      (v/assert kb '(unary_predicate shipped_retired_kind) 'CxUniverse)
+      (v/assert kb retired-note 'CxUniverse)
       (v/export! kb dir {})
       (let [key (cat/load-dir dir {:belief? :rebuild})]
         ;; 15 min: the load imports a starter-sized dump and rebuilds its belief, and the
@@ -1107,7 +1112,7 @@
               loaded (:kb e)]
           (is (= :done (:status (#'cat/with-job e))))
           (is (= {:added 0 :removed 1 :refused []} (:sync e)))
-          (is (nil? (v/handle-of loaded '(unary_predicate shipped_retired_kind) 'CxUniverse)))
+          (is (nil? (v/handle-of loaded retired-note 'CxUniverse)))
           (cat/unload! key)))
       (finally
         (tu/clear-kb! kb)

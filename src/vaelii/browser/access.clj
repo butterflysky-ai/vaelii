@@ -87,6 +87,8 @@
   ;; the one-step neighbours no other one-step neighbour stands between, which is what the
   ;; concept graph draws: one round trip an expansion, the reduction done by the engine
   min-genls max-specs
+  ;; the same reduction over `genlCx`, for a context's page
+  min-context-parents max-context-children
   ;; whether a `types` node is a relation, by its stored arity, for the term colouring
   relation?
   supporting-justifications dependent-justifications

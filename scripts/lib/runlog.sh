@@ -4,10 +4,10 @@
 #
 # The stage logs already hold every detail, and they are the wrong shape for one
 # question: WHICH REVISION was the last one lint / the suite / perf / the matrix
-# actually passed at?  Answering that from `target/gate/run-*/` means opening a
+# actually passed at?  Answering that from `logs/gate/run-*/` means opening a
 # dozen directories, reading each one's first line for the revision, and guessing
-# at the verdict from the tail — and `target/` is deleted by `lein clean`, so the
-# history goes with it.  So each runner appends one row here as it exits.
+# at the verdict from the tail, and `runlog_prune` rotates those directories.  So
+# each runner appends one row here as it exits.
 #
 # The ledger is a LEDGER: append-only, one row per run, never rewritten.  A row is
 # a fact about a run that finished, so a re-run at the same revision adds a row

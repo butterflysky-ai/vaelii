@@ -101,7 +101,6 @@
 (genl dwelling container)
 (disjoint dwelling clothing)
 (disjoint dwelling furniture)
-(disjoint dwelling tool)
 ;; A detached house is a dwelling and a building, and a motorhome a dwelling and a vehicle.
 ;; Demolition ends the house as both, and scrapping ends the motorhome as both.
 (orthogonal dwelling building)

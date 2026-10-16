@@ -723,7 +723,7 @@
   "`[P kind value]` for the sentence `s` of a stored fact that binds a relation's length,
   else nil: `(arity P n)` and an exact-arity class membership bind `:exact n`, a
   `variable_arity` membership `:var nil`, and `(arityMin P m)` `:min m`.  The index posts
-  each under its binding family (`vaelii.impl.kv`), which the arity nogoods read."
+  each under its binding family (`vaelii.impl.kv`), which `arity/relation-length` reads."
   [s]
   (when (seq? s)
     (let [[f p v] s

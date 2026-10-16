@@ -168,7 +168,11 @@
       (tu/with-terms [exc otherBase other sub super]
         (v/assert kb (except-rule (list exc '?x) [(list otherBase '?x)] (list other '?x))
                   CxFast)
-        (is (pos? (walks #(v/assert kb (list 'genl sub super) CxFast))))))))
+        (is (pos? (walks #(v/assert kb (list 'genl sub super) CxFast))))
+        (testing "an edge whose upper end is already above its lower end moves no closure"
+          (tu/with-terms [top]
+            (v/assert kb (list 'genl super top) CxFast)
+            (is (zero? (walks #(v/assert kb (list 'genl sub top) CxFast))))))))))
 
 ;; ---- the walk's cost -----------------------------------------------------
 ;; A walk reaches a rule once per edge into it, and the graph is dense wherever many

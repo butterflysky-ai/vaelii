@@ -444,6 +444,9 @@ default-chain-opts                              ; the bounds a chain run takes w
                                                         ; else an inherited length of 2+:
                                                         ; a `types` node that is a relation, not a type
 (context-up kb c) / (context-down kb c) / (sees? kb k y); genlCx closures + visibility test
+(min-context-parents kb c) / (max-context-children kb c) ; the one-step genlCx parents / children no
+                                                        ; other one stands between, read as
+                                                        ; context-up / context-down read an except
 (context-of-agent agent) / (agent-of-context ctx)       ; the Alice <-> CxAgentAlice agent
                                                         ; context bijection (docs/belief.md)
 (has-prop? kb kind pred [context]) / (props kb kind)              ; :transitive :symmetric :asymmetric :reflexive
@@ -603,7 +606,8 @@ assertable-strengths                            ; #{:monotonic :default}, the se
 (why-not kb handle)                             ; stored but OUT: :defeated (+ what contradicts it)
                                                 ; / :withdrawn (+ the defeats it rests on)
                                                 ; / :superseded (+ the restatement that displaced it)
-                                                ; / :inert (a denial of a roster literal)
+                                                ; / :inert (a denial of a roster literal,
+                                                ;   + :denies, the literal and its roster)
                                                 ; / :forced-conclusion (+ the rule and its
                                                 ;   antecedent predicates off the roster)
                                                 ; / :unsupported (+ the missing antecedents) / :not-stored
@@ -629,6 +633,7 @@ assertable-strengths                            ; #{:monotonic :default}, the se
                                                 ; results and justifications of BOTH sides.  No opts
                                                 ; and it is `ask` (no rule expands); {:max-depth n} and
                                                 ; it is `query`.  There is no default depth here either
+                                                ; A ground side's search stops at its first answer
                                                 ; opts: `query-opt-keys`, checked at THIS entry point — a
                                                 ; misspelt depth checked downstream is never checked at
                                                 ; all, and answers :unknown for a derivable sentence
@@ -1289,7 +1294,9 @@ Assert known-true facts with `{:strength :monotonic}`; the default is `:default`
 (most of a common-sense KB), and a default is defeasible at the edges.
 
 `opts` on assert: `{:chain? false}` skips forward chaining, and computes none of the
-seeds it would chain from, `{:max-depth n}` bounds it. `vaelii.host.core-context/load-into` asserts the upper layer into CxUniverse: every
+seeds it would chain from, `{:max-depth n}` bounds it. A `with-deferred-settle` batch's
+closing settle seeds chaining from the `genlCx` moves it settles only when a write of
+the batch chained. `vaelii.host.core-context/load-into` asserts the upper layer into CxUniverse: every
 file under `resources/kb/upper/`, with `core.txt` the vocabulary — every special
 predicate the engine interprets (types/contexts, arg/genlArg/interArg,
 disjoint/disjoint_metatype,
@@ -1321,8 +1328,8 @@ kinds below the skeleton `core.txt` holds, body parts and substances,
 the use/mention vocabulary; `space.txt`, the four spatial calculi of
 [space.md](space.md); `time.txt`, Allen's interval relations, the point algebra, the
 calendar constructors and the event/fluent vocabulary. It is also where lifted universal
-facts are stored. `vaelii.host.sync/sync!` locks CxUniverse's premises to the shipped
-files, every `genlCx` edge excepted ([contexts.md](contexts.md#the-context-topology)).
+facts are stored. `vaelii.host.sync/sync!` locks CxUniverse's premises about the engine's
+vocabulary to the shipped files, every `genlCx` edge excepted ([contexts.md](contexts.md#the-context-topology)).
 
 The **middle contexts** are `kb/middle/`, each seeing CxUniverse (`CxKinship`,
 `CxMereology`, `CxBiology`, `CxChange`, `CxSocial` — the rules; `CxAnatomy` and `CxSize`

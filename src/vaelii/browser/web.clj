@@ -166,9 +166,9 @@
       (when (pos? n) (str " " n))])))
 
 (defn- header
-  "The site header: the vaelii logo and wordmark (a home link) at the left, a
-  term-search box, and the colour controls at the right.  The search is an htmx
-  active-search — a debounced `hx-get` to /find swaps just the `#main` region out of
+  "The site header: the vaelii logo and wordmark (a home link) at the left, the
+  menubar with the colour controls after its last item, and a term-search box.  The
+  search is an htmx active-search — a debounced `hx-get` to /find swaps just the `#main` region out of
   the answer.  The palette dot (cycling the four accent pairs) and the theme dot
   (flipping light against dark) are wired by vaelii.js and persisted in localStorage
   (docs/web.md)."
@@ -186,10 +186,8 @@
     [:a {:href "/"} "Ontology"]
     [:a {:href "/reasoning"} "Reasoning"]
     [:a {:href "/levels"} "Query"]
+    ;; the assert page writes into the reader's sandbox, names it and offers the reset
     [:a {:href "/assert"} "Assert"]
-    ;; the sandbox is reached as a place to write, never as a context to choose — the
-    ;; assert page names it and offers the reset; this is only the way in
-    [:a {:href "/assert"} "Sandbox"]
     [:a {:href "/network"} "Network"]
     [:a {:href "/stats"} "Stats"]
     ;; long work runs on its own thread, so the way to it has to be in the chrome rather
@@ -200,20 +198,20 @@
     ;; the label is its own element with an id because it changes without the header
     ;; being re-rendered: switching KBs swaps it out of band (`entries-panel`)
     [:a.kb-active {:href "/kbs" :title "knowledge bases: load, unload, switch"}
-     [:span.muted "KB:"] " " [:span#kb-label (active-kb-name)]]]
+     [:span.muted "KB:"] " " [:span#kb-label (active-kb-name)]]
+    ;; each dot is painted in what it controls, so neither needs a label beside it:
+    ;; vaelii.js keeps the titles saying which value is live
+    [:span.theme-controls
+     [:button#palette-dot.palette-btn {:type "button" :aria-label "switch colour palette"
+                                       :title "Switch colour palette"}]
+     [:button#theme-dot.theme-btn {:type "button"
+                                   :aria-label "toggle light or dark theme"
+                                   :title "Toggle light or dark theme"}]]]
    [:input.search {:type "search" :name "q" :placeholder "regex over terms…"
                    :autocomplete "off" :aria-label "find terms by regex"
                    :hx-get "/find" :hx-target "#main" :hx-select "#main"
                    :hx-swap "outerHTML" :hx-push-url "true"
-                   :hx-trigger "keyup changed delay:400ms, search"}]
-   ;; each dot is painted in what it controls, so neither needs a label beside it:
-   ;; vaelii.js keeps the titles saying which value is live
-   [:div.theme-controls
-    [:button#palette-dot.palette-btn {:type "button" :aria-label "switch colour palette"
-                                      :title "Switch colour palette"}]
-    [:button#theme-dot.theme-btn {:type "button"
-                                  :aria-label "toggle light or dark theme"
-                                  :title "Toggle light or dark theme"}]]])
+                   :hx-trigger "keyup changed delay:400ms, search"}]])
 
 (defn- restart-notice
   "The notice every page carries while a held namespace, or a protocol, record or type,
@@ -864,13 +862,9 @@
 (declare render-form)
 
 ;; The second cycle: a `(sentexHandle N)` subterm renders as the sentence N holds, whose
-;; own subterms go back through `render-form`.  `handle-ref` is below because it needs
-;; the badge, so the two cannot be ordered.
-(declare handle-ref)
-
-;; The third: `laid-out-form` breaks a rule across lines and hands every non-connective
-;; part back to `render-form`, which reaches for the layout when a sentence is a rule.
-(declare laid-out-form)
+;; own subterms go back through `layout`.  `handle-layout` is below because it needs the
+;; badge, so the two cannot be ordered.
+(declare handle-layout)
 
 (defn- nat-ref
   "A reified term, rendered as the expression it was minted from with **bold parens**.
@@ -905,6 +899,11 @@
                 :href  (str "/term?q=" (url-enc (pr-str t)))}
             (term-text view t seen)])))
 
+(def ^:private in-cx
+  "The word between a sentence and the context it holds in.  The space after it is a
+  no-break space, so a line never ends between `in` and the context."
+  [:span.cx-in " in "])
+
 (def ^:private rb-depths
   "How many steps the paren colours count along the spectrum before repeating —
   `--rb1` … `--rb9` (vaelii.css), the nine vaelii.com's stylesheet draws in the same
@@ -920,9 +919,20 @@
   A sentence is a tree printed as a line, and the parens are the only thing that says
   where a subterm ends — `(implies (and (weightOf ?x ?wx) …` is three opening parens
   before the first argument.  Every subterm here is already coloured by its role, and the
-  paren colour is what gives the nesting a colour of its own."
-  [depth s]
-  [:span {:class (str "rb" (inc (mod depth rb-depths)))} s])
+  paren colour is what gives the nesting a colour of its own.  With `href`, the paren is a
+  link there, in the same colour."
+  ([depth s]
+   [:span {:class (str "rb" (inc (mod depth rb-depths)))} s])
+  ([depth s href]
+   [:a {:class (str "rb" (inc (mod depth rb-depths))) :href href :title "the term itself"} s]))
+
+(defn- term-compound?
+  "Is `form` a ground compound term, a structural NAT: its functor is spelled as a function
+  or a context (CapitalCamelCase), which no literal is headed by.  Its open paren links to
+  its term page, as a reified term's does (`nat-ref`)."
+  [form]
+  (and (#{:individual :context} (v/term-role (first form)))
+       (not-any? #(= :variable (v/term-role %)) (tree-seq sequential? seq form))))
 
 (defn- sentex-reference
   "The id a `(sentexHandle N)` subterm names, or nil for any other form.
@@ -941,92 +951,160 @@
     (second form)))
 
 (def ^:private laid-out-connectives
-  "The n-ary connectives a sentence is broken across lines at, one argument per line.
-  `implies` is not here — it takes two parts rather than a list, and `laid-out-form`
-  gives it its own arm."
+  "The n-ary connectives a rule is broken across lines at, one argument per line."
   '#{and or})
 
-(defn- laid-out-form
-  "`form` rendered across lines, its first argument `col` characters from the left
-  margin and every later one aligned under it:
+(def ^:private badge-cols
+  "The characters a badge occupies inside a sentence: `.sx .badge` (vaelii.css) sizes it
+  to `2ch`, so a sentence expanded from a `(sentexHandle N)` starts two columns in."
+  2)
 
-      (implies (and (weightOf ?x ?wx)
-                    (weightOf ?y ?wy))
-               (heavierThan ?x ?y))
+(def ^:private docs-base
+  "Where a `docs/…` reference in a comment links: the page in the public repository."
+  "https://github.com/vaelii/vaelii/blob/develop/")
 
-  A rule read as one line is a rule read by counting parentheses: which literals are the
-  conditions and which one is the conclusion is exactly what a single line runs together.
-  One literal to a line separates them, and the indent says which side of the arrow each
-  is on.
+(def ^:private comment-token-re
+  "One token `comment-text` marks up: a backquoted span, a `docs/…` page, a variable, a
+  word, or an opening paren."
+  #"`[^`]+`|docs/[\w/-]+\.md(?:#[\w-]+)?|\?[A-Za-z][\w-]*|[A-Za-z][\w-]*|\(")
 
-  The indent is **characters**, which is exact rather than approximate because every
-  sentence on this page is set in the monospace face (`--mono`, vaelii.css) and the
-  container holding the newlines is `white-space: pre-wrap`.  So the alignment is the
-  printed width of the functor and its two parentheses, the same arithmetic a Clojure
-  editor does, and it survives a reader's own font size because both sides scale with it.
+(defn- term-shaped?
+  "Whether word `w` is spelled as a term rather than as an English word: a camelCase
+  predicate, a snake_case type, or a context or name with a second capital (`CxChange`,
+  `QuantityFn`)."
+  [w]
+  (boolean (or (re-matches #"[a-z][a-z0-9]*[A-Z][A-Za-z0-9]*" w)
+               (re-matches #"[a-z][a-z0-9]*(?:_[a-z0-9]+)+" w)
+               (re-matches #"[A-Z][a-z0-9]+[A-Z][A-Za-z0-9]*" w))))
 
-  Anything that is not a connective is one line, through `render-form`: an antecedent
-  literal is a unit, and breaking inside one would be indenting argument positions.
-  `depth` is the paren colour's, carried through unchanged so a rule's parens count
-  along the same scale a fact's do (`paren`)."
-  [view form seen col depth]
-  (let [pad  (fn [n] (str "\n" (apply str (repeat n \space))))
-        head (fn [f] (+ col 1 (count (name f)) 1))]
-    (cond
-      (and (sequential? form) (= 'implies (first form)) (= 3 (count form)))
-      (let [k (head 'implies)]
-        [:span.sx (paren depth "(") (term-link view 'implies seen) " "
-         (laid-out-form view (nth form 1) seen k (inc depth))
-         (pad k)
-         (laid-out-form view (nth form 2) seen k (inc depth))
-         (paren depth ")")])
+(defn- matching-paren
+  "The index just past the `)` closing the `(` at `i` in `s`, or nil when none closes it."
+  [^String s i]
+  (loop [j i depth 0]
+    (when (< j (count s))
+      (case (.charAt s j)
+        \( (recur (inc j) (inc depth))
+        \) (if (= 1 depth) (inc j) (recur (inc j) (dec depth)))
+        (recur (inc j) depth)))))
 
-      (and (sequential? form)
-           (contains? laid-out-connectives (first form))
-           (> (count form) 2))
-      (let [k (head (first form))]
-        [:span.sx (paren depth "(") (term-link view (first form) seen) " "
-         (interpose (pad k) (map #(laid-out-form view % seen k (inc depth)) (rest form)))
-         (paren depth ")")])
+(defn- comment-formula
+  "The form text `s` spells when it is a formula, else nil.  A formula parses to an EDN
+  list headed by a connective or by a symbol `known?` answers for, and holds no comma: a
+  prose parenthetical separates its items with commas, and EDN parses a comma as space."
+  [known? s]
+  (when-not (str/includes? s ",")
+    (let [f (try (edn/read-string s) (catch Exception _ nil))]
+      (when (and (seq? f) (symbol? (first f))
+                 (or (contains? '#{implies and or not} (first f)) (known? (first f))))
+        f))))
 
-      :else (render-form view form seen depth))))
+(defn- comment-text
+  "A `comment`'s text with what it names marked up, inside its quotes: a formula renders
+  as a sentence does (`render-form`), a variable in the variable colour, a word spelled
+  as a term (`term-shaped?`) that a stored sentex mentions as that term's link, a
+  backquoted span as a term, a formula or code, and a `docs/…` page as a link to it
+  (`docs-base`).  Everything else is the literal's text.  Runs of whitespace collapse to
+  one space, since a KB file wraps a comment to its line length."
+  [{:keys [kb] :as view} text seen]
+  (let [s      (str/replace (str/trim text) #"\s+" " ")
+        known? (memoize #(some? (first (v/find-sentexes kb %))))
+        m      ^java.util.regex.Matcher (re-matcher comment-token-re s)
+        token  (fn [a b ^String tok]
+                 (cond
+                   (= "(" tok)
+                   (let [e (matching-paren s a)
+                         f (some->> e (subs s a) (comment-formula known?))]
+                     (if f [(render-form view f seen) e] [tok b]))
+
+                   (str/starts-with? tok "`")
+                   (let [inner (subs tok 1 (dec (count tok)))
+                         f     (comment-formula known? inner)]
+                     (cond
+                       (and (re-matches #"[A-Za-z][\w-]*" inner) (known? (symbol inner)))
+                       [(term-link view (symbol inner) seen) b]
+                       f     [(render-form view f seen) b]
+                       :else [[:code inner] b]))
+
+                   (str/starts-with? tok "docs/") [[:a {:href (str docs-base tok)} tok] b]
+                   (str/starts-with? tok "?")     [[:span.t-var tok] b]
+                   (and (term-shaped? tok) (known? (symbol tok)))
+                   [(term-link view (symbol tok) seen) b]
+                   :else [tok b]))]
+    (loop [pos 0, out [:span.str-text]]
+      (if (and (< pos (count s)) (.find m (int pos)))
+        (let [a (.start m)
+              [el end] (token a (.end m) (.group m))]
+          (recur (long end) (conj out (subs s pos a) el)))
+        [:span.sx.t-str "\"" (conj out (subs s pos)) "\""]))))
+
+(defn- layout
+  "`[element multi-line?]` for `form`, its first character `col` characters from the left
+  margin.  The layout is Clojure's: a form spanning lines keeps its first argument beside
+  the functor and aligns every later argument under it.
+
+      (exceptWhen (dead ?x)
+                  (implies (organism ?x)
+                           (alive ?x)))
+
+  An implication always spans lines, a connective over two or more arguments spans lines
+  inside one, and any other compound spans lines when one of its arguments does.  The
+  indent is a character count, which is exact because every sentence is set in `--mono`
+  and the block holding it is `white-space: pre-wrap` (`.sx-rule`).
+
+  A `(sentexHandle N)` subterm renders as the sentence N holds behind its badge
+  (`handle-layout`).  `seen` carries the handles on the path, as vectors, beside the
+  terms the reified-term walk carries, so a handle that reaches back renders as the
+  back-edge.  `depth` is the paren colour's (`paren`); `in-rule?` is whether the form is
+  an implication's part or a connective's argument below one."
+  [view form seen col depth in-rule?]
+  (cond
+    (sentex-reference form)
+    (let [h (sentex-reference form)]
+      (if (seen [::handle h])
+        [[:span.muted "#" h " (above)"] false]
+        (handle-layout view h (conj seen [::handle h]) col)))
+
+    (and (sequential? form) (seq form))
+    (let [f     (first form)
+          rule? (and (= 'implies f) (= 3 (count form)))
+          conn? (and in-rule? (contains? laid-out-connectives f) (> (count form) 2))
+          k     (+ col 2 (count (term-text view f seen)))
+          args  (mapv #(if (and (= 'comment f) (string? %))
+                         [(comment-text view % seen) false]
+                         (layout view % seen k (inc depth) (or rule? conn?)))
+                      (rest form))
+          multi (boolean (or rule? conn? (some second args)))
+          sep   (if multi (str "\n" (apply str (repeat k \space))) " ")]
+      [[:span.sx (if (term-compound? form)
+                   (paren depth "(" (str "/term?q=" (url-enc (pr-str form))))
+                   (paren depth "("))
+        (first (layout view f seen (inc col) (inc depth) false))
+        (when (seq args) " ")
+        (interpose sep (map first args))
+        (paren depth ")")]
+       multi])
+
+    (sequential? form) [[:span.sx (paren depth "(") (paren depth ")")] false]
+    (string? form)     (let [q (pr-str form)]
+                         [[:span.sx.t-str "\"" [:span.str-text (subs q 1 (dec (count q)))] "\""]
+                          false])
+    :else              [(term-link view form seen) false]))
 
 (defn render-form
   "Render a sentence (or subterm) with every atomic subterm an individually
-  role-colored link, structure shown with parentheses.
+  role-colored link, structure shown with parentheses, laid out by `layout`.  A form
+  spanning lines is wrapped in `.sx-rule`, which keeps its newlines and indent.
 
   A `(sentexHandle N)` subterm renders as **the sentence N holds**, linked, rather than
   as the integer: a reader shown `(except (sentexHandle 41))` has been told a sentex is
   hidden and not which one, and the handle is the one thing on the page they cannot look
   up without leaving it.  One branch covers every surface that prints a meta-sentex — a
-  term-page row, the sentex page, a preview's `excepts` line.
-
-  The expansion carries the ids already on the path, so a stored sentence naming a
-  handle that reaches back to it renders the back-edge rather than overflowing the
-  stack.  `seen` holds terms for the reified-term walk, so a handle is marked with a
-  vector, which no term is."
+  term-page row, the sentex page, a preview's `excepts` line."
   ([view form] (render-form view form #{} 0))
   ([view form seen] (render-form view form seen 0))
   ([view form seen depth]
-   (cond
-     (sentex-reference form)
-     (let [h (sentex-reference form)]
-       (if (seen [::handle h])
-         [:span.muted "#" h " (above)"]
-         (handle-ref view h (conj seen [::handle h]))))
-
-     ;; a whole rule, and only a whole one: the layout separates an implication's two
-     ;; sides, so it starts at the left margin and nothing below it re-enters here
-     (and (sequential? form) (= 'implies (first form)) (= 3 (count form)))
-     [:span.sx-rule (laid-out-form view form seen 0 depth)]
-
-     (sequential? form)
-     [:span.sx (paren depth "(")
-      (interpose " " (map #(render-form view % seen (inc depth)) form))
-      (paren depth ")")]
-
-     (string? form)     [:span.sx (pr-str form)]
-     :else              (term-link view form seen))))
+   (let [[e multi?] (layout view form seen 0 depth false)]
+     (if multi? [:span.sx-rule e] e))))
 
 (defn- readable
   "A sentex's sentence with the author's variable names restored, so a stored rule
@@ -1105,6 +1183,13 @@
     [:a.badge-link {:href (str "/sentex/" h) :title label}
      [:span {:class (str/join " " classes)}]]))
 
+(defn- belief-span
+  "`content` in a span classed by whether sentex `h` is believed: `.sx-in` or `.sx-out`,
+  which set how much of its colour each sentence part keeps (`--lit`, vaelii.css).  Each
+  nested sentex sets its own, so an IN sentence inside an OUT meta-sentex reads as IN."
+  [view h & content]
+  [:span {:class (if (believed? view h) "sx-in" "sx-out")} content])
+
 (defn- sentex-ref
   "A colour-coded handle badge (see `badge`) placed BEFORE the sentence, then the
   sentence rendered with individually-linked subterms.  It takes the **record**, which
@@ -1115,7 +1200,16 @@
   `(sentexHandle N)` subterm cannot expand its way back to the one it came from."
   ([view s] (sentex-ref view s #{}))
   ([view s seen]
-   [:span (badge view s) (render-form view (readable s) seen)]))
+   (belief-span view (:id s) (badge view s) (render-form view (readable s) seen))))
+
+(defn- handle-layout
+  "`layout`'s arm for a `(sentexHandle N)` subterm: the badge and the sentence `h` holds,
+  the sentence starting `badge-cols` past `col`, and whether it spans lines."
+  [{:keys [kb] :as view} h seen col]
+  (if-let [s (v/sentex kb h)]
+    (let [[e multi?] (layout view (readable s) seen (+ col badge-cols) 0 false)]
+      [(belief-span view h (badge view s) e) multi?])
+    [[:span.muted "#" h " (gone)"] false]))
 
 (defn- handle-ref
   "`sentex-ref` for a caller holding only a handle — a justification's antecedent, a
@@ -1129,18 +1223,20 @@
 
 (defn- state-tag
   "The belief-state pill for a sentex: IN when the JTMS believes it, else the `why-not`
-  reason (superseded / defeated / unsupported / not-stored), followed for a placed defeat
-  by the declarations its nogood convicts through.  The sentex page shows it always; a list row shows only the reason and only when the row is OUT — a believed
+  reason (superseded / defeated / inert / unsupported / not-stored), followed for a placed
+  defeat by the declarations its nogood convicts through, and for an inert tuple by the
+  grounds of the length it breaks.  The sentex page shows it always; a list row shows only the reason and only when the row is OUT — a believed
   row's dimmed badge already reads as believed.  The one authority `in?` folds every
   not-believed reason into, and the page reads it back."
   [{:keys [kb] :as view} h]
   (if (believed? view h)
     [:span.tag.tag-in "IN"]
-    (let [{:keys [reason grounds]} (v/why-not kb h)
-          r (name reason)]
+    (let [{:keys [reason grounds binding]} (v/why-not kb h)
+          r  (name reason)
+          hs (concat (map :handle grounds) (:grounds binding))]
       (list [:span.tag {:class (str "tag-" r)} r]
-            (when (seq grounds)
-              [:span.muted " through " (interpose ", " (map #(handle-ref view (:handle %)) grounds))])))))
+            (when (seq hs)
+              [:span.muted " through " (interpose ", " (map #(handle-ref view %) hs))])))))
 
 (defn- edit-link
   "A way into the editor: an htmx GET of `/edit`, swapped into the `#editor` panel.  A
@@ -1154,30 +1250,38 @@
                     :hx-target "#editor" :hx-select "unset" :hx-swap "innerHTML"
                     :aria-label label} "edit"])
 
-(defn- sentex-row
-  "One sentex row: the handle badge, the sentence, its context, and the control that
-  opens the editor on it.  `data-h` is what an out-of-band swap addresses after a save,
-  so a row can be replaced where it sits.
-
-  The row carries no selection state and no script.  A sentence is text a reader copies,
-  so a press-drag across it selects that text; editing is the row's own `[edit]`.
+(defn- sentex-line
+  "The content of an `.sx-item`: the badge of `s`, then its sentence in its context, dimmed
+  by belief (`belief-span`), with `after` behind the context.
 
   **The badge and the sentence are two boxes, not one run of inline content.**  A rule is
-  laid out with newlines (`laid-out-form`), and a newline in inline content returns to the
+  laid out with newlines (`layout`), and a newline in inline content returns to the
   left edge of the *row* — so every line after the first would start under the badge
-  rather than under `(implies`, and the context and `[edit]` after the sentence would ride
-  up beside its first line.  The sentence gets its own block, and the indent and the
-  trailing context both count from where the sentence starts."
+  rather than under `(implies`, and the context after the sentence would ride up beside
+  its first line.  The sentence gets its own block, and the indent and the trailing
+  context both count from where the sentence starts."
+  [view s & after]
+  (list (badge view s)
+        [:span.sx-body
+         (belief-span view (:id s)
+                      (render-form view (readable s)) in-cx (term-link view (:context s)))
+         after]))
+
+(defn- sentex-row
+  "One sentex row (`sentex-line`), and the control that opens the editor on it.
+  `data-h` is what an out-of-band swap addresses after a save, so a row can be replaced
+  where it sits.
+
+  The row carries no selection state and no script.  A sentence is text a reader copies,
+  so a press-drag across it selects that text; editing is the row's own `[edit]`."
   [view s]
   [:li {:data-h (:id s) :class "sx-item"}
-   (badge view s)
-   [:span.sx-body
-    (render-form view (readable s)) " @ " (term-link view (:context s))
-    ;; the handle badge dims an OUT row; the reason pill says WHY it is out
-    ;; (superseded / defeated / unsupported) — shown only when not believed, so a
-    ;; believed row stays clean.  Its proof is a click away on the sentex page.
-    (when-not (believed? view (:id s)) (list " " (state-tag view (:id s))))
-    " " (edit-link (str "handles=" (:id s)) (str "edit sentex " (:id s)))]])
+   (sentex-line view s
+                ;; the reason pill says WHY a row is OUT (superseded / defeated /
+                ;; unsupported) — shown only when not believed, so a believed row stays
+                ;; clean.  Its proof is a click away on the sentex page.
+                (when-not (believed? view (:id s)) (list " " (state-tag view (:id s))))
+                " " (edit-link (str "handles=" (:id s)) (str "edit sentex " (:id s))))])
 
 (defn- sx-list
   "A list of sentex rows, labelled for a reader who arrives at it out of context."
@@ -1237,6 +1341,40 @@
    [:h2.panel-title (when n (fold-button n)) title]
    body])
 
+(defn- visit-mark
+  "A hidden element naming the page for the reader's browsing history, which vaelii.js
+  records in localStorage and the front page's `#history` panel lists.  `kind` is
+  `term`, `literal` or `rule`, and `cls` the role class a term's entry is coloured by."
+  [kind href label cls]
+  [:span {:hidden true :data-visit kind :data-href href :data-label label :data-class cls}])
+
+(def ^:private history-panel
+  "The front page's browsing history: empty and hidden as served, and filled by
+  vaelii.js from localStorage, since the server keeps no per-reader state."
+  [:section#history.panel {:hidden true}
+   [:h2.panel-title "Browsed"]
+   [:div.history-body]])
+
+(def ^:private history-cap
+  "The most entries one history row holds: vaelii.js's `HISTORY_CAP`."
+  50)
+
+(defn- history-literals
+  "The `Literals` row of the browsing history, each of the handles `hs` in the order given
+  as a `handle-ref` (its badge, its colours, its belief now) with its remove button.  The
+  server renders it because vaelii.js keeps only the handle of a visited literal and
+  builds no markup from localStorage."
+  [view hs]
+  (let [hs (take history-cap hs)]
+    (prime-belief! view hs)
+    (frag (for [h hs]
+            [:span.history-item
+             (handle-ref view h)
+             [:button.history-x {:type       "button"
+                                 :aria-label (str "remove sentex " h " from the history")
+                                 :data-kind  "literal"
+                                 :data-href  (str "/sentex/" h)} "×"]]))))
+
 (defn- sentex-list [view sentexes]
   (let [ss (sort-by :id sentexes)]
     (prime-belief! view (map :id ss))
@@ -1258,7 +1396,7 @@
   [:p.legend "Terms: "
    [:a.sx.t-type "type"] " · " [:a.sx.t-ind "individual"] " · "
    [:a.sx.t-pred "predicate"] " · " [:a.sx.t-context "context"] " · "
-   [:a.sx.t-num "number"] " · " [:span.t-var "?variable"] "."])
+   [:a.sx.t-num "literal"] " · " [:span.t-var "?variable"] "."])
 
 (def ^:private badge-legend
   [:p.legend "The circle before a sentence: "
@@ -1282,7 +1420,7 @@
   the missing antecedents of an unsupported one.  Nothing for a believed sentex — its
   proof is the \"Supported by\" section."
   [{:keys [kb] :as view} h]
-  (let [{:keys [reason superseded-by contradicted-by grounds support]} (v/why-not kb h)]
+  (let [{:keys [reason superseded-by contradicted-by grounds binding denies support]} (v/why-not kb h)]
     (case reason
       :superseded
       [:div.belief
@@ -1299,14 +1437,40 @@
        (when (seq contradicted-by)
          [:ul (for [c contradicted-by]
                 [:li "contradicted by " (handle-ref view (:handle c))
-                 " @ " (term-link view (:context c))
+                 in-cx (term-link view (:context c))
                  (when-let [dc (:defeat-class c)] [:span.tag (str "class " (name dc))])])])
        (when (seq grounds)
          [:ul (for [g grounds]
                 [:li "convicted through " (handle-ref view (:handle g))
-                 " @ " (term-link view (:context g))])])
+                 in-cx (term-link view (:context g))])])
        (when (and (empty? contradicted-by) (empty? grounds))
          [:p.muted "the winning sentex has since been retracted; nothing contradicts it now."])]
+      :inert
+      [:div.belief
+       [:p [:b "Inert"] " — held OUT by the labeller before any contest: it is never "
+        "believed, forms no nogood and fires no rule"
+        (when-let [{:keys [length min via]} binding]
+          (list ". Its length breaks " (if length (str "length " length) (str "floor " min))
+                ", bound through " (term-link view via)))
+        "."]
+       (when (seq (:grounds binding))
+         [:ul (for [g (:grounds binding)]
+                [:li "bound through " (handle-ref view g)])])
+       (when-let [{:keys [sentence handle believed? roster]} denies]
+         (let [{:keys [predicate kind global? declarations]} roster]
+           (list
+            [:p "It denies " (if handle (handle-ref view handle) (render-form view sentence))
+             (cond believed? ", which this context believes."
+                   handle    ", which is stored in this context and not believed."
+                   :else     ", which is not stored in this context.")]
+            (when roster
+              [:p (term-link view predicate) " is on the forced-monotonic roster"
+               (when (= :forced-between-predicates kind) " between predicates")
+               (if global? ", which every KB holds" ", by the declarations below")
+               ". A literal on the roster goes OUT only by retraction, never as the loser "
+               "of a nogood, so a denial of it is stored and never weighed against it."])
+            (when (seq declarations)
+              [:ul (for [d declarations] [:li "declared by " (handle-ref view d)])]))))]
       :unsupported
       [:div.belief
        [:p [:b "Unsupported"] " — not a premise, and every justification has an OUT argument."]
@@ -1740,7 +1904,7 @@
   [view {:keys [handle sentence context premise? justification reason]}]
   [:li
    (render-form view sentence)
-   " " [:span.muted "@ "] (term-link view context)
+   in-cx (term-link view context)
    (when reason [:span {:class (str "tag tag-" (name reason))} (name reason)])
    (when-let [rule (:rule justification)]
      (list " " [:span.muted "by "] (render-form view rule)))
@@ -2232,6 +2396,7 @@
         ctx-count (count (v/contexts kb))
         pairs     (disjoint-pairs kb)]
     (render view "upper ontology"
+            history-panel
             ;; what this KB *is*, before anything it contains.  Four O(1) reads, and the
             ;; question a reader landing on an unfamiliar corpus asks first — which is why
             ;; it belongs here and not only on the stats page
@@ -2399,7 +2564,7 @@
                ;; entry that has a sentence renders exactly the markup it always did
                (fn [v] [:li [:span.tag (name (:violation v))]
                         (when-let [s (:sentence v)] (list " " (render-form view s)))
-                        (when-let [c (:context v)] (list " @ " (term-link view c)))
+                        (when-let [c (:context v)] (list in-cx (term-link view c)))
                         (when-let [r (:run v)] [:span.muted " · run " r])
                         (when-let [m (or (:message (:detail v)) (:message v))]
                           [:span.muted " — " m])])))
@@ -2720,13 +2885,22 @@
   out each one-step neighbour another one stands between.  A stated `(genl dog animal)`
   beside `dog ⊂ mammal ⊂ animal` therefore draws `animal` above `mammal` and not beside
   it.  The step does not read `hide-derived?`: which sentexes the page lists does not move
-  a node.  A `genlCx` step draws every one-step neighbour, since the facade has no such
-  read for contexts.
+  a node.
+
+  **A `genlCx` step draws the context's minimal parents going up and its maximal children
+  going down** (`min-context-parents` / `max-context-children`), the same reduction over
+  the context lattice.  A stated `(genlCx CxLeaf CxTop)` beside `CxLeaf → CxMid → CxTop`
+  draws `CxTop` above `CxMid` and not beside it.  The engine reads an `except` on a
+  `genlCx` edge as `context-up` and `context-down` read one.
+
+  **A step under any other relation draws its one-step neighbours unreduced.**  Only
+  `genl` and `genlCx` have a closure read; another relation is not asked of either
+  lattice.
 
   **The neighbours drawn are the first `cap` in print order, of every nearest neighbour
   the node has.**  The read realizes at most `graph-row-limit` + 1 one-step neighbours, so
-  it costs at most that many records whatever the node's fan-out.  A `genl` node with two
-  to `graph-row-limit` one-step neighbours costs a second facade read, in which the engine
+  it costs at most that many records whatever the node's fan-out.  A node with two to
+  `graph-row-limit` one-step neighbours costs a second facade read, in which the engine
   makes one memoized up-closure read per neighbour.  A node with no more than
   `graph-row-limit` one-step neighbours is realized whole, sorted, and counted exactly.  A
   node with more contributes **no** neighbours and makes no second read: the index hands
@@ -2740,8 +2914,11 @@
                   ((if up? parent-terms child-terms) kb pred node))]
     (if (> (count got) graph-row-limit)
       {:terms [] :total graph-row-limit :exact? false :more? true}
-      (let [near (if (and (= 'genl pred) (> (count got) 1))
-                   ((if up? v/min-genls v/max-specs) kb node)
+      (let [near (if (> (count got) 1)
+                   (case pred
+                     genl   ((if up? v/min-genls v/max-specs) kb node)
+                     genlCx ((if up? v/min-context-parents v/max-context-children) kb node)
+                     got)
                    got)]
         {:terms (into [] (take cap) (by-print-key near)) :total (count near)
          :exact? true :more? false}))))
@@ -3226,6 +3403,8 @@
              ;; this already says which term it is about
              (edit-link (str "q=" (url-enc (pr-str term)))
                         "edit what this term is most directly in")]
+            (visit-mark "term" (str "/term?q=" (url-enc (pr-str term))) text
+                        (term-class view term))
             ;; the picture goes above everything the page says in prose, and the prose
             ;; below is unchanged: the type lines are the accessible equivalent and the
             ;; exact answer this approximates
@@ -3397,15 +3576,19 @@
   (if-let [s (v/sentex kb h)]
     (let [premise? (v/premise? kb h)]
       (render view (str "sentex #" h)
-              [:h2 "Sentex " (badge view s) [:span.muted "#" h]]
-              [:p (render-form view (readable s)) " @ " (term-link view (:context s))
-               (state-tag view h)
-               (when premise? [:span.tag.tag-premise "premise"])
-               ;; a rule is exactly a sentex with a decomposed antecedent — read off the
-               ;; record `v/sentex` returned, rather than re-deriving it from the sentence
-               (when (:antecedent s) [:span.tag "rule"])
-               (when-let [st (:strength s)] [:span.tag (str "assumed " (name st))])
-               (when-let [dc (v/defeat-class kb h)] [:span.tag (str "class " (name dc))])]
+              [:h2 "Sentex " [:span.muted "#" h]]
+              (visit-mark (if (:antecedent s) "rule" "literal") (str "/sentex/" h)
+                          (term-text view (readable s)) nil)
+              [:p.sx-item
+               (sentex-line view s
+                            (state-tag view h)
+                            (when premise? [:span.tag.tag-premise "premise"])
+                            ;; a rule is exactly a sentex with a decomposed antecedent —
+                            ;; read off the record `v/sentex` returned, rather than
+                            ;; re-deriving it from the sentence
+                            (when (:antecedent s) [:span.tag "rule"])
+                            (when-let [st (:strength s)] [:span.tag (str "assumed " (name st))])
+                            (when-let [dc (v/defeat-class kb h)] [:span.tag (str "class " (name dc))]))]
               ;; when the sentex is stored but not believed, say why — the states
               ;; docs/equality.md and docs/nmtms.md describe: superseded / defeated /
               ;; unsupported.  A believed sentex's proof is the "Supported by" list below.
@@ -3467,7 +3650,7 @@
      (list (handle-ref view h)
            (when-not (believed? view h) (list " " (state-tag view h))))
      [:span (render-form view (:sentence r)) [:span.tag "derived"]])
-   (when-let [c (:context r)] [:span " @ " (term-link view c)])
+   (when-let [c (:context r)] [:span in-cx (term-link view c)])
    (when (seq (:bindings r)) [:span.muted " — " (bindings-str view (:bindings r))])])
 
 (defn- result-list
@@ -3637,7 +3820,7 @@
               ;; a goal `prove` will not answer is a fiction either way.
               (and (vector? goal) (not-every? seq? goal))
               [:div
-               [:h2 "Not a goal @ " (term-link view ctx)]
+               [:h2 "Not a goal" in-cx (term-link view ctx)]
                [:p.muted "A vector goal is a conjunction, so each member has to be a "
                 "sentence — e.g. " [:code "[(bird ?x) (hasCapability ?x flying)]"] ". "
                 "One sentence is written as a list: " [:code "(animal ?x)"] ", not "
@@ -3645,7 +3828,7 @@
 
               (vector? goal)
               [:div
-               [:h2 "Conjunctive goal @ " (term-link view ctx)]
+               [:h2 "Conjunctive goal" in-cx (term-link view ctx)]
                [:ul (for [g goal] [:li (render-form view g)])]
                (plan-section view goal ctx)
                [:p [:a {:href (str "/inference?q=" (url-enc (pr-str goal))
@@ -3657,7 +3840,7 @@
               :else
               (let [esc (v/escalate kb goal ctx)]
                 [:div
-                 [:h2 "Goal " (render-form view goal) " @ " (term-link view ctx)]
+                 [:h2 "Goal " (render-form view goal) in-cx (term-link view ctx)]
                  (if-let [lvl (:level esc)]
                    [:p "Answered at level " [:b lvl] " " [:span.tag (name (:name esc))] " "
                     [:span.muted (:adds (nth table lvl))]]
@@ -3890,14 +4073,14 @@
 
             (and (vector? goal) (not-every? seq? goal))
             [:div
-             [:h2 "Not a goal @ " (term-link view ctx)]
+             [:h2 "Not a goal" in-cx (term-link view ctx)]
              [:p.muted "A vector goal is a conjunction, so each member has to be a sentence — "
               "e.g. " [:code "[(edgeOf ?x ?y) (anc ?y ?z)]"] ". One sentence is a list: "
               [:code "(anc ?x ?z)"] ", not " [:code "[anc ?x ?z]"] "."]]
 
             (not (or (seq? goal) (vector? goal)))
             [:div
-             [:h2 "Not a goal @ " (term-link view ctx)]
+             [:h2 "Not a goal" in-cx (term-link view ctx)]
              [:p.muted "A goal is a sentence like " [:code "(anc ?x ?z)"] ", or a vector of them."]]
 
             :else
@@ -4192,7 +4375,7 @@
   [view {:keys [handle sentence context]}]
   (list [:a.ref {:href (str "/sentex/" handle)} "#" handle] " "
         (render-form view sentence)
-        (when context (list " @ " (term-link view context)))))
+        (when context (list in-cx (term-link view context)))))
 
 (defn- why-node
   "One node of the proof tree.  A derived node is a `<details>` whose branches are its
@@ -4258,8 +4441,8 @@
   (if-let [s (v/sentex kb h)]
     (let [tree (v/why kb h)]
       (render view (str "why #" h)
-              [:h2 "Why " (badge view s) [:span.muted "#" h]]
-              [:p (render-form view (readable s)) " @ " (term-link view (:context s))]
+              [:h2 "Why " [:span.muted "#" h]]
+              [:p.sx-item (sentex-line view s)]
               (if (:believed? tree)
                 (let [sup     (:support tree)
                       blocked (blocked-justifications view)
@@ -4897,7 +5080,7 @@
     (list [:h4 heading]
           [:ul.retract-list
            (for [s stayed]
-             [:li (sentex-ref view s) " @ " (term-link view (:context s))
+             [:li (sentex-ref view s) in-cx (term-link view (:context s))
               (stays-because (:id s) (premises (:id s)) true)])])))
 
 (defn- retract-panel
@@ -4919,7 +5102,7 @@
             premises (set (filter #(v/premise? kb %) staying))
             acts     (+ (count going) (count premises))
             swept-ss (keep #(v/sentex kb %) swept)
-            row      (fn [s] (list (sentex-ref view s) " @ " (term-link view (:context s))))]
+            row      (fn [s] (list (sentex-ref view s) in-cx (term-link view (:context s))))]
         (prime-belief! view (concat (map :id ss) swept))
         [:div.editor
          [:h3 "Retract " (count ss) " sentex" (when (not= 1 (count ss)) "es")]
@@ -5071,7 +5254,7 @@
   [view {:keys [violation sentence context]}]
   [:div [:span.tag.tag-defeated (name violation)]
    (when sentence [:span " " (render-form view sentence)])
-   (when context [:span.muted " @ " (term-link view context)])])
+   (when context [:span.muted in-cx (term-link view context)])])
 
 (defn- funnel-refused-rank
   [{:keys [refused]}]
@@ -5293,49 +5476,35 @@
                                                     "or an options map — got "
                                                     (pr-str form))})))))))
 
-(defn- breaks-across-lines?
-  "Is `form` one of the two shapes `pretty-sentence` lays out — an implication, or a
-  connective over more than one argument?"
-  [form]
-  (and (sequential? form)
-       (or (and (= 'implies (first form)) (= 3 (count form)))
-           (and (contains? laid-out-connectives (first form)) (> (count form) 2)))))
+(defn- pretty-layout
+  "`[text multi-line?]` for `form` starting at column `col`: `layout`'s alignment as
+  text.  An implication and a connective over two or more arguments span lines, and any
+  other compound spans lines when one of its arguments does."
+  [form col]
+  (if-not (and (sequential? form) (seq form))
+    [(print-key form) false]
+    (let [f     (first form)
+          k     (+ col 2 (count (print-key f)))
+          args  (mapv #(pretty-layout % k) (rest form))
+          multi (boolean (or (and (= 'implies f) (= 3 (count form)))
+                             (and (contains? laid-out-connectives f) (> (count form) 2))
+                             (some second args)))]
+      [(if multi
+         (str "(" (print-key f) " "
+              (str/join (str "\n" (apply str (repeat k \space))) (map first args)) ")")
+         (print-key form))
+       multi])))
 
 (defn- pretty-sentence
-  "`form` as **text**, laid out the way a row lays a rule out (`laid-out-form`) — the
-  editor's copy of the same alignment, so a rule reads in the field the way it reads on
-  the page it was opened from.  `col` is the column the form starts at.
-
-  Three shapes break: an implication, a connective over more than one argument, and a
-  one-argument wrapper around either — `(set/backwardRule <rule>)`, which is how a rule's
-  direction is written back, and which would otherwise put the whole rule on one line
-  inside it.  Everything else is one line.
+  "`form` as **text**, laid out the way a row lays it out (`layout`): the editor's copy
+  of the same alignment, so a rule reads in the field the way it reads on the page it
+  was opened from.  `col` is the column the form starts at.
 
   The whitespace is not read back: `read-entries` reads EDN **forms** and the save diffs
   by content, so the layout is for the reader and the sentence reaching the KB is the one
   that was there."
   [form col]
-  (let [pad  (fn [n] (str "\n" (apply str (repeat n \space))))
-        head (fn [f] (+ col 1 (count (print-key f)) 1))]
-    (cond
-      (and (sequential? form) (= 'implies (first form)) (= 3 (count form)))
-      (let [k (head 'implies)]
-        (str "(implies " (pretty-sentence (nth form 1) k)
-             (pad k) (pretty-sentence (nth form 2) k) ")"))
-
-      (and (sequential? form)
-           (contains? laid-out-connectives (first form))
-           (> (count form) 2))
-      (let [k (head (first form))]
-        (str "(" (print-key (first form)) " "
-             (str/join (pad k) (map #(pretty-sentence % k) (rest form)))
-             ")"))
-
-      (and (sequential? form) (= 2 (count form)) (breaks-across-lines? (second form)))
-      (let [k (head (first form))]
-        (str "(" (print-key (first form)) " " (pretty-sentence (second form) k) ")"))
-
-      :else (print-key form))))
+  (first (pretty-layout form col)))
 
 (defn- seed-text
   "The editor's text for a set of sentexes, in the order the handles name them: a context
@@ -5457,7 +5626,7 @@
    ;; listing, so they carry no [edit] of their own
    (when (seq unpaired)
      [:ul (for [s unpaired]
-            [:li (sentex-ref view s) " @ " (term-link view (:context s))])])
+            [:li (sentex-ref view s) in-cx (term-link view (:context s))])])
    (stayed-rows view stayed premises "Still stored")
    [:div.editor-actions [:button#sx-cancel.primary {:type "button"} "Close"]]])
 
@@ -7467,6 +7636,13 @@
                                 (continued req #(front-rows-page (view (current target) req)
                                                                  (get-in req [:query-params "section"])
                                                                  %)))}]
+         ;; the browsing history's literals, which vaelii.js names by handle and the
+         ;; server draws; a `handles` that does not read is an empty row
+         ["/history/literals" {:get (fn [req]
+                                      (let [hs (param-handles (get-in req [:query-params "handles"]))]
+                                        (if (= unreadable hs)
+                                          (frag "")
+                                          (history-literals (view (current target) req) hs))))}]
          ["/stats/rows" {:get (fn [req]
                                 (continued req #(stats-rows-page (view (current target) req)
                                                                  (get-in req [:query-params "section"])

@@ -3,10 +3,10 @@
    Two typefaces, one job each.  Hasklig sets everything the KB stores or the terminal
    draws: sentences, terms, handles, index keys, frame titles, tables, buttons and the
    editor.  Atkinson Hyperlegible Next sets English written for a reader: a paragraph,
-   a hint, a `comment` string off the KB.  `font-weight: 600` on a title, a type term or
-   a table head is the browser synthesizing a heavier level, which is what declaring only
-   400 keeps on — a `font-weight: 400 700` range would claim a face covers bold and the
-   emphasis would flatten instead.
+   a hint, the text between a string argument's quotes.  `font-weight: 600` on a title or
+   a table head is the browser synthesizing a heavier level, which is what
+   declaring only 400 keeps on — a `font-weight: 400 700` range would claim a face
+   covers bold and the emphasis would flatten instead.
 
    The page is a **terminal**: a dark ground, square frames around every region, a title
    set into the top border of the frame it names, and the region's own numbers at the
@@ -84,13 +84,15 @@
   --err-bg:     #1e1113;
   --err-ink:    #e06c6c;
 
-  /* the term roles, on btop's own spread: green for a type, magenta for an individual,
-     blue for a predicate, amber for a context, red for a number */
-  --t-type:    #7ec87e;
-  --t-ind:     #c792ea;
-  --t-pred:    #7fb0e8;
-  --t-context: #e0a566;
-  --t-num:     #e0796a;
+  /* the term roles, off the spectrum below, so light mode's darker steps carry over:
+     pale amber for a type (a unary predicate), yellow-orange for a predicate of two or
+     more places, blue for a context, violet for an individual, and the title ink for a
+     literal (a number or a string) and for the `in` before a context */
+  --t-type:    color-mix(in srgb, var(--rb3) 60%, var(--title));
+  --t-ind:     var(--rb8);
+  --t-pred:    color-mix(in srgb, var(--rb2) 55%, var(--rb3));
+  --t-context: var(--rb7);
+  --t-num:     var(--title);
   --t-var:     #6b7183;
 
   /* derived from --accent (+ mode), so a palette change ripples automatically: the
@@ -145,8 +147,7 @@
     --code-bg:#ecece4; --field-bg:#fff; --field-edge:#c9c9bf;
     --btn-bg:#ecece4; --btn-hover:#e0e0d6; --shadow:rgba(0,0,0,.18);
     --belief-bg:#faf7f2; --err-bg:#fdeceb; --err-ink:#c0392b;
-    --t-type:#0a7d5a; --t-ind:#8a2be2; --t-pred:#0645ad;
-    --t-context:#a1571a; --t-num:#c0392b; --t-var:#8b8f99;
+    --t-var:#8b8f99;
     --rb1:#c21527; --rb2:#d32704; --rb3:#d69900; --rb4:#6da72f; --rb5:#2daa8a;
     --rb6:#1893be; --rb7:#1661c0; --rb8:#4b20b6; --rb9:#b91d75;
     --accent: var(--lt-accent); --accent-2: var(--lt-accent-2);
@@ -160,8 +161,7 @@
   --code-bg:#ecece4; --field-bg:#fff; --field-edge:#c9c9bf;
   --btn-bg:#ecece4; --btn-hover:#e0e0d6; --shadow:rgba(0,0,0,.18);
   --belief-bg:#faf7f2; --err-bg:#fdeceb; --err-ink:#c0392b;
-  --t-type:#0a7d5a; --t-ind:#8a2be2; --t-pred:#0645ad;
-  --t-context:#a1571a; --t-num:#c0392b; --t-var:#8b8f99;
+  --t-var:#8b8f99;
   --rb1:#c21527; --rb2:#d32704; --rb3:#d69900; --rb4:#6da72f; --rb5:#2daa8a;
   --rb6:#1893be; --rb7:#1661c0; --rb8:#4b20b6; --rb9:#b91d75;
   --accent: var(--lt-accent); --accent-2: var(--lt-accent-2);
@@ -333,7 +333,7 @@ button.panel-n:hover { background: none; color: var(--accent-2); }
 
 /* ---- header ---------------------------------------------------------- */
 /* btop's top bar: one framed strip across the page holding the brand, the tools, the
-   search and the two colour dots.  It is the first frame on every page, so it is drawn
+   two colour dots and search.  It is the first frame on every page, so it is drawn
    as one rather than as a rule under a row of links. */
 
 header.site {
@@ -385,12 +385,13 @@ header.site {
 /* the two colour controls, dots rather than labels (vaelii.com's, so the two surfaces
    read as one): the palette dot cycles the accent pair and is painted in it, and the
    theme dot flips light against dark and shows both grounds. */
-.theme-controls { display: inline-flex; align-items: center; gap: .4rem; }
+.theme-controls { display: inline-flex; align-items: center; gap: .4rem; margin-left: .5rem; }
 .palette-btn, .theme-btn {
   width: 13px;
   height: 13px;
   padding: 0;
   border: 1px solid var(--card-edge);
+  border-radius: 50%;
   cursor: pointer;
   transition: border-color .15s ease;
 }
@@ -419,9 +420,9 @@ header.site {
   width: .68em;
   height: .68em;
   margin-right: .45em;
-  border: 1px solid var(--badge-c, var(--muted));
+  border: 1px solid color-mix(in srgb, var(--badge-c, var(--muted)) var(--lit, 100%), var(--bg));
   border-radius: 50%;
-  background: var(--badge-c, var(--muted));
+  background: color-mix(in srgb, var(--badge-c, var(--muted)) var(--lit, 100%), var(--bg));
   vertical-align: .04em;
   user-select: none;
 }
@@ -437,21 +438,30 @@ header.site {
    says so by leaving it unlit.  Its border is what keeps it visible on either ground */
 .badge-inert     { --badge-c: #000; border-color: var(--muted); }
 /* a rule that runs both ways is both colours, split down the middle */
-.badge-both      { --badge-c: var(--rb8); background: linear-gradient(90deg, var(--rb7) 50%, var(--rb8) 50%); }
+.badge-both      { --badge-c: var(--rb8);
+                   background: linear-gradient(90deg,
+                     color-mix(in srgb, var(--rb7) var(--lit, 100%), var(--bg)) 50%,
+                     color-mix(in srgb, var(--rb8) var(--lit, 100%), var(--bg)) 50%); }
 /* derived, so the engine worked it out: the outline without the fill.  Two pixels of it,
    because one at this diameter carries too little of the hue to read as a colour */
 .badge-open      { background: none; border-width: 2px; }
-.badge-out       { opacity: .4; filter: grayscale(1); }  /* stored, not believed */
+/* Stored and not believed.  `--lit` is how much of its own colour a badge or a sentence
+   part keeps, mixed toward the ground, so an OUT one keeps its hue at a lower contrast.
+   `web/belief-span` puts `.sx-in` or `.sx-out` on every sentence it renders with a
+   badge; `--lit` inherits, so a sentence nested in a meta-sentex takes its own belief's
+   value and not the outer one's. */
+.badge-out, .sx-out { --lit: 55%; }
+.sx-in              { --lit: 100%; }
 
-/* A rule is laid out across lines, one antecedent literal to a line, each aligned under
-   the first (`laid-out-form`).  The indent is counted in characters, which is exact
-   because the sentence is set in --mono; `pre-wrap` is what keeps those characters and
-   still lets a line too long for the viewport wrap rather than widen the page. */
-/* `pre-wrap` keeps the newlines and the counted indent, and still lets a line too long
+/* A rule or a meta-sentex holding one is laid out across lines (`web/layout`).
+   `pre-wrap` keeps the newlines and the counted indent, and still lets a line too long
    for the viewport wrap rather than widening the page.  The alignment itself is
    `.sx-body`'s doing: a newline returns to the left edge of the containing block, and
    that block is the sentence's rather than the row's (web/sentex-row). */
 .sx-rule { white-space: pre-wrap; }
+/* a badge inside a sentence (an expanded `(sentexHandle N)`) is two characters wide, so
+   the counted indent of the sentence behind it holds (`web/badge-cols`) */
+.sx .badge { box-sizing: border-box; margin-right: calc(2ch - .68em); }
 
 /* Depth-coloured parens (`web/paren`).  A sentence is a tree printed as a line, and the
    parens are the only thing saying where a subterm ends; every subterm is already
@@ -459,15 +469,15 @@ header.site {
    depth counts along the spectrum from --rb1 and wraps at nine, so a matching pair is
    one colour and no pair is the colour of the one immediately inside it.  vaelii.com's
    stylesheet draws the same nine in the same order. */
-.rb1 { color: var(--rb1); }
-.rb2 { color: var(--rb2); }
-.rb3 { color: var(--rb3); }
-.rb4 { color: var(--rb4); }
-.rb5 { color: var(--rb5); }
-.rb6 { color: var(--rb6); }
-.rb7 { color: var(--rb7); }
-.rb8 { color: var(--rb8); }
-.rb9 { color: var(--rb9); }
+.rb1 { --sx-c: var(--rb1); }
+.rb2 { --sx-c: var(--rb2); }
+.rb3 { --sx-c: var(--rb3); }
+.rb4 { --sx-c: var(--rb4); }
+.rb5 { --sx-c: var(--rb5); }
+.rb6 { --sx-c: var(--rb6); }
+.rb7 { --sx-c: var(--rb7); }
+.rb8 { --sx-c: var(--rb8); }
+.rb9 { --sx-c: var(--rb9); }
 
 /* a small tag for a sentex's assumption strength / defeat class, rule flag, etc. */
 .tag {
@@ -530,12 +540,46 @@ header.site {
 .ref { color: var(--muted); font-size: .85em; margin-right: .2em; }
 
 /* term roles (vaelii.naming) */
-a.t-type    { color: var(--t-type); font-weight: 600; }  /* dog, physical_object */
-a.t-ind     { color: var(--t-ind); }                     /* Muffet, Tom            */
-a.t-pred    { color: var(--t-pred); }                    /* parentOf, genl       */
-a.t-context { color: var(--t-context); }                 /* CxUniverse      */
-a.t-num     { color: var(--t-num); }                     /* 1970                 */
-.t-var      { color: var(--t-var); }                     /* ?x — not a link      */
+a.t-type    { --sx-c: var(--t-type); }                   /* dog, physical_object */
+a.t-ind     { --sx-c: var(--t-ind); }                    /* Muffet, Tom          */
+a.t-pred    { --sx-c: var(--t-pred); }                   /* parentOf, genl       */
+a.t-context { --sx-c: var(--t-context); }                /* CxUniverse           */
+a.t-num     { --sx-c: var(--t-num); }                    /* 1970                 */
+.t-str      { --sx-c: var(--t-num); }                    /* "a string"           */
+.cx-in      { --sx-c: var(--title); }                    /* (dog Fido) in CxWorld */
+.t-var      { --sx-c: var(--t-var); }                    /* ?x — not a link      */
+/* every sentence part above, and a depth paren (`.rb1`…), is its colour at `--lit` */
+:is(.rb1, .rb2, .rb3, .rb4, .rb5, .rb6, .rb7, .rb8, .rb9, a.t-type, a.t-ind, a.t-pred,
+    a.t-context, a.t-num, .t-str, .cx-in, .t-var) {
+  color: color-mix(in srgb, var(--sx-c) var(--lit, 100%), var(--bg));
+}
+/* a string's text is English, so it takes --prose between quotes that keep --mono; a
+   term, formula or variable a comment's text marks up is `.sx` or `.t-var` and keeps --mono.
+   It inherits `.sx`'s --x-height, so the prose stands at the height of the mono beside it */
+.t-str .str-text { font-family: var(--prose); }
+
+/* the front page's browsing history (vaelii.js): one row per kind, each entry a link
+   whose remove button shows while the pointer or the focus is on it */
+.history-row  { display: flex; flex-wrap: wrap; align-items: baseline; gap: .15rem .9rem;
+                margin: .2rem 0; }
+.history-kind { min-width: 5rem; font-size: .85em; }
+.history-item { display: inline-flex; align-items: baseline; gap: .2em; max-width: 32rem; }
+/* an entry's label: a term link, or a literal the server draws (`web/history-literals`) */
+.history-item > :first-child { min-width: 0; overflow: hidden; text-overflow: ellipsis;
+                               white-space: nowrap; }
+.history-items { display: contents; }   /* the literal row's items stay flex items of the row */
+.history-x {
+  visibility: hidden;
+  padding: 0 .25em;
+  border: none;
+  background: none;
+  color: var(--muted);
+  font-size: .85em;
+  line-height: 1;
+  cursor: pointer;
+}
+.history-item:hover .history-x, .history-item:focus-within .history-x { visibility: visible; }
+.history-x:hover { color: var(--err-ink); background: none; }
 
 /* a reified term (docs/nat.md), shown as the expression it denotes rather than as its
    opaque nat/ constant.  The parens are what say it is one *term* and not a compound

@@ -71,6 +71,7 @@
    [#'protocols/RecordSink      "docs/storage.md"]
    [#'protocols/BulkAnnotating  "docs/storage.md"]
    [#'protocols/IndexStore      "docs/storage.md"]
+   [#'protocols/ImageStamping   "docs/storage.md"]
    [#'protocols/KvBackend              "docs/storage.md"]
    [#'snapshot-types/SnapshotSink     "docs/storage.md"]
    [#'snapshot-types/SnapshotSource   "docs/storage.md"]

@@ -157,27 +157,19 @@
 
 ;; ---- which records an image can be about --------------------------------
 
-(deftest the-image-pairs-with-disk-records-alone
-  ;; An image is stamped with `record-store/slot-fingerprint` — the disk record store's own
-  ;; sequential read of its slot file, which lives on that namespace rather than on the
-  ;; `RecordStore` protocol.  No other record axis can compute one, so an image over one
-  ;; could be neither stamped when it was written nor checked when it was read, and validity
-  ;; is this representation's whole design.  Durability is not the test, which is what makes
-  ;; this a second gate rather than a stricter reading of the first: `:pg` records are
-  ;; durable and are refused all the same.
-  (testing ":pg records, durable and still unable to answer the stamp"
-    (let [e (is (thrown-with-msg? clojure.lang.ExceptionInfo
-                                  #"the :snapshot index pairs with :disk records"
-                                  (kb/backend-axes {:records :pg :index :snapshot})))]
-      (is (= :unknown-backend (:type (ex-data e))))
-      (is (= :pg-disk-log (:instead (ex-data e))) "naming the pairing to take instead")
-      (is (re-find #"fingerprint" (ex-message e)) "and saying which of the two gates it is")))
-  (testing "and no backend name spells that pair"
-    (is (thrown-with-msg? clojure.lang.ExceptionInfo #"unknown KB backend"
-                          (kb/backend-axes {:backend :pg-snapshot}))))
+(deftest the-image-pairs-with-records-that-stamp-it
+  ;; An image is stamped with what its record store answers to `p/ImageStamping`: the
+  ;; `:disk` store reads its slot file, and the `:pg` adapter one row its trigger moves.
+  (testing ":pg records, whose adapter stamps images, take the image as :pg-snapshot"
+    (is (= {:records :pg :index :snapshot} (kb/backend-axes {:backend :pg-snapshot})))
+    (is (= {:records :pg :index :snapshot} (kb/backend-axes {:records :pg :index :snapshot}))))
+  (testing ":sqlite records, which may not persist an index beside them, are refused it"
+    (is (thrown-with-msg? clojure.lang.ExceptionInfo
+                          #"the :snapshot index needs durable records"
+                          (kb/backend-axes {:records :sqlite :index :snapshot}))))
   (testing "while RAM records get the durability argument, which is the other one"
     (is (thrown-with-msg? clojure.lang.ExceptionInfo
-                          #"the :snapshot index needs durable records — :disk —"
+                          #"the :snapshot index needs durable records — :disk or :pg —"
                           (kb/backend-axes {:records :memory :index :snapshot}))))
   (testing "and the one pairing that opens"
     (is (= {:records :disk :index :snapshot} (kb/backend-axes {:backend :disk-snapshot})))

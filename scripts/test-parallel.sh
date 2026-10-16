@@ -20,10 +20,11 @@
 #     itself echoes, never from a pipeline (`lein test | tee` reports `tee`).  The
 #     aggregate is red if any shard is.
 #
-# Balance comes from measured time, not guesswork: each run records how long every
-# namespace took to `target/gate/test-timings.tsv`, and the next run bin-packs
-# longest-first into the emptiest shard.  With no timings yet it falls back to
-# round-robin, which is a worse split and still correct.
+# Balance comes from measured time, not guesswork: each run averages how long every
+# namespace took into `logs/test-timings.tsv`, and the next run bin-packs
+# longest-first into the emptiest shard.  A namespace with no local figure takes its
+# CI weight (scripts/ci-test-weights-memory.tsv) scaled to local time, and one with
+# neither takes the mean.
 #
 # Usage:
 #   scripts/test-parallel.sh                 # :default, jobs from scripts/lib/slots.sh
@@ -41,22 +42,25 @@ cd "$(dirname "$0")/.." || exit 1
 . scripts/lib/revision.sh
 # one row in `logs/runs.tsv` per run: the revision, the clock, the totals and the
 # verdict, so "which revision did the suite last pass at" is one file to read
-# rather than a dozen `target/gate/run-*` directories a `lein clean` can delete
+# rather than a dozen `logs/gate/run-*` directories
 # shellcheck source=scripts/lib/runlog.sh
 . scripts/lib/runlog.sh
 # the default shard count, shared with test-matrix.sh so the rule cannot drift
 # shellcheck source=scripts/lib/slots.sh
 . scripts/lib/slots.sh
+# the per-namespace clock each shard's output passes through
+# shellcheck source=scripts/lib/ns-timings.sh
+. scripts/lib/ns-timings.sh
 
-# Logs and scratch are **per run**; the timings are **per checkout**, and the split is
-# the point.  `gate.sh` hands this a fresh `target/gate/run-<pid>` so two gates in one
-# working tree cannot read each other's shard logs — but the timings are feedback for
-# the *next* run rather than output of this one, so they live above the run directory
-# and every run in this checkout shares the one file.  Put them inside `$OUT` and each
-# run starts blind, silently falling back to round-robin sharding: a slower gate whose
-# only symptom is being slower.
-OUT="${VAELII_GATE_OUT:-target/gate}"
-TIMINGS="${VAELII_GATE_TIMINGS:-target/gate/test-timings.tsv}"
+# Logs and scratch are **per run**; the timings are **per checkout**.  `gate.sh` hands
+# this a fresh `logs/gate/run-<pid>` so two gates in one working tree cannot read
+# each other's shard logs.  The timings are feedback for the *next* run, so every run
+# in this checkout shares one file, under `logs/` beside `logs/runs.tsv`: `lein jar`,
+# `lein install` and `lein clean` empty `target/`, and a run after one of them would
+# pack its shards from no measurement.
+OUT="${VAELII_GATE_OUT:-logs/gate}"
+TIMINGS="${VAELII_GATE_TIMINGS:-logs/test-timings.tsv}"
+CI_WEIGHTS=scripts/ci-test-weights-memory.tsv
 
 selector=":default"
 jobs=""
@@ -86,8 +90,8 @@ mkdir -p "$OUT" || exit 1
 # suite is minutes long on a checkout several writers work in, and a verdict
 # credited to whatever landed while it ran is a verdict about no tree at all.
 runlog_start
-# the timings sit above `$OUT` when the gate hands us a per-run directory, so their own
-# parent may not exist yet on a fresh checkout
+# the timings live outside `$OUT`, so their own parent may not exist yet on a fresh
+# checkout
 mkdir -p "$(dirname "$TIMINGS")" || exit 1
 
 # ---- the namespaces ---------------------------------------------------------
@@ -104,23 +108,41 @@ if [[ $n -eq 0 ]]; then echo "test-parallel: no test namespaces found" >&2; exit
 [[ $jobs -gt $n ]] && jobs=$n
 
 # ---- bin-pack ---------------------------------------------------------------
-# Longest-processing-time-first: sort by last run's duration descending, and hand each
+# Longest-processing-time-first: sort by the averaged duration descending, and hand each
 # namespace to whichever shard is currently lightest.  This is the standard 4/3-optimal
 # greedy, and on this suite it matters — the spread between the heaviest namespace and
 # the median is large enough that round-robin leaves one shard running alone at the end.
-assign_out="$OUT/.shard-assign"
-awk -v jobs="$jobs" -v timings="$TIMINGS" '
+#
+# `test.assign` keeps the split, `shard<TAB>namespace<TAB>predicted seconds`, and each
+# shard's `test.timing-<b>.tsv` gets a row as each of its namespaces ends.  Both stay
+# in the run directory: vaelii-top reads them for how far through its predicted
+# seconds a shard is (vaelii-tools: vaelii-top/src/vtop/live.py).
+assign_out="$OUT/test.assign"
+rm -f "$OUT"/test.timing-*.tsv
+awk -v jobs="$jobs" -v timings="$TIMINGS" -v ci="$CI_WEIGHTS" '
   BEGIN {
     while ((getline line < timings) > 0) {
       split(line, f, "\t"); if (f[1] != "") secs[f[1]] = f[2] + 0
     }
     close(timings)
+    while ((getline line < ci) > 0) {
+      if (line ~ /^#/) continue
+      split(line, f, "\t"); if (f[1] != "") cis[f[1]] = f[2] + 0
+    }
+    close(ci)
   }
   { ns[NR] = $0; w[NR] = (ns[NR] in secs) ? secs[ns[NR]] : -1 }
   END {
-    # unknown namespaces get the mean, so a new test is not always packed last
-    total = 0; known = 0
-    for (i = 1; i <= NR; i++) if (w[i] >= 0) { total += w[i]; known++ }
+    # A namespace with no local figure takes its CI weight times the ratio of local
+    # to CI time over the namespaces both name; one with neither takes the local
+    # mean, so a new test is not always packed last.
+    lsum = 0; csum = 0; total = 0; known = 0
+    for (i = 1; i <= NR; i++) if (w[i] >= 0) {
+      total += w[i]; known++
+      if (ns[i] in cis) { lsum += w[i]; csum += cis[ns[i]] }
+    }
+    scale = (csum > 0) ? lsum / csum : 1
+    for (i = 1; i <= NR; i++) if (w[i] < 0 && (ns[i] in cis)) { w[i] = cis[ns[i]] * scale; total += w[i]; known++ }
     mean = (known > 0) ? total / known : 1
     for (i = 1; i <= NR; i++) if (w[i] < 0) w[i] = mean
 
@@ -135,7 +157,7 @@ awk -v jobs="$jobs" -v timings="$TIMINGS" '
       idx = order[k]; light = 1
       for (b = 2; b <= jobs; b++) if (load[b] < load[light]) light = b
       load[light] += w[idx]
-      printf "%d\t%s\n", light, ns[idx]
+      printf "%d\t%s\t%.2f\n", light, ns[idx], w[idx]
     }
   }
 ' <(printf '%s\n' "${namespaces[@]}") > "$assign_out"
@@ -161,7 +183,7 @@ for ((b = 1; b <= jobs; b++)); do
   while IFS= read -r ns; do shard_ns+=("$ns"); done < <(awk -F'\t' -v b="$b" '$1==b {print $2}' "$assign_out")
   [[ ${#shard_ns[@]} -eq 0 ]] && continue
 
-  log="$OUT/test.shard-$b.log"; timing="$OUT/.timing-$b.tsv"
+  log="$OUT/test.shard-$b.log"; timing="$OUT/test.timing-$b.tsv"
   shard_logs+=("$log")
   # The status comes from the marker the shard echoes, never from the pipeline: `tee`
   # exits 0 over a red suite, which is exactly how a green gate hides one.
@@ -173,12 +195,7 @@ for ((b = 1; b <= jobs; b++)); do
   (
     { lein test "${shard_ns[@]}" "$selector"; echo "SHARD-EXIT:$?"; } 2>&1 \
       | tee -a "$log" \
-      | while IFS= read -r line; do
-          case "$line" in
-            "lein test "*) printf '%s\t%s\n' "$SECONDS" "${line#lein test }" ;;
-            "Ran "*" tests containing "*) printf '%s\t\n' "$SECONDS" ;;
-          esac
-        done > "$timing"
+      | ns_timings "$timing" > /dev/null
   ) &
   pids+=("$!")
 done
@@ -187,19 +204,13 @@ for p in "${pids[@]}"; do wait "$p"; done
 elapsed=$((SECONDS - t0))
 
 # ---- timings for the next run ----------------------------------------------
-# Each `lein test <ns>` line is a start stamp; a namespace's cost is the gap to the
-# next one.  clojure.test's `Ran …` total closes the last namespace with an end stamp
-# whose name is empty, so a shard's last namespace is measured too; a shard killed
-# before its total keeps that namespace's previous figure.
-{
-  [[ -f "$TIMINGS" ]] && cat "$TIMINGS"
-  for ((b = 1; b <= jobs; b++)); do
-    [[ -f "$OUT/.timing-$b.tsv" ]] || continue
-    awk -F'\t' 'NR>1 { printf "%s\t%d\n", prev_ns, $1 - prev_t } { prev_t=$1; prev_ns=$2 }' "$OUT/.timing-$b.tsv"
-  done
-} | awk -F'\t' '$1 != "" { secs[$1] = $2 } END { for (k in secs) printf "%s\t%s\n", k, secs[k] }' \
-  | sort > "$TIMINGS.$$.new" && mv "$TIMINGS.$$.new" "$TIMINGS"
-rm -f "$OUT"/.timing-*.tsv "$assign_out"
+# This run's figures go into the previous ones as a moving average (`ns_timings_average`);
+# a namespace a killed shard never finished keeps its previous figure.
+for ((b = 1; b <= jobs; b++)); do
+  [[ -f "$OUT/test.timing-$b.tsv" ]] && cat "$OUT/test.timing-$b.tsv"
+done > "$OUT/test.timings.tsv"
+ns_timings_average "$TIMINGS" "$OUT/test.timings.tsv" > "$TIMINGS.$$.new" \
+  && mv "$TIMINGS.$$.new" "$TIMINGS"
 
 # ---- aggregate --------------------------------------------------------------
 # Summed, not eyeballed: the whole point of sharding is that no single log carries the

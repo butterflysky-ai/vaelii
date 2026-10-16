@@ -123,9 +123,10 @@
 
 (deftest store-backend-reads-the-backend-off-the-files-beside-the-records
   (testing "a directory with no records/format.edn holds no store"
-    (is (nil? (with-layout [] v/store-backend)))
-    (is (nil? (with-layout [["index" "trie.csr"]] v/store-backend))
-        "an index file with no records beside it is no store"))
+    (is (nil? (with-layout [] v/store-backend))))
+  (testing "an index file with no records beside it is a local index over records on a server"
+    (is (= :pg-snapshot (with-layout [["index" "trie.csr"]] v/store-backend)))
+    (is (= :pg-disk-log (with-layout [["index" "kv.log"]] v/store-backend))))
   (testing "the index file beside the records names the backend"
     (is (= :disk-snapshot (with-layout [["records" "format.edn"] ["index" "trie.csr"]] v/store-backend)))
     (is (= :disk-log (with-layout [["records" "format.edn"] ["index" "kv.log"]] v/store-backend)))

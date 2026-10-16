@@ -91,7 +91,8 @@
 #   ./scripts/test-matrix.sh full :all        # ...with the ^:slow half — before a tag
 #   ./scripts/test-matrix.sh backends         # one axis (also: sweeps, routine, full)
 #   ./scripts/test-matrix.sh memory disk-log rete   # only these
-#   ./scripts/test-matrix.sh --jobs 4         # fewer at a time, on a box you are using
+#   ./scripts/test-matrix.sh --jobs 4         # 4 at a time throughout; without it the
+#                                             # count follows the other vaelii JVMs
 #   ./scripts/test-matrix.sh --set-jobs 6     # the RUNNING matrix: 6 at a time from now on
 #   ./scripts/test-matrix.sh --keep           # keep each durable run's scratch directory
 #   ./scripts/test-matrix.sh --fail-fast      # launch nothing new once one has failed
@@ -104,6 +105,7 @@
 #   MATRIX_KEEP_RUNS  past run dirs to keep (default 20); a run touched in the last 24h is
 #                     never pruned regardless, so a parallel run is never a candidate
 #   MATRIX_JOBS       how many at a time (default: scripts/lib/slots.sh)
+#   MATRIX_SLOTS_EVERY  seconds between re-reads of that default while running (30)
 #   MATRIX_OWED_MAX   the most configurations an `--owed` run starts (default 4; 0 for
 #                     no cap), taken off the front of the launch order
 #   MATRIX_RED_COOLDOWN  seconds after a red run during which no matrix starts or
@@ -519,7 +521,7 @@ while IFS= read -r c; do CONFIGS+=("$c"); done < <(expand_configs "${WANTED[@]}"
 # lein runs before a compile/uberjar/coverage task — wipes all of target/, and a live
 # matrix run's per-configuration logs and disk scratch sit inside its run directory.  logs/
 # is gitignored and no lein task touches it, so a run in one checkout survives a build in
-# another.  `prune_old_runs` (below) is the only thing that deletes a run dir now.
+# another.  `runlog_prune` (scripts/lib/runlog.sh) is the only thing that deletes a run dir.
 MATRIX_ROOT="logs/test-matrix"
 MATRIX_TIMINGS="$MATRIX_ROOT/config-timings.tsv"
 order_longest_first() {
@@ -633,6 +635,8 @@ fi
 # about one core of test work, so a slot count near the core count keeps every core busy
 # while leaving the box usable; more slots than cores does not go faster and costs another
 # JVM's memory each.  slots.sh says why it is P/2 (not `cores - 2`) and load-aware.
+# Without `--jobs` the count follows the load while the matrix runs (the scheduler below).
+AUTO_JOBS=0; [[ -z "$JOBS" ]] && AUTO_JOBS=1
 [[ -z "$JOBS" ]] && JOBS=$(default_slots)
 [[ $JOBS -gt ${#CONFIGS[@]} ]] && JOBS=${#CONFIGS[@]}
 
@@ -683,23 +687,6 @@ for c in ${PROTECTED[@]+"${PROTECTED[@]}"}; do
 done
 (( ${#prot_run[@]} > 0 )) && matrix_yield_stopped_take "${prot_run[@]}"
 
-# Keep a generous tail of past run directories and never delete a recent one.  Nothing
-# pruned before — a stray `lein clean` did the deleting instead, and took live runs with it
-# (their logs live under target/ no longer, see MATRIX_ROOT above).  Delete only a run dir
-# that is BOTH beyond the newest `keep` AND untouched for over a day: a run still in progress
-# — in this checkout or a parallel one — is touched within the day, so it is never a
-# candidate.  Newest-first by mtime; bash 3.2 ships as /bin/bash, so no `mapfile`.
-prune_old_runs() {
-  local root="$1" keep="$2" d i=0
-  [[ -d "$root" ]] || return 0
-  while IFS= read -r d; do
-    i=$((i + 1))
-    (( i <= keep )) && continue
-    [[ -n "$(find "$d" -maxdepth 0 -mmin -1440 2>/dev/null)" ]] && continue
-    rm -rf "$d"
-  done < <(ls -dt "$root"/run-* 2>/dev/null)
-}
-
 # A run owns its directory — `gate.sh` and `test-backends.sh`, same reason: two matrices
 # in one checkout must not interleave a log or delete each other's live disk scratch.
 # MATRIX_ROOT is set above (under logs/, so no lein clean can reach a live run).
@@ -707,7 +694,7 @@ mkdir -p "$MATRIX_ROOT"                        # a fresh checkout has no logs/ y
 if [[ -n "${TEST_MATRIX_OUT:-}" ]]; then
   OUT_DIR="$TEST_MATRIX_OUT"; mkdir -p "$OUT_DIR"
 else
-  prune_old_runs "$MATRIX_ROOT" "${MATRIX_KEEP_RUNS:-20}"
+  runlog_prune "$MATRIX_ROOT" "${MATRIX_KEEP_RUNS:-20}"
   OUT_DIR="$MATRIX_ROOT/run-$$"; mkdir -p "$OUT_DIR"
   ln -sfn "$(basename "$OUT_DIR")" "$MATRIX_ROOT/latest" 2>/dev/null || true
 fi
@@ -1248,15 +1235,33 @@ QUEUE_FILE=$(matrix_state_dir) && QUEUE_FILE="$QUEUE_FILE/queue" || QUEUE_FILE="
 YIELD=0; (( OWED )) && [[ "${MATRIX_YIELD:-1}" != 0 ]] && YIELD=1
 YIELDED=0
 done_n=0; running=0; next=0; last_beat=$SECONDS
+slots_done=0; slots_at=$SECONDS
 while (( done_n < n )); do
   # `--set-jobs` from another shell, capped at the configuration count as `--jobs` is
   if [[ -n "$JOBS_FILE" && -s "$JOBS_FILE" ]] && read -r live <"$JOBS_FILE" \
      && [[ "$live" =~ ^[1-9][0-9]*$ ]]; then
     (( live > n )) && live=$n
+    AUTO_JOBS=0
     if (( live != JOBS )); then
       (( LIVE )) || echo "  ${DIM}now $live at a time (--set-jobs), was $JOBS${OFF}"
       JOBS=$live
     fi
+  fi
+  # ...or the slot rule again, with this matrix's own JVMs left out: a raise launches more
+  # on this pass, a lower launches nothing new until fewer are running
+  if (( AUTO_JOBS && next < n )) \
+     && (( done_n != slots_done || SECONDS - slots_at >= ${MATRIX_SLOTS_EVERY:-30} )); then
+    own=()
+    for ((i = 0; i < next; i++)); do
+      [[ "${state[i]}" == running ]] && own+=("${pgid[i]}")
+    done
+    read -r live others _ < <(slots_beside ${own[@]+"${own[@]}"})
+    (( live > n )) && live=$n
+    if (( live != JOBS )); then
+      (( LIVE )) || echo "  ${DIM}now $live at a time ($others other vaelii JVM(s)), was $JOBS${OFF}"
+      JOBS=$live
+    fi
+    slots_done=$done_n; slots_at=$SECONDS
   fi
 
   while (( running < JOBS && next < n )); do

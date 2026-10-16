@@ -302,7 +302,7 @@
       (is (believed-at? kb (list fatherOf A B) 'CxUniverse) "the inherited length holds")
       (is (tu/stored-in-clash? kb (list fatherOf A B C) 'CxUniverse)
           "and a ternary fatherOf fact is a ternary parentOf tuple, read OUT")
-      (testing "a :monotonic one is a hard clash grounded on the super's own declaration"
+      (testing "a :monotonic one is inert, its conflict grounded on the super's own declaration"
         (let [h (v/assert kb (list fatherOf A B D) 'CxUniverse {:strength :monotonic})
               r (first (filter #(contains? (:nogood %) h) (v/conflicts kb)))]
           (is (= :arity (:kind r)))
@@ -694,9 +694,9 @@
 ;; ---- every arrival order reads the same --------------------------------
 ;;
 ;; A binding reaches a tuple through its own predicate's declaration, a super-predicate's
-;; through a `genl` edge, and either through a `genlCx` edge that brings it into the
-;; tuple's sight.  A reader decides the tuple from what it sees, so whichever of those
-;; arrives last, the tuple reads the same.
+;; through a `genl` edge, and a relation's length is read the same at every context
+;; (docs/taxonomy.md, "Arity"), so whichever of those arrives last, the tuple reads the
+;; same.
 
 (tu/deftest-kb a-wrong-arity-fact-reads-the-same-in-every-arrival-order
   (let [readings
@@ -713,13 +713,13 @@
                       [strength
                        (believed-at? kb tuple 'CxUniverse)
                        (mapv (juxt :kind (comp count :grounds)) (v/conflicts kb))])))))]
-    (is (= #{[:default false []] [:monotonic true [[:arity 1]]]} readings)
-        "OUT at :default and a hard clash at :monotonic, in all six orders")))
+    (is (= #{[:default false [[:arity 1]]] [:monotonic false [[:arity 1]]]} readings)
+        "inert at either strength, in all six orders")))
 
-(tu/deftest-kb a-context-edge-that-brings-a-binding-into-sight-reads-the-same-in-every-order
+(tu/deftest-kb a-binding-a-reader-does-not-see-holds-the-tuple-inert-there-in-every-order
   ;; The declaration is stated in a context the tuple's own does not see until the
-  ;; `genlCx` edge arrives, so the edge is the third ingredient; a reader beside the tuple's
-  ;; context that never sees the declaration believes the tuple throughout.
+  ;; `genlCx` edge arrives, and a reader beside the tuple's context never sees it: the
+  ;; tuple is inert at both.
   (let [readings
         (into #{}
               (for [order (orderings [:declaration :edge :tuple])]
@@ -735,8 +735,7 @@
                       (doseq [k order] ((step k)))
                       [(believed-at? kb tuple CxAside CxLower)
                        (believed-at? kb tuple CxAside CxAside)])))))]
-    (is (= #{[false true]} readings)
-        "OUT at the reader that sees the declaration, IN at the one that does not")))
+    (is (= #{[false false]} readings))))
 
 ;; ---- and the retroactive halves of the other two marks ------------------
 ;;

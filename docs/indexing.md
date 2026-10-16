@@ -728,9 +728,10 @@ A positive fact of functor `f` holding `n` arguments enters the count trie
 `:shape-tuple` under the node `[f n]`, the context last, and `[:shape-lengths f]`, the
 trie's root level, holds the argument counts `f`'s positive facts are stored at, so a
 length leaves the set with its node's last fact (`kv/shape-adds`, `shape-retires`). The
-index write posts both from the sentence in hand. The arity candidates read a functor's
-lengths here (`reads/as-stored-shape-lengths`) and a candidate shape's tuples off its
-node (`reads/as-stored-shape-tuples-global`), so a shape of one tuple reads one handle
+index write posts both from the sentence in hand. The inert-tuple refresh
+(`arity/drain!`) reads a functor's lengths here (`reads/as-stored-shape-lengths`) and a
+shape's tuples off its node (`reads/as-stored-shape-tuples-global`), so a shape of one
+tuple reads one handle
 however many tuples of another length its functor holds; the positional trie cannot
 answer it, since a positive fact's path carries no length.
 
@@ -744,9 +745,10 @@ nodes, and `[:arity-bound]` every predicate holding one. The index write posts a
 from the sentence in hand (`kv/fact-nodes`, `binding-adds`, `binding-retires`): a kind
 enters with its node's first handle and leaves with its last, read off the node's count
 before the write, and a predicate enters `[:arity-bound]` with its first kind and leaves
-with its last. The arity candidates read a predicate's kinds and its bindings in the
-contexts a reader sees here (`reads/as-stored-arity-binding-kinds`,
-`as-stored-arity-bindings`), and the lengths stored above a type probe `[:arity-bound]`
+with its last. `arity/relation-length` reads a predicate's kinds and its bindings in
+every context here (`reads/as-stored-arity-binding-kinds`,
+`as-stored-arity-bindings-global`), the arity pairs read the CxUniverse copies
+(`as-stored-arity-bindings`), and the lengths stored above a type probe `[:arity-bound]`
 once per type they read (`reads/stored-arity-bound?`), so no binding record is read and
 recover rebuilds no roster of them.
 
@@ -796,13 +798,15 @@ on its genl, which is `match1`'s subsumption. A negative fact is the mirror, bec
 `(not (dog ?x))` antecedent with a negative fact on a genl of `dog`. The two directions
 are exclusive: `(not (dog Muffet))` does not satisfy `(not (animal ?x))`.
 
-The negative fan is **enumerated from the roster of keys some stored rule reads**, not
-from the spec closure, and the asymmetry is why: the positive fan walks the *up* set,
-which a hierarchy bounds by its depth, while the down set on a broad ontology is most of
-it — an arriving `(not (thing X))` would otherwise cost one index probe per type in the
-KB. A KB whose rules read no negation pays one map read. The positive fan is read against
-the same roster: the up set intersected with it, walking the smaller of the two, so a fact
-on a type with thousands of ancestors probes only the keys some rule reads.
+Each fan is the closure intersected with the **roster of keys some stored rule reads**,
+read from the smaller side in one read (`reads/as-stored-rule-keys-meeting`). A closure no
+larger than the roster's count costs one membership test per term. A larger
+one costs one pass over the roster, which the `:dense` and columnar indexes decode into a
+set on every read, and `chain/fire-rules-for` asks once per datum. The positive fan walks
+the *up* set, which a hierarchy bounds by its depth. The down set on a broad ontology is
+most of it, so the spec walk stops at the count (`tax/specs-global-within`), and an
+arriving `(not (thing X))` takes the pass instead of one index probe per type in the KB.
+A KB with no rule reads the count alone (`trigger-keys-beside-rules` in `lein perf`).
 
 The exception re-check index (§4) keeps its bare-`not` bucket: it is a coarse
 *whether-to-look* roster, and both of its sides agree on that spelling.

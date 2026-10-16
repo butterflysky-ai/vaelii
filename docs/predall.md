@@ -23,9 +23,16 @@ while `predInstanceAll` fixes position 1 and quantifies position 2.
 | | fixed second argument | collection second argument |
 |---|---|---|
 | **universal first** | `predAllInstance` (stamps a rule) | `predAllExists` (inert) · `predAllSpecified` (audit) |
-| **existential first** | `predExistsInstance` (inert) | `predExistsAll` (inert) |
+| **existential first** | `predExistsInstance` (inert) | `predExistsAll` (inert, universal second) |
 | **fixed first** | — | `predInstanceAll` (stamps a rule) · `predInstanceExists` (inert) |
 | **audited first** | — | `predSpecifiedAll` (audit) |
+
+Where a cell quantifies both positions, the universal outscopes the existential.
+`(predAllExists owns person dog)` says that every person owns some dog: for all x in
+`person`, there exists y in `dog` with `(owns x y)`. `predExistsAll` is `predAllExists`
+with the predicate's argument positions swapped, so `(predExistsAll worksFor person
+company)` says that every company has at least one person who works for it: for all x in
+`company`, there exists y in `person` with `(worksFor y x)`.
 
 The three classes differ in what the engine does with a declaration, and the difference is
 the whole design. *Instance* declarations produce inference. *Exists* declarations produce
@@ -70,9 +77,11 @@ readable inside the sentence ([nat.md](nat.md)). Asserting one into a sentence i
 author's act. The engine never asserts a placeholder, and a placeholder an author did
 assert counts as a determinate filler for the audit below.
 
-`PredAllExistsFn` also takes the subject: `(PredAllExistsFn owns person dog Muffet)` is the
-dog `(predAllExists owns person dog)` requires Muffet to own, because the filler a universal
-first position requires varies with the member it is required of. The other three cells
+`PredAllExistsFn` and `PredExistsAllFn` also take the subject, because the filler a cell
+with a universal position requires varies with the member it is required of.
+`(PredAllExistsFn owns person dog Muffet)` is the dog `(predAllExists owns person dog)`
+requires Muffet to own. `(PredExistsAllFn worksFor person company Acme)` is the person
+`(predExistsAll worksFor person company)` requires to work for Acme. The two cross-cells
 require one filler for the whole declaration and take no subject. Each placeholder is an
 instance of the collection the cell requires it from, `(resultArg PredAllExistsFn 3)` and
 its three siblings ([argtypes.md](argtypes.md#a-type-another-argument-names-argarg)), and

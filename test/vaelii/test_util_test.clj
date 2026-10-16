@@ -75,6 +75,23 @@
     (is (= {:sentexes 0 :justifications 0} (tu/content-count kb))
         "fresh means empty, not merely bound")))
 
+(deftest fresh-reopens-a-store-a-fault-stopped
+  ;; A disk store latched unusable refuses every call until its directory is opened again
+  ;; (docs/storage.md, "A store that stops").  Built on `disk-log` whatever the run
+  ;; selected; an interrupt during the write latches the fault.
+  (binding [tu/*storage* {:backend :disk-log}]
+    (let [kb      (tu/fresh)
+          refusal (fn [f] (try (f) nil (catch clojure.lang.ExceptionInfo e (:type (ex-data e)))))]
+      (.interrupt (Thread/currentThread))
+      (try (v/assert kb '(dog Muffet) 'CxUniverse) (catch Throwable _ nil))
+      (Thread/interrupted)
+      (is (= :store-unusable (refusal #(v/clear! kb))) "the interrupt latched the store")
+      (let [kb (tu/fresh)]
+        (try
+          (is (= {:sentexes 0 :justifications 0} (tu/content-count kb)))
+          (is (nat-int? (v/assert kb '(dog Muffet) 'CxUniverse)))
+          (finally (v/close! kb)))))))
+
 (deftest the-overlay-arms-fresh-kb-reads-through-its-base
   ;; Built under the overlay arm whatever the run selected, so the default gate holds the
   ;; arm's `fresh` too.  A cleared fork hides its base for the rest of the process

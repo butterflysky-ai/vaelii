@@ -76,14 +76,14 @@
     :name    "Upper vocabulary"
     :blurb   "The upper ontology alone — the predicates the engine interprets and the upper types, all in CxUniverse."
     :scale   "3,000+ sentexes"
-    :options [{:key :chain? :type :flag :label "Forward-chain after loading" :default false}]}
+    :options []}
    {:id      "starter"
     :kind    :starter
     :name    "Starter ontology"
     :blurb   "The shipped schema: the upper ontology in CxUniverse and the middle theories below it. No individuals."
     :scale   "1,600+ asserted / 3,200+ stored"
     :default? true
-    :options [{:key :chain? :type :flag :label "Forward-chain after loading" :default false}]}
+    :options []}
    {:id      "generated"
     :kind    :generated
     :name    "Generated corpus"
@@ -806,17 +806,10 @@
 
 (defn- chain-asked
   "Forward-chain `kb` when the form asked for it, folding what it derived into `summary`.
-
-  **After** loading, which is what the option says and the only shape that pays: chaining
-  per assertion derives against a KB whose rules are half there, costs more, and reaches
-  the same fixpoint — so every loader here asserts with `:chain? false` and a chained load
-  is one pass at the end.  That is also the only point at which chaining can be *reported*,
-  which is why it is a phase of its own, with no total: a fixpoint's agenda grows as it
-  derives, so there is nothing for `done` to be a fraction of.
-
-  `:max-derivations` bounds it.  A corpus-sized rule set has no layer count to bound a run
-  by the way a generated KB does, so a cap is what stands between a chained load and one
-  that never comes back — a truncated run says so in the summary."
+  The corpus loader asserts with `:chain? false`, and this is the pass at the end
+  (docs/catalog.md, \"A chained load chains once, at the end\").  The phase reports no
+  total, since a fixpoint's agenda grows as it derives.  `:max-derivations` bounds it,
+  and a truncated run says so in the summary."
   [kb params progress! summary]
   (if-not (:chain? params)
     summary
@@ -854,11 +847,11 @@
       :core     (let [kb (open!)]
                   (progress! {:phase :vocabulary :done 0 :note "the upper ontology"})
                   (core-context/load-into kb)
-                  (chain-asked kb params progress! {}))
+                  {})
       :starter  (let [kb (open!)]
                   (progress! {:phase :ontology :done 0 :note "the shipped schema"})
                   (starter/load-into kb)
-                  (chain-asked kb params progress! {}))
+                  {})
       :generated (generate/load-into (open!) params {:on-progress progress!})
       :corpus   (let [kb (open!)]
                   (progress! {:phase :vocabulary :done 0 :note "the upper ontology"})
@@ -886,13 +879,13 @@
       ;; the store's own layout, never assumed: opening a `:disk-columnar` store as
       ;; `:disk-log` surfaces no records at all (docs/storage.md).
       ;;
-      ;; `:recover? :background` is taken under `VAELII_DEV` only.  It installs an image an
-      ;; earlier engine build wrote and rebuilds belief on a daemon thread behind it, so a
-      ;; large store is browsable in seconds — worth the rebuild thread at a development
-      ;; prompt, where the alternative is waiting out a recover to look at one term.  A
-      ;; served browser takes `:auto` instead: it waits for the recover, so the KB it makes
-      ;; active holds belief this build derived, with no thread to abandon and no window in
-      ;; which writes are refused (docs/storage.md, "Rebuilding behind an image").
+      ;; `:recover? :trust` is taken under `VAELII_DEV` only.  It installs and keeps an
+      ;; image an earlier engine build wrote, writable at once, and this build's code moves
+      ;; belief wherever a settle reaches — at a development prompt the engine changes all
+      ;; day, and a recover or a rebuild per change is the hour the image exists to save.
+      ;; A served browser takes `:auto` instead: it waits for the recover, so the KB it
+      ;; makes active holds belief this build derived (docs/storage.md, "Trusting an
+      ;; image").
       :store    (let [backend  (v/store-backend path)
                       recover? (boolean (:recover? params))
                       _  (progress! {:phase :open :done 0
@@ -901,7 +894,7 @@
                                              "opening the store — records only, recover to build belief")})
                       kb (v/open-kb {:backend backend :dir path
                                      :recover? (cond (not recover?)                false
-                                                     (v/switch-value "VAELII_DEV") :background
+                                                     (v/switch-value "VAELII_DEV") :trust
                                                      :else                         :auto)})]
                   (note-kb! kb {:backend backend :dir path :attached? true})
                   (check-readable! kb path)

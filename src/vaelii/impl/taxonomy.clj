@@ -404,7 +404,7 @@
           :disjoint #{} :disjoint-index {} :disjoint-metatypes #{} :metatype-members {}
           :sibling-disjoint #{} :sib-exception-index {}
           :covers {} :cover-parts {} :partitions #{}
-          :props {} :inverse {} :arity {} :functional-in-arg {} :commuting {}
+          :props {} :inverse {} :genl-inverse-down {} :genl-inverse-up {} :arity {} :functional-in-arg {} :commuting {}
           :cache-dirty #{} :cache-ctxs {}
           ;; The supporter cache (`supporters-of`), over the index's supporter families
           :supporters empty-supporters
@@ -1332,6 +1332,9 @@
                (cond-> t' (separating-kind? b) (update :partitions conj [whole parts b]))))
     :prop     (update-in t [:props a] (fnil conj #{}) b)             ; a = prop-kind, b = pred
     :inverse  (index-symmetric t :inverse a true)                  ; a = #{p q}
+    ;; a `(genlInverse p q)` edge, held both ways round for the signed closure's two walks
+    :genl-inverse (-> t (update-in [:genl-inverse-down b] (fnil conj #{}) a)
+                      (update-in [:genl-inverse-up a] (fnil conj #{}) b))      ; a = p, b = q
     :arity    (update-in t [:arity a] (fnil conj #{}) b)                          ; a = pred, b = n
     ;; `:functional-in-arg` is `:arity`'s shape and not `:prop`'s, because the
     ;; declaration carries an integer and a `:props` roster is a set of predicates with
@@ -1381,6 +1384,12 @@
                (cond-> t' (separating-kind? b) (update :partitions disj [whole parts b]))))
     :prop     (update-in t [:props a] (fnil disj #{}) b)
     :inverse  (index-symmetric t :inverse a false)
+    :genl-inverse (let [drop-in (fn [t path v]
+                                  (let [left (disj (get-in t path #{}) v)]
+                                    (if (seq left)
+                                      (assoc-in t path left)
+                                      (update-in t (pop path) dissoc (peek path)))))]
+                    (-> t (drop-in [:genl-inverse-down b] a) (drop-in [:genl-inverse-up a] b)))
     :arity    (let [ns' (disj (get-in t [:arity a] #{}) b)]
                 (if (seq ns') (assoc-in t [:arity a] ns') (update t :arity dissoc a)))
     ;; Dropping the last position drops the predicate's whole entry, so
@@ -2923,7 +2932,7 @@
          :disjoint #{} :disjoint-index {} :disjoint-metatypes #{} :metatype-members {}
          :sibling-disjoint #{} :sib-exception-index {}
          :covers {} :cover-parts {} :partitions #{}
-         :props {} :inverse {} :arity {} :functional-in-arg {} :commuting {}
+         :props {} :inverse {} :genl-inverse-down {} :genl-inverse-up {} :arity {} :functional-in-arg {} :commuting {}
          :cache-dirty #{} :cache-ctxs {}
          :supporters empty-supporters
          :cache-moves (journal/restart nil)
@@ -3227,6 +3236,19 @@
               (let [fresh (into [] (remove #(or (contains? parent %) (not (over? %)))) ns)]
                 (recur (into parent (map #(vector % n)) fresh) (into (pop stack) fresh))))))))))
 
+(defn genl-path-edges
+  "The `[a b]` edges of one path of active `genl` edges from `sub` up to `super`
+  (`genl-path`), held in the closure cache under the relation's `:gen`, or nil when there
+  is none."
+  [tax sub super]
+  (let [t    @tax
+        rel  (:genl t)
+        lru  (:closure-lru t)
+        pk   [:genl (:gen rel) :path sub super]
+        held (caches/lru-get lru pk)
+        path (if (some? held) held (caches/lru-put! lru pk (or (genl-path rel sub super) ::none)))]
+    (when-not (= ::none path) (into [] (partition 2 1 path)))))
+
 (defn genl-asserted-in?
   "Is `sub` at or below `super` through the active edges some supporter asserts from a
   context in the set `ctxs`, with no belief callback?  Membership in
@@ -3248,17 +3270,12 @@
         hit (caches/lru-get lru k)]
     (if (some? hit)
       hit
-      (let [pk   [:genl (:gen rel) :path sub super]
-            held (caches/lru-get lru pk)
-            path (if (some? held)
-                   held
-                   (caches/lru-put! lru pk (or (genl-path rel sub super) ::none)))
-            ectx (:edge-ctxs rel)]
+      (let [edges (genl-path-edges tax sub super)
+            ectx  (:edge-ctxs rel)]
         (caches/lru-put! lru k
                          (boolean
-                          (and (not= ::none path)
-                               (or (every? (fn [[a b]] (ctxs-visible? (get ectx [a b]) ctxs))
-                                           (partition 2 1 path))
+                          (and edges
+                               (or (every? (fn [[a b]] (ctxs-visible? (get ectx [a b]) ctxs)) edges)
                                    (reachable-filtered? sub super t :genl ctxs
                                                         (when-not (:loose? rel) (:depth rel))
                                                         (:scc rel))))))))))
@@ -3386,8 +3403,8 @@
 
 (defn genls-global-union
   "The union of what the transducer `xf` makes of each term of `genls-global` of `t`, for
-  a caller asking something small of every type above each of many: `arity/recompute-arity`
-  asks which exact lengths are bound at or above every tracked functor at a rebuild.  Built
+  a caller asking something small of every type above each of many: `arity/bound-above`
+  asks which predicates above a functor store a binding.  Built
   like the closure, from the parents' answers (`reach-by-parents`), but each answer holds
   only what `xf` makes, which is a few terms or none where the closure holds every
   ancestor, so reading it for every type costs the edges rather than the sum of the
@@ -3420,11 +3437,17 @@
         (reach-by-parents node #(get (:fwd rel) %) scc held hold! xf nil)
         (into #{} xf (closure-of tax :genl :fwd t)))))
 
-(defn genl-representative
-  "The representative of the `genl` component `t` sits in, which `genls-global-union` keys
-  its answers by: `t` itself outside a cycle."
-  [tax t]
-  (get-in @tax [:genl :scc t] t))
+(defn specs-global-union-held
+  "`genls-global-union-held` downward: the union of what `xf` makes of each term of
+  `specs-global` of `t`, built from the children's answers, read from `(held node)` and
+  handed to `(hold! node answer)` by component representative."
+  [tax t xf held hold!]
+  (let [rel  (:genl @tax)
+        scc  (:scc rel)
+        node (get scc t t)]
+    (or (held node)
+        (reach-by-parents node #(get (:rev rel) %) scc held hold! xf nil)
+        (into #{} xf (closure-of tax :genl :rev t)))))
 
 (defn genls-global-among
   "`genls-global` of `t` cut to the terms the set `among` holds: `genls-global-union` with
@@ -3463,17 +3486,10 @@
 
 (defn specs-global-while
   "`specs-global` of `t` cut below each type `enter?` refuses (`closure-while`), for a
-  caller keeping a property of every subtype that a subtype holding it passes down
-  unchanged, which stops where the property is already held: `arity/spread-lengths`."
+  caller whose question a subtype answers for every type below it: `arity/drain!` stops
+  at a subtype whose own binding gives the length a moved binding gave."
   [tax t enter?]
   (closure-while tax :genl :rev t enter?))
-
-(defn genls-global-while
-  "`genls-global` of `t` cut above each type `enter?` refuses (`closure-while`), for a
-  caller keeping a set closed upward that stops where the set already holds a type:
-  `arity/conflict-raised`."
-  [tax t enter?]
-  (closure-while tax :genl :fwd t enter?))
 
 (defn genls-global-meets?
   "Does `genls-global` of `t` hold a term of the set `among`?  A walk up that returns at the
@@ -3531,13 +3547,13 @@
     (closure-of tax :genl :rev t)))
 
 (defn- direct-neighbours
-  "`t`'s `dir-key` neighbours across **one** `genl` edge, scoped like `genls` / `specs`.
-  Not reflexive: the closures include `t` because transitivity is reflexive, and a step
-  is not."
-  [tax dir-key t context]
-  (if-some [scope (relation-scope tax :genl context)]
-    (into #{} (visible-neighbours @tax :genl dir-key scope t))
-    (get-in @tax [:genl dir-key t] #{})))
+  "`t`'s `dir-key` neighbours across **one** edge of `rel-key` (`:genl` or `:genlCx`),
+  scoped like the relation's closures (`genls` / `specs`, `context-up`).  Not reflexive:
+  the closures include `t` because transitivity is reflexive, and a step is not."
+  [tax rel-key dir-key t context]
+  (if-some [scope (relation-scope tax rel-key context)]
+    (into #{} (visible-neighbours @tax rel-key dir-key scope t))
+    (get-in @tax [rel-key dir-key t] #{})))
 
 (defn direct-genls
   "The types `t` is a subtype of by **one** `genl` edge of the closure — its direct
@@ -3548,24 +3564,24 @@
   read that is O(1) only because it is memoized.  The closure is what a subsumption check
   needs, and the parents are what a reader is shown."
   [tax t context]
-  (direct-neighbours tax :fwd t context))
+  (direct-neighbours tax :genl :fwd t context))
 
 (defn direct-specs
   "The types that are a subtype of `t` by **one** `genl` edge of the closure — its direct
   children.  `direct-genls`' reasoning, the other direction."
   [tax t context]
-  (direct-neighbours tax :rev t context))
+  (direct-neighbours tax :genl :rev t context))
 
 (defn direct-genls-global
   "`direct-genls` through **every** active edge — no context scope.  `genls-global`'s
   reasoning: a caller holding a context wants `direct-genls`."
   [tax t]
-  (direct-neighbours tax :fwd t nil))
+  (direct-neighbours tax :genl :fwd t nil))
 
 (defn direct-specs-global
   "`direct-specs` through **every** active edge — no context scope."
   [tax t]
-  (direct-neighbours tax :rev t nil))
+  (direct-neighbours tax :genl :rev t nil))
 
 (defn- extremal-types
   "The members of `types` at one end of the subsumption order among themselves: with
@@ -3603,13 +3619,13 @@
         (reduce disj among dropped)))))
 
 (defn- up-closure-fn
-  "The read `extremal-types` takes as `above`: a type's reflexive `genl` up-closure
-  through the edges visible from `context`, or through every active edge for a nil
-  `context`."
-  [tax context]
-  (if-some [scope (relation-scope tax :genl context)]
-    #(closure-of-vis tax :genl :fwd % scope)
-    #(closure-of tax :genl :fwd %)))
+  "The read `extremal-types` takes as `above`: a node's reflexive up-closure in `rel-key`
+  (`:genl` or `:genlCx`) through the edges visible from `context`, or through every
+  active edge for a nil `context`."
+  [tax rel-key context]
+  (if-some [scope (relation-scope tax rel-key context)]
+    #(closure-of-vis tax rel-key :fwd % scope)
+    #(closure-of tax rel-key :fwd %)))
 
 (defn min-types
   "The **minimal** members of `types`, a collection of types: the members with no other
@@ -3623,24 +3639,24 @@
   No closure is read for fewer than two distinct members.  Otherwise the cost is one
   memoized up-closure read per member.  `min-types-global` is the unscoped read."
   [tax types context]
-  (extremal-types (up-closure-fn tax context) true types))
+  (extremal-types (up-closure-fn tax :genl context) true types))
 
 (defn max-types
   "The **maximal** members of `types`: the members with no other member strictly above
   them, through the edges visible from `context`.  `min-types`' reasoning, the other
   direction, and `#{animal}` in its example.  `max-types-global` is the unscoped read."
   [tax types context]
-  (extremal-types (up-closure-fn tax context) false types))
+  (extremal-types (up-closure-fn tax :genl context) false types))
 
 (defn min-types-global
   "`min-types` through **every** active edge — no context scope."
   [tax types]
-  (extremal-types (up-closure-fn tax nil) true types))
+  (extremal-types (up-closure-fn tax :genl nil) true types))
 
 (defn max-types-global
   "`max-types` through **every** active edge — no context scope."
   [tax types]
-  (extremal-types (up-closure-fn tax nil) false types))
+  (extremal-types (up-closure-fn tax :genl nil) false types))
 
 (defn- nearest-of
   "The members of `nbrs`, the one-step neighbours of `node`, that no other member stands
@@ -3665,13 +3681,14 @@
         (into twins (ends (reduce disj among twins)))))))
 
 (defn- nearest-neighbours
-  "`direct-neighbours` reduced to the nearest ones (`nearest-of`): `min-types` of the
-  parents, `max-types` of the children, scoped like `genls` / `specs`."
-  [tax dir-key t context]
-  (let [up? (= :fwd dir-key)]
-    (nearest-of (up-closure-fn tax context)
-                #((if up? min-types max-types) tax % context)
-                up? t (direct-neighbours tax dir-key t context))))
+  "`direct-neighbours` in `rel-key` reduced to the nearest ones (`nearest-of`): the
+  minimal parents, the maximal children (`extremal-types`, which for `:genl` is
+  `min-types` / `max-types`), scoped like the relation's closures."
+  [tax rel-key dir-key t context]
+  (let [up?   (= :fwd dir-key)
+        above (up-closure-fn tax rel-key context)]
+    (nearest-of above #(extremal-types above up? %)
+                up? t (direct-neighbours tax rel-key dir-key t context))))
 
 (defn min-genls
   "The minimal supertypes of `t` through the edges visible from `context`: `min-types` of
@@ -3680,24 +3697,24 @@
   beside `dog ⊂ mammal ⊂ animal` leaves `animal` out.  An edge counts whatever installed
   it, as for `direct-genls`.  One memoized up-closure read per direct parent."
   [tax t context]
-  (nearest-neighbours tax :fwd t context))
+  (nearest-neighbours tax :genl :fwd t context))
 
 (defn max-specs
   "The maximal subtypes of `t` through the edges visible from `context`: `max-types` of
   `t`'s direct children, the direct children with no other one strictly above them.  `min-genls`'
   reasoning, the other direction.  One memoized up-closure read per direct child."
   [tax t context]
-  (nearest-neighbours tax :rev t context))
+  (nearest-neighbours tax :genl :rev t context))
 
 (defn min-genls-global
   "`min-genls` through **every** active edge — no context scope."
   [tax t]
-  (nearest-neighbours tax :fwd t nil))
+  (nearest-neighbours tax :genl :fwd t nil))
 
 (defn max-specs-global
   "`max-specs` through **every** active edge — no context scope."
   [tax t]
-  (nearest-neighbours tax :rev t nil))
+  (nearest-neighbours tax :genl :rev t nil))
 
 (defn specs-of-all
   "The union of `specs` over every node in `nodes`, walked **once**.
@@ -3954,6 +3971,58 @@
   (when (and (some #(= super %) (adj sub)) (admit? [sub super]))
     (when-let [w (witness [sub super])] [w])))
 
+(defn- reach-support*
+  "`reach-support`'s walk.  The six- and seven-argument arities call it directly rather
+  than one another through the var, so a walk is one call to either of them."
+  [tax rel-key sub super context supporter-class thresholds]
+  (if (= sub super)
+    []
+    (let [t   @tax
+          rel (get t rel-key)
+          scope (relation-scope tax rel-key context)
+          ;; nil `vis` is the unscoped walk — every asserting context is visible, so
+          ;; the plain adjacency *is* the visible one, exactly as in `genls`
+          adj (if (nil? scope) #(get (:fwd rel) %) #(visible-neighbours t rel-key :fwd scope %))
+          ;; `nm/print-key` keeps a node that is not a symbol (a NAT) sortable, and
+          ;; prints it with the bounds released — a bare `str` would let an ambient
+          ;; `*print-length*` elide two nested nodes to one prefix and expand the
+          ;; adjacency in the set's own order, which is what the witness path (and so a
+          ;; justification's antecedents) would then rest on.  Built once per adjacency,
+          ;; and a node with 0/1 neighbour — common in a sparse relation — sorts nothing
+          nbrs (fn [n] (pass-held [::sorted rel-key scope n]
+                                  #(nm/sort-by-content-key nm/print-key compare (adj n))))
+          ;; the walk enters only types above `sub` under any scope, since a scoped
+          ;; adjacency is a subset of the global one, and every type on a path from one
+          ;; of them to `super` is above `sub` too: a walk down from `super` through
+          ;; `sub`'s global ancestors enters exactly those with a path to `super`, and
+          ;; it is held by this call alone
+          reaches? (delay (let [up      (closure-of tax rel-key :fwd sub)
+                                between (closure-while tax rel-key :rev super #(contains? up %))]
+                            #(contains? between %)))
+          direct #(direct-witness adj sub super %1 %2)]
+      ;; a walk from a source with no edge it sees finds no path
+      (cond
+        (empty? (adj sub))     nil
+        (nil? supporter-class)
+        (let [witness #(edge-supporter tax t rel-key % scope)]
+          (or (direct (fn [_] true) witness)
+              (bfs-witness-path sub super nbrs (fn [_] true) witness reaches?)))
+        :else
+        ;; each edge's class read once for both thresholds
+        (let [ranks (java.util.HashMap.)
+              rank  (fn [e]
+                      (or (.get ranks e)
+                          (let [r (strength/rank-of (edge-class t rel-key e scope supporter-class))]
+                            (.put ranks e r)
+                            r)))
+              admit (fn [threshold] (fn [e] (>= (long (rank e)) (long (strength/rank-of threshold)))))
+              witness #(strongest-edge-supporter tax t rel-key % scope supporter-class)]
+          ;; the first threshold's walk is the one an edge straight to `super` ends
+          (or (direct (admit :monotonic) witness)
+              (some (fn [threshold]
+                      (bfs-witness-path sub super nbrs (admit threshold) witness reaches?))
+                    thresholds)))))))
+
 (defn reach-support
   "A witness for `sub →* super` in relation `rel-key`, as the `[handle ctx]` of one
   supporter per edge along a single path — or nil when `context` sees no such path.
@@ -3978,56 +4047,15 @@
   capped at the floor and no lower.  Since there are exactly two classes
   (`strength.clj`), the widest floor is found by trying each class as a threshold, highest
   first, and taking the first shortest path made only of edges that clear it — a threshold
-  scan that stays correct for any fixed number of classes and is two passes for two."
+  scan that stays correct for any fixed number of classes and is two passes for two.
+  `thresholds` names the classes tried, highest first: `[:monotonic]` asks for a path
+  every edge of which holds at `:monotonic` and walks no second pass when there is none
+  (`monotonic-route-witness`)."
   ([tax rel-key sub super context] (reach-support tax rel-key sub super context nil))
   ([tax rel-key sub super context supporter-class]
-   (if (= sub super)
-     []
-     (let [t   @tax
-           rel (get t rel-key)
-           scope (relation-scope tax rel-key context)
-           ;; nil `vis` is the unscoped walk — every asserting context is visible, so
-           ;; the plain adjacency *is* the visible one, exactly as in `genls`
-           adj (if (nil? scope) #(get (:fwd rel) %) #(visible-neighbours t rel-key :fwd scope %))
-           ;; `nm/print-key` keeps a node that is not a symbol (a NAT) sortable, and
-           ;; prints it with the bounds released — a bare `str` would let an ambient
-           ;; `*print-length*` elide two nested nodes to one prefix and expand the
-           ;; adjacency in the set's own order, which is what the witness path (and so a
-           ;; justification's antecedents) would then rest on.  Built once per adjacency,
-           ;; and a node with 0/1 neighbour — common in a sparse relation — sorts nothing
-           nbrs (fn [n] (pass-held [::sorted rel-key scope n]
-                                   #(nm/sort-by-content-key nm/print-key compare (adj n))))
-           ;; the walk enters only types above `sub` under any scope, since a scoped
-           ;; adjacency is a subset of the global one, and every type on a path from one
-           ;; of them to `super` is above `sub` too: a walk down from `super` through
-           ;; `sub`'s global ancestors enters exactly those with a path to `super`, and
-           ;; it is held by this call alone
-           reaches? (delay (let [up      (closure-of tax rel-key :fwd sub)
-                                 between (closure-while tax rel-key :rev super #(contains? up %))]
-                             #(contains? between %)))
-           direct #(direct-witness adj sub super %1 %2)]
-       ;; a walk from a source with no edge it sees finds no path
-       (cond
-         (empty? (adj sub))     nil
-         (nil? supporter-class)
-         (let [witness #(edge-supporter tax t rel-key % scope)]
-           (or (direct (fn [_] true) witness)
-               (bfs-witness-path sub super nbrs (fn [_] true) witness reaches?)))
-         :else
-         ;; each edge's class read once for both thresholds
-         (let [ranks (java.util.HashMap.)
-               rank  (fn [e]
-                       (or (.get ranks e)
-                           (let [r (strength/rank-of (edge-class t rel-key e scope supporter-class))]
-                             (.put ranks e r)
-                             r)))
-               admit (fn [threshold] (fn [e] (>= (long (rank e)) (long (strength/rank-of threshold)))))
-               witness #(strongest-edge-supporter tax t rel-key % scope supporter-class)]
-           ;; the first threshold's walk is the one an edge straight to `super` ends
-           (or (direct (admit :monotonic) witness)
-               (some (fn [threshold]
-                       (bfs-witness-path sub super nbrs (admit threshold) witness reaches?))
-                     [:monotonic :default]))))))))
+   (reach-support* tax rel-key sub super context supporter-class [:monotonic :default]))
+  ([tax rel-key sub super context supporter-class thresholds]
+   (reach-support* tax rel-key sub super context supporter-class thresholds)))
 
 (defn context-specificity
   "How specific context `c` is, as the size of its `genlCx` ancestor set; 0 for a supporter
@@ -4404,6 +4432,41 @@
   `context-parents-global`'s reverse, an adjacency read with no closure walk."
   [tax c]
   (get-in @tax [:genlCx :rev c] #{}))
+
+(defn min-context-parents
+  "The minimal contexts `c` inherits from: the contexts `c` reaches over **one** `genlCx`
+  edge with no other such context strictly below them.  `min-genls`' reduction over
+  `genlCx`, read as `context-up` reads: `c` is the reader, so both the edges out of `c`
+  and the ancestor sets the parents are compared by are the ones effective for `c` after
+  the `except` holes `c` reads (`relation-scope`).  Every other context of `context-up`
+  but `c` is therefore reached through one of these.  A `(genlCx CxLeaf CxTop)` held
+  beside `CxLeaf → CxMid → CxTop` leaves `CxTop` out, and an `except` that hides
+  `CxLeaf → CxMid` from `CxLeaf` makes `CxTop` the answer.  Not reflexive.  One memoized
+  up-closure read per direct parent."
+  [tax c]
+  (nearest-neighbours tax :genlCx :fwd c c))
+
+(defn max-context-children
+  "The maximal contexts that inherit from `c`: the contexts that reach `c` over **one**
+  `genlCx` edge with no other such context strictly above them.  `max-specs`' reduction
+  over `genlCx`, and `min-context-parents`' reverse.
+
+  Reverse visibility has no single reader (`context-down`).  So while some `except`
+  targets a `genlCx` supporter (`relation-filter-active?`), each direct child is judged
+  by its own forward answer, as `context-down` judges a candidate: a child is a member
+  when `c` is one of its `min-context-parents`.  Every member is then in `context-down`
+  of `c`, and a context is drawn below `c` exactly when `c` is drawn above the context.
+  With no except reaching `genlCx` the reduction over the raw adjacency is the answer,
+  and the two readings agree on every acyclic edge set.
+
+  One memoized up-closure read for `c` on the raw path.  On the filtered path one
+  `min-context-parents` read per direct child, which is not memoized here."
+  [tax c]
+  (if-not (relation-filter-active? @tax :genlCx)
+    (nearest-neighbours tax :genlCx :rev c nil)
+    (into #{}
+          (filter #(contains? (min-context-parents tax %) c))
+          (context-children-global tax c))))
 
 (defn- up-besides
   "The contexts `c` inherits from, incl `c`, over the `genlCx` edges effective in `scope`
@@ -5577,6 +5640,74 @@
   [tax {:keys [pair mark?]} context]
   (boolean (and mark? pair ((exemption tax context) (first pair) (second pair)))))
 
+(defn monotonic-route-witness
+  "What a reader at `context` reads the separation route `route` (`separation-routes`)
+  through when the route answers a denial, or nil when the reader reads no denial off
+  it.  Three conditions, the soundness rule of docs/taxonomy.md, \"A separation answers a
+  denial\":
+
+  * every flat-cache key of the route has a supporter the reader sees
+    (`visible-supporters`) that `supporter-class` reads `:monotonic`.  The declarations
+    are on the forced-monotonic roster, which `res/holding-class` reads `:monotonic`
+    while believed, so for them the test is belief and visibility.  A disjoint
+    metatype's `[:member m y]` membership is an ordinary fact, and a `:default` one
+    separates nothing here;
+  * no `siblingDisjointException` the reader sees exempts the route's separated pair
+    (`route-exempted?`);
+  * each subsumption the route climbs has a path the reader sees whose every edge holds
+    at `:monotonic` (`reach-support` with `supporter-class`, the widest bottleneck).  A
+    `:default` edge on either side applies forward and does not contrapose.
+
+  `supporter-class` is `handle → class`, a live JTMS `defeat-class` read, nil for a handle
+  that is OUT.  The witness is `{:keys :pair :supports :edges}`: the route's keys and
+  separated pair, one `:monotonic` supporter handle per key, and the `[handle ctx]`
+  supporters of the edges climbed."
+  [tax {:keys [keys links pair] :as route} context supporter-class]
+  (let [mono? #(= :monotonic (supporter-class %))]
+    (when-not (route-exempted? tax route context)
+      (when-let [sups (reduce (fn [acc k]
+                                (if-let [h (first (filter mono? (sort (visible-supporters tax k context))))]
+                                  (conj acc h)
+                                  (reduced nil)))
+                              [] (nm/sort-by-content-key nm/print-key compare keys))]
+        (when-let [edges (reduce (fn [acc [sub super]]
+                                   (let [path (reach-support tax :genl sub super context
+                                                             supporter-class [:monotonic])]
+                                     (if (and path (every? #(mono? (first %)) path))
+                                       (into acc path)
+                                       (reduced nil))))
+                                 [] links)]
+          {:keys keys :pair pair :supports sups :edges edges})))))
+
+(defn separation-routes-held
+  "`separation-routes` of `a` and `b`, as a vector held in the closure cache under the
+  `genl` generation and the separation stamp: the routes are read over the unscoped
+  closures and the declarations alone, so a reader asking one pair again before either
+  moves reads a map entry (`res/separation-denials`, `membership/cover-routes`)."
+  [tax a b]
+  (let [t   @tax
+        lru (:closure-lru t)
+        k   [:separation-routes (:gen (:genl t)) (separation-stamp tax) a b]]
+    (or (caches/lru-get lru k)
+        (caches/lru-put! lru k (vec (separation-routes tax a b))))))
+
+(defn pair-separated?
+  "Does a declaration separate the type `a` from the type `b` over the unscoped closures,
+  with no `siblingDisjointException` read: `separation-test` with no reader and no
+  exemption, a superset over every reader, and symmetric.  Held in the closure cache
+  under the `genl` generation and the separation stamp, so the membership family's cover
+  arm (`membership/term-nogoods`) tests a held type against a part once per stamp and
+  reads a map entry after."
+  [tax a b]
+  (let [t   @tax
+        lru (:closure-lru t)
+        k   [:pair-separated (:gen (:genl t)) (separation-stamp tax) a b]
+        v   (caches/lru-get lru k)]
+    (if (some? v)
+      v
+      (caches/lru-put! lru k (boolean (some-> (separation-test tax a nil (constantly false))
+                                              (apply [b])))))))
+
 (defn separating-pairs
   "Every **ordered** pair `[x y]`, `x` ≠ `y`, that a visible declaration separates —
   the declared pairs in both directions, plus each disjoint metatype's members against
@@ -6228,6 +6359,155 @@
            inv (if (some? context) #(inverses-of tax % context) #(inverses-of tax %))]
        (into #{} (mapcat inv) ps)))))
 
+;; ---- genlInverse: binary genl with the arguments swapped ----------------
+;;
+;; `(genlInverse P Q)` says a `(P x y)` tuple is a `(Q y x)` tuple: binary `genl` with
+;; arguments 1 and 2 swapped.  The edges are a flat-cache entry, held both ways round —
+;; `:genl-inverse-down` maps `Q` to the `P`s below it and `:genl-inverse-up` maps `P` to
+;; the `Q`s above it — and they are never edges of the `genl` relation, whose closure every
+;; type read, placement and disjointness check walks.  What reads them is the signed
+;; closure below, which the matching fan-out takes in place of `specs` / `genls`: it walks
+;; `genl` edges keeping a parity bit and crosses a `genlInverse` edge flipping it, so a
+;; predicate reached over an odd number of `genlInverse` edges is read with its arguments
+;; swapped and one reached over an even number is read as a `genl` spec is.
+
+(defn genl-inverse-key
+  "The flat-cache key a `(genlInverse p q)` declaration installs."
+  [p q]
+  [:genl-inverse p q])
+
+(defn add-genl-inverse
+  ([tax p q handle] (add-genl-inverse tax p q handle nil))
+  ([tax p q handle ctx] (add-supported tax (genl-inverse-key p q) handle ctx)))
+(defn del-genl-inverse! [tax p q handle] (del-supported! tax (genl-inverse-key p q) handle))
+
+(defn genl-inverse-free?
+  "True when no `genlInverse` edge is installed — one map read, and the answer for nearly
+  every KB.  The signed closure is the plain `genl` closure then."
+  [tax]
+  (empty? (get @tax :genl-inverse-up)))
+
+(defn- genl-inverse-hop
+  "The predicates one `genlInverse` edge away from `p` — `dir` `:down` reads the specs
+  `x` of a `(genlInverse x p)`, `:up` the generals `y` of a `(genlInverse p y)` — whose
+  edge is visible from `context` (any edge, for an unscoped one)."
+  [tax dir p context]
+  (let [xs (get-in @tax [(if (= dir :down) :genl-inverse-down :genl-inverse-up) p] #{})]
+    (if (or (empty? xs) (not (scoped-context? context)))
+      xs
+      (into #{} (filter #(cache-entry-visible?
+                          tax (if (= dir :down) (genl-inverse-key % p) (genl-inverse-key p %))
+                          context))
+            xs))))
+
+(defn signed-closure
+  "`[straight swapped]`: the predicates `p`'s matching fan reaches through the `genl` and
+  `genlInverse` edges visible from `context` — `dir` `:down` the specs, `:up` the
+  generals.  `straight` holds those reached over an even number of `genlInverse` edges,
+  read with their arguments as written; `swapped` those reached over an odd number, read
+  with arguments 1 and 2 exchanged.  A predicate reached both ways is in both.
+
+  With no `genlInverse` edge installed this is `[(specs tax p context) #{}]` (or `genls`
+  for `:up`), the same set object the plain read answers, so a KB declaring none reads
+  the fan it always read.  Otherwise a walk over `[predicate parity]` states, each state
+  taking the `genl` closure of its predicate and crossing every visible `genlInverse` edge
+  out of a member of it with the parity flipped, so a chain composes however its `genl`
+  and `genlInverse` edges alternate and terminates on a cycle of either."
+  [tax dir p context]
+  (let [close (if (= dir :down) #(specs tax % context) #(genls tax % context))]
+    (if (genl-inverse-free? tax)
+      [(close p) #{}]
+      (loop [todo [[p false]] seen #{[p false]} straight #{} swapped #{}]
+        (if-let [[n odd] (peek todo)]
+          (let [cl   (close n)
+                nxt  (into [] (comp (mapcat (fn [s] (genl-inverse-hop tax dir s context)))
+                                    (distinct)
+                                    (map (fn [x] [x (not odd)]))
+                                    (remove seen))
+                           cl)]
+            (recur (into (pop todo) nxt)
+                   (into seen nxt)
+                   (if odd straight (into straight cl))
+                   (if odd (into swapped cl) swapped)))
+          [straight swapped])))))
+
+(defn- visible-flat-supporters
+  "The supporters of flat-cache key `k` a reader at `context` can use, as `[handle ctx]`
+  pairs — every stored one for an unscoped read, else those `cache-entry-visible?` would
+  admit."
+  [tax t k context]
+  (let [sup (supporters-of t k)]
+    (cond
+      (not (scoped-context? context)) (vec sup)
+      (supporter-filter-active? t)
+      (let [scope {:contexts (context-up tax context) :context context
+                   :supporter-visible? (visible-fn t)}]
+        (filterv (fn [[h c]] (scope-admits-supporter? scope h c)) sup))
+      :else
+      (let [up (closure-of tax :genlCx :fwd context)]
+        (filterv (fn [[_ c]] (or (nil? c) (contains? up c))) sup)))))
+
+(defn- genl-inverse-witness
+  "A `[handle ctx]` supporter for the `genlInverse` edge `p → q` a reader at `context`
+  sees: the strongest class's most general, as `strongest-edge-supporter` picks for a
+  `genl` edge; nil when none is visible."
+  [tax p q context supporter-class]
+  (let [cands (visible-flat-supporters tax @tax (genl-inverse-key p q) context)]
+    (when (seq cands)
+      (most-general-of
+       tax (if supporter-class
+             (let [top (top-supporter-class cands supporter-class)]
+               (filterv (fn [[h _]] (= top (or (supporter-class h) :default))) cands))
+             cands)))))
+
+(defn signed-reach-support
+  "A witness for `sub` reaching `super` through the signed closure with parity `swapped?`
+  — the `[handle ctx]` supporters of one path's `genl` and `genlInverse` edges, as
+  `reach-support` names a `genl` path's — or nil when `context` sees no such path.
+
+  A pair the `genl` closure relates with `swapped?` false is `reach-support`'s answer
+  unchanged.  Otherwise the path is the one with the fewest `genlInverse` edges, found
+  breadth-first over `[predicate parity]` states in name order, each `genl` stretch of it
+  witnessed by `reach-support` (widest-bottleneck under `supporter-class`, as there)."
+  [tax sub super swapped? context supporter-class]
+  (if (and (not swapped?) (contains? (genls tax sub context) super))
+    (reach-support tax :genl sub super context supporter-class)
+    (when-not (genl-inverse-free? tax)
+      (let [sorted #(nm/sort-by-content-key nm/print-key compare %)
+            start  [sub false]
+            goal?  (fn [[n odd]] (and (= odd (boolean swapped?))
+                                      (contains? (genls tax n context) super)))
+            path   (loop [q (conj clojure.lang.PersistentQueue/EMPTY start) parent {start nil}]
+                     (when-let [[n odd :as st] (peek q)]
+                       (if (goal? st)
+                         ;; walk the parents back: each hop is [from-node x y], the `genl`
+                         ;; stretch from-node →* x then the `genlInverse` edge x → y
+                         (loop [s st acc ()]
+                           (if-let [[prev x y] (get parent s)]
+                             (recur prev (cons [(first prev) x y] acc))
+                             [acc n]))
+                         (let [[q parent]
+                               (reduce (fn [[q parent :as acc] [x y]]
+                                         (let [s' [y (not odd)]]
+                                           (if (contains? parent s')
+                                             acc
+                                             [(conj q s') (assoc parent s' [st x y])])))
+                                       [(pop q) parent]
+                                       (for [x (sorted (genls tax n context))
+                                             y (sorted (genl-inverse-hop tax :up x context))]
+                                         [x y]))]
+                           (recur q parent)))))]
+        (when-let [[hops last-node] path]
+          (reduce (fn [acc seg]
+                    (if (nil? seg) (reduced nil) (into acc seg)))
+                  []
+                  (concat
+                   (mapcat (fn [[from x y]]
+                             [(reach-support tax :genl from x context supporter-class)
+                              (when-let [w (genl-inverse-witness tax x y context supporter-class)] [w])])
+                           hops)
+                   [(reach-support tax :genl last-node super context supporter-class)])))))))
+
 ;; ---- what the taxonomy holds, declared ----------------------------------
 ;;
 ;; Two structures with two different bounds, which is why they are two rows and not one.
@@ -6267,7 +6547,7 @@
 
 (def ^:private flat-keys
   [:disjoint :disjoint-index :disjoint-metatypes :metatype-members :sibling-disjoint
-   :sib-exception-index :covers :cover-parts :partitions :props :inverse :arity
+   :sib-exception-index :covers :cover-parts :partitions :props :inverse :genl-inverse-down :genl-inverse-up :arity
    :functional-in-arg :commuting :cache-dirty :cache-ctxs])
 
 (caches/register-derived

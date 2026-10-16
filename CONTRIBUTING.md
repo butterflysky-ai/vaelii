@@ -68,7 +68,7 @@ lein release-gate  # ...and the uberjar and the perf claims, before a tag or a p
 that answer two different questions — well-formed, right — and it is
 deliberately **not** fail-fast, because the suite takes minutes and learning about both
 failures once beats learning about them one cycle at a time. Each stage streams
-to its own log under `target/gate/run-<pid>/`, which `target/gate/latest` points at — a
+to its own log under `logs/gate/run-<pid>/`, which `logs/gate/latest` points at — a
 run owns its directory, because two gates share a working tree here and neither may read
 the other's verdict. A failing stage prints its tail inline. Two checks then read the
 stage logs: `reflect`, for reflection warnings in the test tree, and `jvm`, for a JDK
@@ -102,7 +102,9 @@ refresh never rides along with the change that needed it.
 workflows, and neither is anything you cannot run yourself: `lint` is `lein lint`, and
 `test` is the suite at `:default` on the two ends of the durability axis — everything
 in RAM, and everything on disk. Both run with a read-only token and read no secret, so
-a pull request from a fork runs them in full.
+a pull request from a fork runs them in full. A comment reading exactly `/rerun`, from
+the pull request's author or a maintainer, reruns the failed jobs at the pull request's
+head commit.
 
 What the pull-request path leaves out, the `deep` workflow picks up: the `^:slow`
 tests, which carry more than half the suite's assertions; the `^:multi-jvm` and `^:fuzz`
@@ -315,8 +317,10 @@ to spell them to ban them.
 ### 3.8 What counts as breaking
 
 A change is classified by who can observe it, and the release number follows the
-classification. Five classes, and every entry's `*Class:*` line spells one of them —
-**Breaking**, **Refusal**, **Additive**, **Fix**, **Internal**:
+classification. Five classes, and every entry sits under a `### ` heading whose first word
+names one of them — **Breaking**, **Refusal**, **Additive**, **Fix**, **Internal**
+(`### Fix: storage` groups the fixes to one subsystem). An entry carries no class line of
+its own:
 
 1. **A contract change a working caller can observe** — a return shape, a `:type`
    keyword, a status code, a documented default. That is **Breaking**: the changelog

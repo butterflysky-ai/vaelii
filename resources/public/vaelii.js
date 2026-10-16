@@ -10,6 +10,9 @@
         clicked or pressed, the way a terminal monitor hides a box. Which regions are
         folded is held per path, so a page opens the way the reader left it.
      3. the `/kbs` page's option sliders, which show their own value as it moves.
+     4. the browsing history: a term or sentex page carries a hidden `[data-visit]`
+        element, recorded here in localStorage, and the front page's `#history` panel
+        lists the terms, literals and rules visited, each in visit order.
 
    A sentex row carries no script.  The row is text, so a press-drag over it selects
    that text the way a press-drag over any other text does, and the row's `[edit]`
@@ -151,9 +154,122 @@
     if ($('[data-panel="' + ev.key + '"]')) { fold(ev.key); ev.preventDefault(); }
   });
 
+  // ---- browsing history -------------------------------------------------
+
+  // Three lists, each in visit order with the latest visit last.  A revisit moves the
+  // entry to the end, and each list keeps its latest HISTORY_CAP entries.
+  const HISTORY_KEY = "vaelii-history";
+  const HISTORY_CAP = 50;
+  const HISTORY_KINDS = [["term", "Terms"], ["literal", "Literals"], ["rule", "Rules"]];
+
+  // localStorage is shared ground, so an entry is kept only when its href is one of the
+  // two page shapes and its class is a role class: anything else would put a foreign
+  // link or class on the page
+  const validEntry = (e) =>
+    e && typeof e.label === "string" && typeof e.href === "string" &&
+    /^\/(term\?q=|sentex\/[0-9]+$)/.test(e.href) &&
+    (e.cls == null || /^t-[a-z]+$/.test(e.cls));
+
+  function readHistory() {
+    let h = {};
+    try { h = JSON.parse(stored(HISTORY_KEY) || "{}") || {}; } catch (e) { h = {}; }
+    const out = {};
+    HISTORY_KINDS.forEach(([k]) => {
+      out[k] = Array.isArray(h[k]) ? h[k].filter(validEntry).slice(-HISTORY_CAP) : [];
+    });
+    return out;
+  }
+  const writeHistory = (h) => stored(HISTORY_KEY, JSON.stringify(h));
+
+  function recordVisit() {
+    const m = $("#main [data-visit]");
+    if (!m) return;
+    const kind = m.getAttribute("data-visit");
+    const e = { href: m.getAttribute("data-href"), label: m.getAttribute("data-label"),
+                cls: m.getAttribute("data-class") || null };
+    const h = readHistory();
+    if (!h[kind] || !validEntry(e)) return;
+    h[kind] = h[kind].filter((x) => x.href !== e.href).concat([e]).slice(-HISTORY_CAP);
+    writeHistory(h);
+  }
+
+  function removeVisit(kind, href) {
+    const h = readHistory();
+    if (!h[kind]) return;
+    h[kind] = h[kind].filter((x) => x.href !== href);
+    writeHistory(h);
+    renderHistory();
+  }
+
+  // built from elements and textContent, never from markup, since every label came out
+  // of localStorage
+  function renderHistory() {
+    const panel = $("#history"), body = panel && panel.querySelector(".history-body");
+    if (!body) return;
+    const h = readHistory();
+    body.replaceChildren();
+    HISTORY_KINDS.forEach(([kind, title]) => {
+      if (!h[kind].length) return;
+      const row = document.createElement("div");
+      row.className = "history-row";
+      const head = document.createElement("span");
+      head.className = "history-kind muted";
+      head.textContent = title;
+      row.appendChild(head);
+      // a literal is drawn by the server (`/history/literals`), with its badge, its
+      // colours and its belief now; the text entries below stand until it answers
+      let items = row;
+      if (kind === "literal") {
+        items = document.createElement("span");
+        items.className = "history-items";
+        items.setAttribute("hx-get", "/history/literals?handles=" +
+          h[kind].map((e) => e.href.slice("/sentex/".length)).join(","));
+        items.setAttribute("hx-trigger", "load");
+        // the body's boosted-navigation target, select and swap would put the fragment
+        // in place of #main
+        items.setAttribute("hx-target", "this");
+        items.setAttribute("hx-select", "unset");
+        items.setAttribute("hx-swap", "innerHTML");
+        row.appendChild(items);
+      }
+      h[kind].forEach((e) => {
+        const item = document.createElement("span");
+        item.className = "history-item";
+        const a = document.createElement("a");
+        a.className = "sx" + (e.cls ? " " + e.cls : "");
+        a.href = e.href;
+        a.title = e.label;
+        a.textContent = e.label;
+        const x = document.createElement("button");
+        x.type = "button";
+        x.className = "history-x";
+        x.setAttribute("aria-label", "remove " + e.label + " from the history");
+        x.dataset.kind = kind;
+        x.dataset.href = e.href;
+        x.textContent = "×";
+        item.append(a, x);
+        items.appendChild(item);
+      });
+      body.appendChild(row);
+    });
+    panel.hidden = !body.children.length;
+    if (window.htmx) window.htmx.process(body);
+  }
+
+  document.addEventListener("click", (ev) => {
+    const x = ev.target.closest("button.history-x");
+    if (x) removeVisit(x.dataset.kind, x.dataset.href);
+  });
+
   // the header is outside #main, so a boosted navigation swaps the page under it and
   // leaves the active menubar link pointing at where the reader used to be
-  document.addEventListener("htmx:afterSwap", () => { reflect(); reflectFolds(); });
+  document.addEventListener("htmx:afterSwap", (ev) => {
+    // the history's own literal row arriving is not a navigation, and rendering the
+    // history again would fetch that row again, without end
+    const t = ev.detail && ev.detail.target;
+    if (t && t.closest && t.closest("#history")) return;
+    reflect(); reflectFolds(); recordVisit(); renderHistory();
+  });
 
   // A 400 into #main is a page: the one a route renders for a parameter it cannot read,
   // naming the parameter.  htmx swaps only a 2xx unless told otherwise, so a page's own
@@ -170,7 +286,7 @@
   const setPalette = (p) => apply("palette", p);
   const setTheme = (t) => apply("theme", t);
   window.vaelii = { closeEditor, setPalette, setTheme, fold };
-  const start = () => { reflect(); reflectFolds(); };
+  const start = () => { reflect(); reflectFolds(); recordVisit(); renderHistory(); };
   if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", start);
   else start();
 })();

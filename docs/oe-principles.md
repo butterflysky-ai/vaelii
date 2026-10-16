@@ -178,3 +178,20 @@ The KB exists so an inference engine can conclude useful, true things about the 
 *References go in seeAlso/termsRelated, not comment prose*
 **genlPrinciple:** meaning, not name
 A pointer to another term belongs in `seeAlso` (one-way) or `termsRelated` (a symmetric cluster), not in a comment. The comment says what the term means.
+
+## OE over code over text
+*Prefer representation over code over prose*
+**specPrinciple:** represent the definition, references in seeAlso
+Knowledge stated in the KB beats knowledge enforced only in code, which beats knowledge written only in prose. A representation is the most precise form, and the engine can check it. Code is checked, but the KB cannot read it. Prose is neither checked nor readable by the KB.
+
+**Audit:** for each constraint a PR adds in code or in prose, ask whether the KB could state it.
+
+## represent the definition
+*State a new term's definition as rules, not only in its comment*
+**genlPrinciple:** OE over code over text
+An inferentially inert defining rule is still better than text, because it is more precise. For new vocabulary:
+- Consider its `seeAlso` and `termsRelated` partners.
+- For every sentence of its comment, state the sentence as a fact or a rule where vaelii can. Use `set/inertRule` for a rule that must not fire. The comment keeps only what cannot be represented.
+- Run `kb-integrity` over the new terms.
+
+**Audit:** apply those three steps to every new term.

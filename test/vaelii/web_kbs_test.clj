@@ -16,8 +16,7 @@
             [vaelii.host.io.generate :as generate]
             [vaelii.impl.kb :as kb]
             [vaelii.test-util :as tu])
-  (:import [java.io ByteArrayInputStream]
-           [java.lang.management ManagementFactory]))
+  (:import [java.io ByteArrayInputStream]))
 
 (def ^:dynamic *app* nil)
 
@@ -312,20 +311,11 @@
     (catalog/activate "late")
     kb))
 
-(defn- blocked-on?
-  "Is thread `t` blocked entering `monitor`?"
-  [^Thread t monitor]
-  (let [info (.getThreadInfo (ManagementFactory/getThreadMXBean) (.getId t))]
-    (boolean (and info
-                  (= Thread$State/BLOCKED (.getThreadState info))
-                  (some-> (.getLockInfo info) .getIdentityHashCode
-                          (= (System/identityHashCode monitor)))))))
-
 (defn- parked-behind-an-unload
   "Run `request` on its own thread while this thread holds the browser's write monitor,
-  as a chain on another KB does.  Once `request` is blocked entering the monitor, and so
-  past every refusal read outside it, unload entry `key` from this thread: the monitor is
-  reentrant, so the unload runs to completion before `request` enters.  Answers what
+  as a chain on another KB does.  Once `request`'s op is blocked entering the monitor, and
+  so past every refusal read outside it, unload entry `key` from this thread: the monitor
+  is reentrant, so the unload runs to completion before the op enters.  Answers what
   `request` answered."
   [key request]
   (let [monitor @#'web/write-monitor
@@ -334,10 +324,7 @@
         t       (Thread. run)]
     (locking monitor
       (.start t)
-      (let [deadline (+ (System/currentTimeMillis) 10000)]
-        (while (and (not (blocked-on? t monitor)) (< (System/currentTimeMillis) deadline))
-          (Thread/sleep 5)))
-      (is (blocked-on? t monitor) "the request is parked on the write monitor")
+      (is (tu/await-blocked-on monitor 10000) "the request is parked on the write monitor")
       (is (= 200 (:status (POST "/kbs/unload" {"key" key}))))
       (is (nil? (catalog/entry key)) "and the unload released the entry"))
     (deref out 10000 ::no-answer)))

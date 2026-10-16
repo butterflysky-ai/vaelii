@@ -74,17 +74,17 @@
   ;; them — a store-mutating test clears instead (like the persistence tests)
   (tu/with-cleared-kb [kb tu/fresh]
     (tu/with-terms [p Tom CxBox]
-      (let [h (v/assert-inert kb (list p Tom) 'CxBox)]
+      (let [h (v/assert-inert kb (list p Tom) CxBox)]
         (testing "stored and inspectable"
           (is (some? (sentex-of kb h)))
-          (is (some #(= (:id %) h) (v/sentexes-in-context kb 'CxBox))))
+          (is (some #(= (:id %) h) (v/sentexes-in-context kb CxBox))))
         (testing "but not a premise, so not believed"
           (is (not (v/in? kb h)))
-          (is (empty? (v/sentexes-matching kb (list p Tom) 'CxBox))))
+          (is (empty? (v/sentexes-matching kb (list p Tom) CxBox))))
         (testing "and retract! tears it down directly, though it was never a TMS datum"
           (is (= {:removed-sentexes 1 :removed-justifications 0} (v/retract! kb h)))
           (is (nil? (sentex-of kb h)))
-          (is (empty? (v/sentexes-in-context kb 'CxBox)))
+          (is (empty? (v/sentexes-in-context kb CxBox)))
           (is (empty? (v/find-sentexes kb Tom))))))))
 
 (deftest an-inert-negation-forms-no-nogood
@@ -93,8 +93,8 @@
   (tu/with-cleared-kb [kb tu/fresh]
     (tu/with-terms [p Tom CxBox]
       (v/assert kb (list p Tom) 'CxUniverse)                              ; believed
-      (v/assert kb (list 'genlCx 'CxBox 'CxUniverse) 'CxUniverse {:strength :monotonic})
-      (v/assert-inert kb (list 'not (list p Tom)) 'CxBox)                 ; inert opposite
+      (v/assert kb (list 'genlCx CxBox 'CxUniverse) 'CxUniverse {:strength :monotonic})
+      (v/assert-inert kb (list 'not (list p Tom)) CxBox)                 ; inert opposite
       (testing "no contradiction, and the believed side stands"
         (is (zero? (count (v/contradictions kb))))
         (is (seq (v/sentexes-matching kb (list p Tom) 'CxUniverse)))))))

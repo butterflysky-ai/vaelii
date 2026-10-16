@@ -22,8 +22,9 @@
 
   **Eight of the twelve write a fact and four write the vocabulary**, which is the split to
   read the assert half by.  A check that grows costs a fact nothing and a `genl` edge or
-  an `(arity P n)` everything: a binding or an edge recomputes the arity candidates of the
-  functors below it (`decide/note-candidate!`) off the candidate index, and the
+  an `(arity P n)` everything: a binding or an edge queues the functors below it for the
+  settle's inert-tuple refresh (`arity/drain!`), which reads their lengths off the shape
+  roster, and the
   argument-type entailment reads what an edge newly puts above the facts.
   `:taxonomy-edge` and `:arity-declaration` are the two that price that path.
 
@@ -236,7 +237,8 @@
 
   **The shape none of them reaches.**  Every other workload here builds its taxonomy during
   the *build* and asserts facts under it in the thunk, so a cost added to the edge write
-  itself is priced nowhere: the edge recomputes the arity candidates below it, the
+  itself is priced nowhere: the edge queues the shapes below it for the inert-tuple
+  refresh, the
   argument-type entailment draws what the predicates above the edge say about the facts
   below it, and the chaining path reads the subtree an edge newly makes matchable when a
   rule reads a term above it.  All three run per edge and none of them runs on a fact.
@@ -265,9 +267,9 @@
   "An `(arity P 2)` declaration over a predicate carrying `declaration-relatives`
   super-predicates.
 
-  An arity arriving recomputes the arity candidates of `P` and its specs, reading each
-  relative's bindings off the candidate index, so the relatives cost map reads and no
-  index read; the budget pins that."
+  An arity arriving reads the lengths stored above `P` from its parents' held answers
+  (`arity/lengths-of`), so the first declaration reads the relatives and each later one
+  reads none of them; the budget pins that."
   []
   (let [kb (fresh)
         s  (fn [i] (symbol (str "acadB" i)))]
@@ -503,8 +505,8 @@
 ;; **`:slots` counts the slot rosters' ops and the shape roster's together.**  A positive
 ;; fact writes one shape op, its length into its functor's lengths (`kv/shape-adds`); a
 ;; retraction writes one when it empties its shape's node (`kv/shape-retires`), and none
-;; otherwise.  A binding or an edge that recomputes the arity candidates reads
-;; a functor's lengths once, as one `:predicate-extent` read.
+;; otherwise.  A binding or an edge that queues the inert-tuple refresh reads a
+;; functor's lengths once, as one `:predicate-extent` read.
 ;;
 ;; **`:roots` counts the root postings and the count-trie node ops together.**  A binary
 ;; fact writes its context root, its predicate-extent leaf, one argument leaf per argument
@@ -520,25 +522,23 @@
 ;; a functor computes its entry in the arity length cache (`arity/entry`): one probe of
 ;; `[:arity-bound]` per type at or above the functor whose lengths the cache does not hold,
 ;; and a kinds read per bound one, so a workload pays it once per functor it first writes
-;; and no read per fact after it.
+;; and no read per fact after it.  The first settle of a workload refreshes every shape
+;; (`arity/drain!` on a candidate index with no generation): one read of the bound
+;; predicates, of the stored functors and of their shape rosters, which is the `+1` in
+;; `:arity-binding`, `:predicate-extent` and `:trie-counts` of the fact workloads.
 ;;
 ;; **One `:mint` read per settle pass**, in every workload: the mint withdrawal's gate
 ;; reads the mint family's count (`reads/stored-mint-count-global`).  No record these
 ;; settles move can subsume a mint, so nothing else reads the family, `declared`'s filed
 ;; mints included.
 ;; `nat-orphan-teardown` settles twice per retraction.
-;;
-;; **One `:argument-root` and one `:argument-slot` read per tuple functor**, in every
-;; assert workload: the arity candidates read a functor's `:monotonic` memberships once
-;; (`arity/types-held`), and the entry holds them after.  `rule-fired` writes tuples of
-;; two functors.
 
 (def ^:private budgets
   [{:name    :plain
     :build   plain
     :sentexes 100
-    :reads   {:argument-root 1 :argument-slot 1 :arity-binding 2 :exception-index 100 :opposed 100 :predicate-extent 1103
-              :rule-index 100 :trie-counts 700 :trie-lookup 100 :mint 100}
+    :reads   {:arity-binding 3 :exception-index 100 :opposed 100 :predicate-extent 1104
+              :rule-index 100 :trie-counts 701 :trie-lookup 100 :mint 100}
     :writes  {:levels 500 :terms 400 :roots 1300 :roster 202 :slots 300}}
 
    ;; **One membership read per assert above `plain`**: a unary fact's argument is read
@@ -558,7 +558,7 @@
    {:name    :membership
     :build   membership
     :sentexes 100
-    :reads   {:arity-binding 3 :argument-root 101 :argument-slot 101 :exception-index 100
+    :reads   {:arity-binding 3 :argument-root 100 :argument-slot 100 :exception-index 100
               :opposed 100 :predicate-extent 1500 :rule-index 100 :tax-support 100 :trie-counts 900
               :trie-lookup 100 :mint 100}
     :writes  {:levels 400 :terms 300 :roots 1000 :roster 100 :slots 300}}
@@ -569,7 +569,7 @@
    {:name    :deep-membership
     :build   deep-membership
     :sentexes 100
-    :reads   {:arity-binding 11 :argument-root 101 :argument-slot 101 :exception-index 100
+    :reads   {:arity-binding 11 :argument-root 100 :argument-slot 100 :exception-index 100
               :opposed 100 :predicate-extent 1500 :rule-index 100 :tax-support 100 :trie-counts 900
               :trie-lookup 100 :mint 100}
     :writes  {:levels 400 :terms 300 :roots 1000 :roster 100 :slots 300}}
@@ -625,8 +625,8 @@
    {:name    :negative
     :build   negative
     :sentexes 100
-    :reads   {:exception-index 200 :opposed 100 :predicate-extent 1003
-              :rule-index 100 :tax-support 100 :trie-counts 700 :trie-lookup 100 :mint 100}
+    :reads   {:arity-binding 1 :exception-index 200 :opposed 100 :predicate-extent 1003
+              :rule-index 100 :tax-support 100 :trie-counts 701 :trie-lookup 100 :mint 100}
     :writes  {:levels 400 :terms 400 :roots 1000 :roster 103 :slots 101}}
 
    ;; **One `:trie-lookup` and one `:predicate-extent` read per assert above the unmarked
@@ -635,11 +635,15 @@
    ;; *constant*: a read of the predicate's extent would add a term proportional to the
    ;; stored tuples, which this exact-count gate catches where `lein perf`'s ratio check
    ;; cannot (see the docstring above).
+   ;;
+   ;; `:trie-counts` holds one child count per flat-cache functor for each census of the
+   ;; flat caches the assert takes (`tax/census-in`), two here, so a functor joining the
+   ;; flat caches adds 2 per assert: `genlInverse` is the +200.
    {:name    :functional-in-arg-arity-2
     :build   functional-in-arg-arity-2
     :sentexes 100
-    :reads   {:arity-binding 2 :argument-root 101 :argument-slot 201 :exception-index 100
-              :opposed 100 :predicate-extent 1600 :rule-index 100 :trie-counts 2100
+    :reads   {:arity-binding 2 :argument-root 100 :argument-slot 200 :exception-index 100
+              :opposed 100 :predicate-extent 1600 :rule-index 100 :trie-counts 2300
               :trie-lookup 200 :mint 100}
     :writes  {:levels 500 :terms 400 :roots 1300 :roster 200 :slots 300}}
 
@@ -649,8 +653,8 @@
    {:name    :compound
     :build   compound
     :sentexes 100
-    :reads   {:argument-root 1 :argument-slot 1 :arity-binding 2 :exception-index 100 :opposed 100 :predicate-extent 1103
-              :rule-index 100 :trie-counts 700 :trie-lookup 100 :mint 100}
+    :reads   {:arity-binding 3 :exception-index 100 :opposed 100 :predicate-extent 1104
+              :rule-index 100 :trie-counts 701 :trie-lookup 100 :mint 100}
     :writes  {:levels 800 :terms 600 :roots 1300 :roster 104 :slots 300}}
 
    ;; 200 indexed sentexes for 100 asserts — the rule concludes one apiece
@@ -669,23 +673,20 @@
    {:name    :rule-fired
     :build   rule-fired
     :sentexes 200
-    :reads   {:argument-root 2 :argument-slot 2 :arity-binding 4 :exception-index 300 :opposed 100 :predicate-extent 1700
+    :reads   {:arity-binding 4 :exception-index 300 :opposed 100 :predicate-extent 1700
               :rule-index 300 :trie-counts 1000 :trie-lookup 200 :mint 100}
     :writes  {:levels 1000 :terms 800 :roots 2600 :roster 200 :slots 600}}
 
    ;; **The vocabulary write, and the first budget here that is not about a fact.**  What it
-   ;; prices is everything a `genl` edge sets off that a fact does not: the arity
-   ;; candidates recomputed below it and the argument-type entailment's two gates.  No
-   ;; rule reads a term above the edge, so the chaining seeds read no subtree.  The arity
-   ;; recompute reads five `:arity-binding` entries an edge: the count of the bound
-   ;; predicates and two probes of the lower end, which holds no binding, at the write;
-   ;; then, for the relation move the install records, the count again and one probe of
-   ;; the lower end, with its shape-roster read (`arity/moved-below`, one
-   ;; `:predicate-extent`).
+   ;; prices is everything a `genl` edge sets off that a fact does not: the arity refresh
+   ;; below it and the argument-type entailment's two gates.  No rule reads a term above
+   ;; the edge, so the chaining seeds read no subtree.  The arity refresh reads one
+   ;; `:arity-binding` entry an edge, the probe of the lower end for a binding
+   ;; (`arity/drain!`), and the lower end's shape roster (`arity/refresh-shapes!`).
    {:name    :taxonomy-edge
     :build   taxonomy-edge
     :sentexes 100
-    :reads   {:argument-root 1 :argument-slot 1 :arity-binding 502 :exception-index 300 :opposed 100 :predicate-extent 1500
+    :reads   {:arity-binding 100 :exception-index 300 :opposed 100 :predicate-extent 1400
               :rule-index 500 :trie-counts 900 :trie-lookup 100 :mint 100}
     :writes  {:levels 500 :terms 400 :roots 1300 :roster 101 :slots 201}}
 
@@ -704,7 +705,7 @@
    {:name    :arity-declaration
     :build   arity-declaration
     :sentexes 100
-    :reads   {:argument-root 1 :argument-slot 1 :arity-binding 806 :exception-index 100 :opposed 100 :predicate-extent 1300
+    :reads   {:arity-binding 400 :exception-index 100 :opposed 100 :predicate-extent 1200
               :rule-index 100 :trie-counts 900 :trie-lookup 100 :mint 100}
     :writes  {:levels 500 :terms 300 :roots 1300 :roster 1 :slots 400}}
 
@@ -728,16 +729,16 @@
    {:name    :preserved-edges-4
     :build   preserved-edges-4
     :sentexes 100
-    :reads   {:arity-binding 200 :argument-root 2 :argument-slot 600 :exception-index 300 :opposed 100
-              :predicate-extent 3800 :rule-index 700 :trie-counts 900
+    :reads   {:arity-binding 100 :argument-root 2 :argument-slot 600 :exception-index 300 :opposed 100
+              :predicate-extent 3900 :rule-index 700 :trie-counts 900
               :trie-lookup 100 :mint 100}
     :writes  {:levels 500 :terms 400 :roots 1300 :roster 200 :slots 300}}
 
    {:name    :preserved-edges-32
     :build   preserved-edges-32
     :sentexes 100
-    :reads   {:arity-binding 200 :argument-root 2 :argument-slot 600 :exception-index 300 :opposed 100
-              :predicate-extent 3800 :rule-index 700 :trie-counts 900
+    :reads   {:arity-binding 100 :argument-root 2 :argument-slot 600 :exception-index 300 :opposed 100
+              :predicate-extent 3900 :rule-index 700 :trie-counts 900
               :trie-lookup 100 :mint 100}
     :writes  {:levels 500 :terms 400 :roots 1300 :roster 200 :slots 300}}])
 
@@ -1005,10 +1006,14 @@
 (deftest an-unchained-assert-computes-no-chaining-seeds
   ;; The seeds feed chaining alone, and `move-seeds` reads the rule-relevant facts the
   ;; edge shows, so an edge asserted under `:chain? false` computes none in its settle's
-  ;; drain (`special/*seed-moves?*`).  The chained assert is the control.
+  ;; drain (`special/*seed-moves?*`).  A `with-deferred-settle` batch drains the move in
+  ;; its closing settle, which seeds only when a write of the batch chained
+  ;; (`settle/*batch-seeds-moves*`).  The chained assert is the control.
   (let [calls (atom 0)
-        edge  (fn [chain?]
-                (let [kb (fresh)]
+        edge  (fn [chain? batched?]
+                (let [kb    (fresh)
+                      write #(v/assert kb '(genlCx CxSeedLow CxSeedMid) 'CxUniverse
+                                       {:chain? chain?})]
                   (v/assert kb '(implies (v_fact_p ?x) (v_seen_p ?x)) 'CxSeedLow
                             {:direction :forward})
                   (v/assert kb '(v_fact_p VA) 'CxSeedMid)
@@ -1016,15 +1021,32 @@
                   (with-redefs [special/move-seeds
                                 (let [f special/move-seeds]
                                   (fn [& args] (swap! calls inc) (apply f args)))]
-                    (v/assert kb '(genlCx CxSeedLow CxSeedMid) 'CxUniverse {:chain? chain?}))
+                    (if batched? (v/with-deferred-settle kb (write)) (write)))
                   {:seeds @calls
                    :fired (boolean (seq (v/sentexes-matching kb '(v_seen_p VA) 'CxSeedLow)))}))]
-    (testing "chained, the edge computes its seeds and the rule fires over what it now sees"
-      (let [{:keys [seeds fired]} (edge true)]
-        (is (pos? seeds))
-        (is (true? fired))))
-    (testing "unchained, it computes none — and fires nothing, which `:chain? false` asks"
-      (is (= {:seeds 0 :fired false} (edge false))))))
+    (doseq [batched? [false true]]
+      (testing (str "batched? " batched?)
+        (testing "chained, the edge computes its seeds and the rule fires over what it now sees"
+          (let [{:keys [seeds fired]} (edge true batched?)]
+            (is (pos? seeds))
+            (is (true? fired))))
+        (testing "unchained, it computes none — and fires nothing, which `:chain? false` asks"
+          (is (= {:seeds 0 :fired false} (edge false batched?))))))))
+
+(deftest an-unchained-rule-in-a-batch-seeds-no-chaining
+  ;; A rule or exception written with `:chain? false` settles as an unchained fact does,
+  ;; so a batch whose writes all pass it seeds nothing from the `genlCx` moves its closing
+  ;; settle drains.  A bulk load of the shipped ontology into a populated store asserts
+  ;; its rules beside the middle contexts' edges in one such batch.
+  (let [kb (fresh)]
+    (v/assert kb '(implies (v_fact_p ?x) (v_seen_p ?x)) 'CxSeedLow {:direction :forward})
+    (v/assert kb '(v_fact_p VA) 'CxSeedMid)
+    (v/with-deferred-settle kb
+      (v/assert kb '(implies (v_other_p ?x) (v_other_q ?x)) 'CxSeedMid {:chain? false})
+      (v/assert kb '(exceptWhen (v_other_r ?x) (implies (v_other_p ?x) (v_other_q ?x)))
+                'CxSeedMid {:chain? false})
+      (v/assert kb '(genlCx CxSeedLow CxSeedMid) 'CxUniverse {:chain? false}))
+    (is (empty? (v/sentexes-matching kb '(v_seen_p VA) 'CxSeedLow)))))
 
 (deftest instrument-is-silent-when-off
   ;; The budgets above are only meaningful if the protocols added no work when nobody is

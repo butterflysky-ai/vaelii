@@ -7,9 +7,11 @@
   what a reader reads of the clashes is `vaelii.impl.clashes`.  The top engine layer,
   below `vaelii.core`.  See docs/nmtms.md."
   (:require [taoensso.trove :as trove]
+            [vaelii.impl.capabilities :as cap]
             [vaelii.impl.chain :as chain]
             [vaelii.impl.checks :as checks]
             [vaelii.impl.decide :as decide]
+            [vaelii.impl.decide.arity :as arity]
             [vaelii.impl.discovery :as discovery]
             [vaelii.impl.except :as exc]
             [vaelii.impl.feed :as feed]
@@ -268,6 +270,31 @@
                       (into minted new)))
              minted)))))))
 
+(defn- arity-class-seeds
+  "The class memberships a metatype route derives that the records stored since the last
+  pass with no sync on their store path (`arity/take-classes!`), the relabelled handles
+  of `region` (a delay) and the `genl` edges moved since the last pass
+  (`arity/take-class-ends!`) move, as new handles to chain from
+  (`chain/arity-classes-moved!`, `chain/arity-class-ends-moved!`), the violations
+  reported.  A relabelled handle whose node this window created was queued at its store,
+  and a removed one holds no class, so neither is read.  Empty during a rebuild, whose replayed justifications carry every
+  class membership."
+  [kb region]
+  (if *rebuilding?*
+    []
+    (let [tms   (reasoning/tms kb)
+          recs  (:records kb)
+          new   (jtms/touched-new tms)
+          fresh (into [] (keep #(p/get-sentex recs %)) (sort (arity/take-classes! kb)))
+          moved (into [] (comp (remove new) (filter #(jtms/known-datum? tms %))
+                               (keep #(p/get-sentex recs %)))
+                      (set @region))
+          r     (merge-with into (chain/arity-classes-moved! kb fresh false)
+                            (chain/arity-classes-moved! kb moved true)
+                            (chain/arity-class-ends-moved! kb (arity/take-class-ends! kb)))]
+      (violations/report kb (:violations r))
+      (:new r))))
+
 (defn- revived-mark-seeds
   "The merges and lifts a mark, or a `genl` edge under one, in `revived` owes the facts
   stored while it was OUT, as new handles to chain from
@@ -370,10 +397,14 @@
 (defn- subsumed-blocks
   "The mint justifications this settle withdraws, and the records they held up:
   `special/subsumed-mint-blocks` over `moved`, the delay of the region's sentexes
-  `released-subsumed` reads too."
-  [kb moved was-in believed? asked]
-  (or (special/subsumed-mint-blocks kb moved was-in asked believed? (not *rebuilding?*))
-      {:blocked #{} :withdrawn #{}}))
+  `released-subsumed` reads too.  A `recover`'s region, the whole store, is passed as its
+  size, so the mints are read instead of the region where fewer are stored."
+  [kb region moved was-in believed? asked]
+  (let [whole (when (and *rebuilding?* discovery/*whole-store-region?*)
+                (let [n (count @region)]
+                  (when (>= n (cap/count-sentexes (:records kb))) n)))]
+    (or (special/subsumed-mint-blocks kb moved was-in asked believed? (not *rebuilding?*) whole)
+        {:blocked #{} :withdrawn #{}})))
 
 (defn- defeat-moves
   "`[stored removed]` over the placed handles of `region` (the window, a set) that move a
@@ -420,6 +451,13 @@
   write (`reading-before`), or nil.  The batch does not name its writes in advance, so
   the reading covers every standing defeat's reach.  A settle inside the batch takes it
   again once it has reported, and the batch's closing settle diffs against it."
+  nil)
+
+(def ^:dynamic *batch-seeds-moves*
+  "A volatile a `with-deferred-settle` batch binds to false before its first write, or nil.
+  A write the batch defers sets it true when its own settle would have seeded chaining
+  from the `genlCx` moves it settles (`settle-write`), and the batch's closing
+  settle seeds them only then (`special/*seed-moves?*`)."
   nil)
 
 (defn- report-wanted?
@@ -1024,11 +1062,14 @@
                                              @(:withdrawn asked)))
                     ;; the interArg and homogeneity entailments a trigger arriving
                     ;; after its facts owes them
-                    (into (triggered-seeds kb rsx was-in believed? (:trigger asked))))
+                    (into (triggered-seeds kb rsx was-in believed? (:trigger asked)))
+                    ;; the class memberships a relabelled `genl` edge or class membership
+                    ;; moves (`chain/arity-classes-moved!`)
+                    (into (arity-class-seeds kb region)))
         ;; the other direction of the subsumption question: the mints a membership
         ;; arriving this settle has made redundant, whose justifications this pass blocks
         ;; so the sweep collects the records
-        wdrawn  (subsumed-blocks kb rsx was-in believed? (:subsumption asked))
+        wdrawn  (subsumed-blocks kb region rsx was-in believed? (:subsumption asked))
         ;; the mint placements a `genlCx` edge arriving this settle left below a more
         ;; general one
         dropped (drop-surplus-placements! kb (:surplus wdrawn))]
@@ -1303,3 +1344,13 @@
     (when (and *batch-reading* wiring/*defer-settle?* (report-wanted? kb))
       (vreset! *batch-reading* (belief-before kb nil)))
     nil))
+
+(defn settle-write
+  "Settle after a write, seeding chaining from the `genlCx` moves it settles when `seed?`
+  (`special/*seed-moves?*`).  Under `wiring/*defer-settle?*` it settles nothing and
+  records `seed?` for the batch in force (`*batch-seeds-moves*`)."
+  [kb seed?]
+  (if wiring/*defer-settle?*
+    (when (and seed? *batch-seeds-moves*) (vreset! *batch-seeds-moves* true))
+    (binding [special/*seed-moves?* seed?] (settle kb))))
+

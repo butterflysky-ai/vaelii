@@ -1,0 +1,51 @@
+name: rerun
+
+# A `/rerun` comment on a pull request reruns the failed jobs of that pull
+# request's runs at its head commit. GitHub lets only an account with write
+# access rerun a run, so without this workflow a contributor whose shard failed
+# on a runner fault waits on a maintainer.
+#
+# `issue_comment`, not a `/rerun` label: a fork's author cannot label a pull
+# request, and a fork's `pull_request` token is read-only, so it cannot hold
+# `actions: write`. An `issue_comment` run takes this workflow from the default
+# branch and runs with the base repository's token. That token is safe here
+# because the job checks out nothing: no code from the pull request runs beside it.
+#
+# The action calls `reRunWorkflowFailedJobs` on each failed or cancelled run of
+# the pull request's head commit, so one red shard reruns that shard and the
+# `memory` or `disk` job that needs it, and nothing else.
+#
+# The pull request's author and the repository's owners, members and
+# collaborators can trigger it. Any other commenter is skipped, because a public
+# repository takes comments from every GitHub account and each rerun spends
+# runner minutes. The owner check skips the job in every copy of the repository
+# outside the `vaelii` org.
+
+on:
+  issue_comment:
+    types: [created]
+
+permissions: {}
+
+# One rerun request per pull request at a time; a second `/rerun` waits for the
+# first rather than racing it on the same runs.
+concurrency:
+  group: rerun-${{ github.event.issue.number }}
+  cancel-in-progress: false
+
+jobs:
+  rerun:
+    name: rerun
+    if: >-
+      github.repository_owner == 'vaelii' &&
+      github.event.issue.pull_request &&
+      github.event.comment.body == '/rerun' &&
+      (github.event.comment.user.login == github.event.issue.user.login ||
+       contains(fromJSON('["OWNER", "MEMBER", "COLLABORATOR"]'), github.event.comment.author_association))
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      actions: write  # reRunWorkflowFailedJobs
+      pull-requests: read  # pulls.get, for the head commit
+    steps:
+      - uses: int128/rerun-workflows-action@ffe15d1b30f9a898817f3df110dc1d6a7a97646f  # v1.17.0

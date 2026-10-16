@@ -204,6 +204,12 @@ ancestor set, so it is a policy of the theory that closes the extent; a closed
 `(not (P …))` rule antecedent under it is negation as failure. See
 [naf.md](naf.md).
 
+**`closedExtentForArg`** ![kb](../.github/badges/cat-kb.svg): The
+`closed_extent_predicate` grant narrowed to one argument value:
+`(closedExtentForArg P n v)` closes `P`'s believed extent for the goals whose argument
+`n` is `v`. `closedExtentForArg1`, `closedExtentForArg2` and `closedExtentForArg3` are
+its binary spellings. See [naf.md](naf.md#a-closed-extent-for-one-argument-value).
+
 **`comment`** ![kb](../.github/badges/cat-kb.svg): A documentation sentex —
 `(comment <term> "…")` — that lets the shipped vocabulary document itself in
 its own representation, read back by `core-context/comment-of`. See
@@ -548,7 +554,7 @@ transitively-closed relations — `genl` between unary types and between
 predicates, `genlCx` between contexts. Cached as reflexive-transitive up/down closures, recomputed on
 edge change, belief-following. See [taxonomy.md](taxonomy.md).
 
-**`genlInverse`** ![kb](../.github/badges/cat-kb.svg): Binary `genl` with the argument order flipped. Inert — declared, read by no inference path. See [taxonomy.md](taxonomy.md).
+**`genlInverse`** ![kb](../.github/badges/cat-kb.svg): Binary `genl` with arguments 1 and 2 swapped. `(genlInverse P Q)` makes a stored `(P a b)` answer `(Q b a)`, read by the matching fan beside `genl`, and two of them in a row compose to `genl`. See [inference.md](inference.md#genlinverse-the-fan-with-the-arguments-swapped).
 
 **Ground** ![inference](../.github/badges/cat-inference.svg): Containing no variables, `sentex/ground?`. A stored
 non-rule sentence must be closed rather than ground (`checks/check-ground`, which reads

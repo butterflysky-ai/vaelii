@@ -16,7 +16,7 @@
 # (docs/overlay.md) over an empty base.
 #
 # Each run prints the command it is about to run and the log it is writing —
-# `env … lein test :default  # target/test-backends/<backend>.log` — so it is
+# `env … lein test :default  # logs/test-backends/run-<pid>/<backend>.log` — so it is
 # tailable while it goes and reproducible by copying the line.  The line carries only
 # what THAT run needs: a scratch disk directory (`-Dvaelii.disk.dir`) is a
 # durable run's concern, so a RAM-only one is given no `-D` at all and reads as
@@ -93,7 +93,8 @@
 #   ./scripts/test-backends.sh --keep                # keep each run's disk dir
 #
 # Env:
-#   TEST_BACKENDS_OUT   log directory (default target/test-backends)
+#   TEST_BACKENDS_OUT   log directory (default logs/test-backends/run-<pid>)
+#   BACKENDS_KEEP_RUNS  past run directories kept under logs/test-backends (default 20)
 #   SUITE_PROGRESS      marks | lines | auto (default: marks on a terminal, lines
 #                       into anything else)
 #
@@ -165,12 +166,16 @@ fi
 # roots live under it, so two concurrent matrices — the two non-overlapping
 # VAELII_TEST_SPACE blocks testing.md sanctions — cannot rm -rf each other's live
 # store or interleave one log.  `latest` points at the newest and is what to tail;
-# an explicit TEST_BACKENDS_OUT is used verbatim.
-BACKENDS_ROOT="target/test-backends"
+# an explicit TEST_BACKENDS_OUT is used verbatim.  Under `logs/`, where `lein clean`
+# does not reach a run in progress (test-matrix.sh says more).
+BACKENDS_ROOT="logs/test-backends"
 if [[ -n "${TEST_BACKENDS_OUT:-}" ]]; then
   OUT_DIR="$TEST_BACKENDS_OUT"
   mkdir -p "$OUT_DIR"
 else
+  # shellcheck source=scripts/lib/runlog.sh
+  . scripts/lib/runlog.sh
+  runlog_prune "$BACKENDS_ROOT" "${BACKENDS_KEEP_RUNS:-20}"
   OUT_DIR="$BACKENDS_ROOT/run-$$"
   mkdir -p "$OUT_DIR"
   ln -sfn "$(basename "$OUT_DIR")" "$BACKENDS_ROOT/latest" 2>/dev/null || true

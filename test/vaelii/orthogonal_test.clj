@@ -31,16 +31,16 @@
 
 (tu/deftest-kb its-length-is-checked-by-its-own-arm-not-a-stated-class
   ;; `symmetric` and `type_relation_predicate` are each `genl binary_predicate`, so the
-  ;; class is answered without stating it, and the well-formedness arm, which reads the
+  ;; class is derived without stating it, and the well-formedness arm, which reads the
   ;; sentence alone, refuses any other length.
-  (is (empty? (v/sentexes-matching kb '(binary_predicate orthogonal) '?ctx))
+  (is (not-any? #(v/premise? kb (:id %)) (v/sentexes-matching kb '(binary_predicate orthogonal) '?ctx))
       "no (binary_predicate orthogonal) is stated")
   (is (true? (v/ask? kb '(binary_predicate orthogonal))))
   (is (= 2 (:arity (v/describe kb 'orthogonal))))
   (tu/with-terms [alphaKind betaKind gammaKind]
-    (doseq [t ['alphaKind 'betaKind 'gammaKind]]
+    (doseq [t [alphaKind betaKind gammaKind]]
       (v/assert kb (list 'genl t 'thing) 'CxUniverse))
-    (doseq [s [(list 'orthogonal 'alphaKind 'betaKind 'gammaKind) (list 'orthogonal 'alphaKind)]]
+    (doseq [s [(list 'orthogonal alphaKind betaKind gammaKind) (list 'orthogonal alphaKind)]]
       (is (= :not-well-formed
              (try (v/assert kb s 'CxUniverse) :ok
                   (catch clojure.lang.ExceptionInfo e (:type (ex-data e)))))
@@ -48,57 +48,57 @@
 
 (tu/deftest-kb orthogonal-is-symmetric
   (tu/with-terms [spatialKind temporalKind]
-    (v/assert kb (list 'genl 'spatialKind 'thing) 'CxUniverse)
-    (v/assert kb (list 'genl 'temporalKind 'thing) 'CxUniverse)
-    (v/assert kb (list 'orthogonal 'temporalKind 'spatialKind) 'CxUniverse)
-    (is (true? (v/ask? kb (list 'orthogonal 'spatialKind 'temporalKind) 'CxUniverse))
+    (v/assert kb (list 'genl spatialKind 'thing) 'CxUniverse)
+    (v/assert kb (list 'genl temporalKind 'thing) 'CxUniverse)
+    (v/assert kb (list 'orthogonal temporalKind spatialKind) 'CxUniverse)
+    (is (true? (v/ask? kb (list 'orthogonal spatialKind temporalKind) 'CxUniverse))
         "either spelling answers the one stored declaration")
-    (is (true? (v/ask? kb (list 'orthogonal 'temporalKind 'spatialKind) 'CxUniverse)))))
+    (is (true? (v/ask? kb (list 'orthogonal temporalKind spatialKind) 'CxUniverse)))))
 
 ;; ---- the subsumption status -------------------------------------------------
 
 (tu/deftest-kb a-declared-pair-is-orthogonal-without-a-shared-instance
   (tu/with-terms [spatialKind temporalKind]
-    (v/assert kb (list 'genl 'spatialKind 'thing) 'CxUniverse)
-    (v/assert kb (list 'genl 'temporalKind 'thing) 'CxUniverse)
-    (is (= :unknown (v/subsumption-status kb 'spatialKind 'temporalKind))
+    (v/assert kb (list 'genl spatialKind 'thing) 'CxUniverse)
+    (v/assert kb (list 'genl temporalKind 'thing) 'CxUniverse)
+    (is (= :unknown (v/subsumption-status kb spatialKind temporalKind))
         "no relation and no shared instance yet")
-    (v/assert kb (list 'orthogonal 'temporalKind 'spatialKind) 'CxUniverse)
-    (is (= #{:orthogonal} (v/subsumption-statuses kb 'spatialKind 'temporalKind))
+    (v/assert kb (list 'orthogonal temporalKind spatialKind) 'CxUniverse)
+    (is (= #{:orthogonal} (v/subsumption-statuses kb spatialKind temporalKind))
         "the declaration is the witness, whichever order it was written in")
-    (is (= :orthogonal (v/subsumption-status kb 'temporalKind 'spatialKind)))))
+    (is (= :orthogonal (v/subsumption-status kb temporalKind spatialKind)))))
 
 (tu/deftest-kb a-declaration-a-narrower-context-holds-is-read-from-that-vantage
   (tu/with-terms [spatialKind temporalKind]
     (let [cx (tu/tmp-ctx)]
       (v/assert kb (list 'genlCx cx 'CxUniverse) 'CxUniverse)
-      (v/assert kb (list 'genl 'spatialKind 'thing) 'CxUniverse)
-      (v/assert kb (list 'genl 'temporalKind 'thing) 'CxUniverse)
-      (v/assert kb (list 'orthogonal 'spatialKind 'temporalKind) cx)
-      (is (= :unknown (v/subsumption-status kb 'spatialKind 'temporalKind))
+      (v/assert kb (list 'genl spatialKind 'thing) 'CxUniverse)
+      (v/assert kb (list 'genl temporalKind 'thing) 'CxUniverse)
+      (v/assert kb (list 'orthogonal spatialKind temporalKind) cx)
+      (is (= :unknown (v/subsumption-status kb spatialKind temporalKind))
           "CxUniverse does not see a declaration stated below it")
-      (is (= :orthogonal (v/subsumption-status kb 'spatialKind 'temporalKind cx))))))
+      (is (= :orthogonal (v/subsumption-status kb spatialKind temporalKind cx))))))
 
 (tu/deftest-kb a-declared-pair-that-is-also-genl-related-is-inconsistent
   (tu/with-terms [alphaKind betaKind]
-    (v/assert kb (list 'genl 'alphaKind 'thing) 'CxUniverse)
-    (v/assert kb (list 'genl 'betaKind 'alphaKind) 'CxUniverse)
-    (v/assert kb (list 'orthogonal 'alphaKind 'betaKind) 'CxUniverse {:strength :monotonic})
-    (is (= #{:spec :orthogonal} (v/subsumption-statuses kb 'alphaKind 'betaKind)))
-    (is (= :inconsistent (v/subsumption-status kb 'alphaKind 'betaKind)))))
+    (v/assert kb (list 'genl alphaKind 'thing) 'CxUniverse)
+    (v/assert kb (list 'genl betaKind alphaKind) 'CxUniverse)
+    (v/assert kb (list 'orthogonal alphaKind betaKind) 'CxUniverse {:strength :monotonic})
+    (is (= #{:spec :orthogonal} (v/subsumption-statuses kb alphaKind betaKind)))
+    (is (= :inconsistent (v/subsumption-status kb alphaKind betaKind)))))
 
 (tu/deftest-kb a-declared-pair-under-a-separated-pair-is-inconsistent
   ;; overlap propagates upward: two subtypes that could share an instance put it in both
   ;; separated supertypes, so the declaration does not exempt the pair it names
   (tu/with-terms [upperA upperB subA subB]
-    (v/assert kb (list 'genl 'upperA 'thing) 'CxUniverse)
-    (v/assert kb (list 'genl 'upperB 'thing) 'CxUniverse)
-    (v/assert kb (list 'genl 'subA 'upperA) 'CxUniverse)
-    (v/assert kb (list 'genl 'subB 'upperB) 'CxUniverse)
-    (v/assert kb (list 'disjoint 'upperA 'upperB) 'CxUniverse)
-    (v/assert kb (list 'orthogonal 'subA 'subB) 'CxUniverse)
-    (is (= #{:disjoint :orthogonal} (v/subsumption-statuses kb 'subA 'subB)))
-    (is (= :inconsistent (v/subsumption-status kb 'subB 'subA)))))
+    (v/assert kb (list 'genl upperA 'thing) 'CxUniverse)
+    (v/assert kb (list 'genl upperB 'thing) 'CxUniverse)
+    (v/assert kb (list 'genl subA upperA) 'CxUniverse)
+    (v/assert kb (list 'genl subB upperB) 'CxUniverse)
+    (v/assert kb (list 'disjoint upperA upperB) 'CxUniverse)
+    (v/assert kb (list 'orthogonal subA subB) 'CxUniverse)
+    (is (= #{:disjoint :orthogonal} (v/subsumption-statuses kb subA subB)))
+    (is (= :inconsistent (v/subsumption-status kb subB subA)))))
 
 (tu/deftest-kb the-separation-and-the-declaration-are-read-from-one-vantage
   (tu/with-terms [parentkind alphakind betakind]
@@ -123,13 +123,13 @@
 
 (tu/deftest-kb the-audit-counts-a-declared-pair-as-known
   (tu/with-terms [spatialKind temporalKind]
-    (v/assert kb (list 'genl 'spatialKind 'thing) 'CxUniverse)
-    (v/assert kb (list 'genl 'temporalKind 'thing) 'CxUniverse)
-    (let [row (fn [] (first (filter #(= #{'spatialKind 'temporalKind} (hash-set (:a %) (:b %)))
+    (v/assert kb (list 'genl spatialKind 'thing) 'CxUniverse)
+    (v/assert kb (list 'genl temporalKind 'thing) 'CxUniverse)
+    (let [row (fn [] (first (filter #(= #{spatialKind temporalKind} (hash-set (:a %) (:b %)))
                                     (:pairs-data (v/disjointness-audit kb)))))
           before (row)]
       (is (= :unknown (:status before)))
-      (v/assert kb (list 'orthogonal 'spatialKind 'temporalKind) 'CxUniverse)
+      (v/assert kb (list 'orthogonal spatialKind temporalKind) 'CxUniverse)
       (is (= :orthogonal (:status (row)))
           "a declared pair leaves the audit's unknown candidates"))))
 
@@ -150,26 +150,26 @@
 
 (tu/deftest-kb a-consistent-declaration-is-no-clash
   (tu/with-terms [spatialKind temporalKind]
-    (v/assert kb (list 'genl 'spatialKind 'thing) 'CxUniverse)
-    (v/assert kb (list 'genl 'temporalKind 'thing) 'CxUniverse)
-    (v/assert kb (list 'orthogonal 'spatialKind 'temporalKind) 'CxUniverse {:strength :monotonic})
+    (v/assert kb (list 'genl spatialKind 'thing) 'CxUniverse)
+    (v/assert kb (list 'genl temporalKind 'thing) 'CxUniverse)
+    (v/assert kb (list 'orthogonal spatialKind temporalKind) 'CxUniverse {:strength :monotonic})
     (is (= #{} (clashes kb)))))
 
 (tu/deftest-kb an-orthogonal-over-a-genl-related-pair-is-a-clash-in-either-order
   (tu/with-terms [alphaKind betaKind]
-    (v/assert kb (list 'genl 'alphaKind 'thing) 'CxUniverse)
-    (let [orth (list 'orthogonal 'alphaKind 'betaKind)]
+    (v/assert kb (list 'genl alphaKind 'thing) 'CxUniverse)
+    (let [orth (list 'orthogonal alphaKind betaKind)]
       (testing "the edge first"
-        (let [e (v/assert kb (list 'genl 'betaKind 'alphaKind) 'CxUniverse)
+        (let [e (v/assert kb (list 'genl betaKind alphaKind) 'CxUniverse)
               o (v/assert kb orth 'CxUniverse {:strength :monotonic})]
           (is (= #{#{orth}} (clashes kb)))
           (v/retract! kb o)
           (v/retract! kb e)))
       (testing "the orthogonal first"
-        (v/assert kb (list 'genl 'betaKind 'thing) 'CxUniverse)
+        (v/assert kb (list 'genl betaKind 'thing) 'CxUniverse)
         (let [o (v/assert kb orth 'CxUniverse {:strength :monotonic})]
           (is (= #{} (clashes kb)))
-          (let [e (v/assert kb (list 'genl 'alphaKind 'betaKind) 'CxUniverse)]
+          (let [e (v/assert kb (list 'genl alphaKind betaKind) 'CxUniverse)]
             (is (= #{#{orth}} (clashes kb)) "the later edge convicts the stored declaration")
             (v/retract! kb e))
           (is (= #{} (clashes kb)))
@@ -181,12 +181,12 @@
   ;; instance of both separated supertypes.  The report names the separation it was
   ;; convicted through.
   (tu/with-terms [upperA upperB subA subB]
-    (v/assert kb (list 'genl 'upperA 'thing) 'CxUniverse)
-    (v/assert kb (list 'genl 'upperB 'thing) 'CxUniverse)
-    (v/assert kb (list 'genl 'subA 'upperA) 'CxUniverse)
-    (v/assert kb (list 'genl 'subB 'upperB) 'CxUniverse)
-    (let [orth (list 'orthogonal 'subA 'subB)
-          dj   (list 'disjoint 'upperA 'upperB)]
+    (v/assert kb (list 'genl upperA 'thing) 'CxUniverse)
+    (v/assert kb (list 'genl upperB 'thing) 'CxUniverse)
+    (v/assert kb (list 'genl subA upperA) 'CxUniverse)
+    (v/assert kb (list 'genl subB upperB) 'CxUniverse)
+    (let [orth (list 'orthogonal subA subB)
+          dj   (list 'disjoint upperA upperB)]
       (testing "the separation first"
         (let [d (v/assert kb dj 'CxUniverse)
               o (v/assert kb orth 'CxUniverse)]
@@ -207,12 +207,12 @@
 
 (tu/deftest-kb an-orthogonal-under-two-partition-parts-is-a-clash
   (tu/with-terms [wholeKind alphaKind betaKind subA subB]
-    (v/assert kb (list 'genl 'wholeKind 'thing) 'CxUniverse)
-    (v/assert kb (list 'partition 'wholeKind 'alphaKind 'betaKind) 'CxUniverse)
-    (v/assert kb (list 'genl 'subA 'alphaKind) 'CxUniverse)
-    (v/assert kb (list 'genl 'subB 'betaKind) 'CxUniverse)
-    (v/assert kb (list 'orthogonal 'subA 'subB) 'CxUniverse)
-    (is (= #{#{(list 'orthogonal 'subA 'subB)}} (clashes kb)))))
+    (v/assert kb (list 'genl wholeKind 'thing) 'CxUniverse)
+    (v/assert kb (list 'partition wholeKind alphaKind betaKind) 'CxUniverse)
+    (v/assert kb (list 'genl subA alphaKind) 'CxUniverse)
+    (v/assert kb (list 'genl subB betaKind) 'CxUniverse)
+    (v/assert kb (list 'orthogonal subA subB) 'CxUniverse)
+    (is (= #{#{(list 'orthogonal subA subB)}} (clashes kb)))))
 
 (tu/deftest-kb orthogonal-is-on-the-forced-monotonic-roster
   (is (true? (v/has-prop? kb :forced-monotonic 'orthogonal)))
@@ -225,23 +225,23 @@
   ;; keeps that strength and is never the loser: its one-member nogood is a hard clash
   ;; `conflicts` lists, every member stays believed, and the pair reads both statuses.
   (tu/with-terms [alphaKind betaKind]
-    (v/assert kb (list 'genl 'alphaKind 'thing) 'CxUniverse)
-    (v/assert kb (list 'genl 'betaKind 'alphaKind) 'CxUniverse)
-    (let [o (v/assert kb (list 'orthogonal 'alphaKind 'betaKind) 'CxUniverse {:strength :default})]
+    (v/assert kb (list 'genl alphaKind 'thing) 'CxUniverse)
+    (v/assert kb (list 'genl betaKind alphaKind) 'CxUniverse)
+    (let [o (v/assert kb (list 'orthogonal alphaKind betaKind) 'CxUniverse {:strength :default})]
       (is (= :default (v/defeat-class kb o)))
-      (is (= #{#{(list 'orthogonal 'alphaKind 'betaKind)}} (clashes kb)))
-      (is (true? (v/ask? kb (list 'orthogonal 'alphaKind 'betaKind) 'CxUniverse)))
-      (is (= :inconsistent (v/subsumption-status kb 'alphaKind 'betaKind))))))
+      (is (= #{#{(list 'orthogonal alphaKind betaKind)}} (clashes kb)))
+      (is (true? (v/ask? kb (list 'orthogonal alphaKind betaKind) 'CxUniverse)))
+      (is (= :inconsistent (v/subsumption-status kb alphaKind betaKind))))))
 
 (tu/deftest-kb the-clash-is-read-where-the-separation-is-seen
   (tu/with-terms [upperA upperB subA subB]
     (let [cx (tu/tmp-ctx)]
       (v/assert kb (list 'genlCx cx 'CxUniverse) 'CxUniverse)
-      (doseq [[s t] [['upperA 'thing] ['upperB 'thing] ['subA 'upperA] ['subB 'upperB]]]
+      (doseq [[s t] [[upperA 'thing] [upperB 'thing] [subA upperA] [subB upperB]]]
         (v/assert kb (list 'genl s t) 'CxUniverse))
-      (v/assert kb (list 'orthogonal 'subA 'subB) 'CxUniverse)
-      (v/assert kb (list 'disjoint 'upperA 'upperB) cx)
-      (is (= #{#{(list 'orthogonal 'subA 'subB)}} (clashes kb)))
+      (v/assert kb (list 'orthogonal subA subB) 'CxUniverse)
+      (v/assert kb (list 'disjoint upperA upperB) cx)
+      (is (= #{#{(list 'orthogonal subA subB)}} (clashes kb)))
       (is (= [#{cx}] (keep #(when (= :orthogonal (:kind %)) (clashes/report-vantages %))
                            (v/conflicts kb)))
           "read where the disjoint is seen, and not above it"))))
@@ -301,9 +301,9 @@
 
 (tu/deftest-kb a-type-is-not-orthogonal-to-itself
   (tu/with-terms [alphaKind]
-    (v/assert kb (list 'genl 'alphaKind 'thing) 'CxUniverse)
-    (v/assert kb (list 'orthogonal 'alphaKind 'alphaKind) 'CxUniverse {:strength :monotonic})
-    (is (= #{#{(list 'orthogonal 'alphaKind 'alphaKind)}} (clashes kb))
+    (v/assert kb (list 'genl alphaKind 'thing) 'CxUniverse)
+    (v/assert kb (list 'orthogonal alphaKind alphaKind) 'CxUniverse {:strength :monotonic})
+    (is (= #{#{(list 'orthogonal alphaKind alphaKind)}} (clashes kb))
         "a type subsumes itself")))
 
 ;; ---- an orthogonal exempts nothing --------------------------------------------
@@ -473,17 +473,17 @@
 
 (tu/deftest-kb orthogonal-is-not-inherited-down-or-up-genl
   (tu/with-terms [alphaKind betaKind subAlpha superAlpha]
-    (v/assert kb (list 'genl 'superAlpha 'thing) 'CxUniverse)
-    (v/assert kb (list 'genl 'alphaKind 'superAlpha) 'CxUniverse)
-    (v/assert kb (list 'genl 'subAlpha 'alphaKind) 'CxUniverse)
-    (v/assert kb (list 'genl 'betaKind 'thing) 'CxUniverse)
-    (v/assert kb (list 'orthogonal 'alphaKind 'betaKind) 'CxUniverse)
-    (is (true? (v/ask? kb (list 'orthogonal 'alphaKind 'betaKind) 'CxUniverse)))
-    (is (false? (v/ask? kb (list 'orthogonal 'subAlpha 'betaKind) 'CxUniverse))
+    (v/assert kb (list 'genl superAlpha 'thing) 'CxUniverse)
+    (v/assert kb (list 'genl alphaKind superAlpha) 'CxUniverse)
+    (v/assert kb (list 'genl subAlpha alphaKind) 'CxUniverse)
+    (v/assert kb (list 'genl betaKind 'thing) 'CxUniverse)
+    (v/assert kb (list 'orthogonal alphaKind betaKind) 'CxUniverse)
+    (is (true? (v/ask? kb (list 'orthogonal alphaKind betaKind) 'CxUniverse)))
+    (is (false? (v/ask? kb (list 'orthogonal subAlpha betaKind) 'CxUniverse))
         "a subtype of one side is not thereby orthogonal to the other")
-    (is (false? (v/ask? kb (list 'orthogonal 'superAlpha 'betaKind) 'CxUniverse))
+    (is (false? (v/ask? kb (list 'orthogonal superAlpha betaKind) 'CxUniverse))
         "nor is a supertype")
-    (is (false? (v/ask? kb (list 'orthogonal 'betaKind 'subAlpha) 'CxUniverse))
+    (is (false? (v/ask? kb (list 'orthogonal betaKind subAlpha) 'CxUniverse))
         "in either argument position")))
 
 ;; ---- the related-terms links ---------------------------------------------------

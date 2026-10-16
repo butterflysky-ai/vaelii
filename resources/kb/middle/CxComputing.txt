@@ -10,15 +10,15 @@
 ;;
 ;; Two positions declare no type and are rows of ontology_test's untyped-positions
 ;; roster. Position 1 of agentHasTool holds whatever can invoke a tool, and the upper
-;; ontology ships no type for that: agent names a registered koinii participant
-;; (resources/kb/koinii/CxRegistry.txt). Position 3 of toolArgType holds a type of any
-;; kind.
+;; ontology ships no type for that: registered_agent names a registered koinii
+;; participant (resources/kb/koinii/CxRegistry.txt). Position 3 of toolArgType holds a
+;; type of any kind.
 
 (genlCx CxComputing CxUniverse)
 
 ;; ---- the computing kinds: the types the relations below are typed over ----
-;; abstract.txt's tool is a tangible made thing. A software tool has no mass, so
-;; software_tool is placed under computational_system and has no edge to tool.
+;; A software_tool is software that performs one bounded operation per invocation. It
+;; has no mass, so it is placed under computational_system, which is intangible.
 (comment computational_system "Software that computes when it runs, e.g. an interpreter, a database server, a running web service. The hardware that runs a computational system is a separate thing and is not a computational system.")
 (genl computational_system intangible)
 ;; A computational system is not something that happens, and is not a form the KB

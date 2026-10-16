@@ -742,12 +742,11 @@
 
 (defn- exemption-reads?
   "Can a placement be exempt at some reader (`exempt-justifications`): a `(contradicts …)`
-  is stored beside a `siblingDisjointException`, an equality edge or an arity candidate
-  (`decide/arity-held?`).  The whole-KB gate of `exempting-at?`."
+  is stored beside a `siblingDisjointException` or an equality edge.  The whole-KB gate
+  of `exempting-at?`."
   [kb]
   (let [tax (reasoning/taxonomy kb)]
-    (and (or (tax/sib-exceptions? tax) (seq (tax/equality-edges tax))
-             (decide/arity-held? kb))
+    (and (or (tax/sib-exceptions? tax) (seq (tax/equality-edges tax)))
          (pos? (reads/stored-count-with-functor (:index kb) 'contradicts)))))
 
 (defn- denial-stored?
@@ -791,20 +790,16 @@
 (defn- exempting-at?
   "Can a placement be exempt at a reader with ancestor set `up`: `exemption-reads?`, a
   `(contradicts …)` stated in a context of `up`, and an exemption source the reader sees,
-  which is a `siblingDisjointException`, an equality relation or, while the arity index
-  holds a candidate (`decide/arity-held?`), a length binding (`sx/arity-binding-functors`)
-  stated in a context of `up`.  An arity placement is stated where its binding is seen,
-  so a reader that sees the placement sees a context stating a binding.  Each extent is
-  read by context (`reads/stores-in?`), so the answer is flat in the placements and
-  sources stated where the reader does not see."
+  which is a `siblingDisjointException` or an equality relation stated in a context of
+  `up`.  Each extent is read by context (`reads/stores-in?`), so the answer is flat in the
+  placements and sources stated where the reader does not see."
   [kb up]
   (let [idx (:index kb)
         in? #(reads/stores-in? idx % up)]
     (boolean (and (exemption-reads? kb)
                   (in? 'contradicts)
                   (or (in? 'siblingDisjointException)
-                      (some in? rewrite/equality-relations)
-                      (and (decide/arity-held? kb) (some in? sx/arity-binding-functors)))))))
+                      (some in? rewrite/equality-relations))))))
 
 ;; The roster reading decides which declarations the reader sees (`roster-state`), through
 ;; `in-force?`, whose verdict reads the roster (`roster-member-fn`): the two recur into

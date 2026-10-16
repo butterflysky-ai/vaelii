@@ -15,6 +15,7 @@
             [vaelii.impl.naming :as nm]
             [vaelii.impl.protocols :as p]
             [vaelii.impl.reads :as reads]
+            [vaelii.impl.resolution :as res]
             [vaelii.impl.sentex :as sx]
             [vaelii.impl.special :as special]
             [vaelii.impl.strength :as strength]
@@ -140,12 +141,49 @@
                      :when (= ps parts)]
                  [:cover [whole parts] kind])))])))
 
+(defn- separated-cover-keys
+  "The flat-cache keys of a cover refuted through a separation's denial over the member
+  sentences `sens`, at vantage `v` (`membership/term-nogoods`' cover arm): for a
+  membership `(s x)` under a cover's whole each of whose parts a denial among `sens` or
+  another membership among them denies, the cover's key and the keys of each route a
+  separation denies a part through under the soundness rule of `res/separation-denials`
+  (`tax/monotonic-route-witness`).  Empty unless `sens` holds two memberships of one
+  term."
+  [kb sens v]
+  (let [tax    (reasoning/taxonomy kb)
+        pos    (filterv #(and (not (sx/negation? %)) (= 1 (nm/arity %))) sens)
+        denied (mapv second (filter sx/negation? sens))
+        x      (first (nm/args (first pos)))]
+    (when (and (< 1 (count pos)) (= (count pos) (count (remove sx/negation? sens)))
+               (every? #(= [x] (vec (nm/args %))) (concat pos denied))
+               (every? #(symbol? (nm/functor %)) pos))
+      (let [cls   (res/holding-class kb)
+            types (mapv nm/functor pos)
+            ds    (map nm/functor denied)]
+        (into #{}
+              cat
+              (for [s             types
+                    [whole parts] (tax/covers-over tax s v)
+                    :let [per (for [p parts]
+                                (if (some #(contains? (tax/genls tax p v) %) ds)
+                                  [#{}]
+                                  (for [d types
+                                        :when (not= d s)
+                                        r (tax/separation-routes-held tax d p)
+                                        :when (tax/monotonic-route-witness tax r v cls)]
+                                    (:keys r))))]
+                    :when (every? seq per)
+                    [ps kind] (tax/covers-of tax whole)
+                    :when (= ps parts)]
+                (into #{[:cover [whole parts] kind]} (comp cat cat) per)))))))
+
 (defn- minted-from
   "The handles of the sentences the `genl` edges among `hs` were minted from: the source
   of each justification of such an edge an argument declaration's entailment holds up
   (`special/mint-informant?`), which `special/entail-arg-type` stores first among its
   antecedents.  `(disjoint gladdens saddens)` over `(genlArg disjoint 1 thing)` mints
-  `(genl gladdens thing)`, so a clash that edge convicts through names the `disjoint`."
+  `(genl gladdens thing)`, so a tuple whose length that edge inherits names the
+  `disjoint`."
   [kb hs]
   (let [tms  (reasoning/tms kb)
         recs (:records kb)]
@@ -157,50 +195,38 @@
                 (keep #(first (:antecedents %))))
           hs)))
 
-(defn- placed-grounds
-  "The grounds the arity nogood over `members` is placed through at the context `v`, or
-  at every context for a nil `v`, read off the antecedents of each justification of its
-  placed `(contradicts …)`: the bindings (`arity/binding-grounds`) that are not members,
-  and the sentences the `genl` edges among them were minted from (`minted-from`)."
-  [kb members v]
-  (let [tms   (reasoning/tms kb)
-        recs  (:records kb)
-        antes (into []
-                    (comp (keep #(p/get-sentex recs %))
-                          (filter #(and (= 'contradicts (nm/functor (:sentence %)))
-                                        (or (nil? v) (= v (:context %)))
-                                        (= members (into #{} (map sx/handle-id) (rest (:sentence %))))))
-                          (mapcat #(jtms/supports tms (:id %)))
-                          (keep #(jtms/justification tms %))
-                          (filter #(= exc/nogood-informant (:informant %)))
-                          (map :antecedents))
-                    (when (seq members)
-                      (reads/as-stored-with-term (:index kb) (sx/sentex-handle (first members)))))]
-    (-> #{}
-        (into (comp (mapcat #(arity/binding-grounds kb %)) (remove members)) antes)
-        (into (minted-from kb (into #{} cat antes))))))
+(defn inert-binding
+  "The binding the stored tuple `sx` in the `:out` forced set breaks
+  (`arity/inert-binding`), its `:grounds` the bindings stating the length and the
+  sentences the `genl` edges of its route were minted from (`minted-from`), in handle
+  order, or nil when `sx` breaks none."
+  [kb sx]
+  (when-let [b (arity/inert-binding kb sx)]
+    (-> b
+        (update :grounds #(vec (sort (into (set %) (minted-from kb (:route b))))))
+        (dissoc :route))))
 
 (defn clash-grounds
   "The declarations report `r` convicts through, as `{:handle :sentence :context}` maps in
   content order: the believed supporters of the flat-cache entries its conviction reads
-  (`ground-keys`) that one of its vantages sees, or the whole KB for a report weighed at
-  none; for an arity clash, the grounds it is placed through at each vantage
-  (`placed-grounds`).  No `genl` edge is named; an edge an argument declaration minted is
-  named by the sentence it was minted from.  Empty for a rebuttal and an `:inherited`
-  clash, whose reasons are members (docs/nmtms.md, \"The clash reports\")."
+  (`ground-keys`, and `separated-cover-keys` for a cover refuted through a separation's
+  denial) that one of its vantages sees, or the whole KB for a report weighed at none; for
+  an inert tuple, its binding's grounds (`inert-binding`).  No `genl` edge is named.
+  Empty for a rebuttal, an `:inherited` clash and an `:arity-descension` pair, whose
+  reasons are members (docs/nmtms.md, \"The clash reports\")."
   [kb r]
-  (if (contains? #{nil :inherited} (:kind r))
+  (if (contains? #{nil :inherited :arity-descension} (:kind r))
     []
     (let [tax  (reasoning/taxonomy kb)
           tms  (reasoning/tms kb)
           recs (:records kb)
           sens (mapv :sentence (:sides r))
-          at   (fn [v]
-                 (if (contains? #{:arity :arity-descension} (:kind r))
-                   (placed-grounds kb (set (:nogood r)) (when (symbol? v) v))
-                   (mapcat #(tax/visible-supporters tax % v) (ground-keys tax sens v))))]
-      (->> (or (seq (report-vantages r)) [nil])
-           (into #{} (mapcat at))
+          at   (fn [v] (mapcat #(tax/visible-supporters tax % v)
+                               (into (ground-keys tax sens v) (separated-cover-keys kb sens v))))]
+      (->> (if (= :arity (:kind r))
+             (mapcat #(:grounds (inert-binding kb (p/get-sentex recs %))) (:nogood r))
+             (into #{} (mapcat at) (or (seq (report-vantages r)) [nil])))
+           (into #{})
            (into [] (comp (filter #(jtms/in? tms %))
                           (keep #(p/get-sentex recs %))
                           (map (fn [s] {:handle (:id s) :sentence (sx/sentence-of s)
@@ -343,14 +369,31 @@
             {:conflicts [] :contradictions []}
             placed)))
 
+(defn- inert-reports
+  "One `:arity` conflict per stored tuple in the `:out` forced set that breaks its
+  functor's length (`arity/inert-binding`), read at every context."
+  [kb]
+  (let [tms  (reasoning/tms kb)
+        recs (:records kb)]
+    (into []
+          (comp (keep #(p/get-sentex recs %))
+                (filter #(arity/inert-binding kb %))
+                (map (fn [s] (clash-report kb {:nogood   #{(:id s)}
+                                               :kind     :arity
+                                               :priority (+ 2 (strength/rank-of (jtms/defeat-class tms (:id s))))
+                                               :sentence (list 'contradicts (sx/sentence-of s))}))))
+          (sort (jtms/forced-members tms :out)))))
+
 (defn read-clashes
   "The hard clashes and the dilemmas of every placed nogood, as `{:conflicts [report]
   :contradictions [report]}` in `clash-report`'s shape, each report's vantages the most
-  general placement contexts that read it so (`reports-over`)."
+  general placement contexts that read it so (`reports-over`), with the inert tuples'
+  conflicts (`inert-reports`)."
   [kb]
-  (if (zero? (reads/stored-count-with-functor (:index kb) 'contradicts))
-    {:conflicts [] :contradictions []}
-    (reports-over kb (reads/as-stored-with-functor (:index kb) 'contradicts))))
+  (-> (if (zero? (reads/stored-count-with-functor (:index kb) 'contradicts))
+        {:conflicts [] :contradictions []}
+        (reports-over kb (reads/as-stored-with-functor (:index kb) 'contradicts)))
+      (update :conflicts into (inert-reports kb))))
 
 (defn conflicts-of
   "The conflict reports (`read-clashes`), unordered: `ranked` orders them."

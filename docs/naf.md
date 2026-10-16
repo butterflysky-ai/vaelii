@@ -394,6 +394,36 @@ reading the same predicate, answers only what it was told. It is belief-followin
 other predicate marks: a defeated or retracted member leaves the extent, and the closure
 follows.
 
+### A closed extent for one argument value
+
+`(closedExtentForArg P n v)` is the same grant narrowed to the goals whose argument `n` is
+`v`:
+
+```clojure
+(v/assert kb '(closedExtentForArg accountOn 2 HostA) 'CxHosts)
+;; "the accounts on HostA are exactly the stored ones"
+```
+
+Under it, nothing answering `(accountOn Carol HostA)` at level 6 is what answers
+`(not (accountOn Carol HostA))`. `(not (accountOn Carol HostB))` stays open-world in the
+same context, because argument 2 is not `HostA`. `ClosedExtentProver` answers both
+grants (`provers/closed-extent-for?`). The goal is ground, so argument `n` is ground too;
+an open `(not (accountOn Alice ?host))` is not closed.
+
+The per-argument grant is scoped and belief-following exactly as the whole-predicate grant
+is. Its arms mark `P` under the taxonomy prop `:closed-extent-arg`, read from the asking
+context, as the gate; the prover then reads the grant's position and value back from the
+believed grants visible there. A position past the goal's arity matches no goal.
+
+`closedExtentForArg1`, `closedExtentForArg2` and `closedExtentForArg3` are binary
+spellings: `(closedExtentForArg2 P v)` means `(closedExtentForArg P 2 v)`. A CxUniverse forward
+rule derives the ternary from each, and the engine reads only the ternary. An inert rule
+states the reverse direction, so a ternary grant mints no binary twin.
+
+A whole-predicate grant entails the per-argument grant at every admitted position and for
+every value. CxUniverse states that as an inert rule over `admitsArgnum`, with `(thing ?value)`
+binding the value, so a `closed_extent_predicate` grant stores no per-argument grants.
+
 ### Under the grant, a negative antecedent is NAF
 
 ```clojure
@@ -431,6 +461,10 @@ and queues it `:all-rejoin`, because the grant blocked nothing for the blocked s
 notice and the firings it licenses have no justification yet — the same asymmetry a
 widened `genlCx` ancestor set takes that marker for.
 
+A per-argument grant governs rules the same way. The join and the re-check index read
+`P` as granted wherever any `closedExtentForArg` names it (`rules/closed-extent-declared?`),
+and derive time decides the literal for the value it holds.
+
 ### Stratification, from both arrival orders
 
 A closed-extent negative antecedent is a **negative edge** on `P`, so a rule concluding
@@ -441,15 +475,21 @@ with a `[:not P]` antecedent (one antecedent-index lookup, no scan) and **refuse
 declaration**, which is the same answer `check-edge-stratified` gives a `genl` edge that
 closes one, and for the same reason: stored state is always stratified.
 
+A per-argument grant adds the same negative edge on `P`, whatever value it names, so
+`(closedExtentForArg P n v)` and its binary spellings are refused where
+`(closed_extent_predicate P)` would be.
+
 `why-not` reports `:closed-extent` for a positive goal nothing answers under a visible
-grant. That is the more specific answer than `:not-stored`: the KB is not silent about the
+grant that covers it. That is the more specific answer than `:not-stored`: the KB is not silent about the
 sentence, it says the extent is complete and this is not in it.
 
 **`defns` and `disjoint` are untouched.** A `defnIff` states a condition, not an extent —
 a thing whose condition is merely unknown is concluded neither a member nor a non-member
 ([defns.md](defns.md)) — and disjointness refutes from a *positive* claim about a sibling
-type. Both stay open-world by design; this grant is the one place a KB says otherwise, and
-it says it per predicate and per context.
+type: a believed `(S x)` of a type a separation keeps apart from `T` answers `(not (T
+x))` over `:monotonic` edges ([taxonomy.md](taxonomy.md#disjointness), "A separation
+answers a denial"). Both stay open-world by design; this grant is the one place a KB says
+otherwise, and it says it per predicate and per context.
 
 ## Order independence, and the re-check
 
@@ -463,6 +503,15 @@ leaves. This is the `exceptWhen` block/sweep/revive path, reused verbatim:
   its own meta-sentex into the same index (`special/index-exceptWhen-meta`), so both
   kinds of block condition key one index. A fact arriving or leaving on one
   of those predicates (or any subtype, via the genl spec fan-out) queues the rule.
+- A negated literal `(not (T …))` in either kind of condition is posted under the types
+  a declaration separates from `T` as well (`rules/separation-denial-predicates`), since
+  a membership of a type below one of them answers the denial
+  (`provers/DisjointnessNegationProver`). The spec fan-out reaches that membership's
+  type, and the firing filter keeps a firing whose literal the membership denies
+  (`recheck/separation-reaches?`). A separation or a `genl` edge that moves `T`'s
+  separations posts the rule again and queues it whole
+  (`special/repost-separation-denial-rules`), so the block does not depend on whether
+  the rule, the separation or the membership came last.
 - An **equality** queues it too, and that one no predicate can key. `(unknown (flies
   Tweety))` is answered under Tweety's representative, so merging Tweety with a Birdy
   that flies makes the inner query derivable with nothing on `flies` having moved at

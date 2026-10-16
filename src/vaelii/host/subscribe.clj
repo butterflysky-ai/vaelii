@@ -75,8 +75,9 @@
 (def max-parked
   "How many long polls may be **parked at once** on one daemon.
 
-  A parked poll holds an HTTP worker thread for the length of its wait, so the ceiling
-  that matters here is the server's thread pool rather than anything this namespace owns:
+  A parked poll holds an HTTP worker thread for the length of its wait (the worker waits
+  for the op's own thread, `serve/handle-op`), so the ceiling that matters here is the
+  server's thread pool rather than anything this namespace owns:
   park more polls than the pool has threads and the daemon answers nothing at all —
   `/health`, a write, another caller's read — until one of them times out.  Moving the
   wait outside `serve`'s monitor is what keeps a parked poll from blocking the *writer*;
@@ -108,9 +109,10 @@
   reasoning one layer up.
 
   `:parked` is how many long polls are holding a thread right now — a property of the
-  handler rather than of any one subscription, and the thing `max-parked` bounds."
+  handler rather than of any one subscription, and the thing `max-parked` bounds.
+  `:stopping` is set by `release-parked`, and a poll answers without parking once it is."
   []
-  (atom {:next 0 :subs {} :parked 0}))
+  (atom {:next 0 :subs {} :parked 0 :stopping false}))
 
 (defn- now [] (System/currentTimeMillis))
 
@@ -200,6 +202,15 @@
   reap."
   [reg at]
   (drop-where! reg (fn [sub] (> (- at (:polled-at sub)) idle-ms))))
+
+(defn release-parked
+  "Answer every long poll parked on `reg` now, with the events it has, and park none
+  after it.  A daemon that stops calls this (`serve/stop-ops`): the op thread a parked
+  poll runs on belongs to no server, so nothing else ends its wait before `max-wait-ms`."
+  [reg]
+  (swap! reg assoc :stopping true)
+  (doseq [sub (vals (:subs @reg))]
+    (wake! (:signal sub))))
 
 (defn unwatch-kb
   "Drop every subscription over `kb` — the KB each was registered on, by identity — and
@@ -317,18 +328,18 @@
   not have.  `.wait` releases the monitor while parked, so holding it here costs the
   writer a compare rather than the wait.
 
-  **An interrupt ends the park the way the deadline does**, and puts itself back.  A
-  parked poll holds a server thread, so it is exactly what a shutting-down container
-  interrupts — and `.wait` clears the flag on its way out, so letting the exception
-  travel would answer a 500, which the caller takes for the feed stopping, and would
-  lose the interrupt for whoever owns the thread.  Returning instead answers the events
-  it has, which is what a wait that ran out answers too."
+  `release-parked` ends the park the way the deadline does.  **So does an interrupt**,
+  and it puts itself back: `.wait` clears the flag on its way out, so letting the
+  exception travel would answer a 500, which the caller takes for the feed stopping, and
+  would lose the interrupt for whoever owns the thread.  Returning instead answers the
+  events it has, which is what a wait that ran out answers too."
   [reg token cursor ^Object sig deadline]
   (locking sig
     (loop []
-      (let [sub       (get-in @reg [:subs token])
+      (let [r         @reg
+            sub       (get-in r [:subs token])
             remaining (- deadline (now))]
-        (when (and sub (<= (:delivered sub) cursor) (pos? remaining))
+        (when (and sub (not (:stopping r)) (<= (:delivered sub) cursor) (pos? remaining))
           (if (try (.wait sig (long remaining)) true
                    (catch InterruptedException _
                      (.interrupt (Thread/currentThread))

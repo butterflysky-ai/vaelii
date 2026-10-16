@@ -466,7 +466,7 @@ def flag(kind, doc, token, msg):
 
 
 # nsish words that are directory/language names, not aliases.
-NS_STOP = {"docs", "scripts", "src", "resources", "test", "target",
+NS_STOP = {"docs", "scripts", "src", "resources", "test", "target", "logs",
            "checkouts", "bench", "vaelii"}
 
 # Docs whose markdown TABLE ROWS may carry `file.clj:NNN` citations without a W1
@@ -1138,10 +1138,9 @@ for path in licensed_clj_files():
 # section is the one being written, so the check moves forward on its own at
 # each release cut with nothing to remember.
 #
-# Both spellings of the class count, because the changelog uses both on purpose
-# and check-breaking-siblings.sh reads both: a `**Breaking: …**` title and a
-# `*Class:* Breaking` line say the same thing.
-BREAKING_ENTRY = re.compile(r"\*\*Breaking:|\*Class:\*\s*\**Breaking")
+# An entry is Breaking when it sits under a `### Breaking` heading or its title
+# reads `**Breaking: …**`, the two spellings check-breaking-siblings.sh reads.
+BREAKING_TITLE = re.compile(r"\*\*Breaking:")
 
 changelog = pjoin(ROOT, "CHANGELOG.md")
 if os.path.exists(changelog):
@@ -1149,17 +1148,19 @@ if os.path.exists(changelog):
     if len(sections) > 1:
         unreleased = sections[1]
         version = unreleased.split("\n", 1)[0].strip()
-        for entry in re.split(r"\n(?=- \*\*)", unreleased)[1:]:
-            if not BREAKING_ENTRY.search(entry) or "*Breaks:*" in entry:
-                continue
-            title = re.sub(r"\s+", " ", entry.split("**")[1] if "**" in entry else entry)
-            flag("E15", changelog, f"CHANGELOG.md:{title[:40]}",
-                 f"CHANGELOG {version}: the Breaking entry \"{title[:60]}\" carries"
-                 f" no *Breaks:* line. scripts/check-breaking-siblings.sh greps the"
-                 f" siblings for the backticked tokens on that line, so an entry"
-                 f" without one is swept and reports nothing — indistinguishable"
-                 f" from a sibling that is fine. One line beside the class, holding"
-                 f" each name a caller would have written (CONTRIBUTING §3.8)")
+        for part in re.split(r"^(?=### )", unreleased, flags=re.M)[1:]:
+            breaking_heading = re.match(r"### Breaking\b", part) is not None
+            for entry in re.split(r"\n(?=- \*\*)", part)[1:]:
+                if not (breaking_heading or BREAKING_TITLE.search(entry)) or "*Breaks:*" in entry:
+                    continue
+                title = re.sub(r"\s+", " ", entry.split("**")[1] if "**" in entry else entry)
+                flag("E15", changelog, f"CHANGELOG.md:{title[:40]}",
+                     f"CHANGELOG {version}: the Breaking entry \"{title[:60]}\" carries"
+                     f" no *Breaks:* line. scripts/check-breaking-siblings.sh greps the"
+                     f" siblings for the backticked tokens on that line, so an entry"
+                     f" without one is swept and reports nothing — indistinguishable"
+                     f" from a sibling that is fine. One line under the entry, holding"
+                     f" each name a caller would have written (CONTRIBUTING §3.8)")
 
 # ── E16: an index read is an entry point's, and an as-stored one is named ───────────
 # The `IndexStore` posting sets are storage: they hold a defeated default, a
@@ -1295,18 +1296,16 @@ E16_GLOBAL_ROSTER = {
     ("src/vaelii/impl/special.clj", "departed-context-edge-mints"),
     # A body's both polarities in every context, a superset the negation placement scopes.
     ("src/vaelii/impl/decide/negation.clj", "polarity-handles"),
-    # The arity family's rows read every binding and keep a reader's by its ancestor set.
-    ("src/vaelii/impl/decide/arity.clj", "exact-handles"),
+    # A relation's length is read the same at every context, so a tuple breaking it is
+    # inert in every context and the refresh reads the shape's tuples in all of them.
+    ("src/vaelii/impl/decide/arity.clj", "refresh-shapes!"),
     ("src/vaelii/impl/decide/arity.clj", "pair-sets"),
-    ("src/vaelii/impl/decide/arity.clj", "note-arity!"),
-    ("src/vaelii/impl/decide/arity.clj", "routes"),
-    ("src/vaelii/impl/decide/arity.clj", "shape-handles"),
-    ("src/vaelii/impl/decide/arity.clj", "types-entry"),
-    ("src/vaelii/impl/decide/arity.clj", "meta-routes"),
-    # A relation's length is read the same at every context, off its bindings and
-    # metatype memberships in every context.
+    # A relation's length is read the same at every context, off its bindings in every
+    # context.
     ("src/vaelii/impl/decide/arity.clj", "held-bindings"),
-    ("src/vaelii/impl/decide/arity.clj", "meta-held"),
+    # A metatype route's class membership is stored in CxUniverse, so the memberships a
+    # write moves are read from every context.
+    ("src/vaelii/impl/chain.clj", "class-route-memberships"),
     # The self tuples under an `irreflexive` mark when no reader set is given.
     ("src/vaelii/impl/decide/tuple.clj", "self-tuples-under"),
     # The vocabulary: the term roster keys no context, and the public reads and the
@@ -1353,7 +1352,7 @@ E16_GLOBAL_ROSTER = {
     ("src/vaelii/impl/special.clj", "transitive-left-ends"),
     ("src/vaelii/impl/abduce.clj", "edge-handles"),
     ("src/vaelii/impl/clashes.clj", "believed-at-arg1"),
-    ("src/vaelii/impl/kb.clj", "type-memberships"),
+    ("src/vaelii/impl/resolution.clj", "type-memberships"),
     ("src/vaelii/impl/decide/membership.clj", "term-entries"),
 }
 E16_GLOBAL_CALL = re.compile(r"\breads/([\w?!*-]+-global)(?![\w?-])")
@@ -1461,6 +1460,7 @@ E17_ROSTER = {
     ("src/vaelii/impl/wff.clj", "covering-problems"),
     ("src/vaelii/impl/wff.clj", "negation-walk"),
     ("src/vaelii/impl/wff.clj", "genl-negation-cycle"),
+    ("src/vaelii/impl/checks.clj", "edge-negation-cycle"),
     ("src/vaelii/impl/checks.clj", "genls-problem"),
     ("src/vaelii/impl/checks.clj", "covering-genls-problem"),
     ("src/vaelii/impl/checks.clj", "mintable-type?"),
@@ -1505,23 +1505,27 @@ E17_ROSTER = {
     ("src/vaelii/impl/special.clj", "withdrawal-candidates"),
     ("src/vaelii/impl/special.clj", "released-terms"),
     ("src/vaelii/impl/special.clj", "super-reaches-declaration?"),
+    # Which mints a departure can have withheld, a superset over every placement: each
+    # one it keeps is asked again from its own placement (`checks/subsumed-mint`).
+    ("src/vaelii/impl/special.clj", "may-release?"),
     # The predicates a declaration binds, read across every context the facts are stored
     # in; each fact is then asked its own context's declarations.
     ("src/vaelii/impl/special.clj", "declared-functors"),
     ("src/vaelii/impl/special.clj", "trigger-entailments"),
     ("src/vaelii/impl/special.clj", "descent-surplus-placements"),
-    ("src/vaelii/impl/special.clj", "negative-subsumption-seeds"),
     ("src/vaelii/impl/inherit.clj", "moved-goal-test"),
     ("src/vaelii/impl/qcn_kb.clj", "governing-contexts"),
     ("src/vaelii/impl/qcn_kb.clj", "calculi-triggered-by"),
     ("src/vaelii/impl/chain.clj", "answered-by-calculus?"),
-    ("src/vaelii/impl/special.clj", "subsumption-seeds"),
     ("src/vaelii/impl/special.clj", "rule-reads-above?"),
     ("src/vaelii/impl/special.clj", "roster-antecedent-functors"),
     ("src/vaelii/impl/special.clj", "under-seen-edges"),
     # Settle's candidate discovery. An over-approximated candidate merely checks and
     # yields nothing, and the arbitration that follows is context-scoped anyway.
     ("src/vaelii/impl/recheck.clj", "reachable-predicates"),
+    ("src/vaelii/impl/discovery.clj", "separated-reach"),
+    # A predicate no stored claim states in any reader's fan states none in a scoped one.
+    ("src/vaelii/impl/inherit.clj", "claims-stored?"),
     # A nogood family keeps its candidate rows, a superset over every reader, where no
     # reader exists: at the store and removal choke points, at a replay's end and in a
     # sync.  It reads the unscoped closures there through the one view this builds, and
@@ -1531,8 +1535,19 @@ E17_ROSTER = {
     # exists, as the candidate rows they serve are (`decide/write-view`).
     ("src/vaelii/impl/decide/arity.clj", "evict-below!"),
     ("src/vaelii/impl/decide/arity.clj", "lengths-of"),
-    ("src/vaelii/impl/decide/arity.clj", "meta-paths"),
-    ("src/vaelii/impl/decide/arity.clj", "note-reading-moved!"),
+    # A metatype route's class membership is stored in CxUniverse and reads the edges
+    # in every context, as a relation's length does.
+    ("src/vaelii/impl/decide/arity.clj", "reaches-class?"),
+    ("src/vaelii/impl/decide/arity.clj", "class-paths"),
+    ("src/vaelii/impl/chain.clj", "arity-class-ends-moved!"),
+    ("src/vaelii/impl/chain.clj", "resync-arity-classes!"),
+    # The functors whose length a moved edge or binding can have moved, and the arity
+    # pairs stored in CxUniverse, are read over every edge, as a relation's length is.
+    ("src/vaelii/impl/decide/arity.clj", "at-or-below"),
+    ("src/vaelii/impl/decide/arity.clj", "moved-below"),
+    ("src/vaelii/impl/decide/arity.clj", "below-lengths"),
+    ("src/vaelii/impl/decide/arity.clj", "pair-sets"),
+    ("src/vaelii/impl/decide/arity.clj", "bound-up"),
     # A relation's length is read the same at every context: the predicates above a
     # functor are its unscoped closure cut to the bound predicates.
     ("src/vaelii/impl/decide/arity.clj", "bound-above"),
@@ -1577,15 +1592,13 @@ E17_ROSTER = {
     # store holds, which every reader shares.  The argument-order fold and the reified
     # spelling are stored once, and the read walk hides the spelling a reader's belief
     # rules out (docs/canonicalization.md); the storage context of a decontextualized
-    # mark, a teardown, a merge's retargeting, the roster a stored sentex is classed by,
-    # the stratification graph over every stored rule.
+    # mark, a teardown, a merge's retargeting, the roster a stored sentex is classed by.
     ("src/vaelii/core.clj", "rehome-forced-extent!"),
     ("src/vaelii/core.clj", "target-following-meta?"),
     ("src/vaelii/impl/assert_entry.clj", "storage-context"),
     ("src/vaelii/impl/assert_entry.clj", "assert-one"),
     ("src/vaelii/impl/checks.clj", "checked-sentence"),
     ("src/vaelii/impl/checks.clj", "stored-spelling"),
-    ("src/vaelii/impl/checks.clj", "stratification-readers"),
     ("src/vaelii/impl/decide.clj", "on-roster?"),
     ("src/vaelii/impl/integrate.clj", "permuting?"),
     ("src/vaelii/impl/integrate.clj", "recanonicalizing-subject"),
@@ -1607,6 +1620,7 @@ E17_ROSTER = {
     ("src/vaelii/impl/decide/membership.clj", "term-nogoods"),
     ("src/vaelii/impl/decide/membership.clj", "cover-routes"),
     ("src/vaelii/impl/decide/membership.clj", "separation-tests"),
+    ("src/vaelii/impl/decide/membership.clj", "cover-convicted-at?"),
     ("src/vaelii/impl/decide/related.clj", "contradicted-somewhere?"),
     ("src/vaelii/impl/decide/tuple.clj", "roster-marks"),
     ("src/vaelii/impl/decide/tuple.clj", "det-marks"),
@@ -1621,7 +1635,9 @@ E17_ROSTER = {
     ("src/vaelii/impl/inherit.clj", "separation-test"),
     ("src/vaelii/impl/inherit.clj", "stated-claims"),
     ("src/vaelii/impl/recheck.clj", "cross-argument-predicate?"),
-    ("src/vaelii/impl/rules.clj", "closed-extent-antecedents"),
+    ("src/vaelii/impl/rules.clj", "closed-extent-declared?"),
+    ("src/vaelii/impl/rules.clj", "separation-denial-predicates"),
+    ("src/vaelii/impl/special.clj", "repost-separation-denial-rules"),
     ("src/vaelii/impl/special.clj", "licensing-functors"),
     ("src/vaelii/impl/special.clj", "transitive-seeds"),
     ("src/vaelii/impl/special.clj", "transitive-rule-seeds"),

@@ -1,12 +1,13 @@
 #!/usr/bin/env bash
 # scripts/ci-shard.sh — the test namespaces one CI shard runs.
 #
-#   scripts/ci-shard.sh <shard> <of> [--weights FILE]   # 1-based: `3 4` is the third of four
+#   scripts/ci-shard.sh <shard> <of> [--leg disk|memory] [--weights FILE]
+#                                                  # 1-based: `3 4` is the third of four
 #
 # .github/workflows/test.yml runs each backend leg across several runner VMs,
 # and this script decides which namespaces every VM gets.  The memory leg and
-# the disk-log leg call it over the same namespace list with different shard
-# counts, so the rule for splitting the suite is stated once.
+# the disk-log leg call it over the same namespace list, each with its own
+# weights, so the rule for splitting the suite is stated once.
 #
 # A SHARD IS A WHOLE NUMBER OF NAMESPACES.  Several tests in one file share a
 # `:once` fixture, so no file is split across two shards.  scripts/test-parallel.sh
@@ -16,15 +17,20 @@
 # widely enough that an equal count of files is not an equal amount of work: the
 # alphabetical halves this replaced put 752s on one runner and 1060s on the other
 # in run 33979380791, a 29% spread that the slower half pays for.  Every
-# namespace is weighted by scripts/ci-test-weights.tsv and handed to whichever
+# namespace is weighted by its leg's weights file and handed to whichever
 # shard is lightest so far, longest first — the standard greedy bin-pack, which
 # scripts/test-parallel.sh already runs against its own local timings.
+#
+# The weights are the leg's own: scripts/ci-test-weights-<leg>.tsv, or --weights
+# FILE, which the workflow passes when the previous green run of that leg left
+# its timings in the Actions cache.  Every shard of one run must read the same
+# file, or a namespace lands in two shards or in none, so the workflow resolves
+# the cache entry once and hands every shard the same key.
 #
 # A STALE WEIGHT PUTS A NAMESPACE IN THE WRONG SHARD; A MISSING ONE DROPS NO
 # TEST.  The namespace list comes from the tree rather than from the weights
 # file, so a namespace the file does not name still runs, weighted at the mean of
-# the namespaces the file does name.  scripts/ci-weights.sh regenerates the file
-# from a finished run.
+# the namespaces the file does name.  scripts/ci-weights.sh regenerates the files.
 #
 # The output is one namespace per line on stdout, ready for `lein test`; the
 # summary line goes to stderr so a caller can read the list from a pipe.
@@ -34,10 +40,11 @@ set -uo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT" || exit 1
 
-WEIGHTS=scripts/ci-test-weights.tsv
+WEIGHTS=""
+LEG=disk
 
 usage() {
-  echo "usage: scripts/ci-shard.sh <shard> <of> [--weights FILE]   # 1-based, e.g. 3 4" >&2
+  echo "usage: scripts/ci-shard.sh <shard> <of> [--leg disk|memory] [--weights FILE]   # 1-based, e.g. 3 4" >&2
 }
 
 # A flag rather than an environment variable, and the reason is that
@@ -49,6 +56,8 @@ while [[ $# -gt 0 ]]; do
   case "$1" in
     --weights) WEIGHTS="${2:?--weights needs a file}"; shift 2 ;;
     --weights=*) WEIGHTS="${1#--weights=}"; shift ;;
+    --leg) LEG="${2:?--leg needs disk or memory}"; shift 2 ;;
+    --leg=*) LEG="${1#--leg=}"; shift ;;
     -h|--help) usage; exit 0 ;;
     -*) echo "ci-shard: unknown option $1" >&2; usage; exit 2 ;;
     *) positional+=("$1"); shift ;;
@@ -56,6 +65,8 @@ while [[ $# -gt 0 ]]; do
 done
 
 [[ ${#positional[@]} -eq 2 ]] || { usage; exit 2; }
+case "$LEG" in disk|memory) ;; *) echo "ci-shard: --leg is disk or memory, not $LEG" >&2; exit 2 ;; esac
+[[ -n "$WEIGHTS" ]] || WEIGHTS="scripts/ci-test-weights-$LEG.tsv"
 shard="${positional[0]}"
 of="${positional[1]}"
 [[ "$shard" =~ ^[0-9]+$ && "$of" =~ ^[0-9]+$ ]] || { usage; exit 2; }
@@ -105,7 +116,7 @@ printf '%s\n' "${namespaces[@]}" \
       }
       { printf "%012.3f\t%s\n", (($0 in secs) ? secs[$0] : mean), $0 }' \
   | LC_ALL=C sort -k1,1r -k2,2 \
-  | awk -F'\t' -v shard="$shard" -v of="$of" '
+  | awk -F'\t' -v shard="$shard" -v of="$of" -v weights="$WEIGHTS" '
       { light = 1
         for (b = 2; b <= of; b++) if (load[b] < load[light]) light = b
         load[light] += $1 + 0; count[light]++
@@ -113,8 +124,8 @@ printf '%s\n' "${namespaces[@]}" \
       }
       END {
         for (b = 1; b <= of; b++) all += load[b]
-        msg = sprintf("shard %d of %d: %d of %d namespaces, %.0fs of %.0fs predicted",
-                      shard, of, count[shard] + 0, NR, load[shard] + 0, all)
+        msg = sprintf("shard %d of %d: %d of %d namespaces, %.0fs of %.0fs predicted, from %s",
+                      shard, of, count[shard] + 0, NR, load[shard] + 0, all, weights)
         print msg > "/dev/stderr"
       }'
 exit

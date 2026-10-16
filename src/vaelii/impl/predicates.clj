@@ -362,7 +362,7 @@
   a sentence written nine times is a sentence that drifts in eight of them."
   (str " — tax/exact-arity-classes — plus the disjointness that separates the"
        " relation-wide three, which the kind specializations inherit through their genl"
-       " edges. Read as storage by the arity nogoods the settle places."))
+       " edges. Read as storage by the inert-tuple test (arity/relation-length)."))
 
 ;; ---- the entries ---------------------------------------------------------
 
@@ -574,19 +574,19 @@
                         :facets  #{:cached :derived :reach :convicts}
                         :family  nil
                         :notes   (str "binds a relation's length, read as storage beside the"
-                                      " exact-arity classes: a tuple breaking it is a one-member"
-                                      " nogood the settle places, and two related predicates"
-                                      " whose bindings differ are a nogood of the bindings.  Not"
+                                      " exact-arity classes: a tuple breaking it is held inert in"
+                                      " the :out forced set, and two related predicates whose"
+                                      " bindings differ store a contradicts of the bindings.  Not"
                                       " :arbitrable: no settle weighs it.")}
-                       (str "chain/place-arities! — a stored tuple whose length breaks the binding"
-                            " is placed as a nogood"))]
+                       (str "arity/drain! — a stored tuple whose length breaks the binding is held"
+                            " in the :out forced set"))]
      ['arityMin
       (enforced {:shape {:args [:relation :integer]} :storage [:none] :checked false
                  :family nil :facets #{:reach :convicts}
-                 :notes (str "floors a variable_arity relation: a shorter tuple is a one-member"
-                             " nogood the settle places. Ordinary core.txt rules"
+                 :notes (str "floors a variable_arity relation: a shorter tuple is held inert in"
+                             " the :out forced set. Ordinary core.txt rules"
                              " also derive the at_least_binary and at_least_ternary classifications.")}
-                "chain/place-arities! floors a variable-arity tuple at the minimum")]
+                "arity/drain! floors a variable-arity tuple at the minimum")]
      ['relationTypeByArity
       (enforced {:shape {:args [:type :integer]} :storage [:none] :checked false
                  :family nil :facets #{}
@@ -674,6 +674,15 @@
                      " integrate/commute-existing for the facts already stored"))]
      ['inverse (enforced (assoc (pair :inverse :predicate) :facets #{:cached :derived :answers})
                          "taxonomy/add-inverse — the prover that hands the swapped goal back")]
+     ['genlInverse
+      (enforced (pair :genl-inverse :predicate
+                      :notes (str "binary genl with arguments 1 and 2 swapped: (genlInverse ?spec"
+                                  " ?genl-inv) means (?spec ?x ?y) entails (?genl-inv ?y ?x). The"
+                                  " edges are a flat cache beside the genl relation, read by the"
+                                  " matching fan's signed closure rather than by the closure every"
+                                  " type read walks."))
+                (str "taxonomy/add-genl-inverse — the signed closure (tax/signed-closure) the"
+                     " matching fan, the forward trigger and the subsumption witness read"))]
 
      ;; ---- placement, lifting and the policy grants -----------------------
      ['decontextualized_predicate
@@ -712,6 +721,38 @@
                 (str "taxonomy prop :closed-extent — ClosedExtentProver answers (not (P …))"
                      " from the absence of a positive, and a closed negative rule antecedent"
                      " under the grant is negation as failure"))]
+     ['closedExtentForArg
+      (enforced (assoc (prop :closed-extent-arg :facets #{:answers :retriggers}
+                             :notes (str "closed_extent_predicate narrowed to the goals whose"
+                                         " argument n is v. The prop marks P alone, as the"
+                                         " gate; the position and value are read back from"
+                                         " the believed grants visible to the asker."))
+                       :shape {:args [:predicate :position :term]})
+                (str "taxonomy prop :closed-extent-arg — ClosedExtentProver answers a ground"
+                     " (not (P …)) whose argument n is v from the absence of a positive, and"
+                     " a closed negative rule antecedent under the grant is negation as"
+                     " failure"))]
+     ['closedExtentForArg1
+      (enforced {:shape {:args [:predicate :term]} :storage [:none] :checked false
+                 :family nil :facets #{}
+                 :notes (str "the binary spelling of (closedExtentForArg ?p 1 ?v). A CxUniverse"
+                             " forward rule derives the ternary, and the prover reads only the"
+                             " ternary.")}
+                (str "the CxUniverse forward rule deriving (closedExtentForArg P 1 V), and"
+                     " checks/check-closed-extent-stratified, which refuses the spelling where"
+                     " the ternary would be refused"))]
+     ['closedExtentForArg2
+      (enforced {:shape {:args [:predicate :term]} :storage [:none] :checked false
+                 :family nil :facets #{}
+                 :notes "the binary spelling of (closedExtentForArg ?p 2 ?v) — see closedExtentForArg1."}
+                (str "the CxUniverse forward rule deriving (closedExtentForArg P 2 V); see"
+                     " closedExtentForArg1"))]
+     ['closedExtentForArg3
+      (enforced {:shape {:args [:predicate :term]} :storage [:none] :checked false
+                 :family nil :facets #{}
+                 :notes "the binary spelling of (closedExtentForArg ?p 3 ?v) — see closedExtentForArg1."}
+                (str "the CxUniverse forward rule deriving (closedExtentForArg P 3 V); see"
+                     " closedExtentForArg1"))]
      ['modal_predicate (enforced (prop :modal)
                                  (str "taxonomy prop :modal — the gate BeliefProjectionProver reads to decide"
                                       " which predicates project their sentence into the agent's context"))]
@@ -1259,17 +1300,17 @@
       (enforced (collection :notes "the function specialization of fixed_arity.")
                 "generic taxonomy classification under fixed_arity and function")]
      ['variable_arity    (enforced (collection
-                                    :notes (str "the one *exemption* from the arity nogoods — it"
+                                    :notes (str "the one *exemption* from an exact length — it"
                                                 " un-convicts, which is why it carries no facet at"
                                                 " all: every lane in this vocabulary names something"
                                                 " a term causes, and none names something it"
                                                 " prevents."))
-                                   "chain/place-arities! — the one exemption from the arity nogoods")]
+                                   "arity/relation-length — the one exemption from an exact length")]
      ['variable_arity_predicate
       (enforced (collection
-                 :notes (str "the predicate specialization of variable_arity; the arity"
-                             " nogoods read it as a variable_arity membership."))
-                "chain/place-arities! — the variable_arity exemption, spelled for a predicate")]
+                 :notes (str "the predicate specialization of variable_arity; the inert-tuple"
+                             " test reads it as a variable_arity membership."))
+                "arity/relation-length — the variable_arity exemption, spelled for a predicate")]
      ['variable_arity_function
       (enforced (collection
                  :notes (str "the function specialization of variable_arity; it shares the"
@@ -1477,14 +1518,6 @@
      ;; like any fact and read for inference by nothing.  Inert is the decision rather than
      ;; the omission — the grammar documents itself in its own representation, and a
      ;; cross-reference earns a stored sentex whether or not a check ever keys on it.
-     ['genlInverse
-      (inert {:shape {:args [:term :term]} :storage [:none] :checked false
-              :family nil :facets #{}
-              :notes (str "inverse-genl between binary predicates — (genlInverse ?spec ?genl-inv)"
-                          " means (?spec ?x ?y) entails (?genl-inv ?y ?x). Not yet engine-enforced;"
-                          " aspirational ontology predicate from Lacuna proposals.")}
-             (str "aspirational: records that one binary predicate specialises the"
-                  " argument-reversed reading of another. No inference path."))]
      ['typeGenl
       (inert {:shape {:args [:term :term]} :storage [:none] :checked false
               :family nil :facets #{}
@@ -1611,9 +1644,10 @@
       (inert {:shape {:args [:predicate :type :type]} :storage [:none] :checked false
               :family nil :facets #{}
               :notes "the argument-swapped twin of predAllExists, inert like the class."}
-             (str "an inert record, the argument-swapped twin: some ?dep member bears"
-                  " ?pred to every ?indep member. (PredExistsAllFn ?pred ?dep ?indep) is"
-                  " its sanctioned placeholder."))]
+             (str "an inert record, the argument-swapped twin: every ?indep member has some"
+                  " ?dep member bearing ?pred to it. (PredExistsAllFn ?pred ?dep ?indep"
+                  " ?subject) is the sanctioned placeholder an author may use for the filler"
+                  " that bears ?pred to the member ?subject."))]
      ['predExistsInstance
       (inert {:shape {:args [:predicate :type :term]} :storage [:none] :checked false
               :family nil :facets #{}
@@ -1680,11 +1714,11 @@
                   " ?dep ?subject) names. Read by nothing but its argument types; the"
                   " function is unreifiable, so the reify pass never projects onto it."))]
      ['predExistsAllPlaceholder
-      (inert {:shape {:args [:predicate :type :type :term]} :storage [:none] :checked false
+      (inert {:shape {:args [:predicate :type :type :term :term]} :storage [:none] :checked false
               :family nil :facets #{}
               :notes "the predExistsAll twin of predAllExistsPlaceholder."}
              (str "an inert record: ?placeholder is the term (PredExistsAllFn ?pred ?dep"
-                  " ?indep) names."))]
+                  " ?indep ?subject) names."))]
      ['predExistsInstancePlaceholder
       (inert {:shape {:args [:predicate :type :term :term]} :storage [:none] :checked false
               :family nil :facets #{}

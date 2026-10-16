@@ -64,7 +64,9 @@
             [vaelii.host.subscribe :as sub]
             [vaelii.impl.caches :as caches]
             [vaelii.impl.config :as config])
-  (:import [org.eclipse.jetty.server Server ServerConnector]))
+  (:import [java.util.concurrent ExecutionException]
+           [org.eclipse.jetty.server Server ServerConnector]
+           [org.eclipse.jetty.util.component LifeCycle$Listener]))
 
 ;; ---- the op table: the allowlisted vaelii.core surface -------------------
 ;; op keyword -> (fn [kb args-vector]).  `apply`ing keeps the varying arities
@@ -379,6 +381,8 @@
     :direct-specs (op v/direct-specs)
     :min-genls    (op v/min-genls)
     :max-specs    (op v/max-specs)
+    :min-context-parents  (op v/min-context-parents)
+    :max-context-children (op v/max-context-children)
     :types        (op v/types)
     :relation?    (op v/relation?)
     :contexts     (op v/contexts)
@@ -724,8 +728,21 @@
     ;; contexts and frees one with `:abduce-discard`, as with a subscription
     :too-many-kept})
 
+(defn- off-worker
+  "Run `thunk` on a `future` thread and wait for its value on this one, rethrowing what
+  it threw.  An HTTP worker thread is the server's: Jetty interrupts it when the server
+  stops, and an interrupt landing in a disk write closes the store's channel
+  (`ClosedByInterruptException`) and latches the store unusable.  Nothing interrupts a
+  `future` thread, so an interrupt reaches the worker's wait here and the op runs to the
+  end of its write."
+  [thunk]
+  (let [fut (future (thunk))]
+    (try @fut
+         (catch ExecutionException e (throw (or (.getCause e) e))))))
+
 (defn handle-op
-  "Run one `{:op :args}` request under the write lock and answer with EDN.
+  "Run one `{:op :args}` request under the write lock and answer with EDN.  The op runs
+  on a thread of its own (`off-worker`), so stopping the server interrupts no KB write.
 
   Public because the browser serves the same protocol: `vaelii.browser.web` answers
   `POST /op` by calling this with its active KB, its own subscription registry and its
@@ -802,9 +819,10 @@
              ;; of args, so it is a 400 like the unknown op beside it; one raised inside the
              ;; op is a server fault and keeps its 500
              f
-             (let [result (try (locking monitor
-                                 (admit! admit)
-                                 (wire-safe (f kb (vec args))))
+             (let [result (try (off-worker
+                                #(locking monitor
+                                   (admit! admit)
+                                   (wire-safe (f kb (vec args)))))
                                (catch clojure.lang.ArityException t
                                  (if (entry-arity-error? f t)
                                    (throw (ex-info (str "wrong number of arguments for op "
@@ -821,9 +839,10 @@
              ;; already values.
              g
              (edn-reply 200 {:ok true
-                             :result (wire-safe (g {:kb kb :registry registry :monitor monitor
-                                                    :admit admit}
-                                                   (vec args)))})
+                             :result (off-worker
+                                      #(wire-safe (g {:kb kb :registry registry :monitor monitor
+                                                      :admit admit}
+                                                     (vec args))))})
 
              :else
              (edn-reply 400 {:ok false :error (str "unknown op: " (pr-str op))
@@ -902,6 +921,63 @@
   (`auth-posture`)."
   "127.0.0.1")
 
+(defn- daemon-state
+  "What one handler owns: the write monitor its ops serialize on, the subscription
+  registry its feed tokens name, and `:open?`, which `stop-ops` clears."
+  []
+  {:monitor (Object.)
+   ;; per handler, beside the monitor and for the same reason: a feed token names a
+   ;; subscription *on this daemon*, so it is state the handler owns rather than state
+   ;; the KB does — two handlers over one KB are two daemons, and a token from one
+   ;; means nothing to the other
+   :registry (sub/registry)
+   :open? (atom true)})
+
+(defn- stop-ops
+  "Refuse every op of `state`'s handler that has not entered the monitor (503
+  `:stopping`), answer every parked long poll with the events it has
+  (`sub/release-parked`), then wait for the op inside the monitor to finish.  `start`
+  calls this as its server begins to stop, before Jetty interrupts a worker or closes a
+  connector, so the op in progress answers its caller."
+  [{:keys [monitor registry open?]}]
+  (reset! open? false)
+  (sub/release-parked registry)
+  (locking monitor nil))
+
+(defn- handler
+  [kb {:keys [host] :or {host loopback} :as opts} {:keys [monitor registry open?]}]
+  (let [token   (if (contains? opts :token) (:token opts) (guard/api-token))
+        allowed (guard/allowed-hosts host)
+        admit   (fn [] (when-not @open?
+                         {:ok false :status 503 :type :stopping
+                          :error "the daemon is stopping; this op did not run"}))]
+    (wrap-bearer-auth
+     (guard/wrap-host-allowed
+      (ring/ring-handler
+       (ring/router
+        [["/health" {:get (fn [_] {:status 200
+                                   :headers {"content-type" "application/edn"}
+                                   :body (pr-str {:ok true})})}]
+         ["/op" {:post (fn [req] (handle-op kb registry monitor req admit))}]])
+       (ring/create-default-handler
+        {:not-found (fn [req]
+                      {:status 404 :headers {"content-type" "application/edn"}
+                       ;; typed like every other {:ok false} — the migration
+                       ;; line "every reply carries a non-nil :type" holds on
+                       ;; this route too, not only on POST /op
+                       :body (pr-str {:ok false
+                                      :error (str "no route for "
+                                                  (str/upper-case (name (:request-method req :get)))
+                                                  " " (:uri req) " — the daemon answers POST /op"
+                                                  " and GET /health")
+                                      :type :not-found})})}))
+      allowed
+      (fn [_] {:status 400
+               :headers {"content-type" "application/edn"}
+               :body (pr-str {:ok false :type :bad-host
+                              :error "unrecognized Host header"})}))
+     token)))
+
 (defn app
   "The ring handler for a KB — pure `request -> response`, so it is tested without a
   socket.  One monitor per handler serializes the ops (the single-writer contract).
@@ -915,41 +991,7 @@
   without either being configured; an explicit nil serves **open**, which is what a
   test of the other refusals needs — a handler that 401s first exercises none of them."
   ([kb] (app kb {}))
-  ([kb {:keys [host] :or {host loopback} :as opts}]
-   (let [monitor (Object.)
-         ;; per handler, beside the monitor and for the same reason: a feed token names
-         ;; a subscription *on this daemon*, so it is state the handler owns rather than
-         ;; state the KB does — two handlers over one KB are two daemons, and a token
-         ;; from one means nothing to the other
-         registry (sub/registry)
-         token   (if (contains? opts :token) (:token opts) (guard/api-token))
-         allowed (guard/allowed-hosts host)]
-     (wrap-bearer-auth
-      (guard/wrap-host-allowed
-       (ring/ring-handler
-        (ring/router
-         [["/health" {:get (fn [_] {:status 200
-                                    :headers {"content-type" "application/edn"}
-                                    :body (pr-str {:ok true})})}]
-          ["/op" {:post (fn [req] (handle-op kb registry monitor req))}]])
-        (ring/create-default-handler
-         {:not-found (fn [req]
-                       {:status 404 :headers {"content-type" "application/edn"}
-                        ;; typed like every other {:ok false} — the migration
-                        ;; line "every reply carries a non-nil :type" holds on
-                        ;; this route too, not only on POST /op
-                        :body (pr-str {:ok false
-                                       :error (str "no route for "
-                                                   (str/upper-case (name (:request-method req :get)))
-                                                   " " (:uri req) " — the daemon answers POST /op"
-                                                   " and GET /health")
-                                       :type :not-found})})}))
-       allowed
-       (fn [_] {:status 400
-                :headers {"content-type" "application/edn"}
-                :body (pr-str {:ok false :type :bad-host
-                               :error "unrecognized Host header"})}))
-      token))))
+  ([kb opts] (handler kb opts (daemon-state))))
 
 (defn start
   "Start the daemon over `kb` and return the running jetty `Server` (`:join? false`, so
@@ -960,11 +1002,19 @@
   read the note on `loopback` before doing so.  `:token` is `app`'s, forwarded only
   when the key is there, so an omitted one still reads `VAELII_API_TOKEN` and an
   explicit nil serves open on loopback.  An address with no token is refused
-  (`guard/require-token!`) before anything binds, as `-main` refuses it."
+  (`guard/require-token!`) before anything binds, as `-main` refuses it.
+
+  `.stop` on the server first runs `stop-ops`: an op that has not entered the monitor
+  answers 503 `:stopping`, and the stop returns after the op inside it finishes."
   ^Server [kb {:keys [port host] :or {port 4200 host loopback} :as opts}]
   (guard/require-token! "daemon" host (if (contains? opts :token) (:token opts) (guard/api-token)))
-  (jetty/run-jetty (app kb (assoc (select-keys opts [:token]) :host host))
-                   {:port port :host host :join? false :max-threads http-threads}))
+  (let [state  (daemon-state)
+        server (jetty/run-jetty (handler kb (assoc (select-keys opts [:token]) :host host) state)
+                                {:port port :host host :join? false :max-threads http-threads})]
+    (.addEventListener ^Server server
+                       (reify LifeCycle$Listener
+                         (lifeCycleStopping [_ _] (stop-ops state))))
+    server))
 
 (defn port
   "The actual TCP port a started `Server` is listening on — the ephemeral one when it

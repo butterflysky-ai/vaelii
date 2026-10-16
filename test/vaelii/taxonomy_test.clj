@@ -94,6 +94,71 @@
       (tax/add-genl t 'p1 'beyond 30)
       (is (= '#{p1 p2 p3 p4 p5} (tax/min-genls-global t 'leaf))))))
 
+(deftest min-context-parents-and-max-context-children-leave-out-a-neighbour-another-stands-between
+  (let [t (tax/create-taxonomy)]
+    (tax/add-genlCx t 'CxMid 'CxTop 1)
+    (tax/add-genlCx t 'CxLeaf 'CxMid 2)
+    (tax/add-genlCx t 'CxLeaf 'CxTop 3)
+    (tax/add-genlCx t 'CxLeaf 'CxAside 4)
+    (testing "the one-step adjacency holds the redundant edge"
+      (is (= '#{CxMid CxTop CxAside} (tax/context-parents-global t 'CxLeaf)))
+      (is (= '#{CxMid CxLeaf} (tax/context-children-global t 'CxTop))))
+    (testing "the nearest neighbours do not, and two incomparable ones both stay"
+      (is (= '#{CxMid CxAside} (tax/min-context-parents t 'CxLeaf)))
+      (is (= '#{CxMid} (tax/max-context-children t 'CxTop))))
+    (testing "a context with one neighbour has that one, and a context that is no node has none"
+      (is (= '#{CxTop} (tax/min-context-parents t 'CxMid)))
+      (is (= '#{CxLeaf} (tax/max-context-children t 'CxMid)))
+      (is (= #{} (tax/min-context-parents t 'CxUnheard)))
+      (is (= #{} (tax/max-context-children t 'CxUnheard))))
+    (testing "removing the nearer edge makes the farther neighbour the nearest"
+      (tax/del-genlCx! t 'CxLeaf 'CxMid 2)
+      (is (= '#{CxTop CxAside} (tax/min-context-parents t 'CxLeaf)))
+      (is (= '#{CxMid CxLeaf} (tax/max-context-children t 'CxTop))))))
+
+(deftest min-context-parents-and-max-context-children-keep-both-sides-of-a-diamond
+  ;; `CxLeaf` reaches `CxTop` through `CxLeft` and through `CxRight`, and the edge from
+  ;; `CxLeaf` to `CxTop` is held beside them
+  (let [t (tax/create-taxonomy)]
+    (tax/add-genlCx t 'CxLeft 'CxTop 1)
+    (tax/add-genlCx t 'CxRight 'CxTop 2)
+    (tax/add-genlCx t 'CxLeaf 'CxLeft 3)
+    (tax/add-genlCx t 'CxLeaf 'CxRight 4)
+    (tax/add-genlCx t 'CxLeaf 'CxTop 5)
+    (is (= '#{CxLeft CxRight} (tax/min-context-parents t 'CxLeaf)))
+    (is (= '#{CxLeft CxRight} (tax/max-context-children t 'CxTop)))
+    (is (= '#{CxLeaf} (tax/max-context-children t 'CxLeft)))
+    (is (= '#{CxTop} (tax/min-context-parents t 'CxRight)))
+    (testing "the nearest neighbours of a context are among the contexts it sees or is seen by"
+      (is (every? (set (tax/context-up t 'CxLeaf)) (tax/min-context-parents t 'CxLeaf)))
+      (is (every? (set (tax/context-down t 'CxTop)) (tax/max-context-children t 'CxTop))))))
+
+(deftest a-context-is-a-maximal-child-of-exactly-its-minimal-parents
+  ;; over acyclic edge sets, which is what `wff` admits: an edge runs from a lower index
+  ;; to a higher one
+  (let [rnd (java.util.Random. 20261011)
+        cx  (fn [i] (symbol (str "CxNode" i)))
+        n   9]
+    (dotimes [trial 200]
+      (let [t     (tax/create-taxonomy)
+            edges (into #{} (for [a (range n), b (range (inc a) n)
+                                  :when (< (.nextDouble rnd) 0.35)]
+                              [a b]))]
+        (doseq [[i [a b]] (map-indexed vector (sort edges))]
+          (tax/add-genlCx t (cx a) (cx b) (inc i)))
+        (is (every? (fn [c]
+                      (= (tax/max-context-children t c)
+                         (into #{} (filter #(contains? (tax/min-context-parents t %) c))
+                               (tax/context-children-global t c))))
+                    (map cx (range n)))
+            (str "trial " trial " edges " (sort edges)))
+        (is (every? (fn [c]
+                      (let [near (tax/min-context-parents t c)
+                            up   (disj (set (tax/context-up t c)) c)]
+                        (= up (into #{} (mapcat #(tax/context-up t %)) near))))
+                    (map cx (range n)))
+            "every context a context sees is seen through a minimal parent")))))
+
 (deftest nearest-of-keeps-mutually-subsuming-neighbours
   ;; the closures are given as a map, so the cycle needs no taxonomy that admits one
   (let [ends    @#'tax/extremal-types

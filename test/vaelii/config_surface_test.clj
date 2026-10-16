@@ -305,6 +305,7 @@
    "MATRIX_JVM_OPTS"   "scripts/test-matrix.sh, extra JVM_OPTS for every configuration"
    "TEST_MATRIX_SEED"  "scripts/test-matrix.sh, the seed its launch order is shuffled with"
    "MATRIX_HEARTBEAT"  "scripts/test-matrix.sh, seconds between its progress lines"
+   "MATRIX_SLOTS_EVERY" "scripts/test-matrix.sh, seconds between re-reads of its slot count"
    "ALLOW_WORKTREE_RUN" "scripts/lib/slots.sh, lets a matrix, sweep or perf run in a worktree"})
 
 (deftest an-unpinned-switch-is-read-by-the-script-it-names

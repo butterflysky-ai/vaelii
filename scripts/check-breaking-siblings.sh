@@ -16,8 +16,9 @@
 #
 # ## The hook it reads
 #
-# Every Breaking entry carries one line beside its `*Class:*` (CONTRIBUTING
-# §3.8), holding one backticked token per name a caller would have written:
+# Every entry sits under a `### ` heading naming its class, and every Breaking
+# entry carries one line (CONTRIBUTING §3.8) holding one backticked token per name
+# a caller would have written:
 #
 #   *Breaks:* `:record-space`, `:index-space`
 #
@@ -227,51 +228,38 @@ function headline(   h) {
   if (length(h) > 96) h = substr(h, 1, 93) "..."
   return h
 }
-# The word an entry states its class with, lowercased, or "" when it states none
-# in a `*Class:*` line.  Read off that line alone — the argument after it is prose
-# and says "breaking" as often as not.
-function class_word(   s) {
-  if (body !~ /\*Class:\*/) return ""
-  s = body
-  sub(/.*\*Class:\*/, "", s)
-  sub(/\n.*/, "", s)
-  gsub(/[*`]/, " ", s)
-  sub(/^[ \t]+/, "", s)
-  sub(/[^A-Za-z].*/, "", s)
-  return tolower(s)
-}
+# The class of the entries below a `### ` heading is the first word of the heading,
+# lowercased: `### Breaking`, `### Fix: storage`.  An entry above every such
+# heading in its section states no class.
 function flush(   i, cls, cw, headlined) {
   if (!started) return
+  cw  = heading_class
   cls = "other"
-  if (body ~ /\*\*Breaking:/ || body ~ /\*Class:\* *\**Breaking/) cls = "breaking"
-  else if (body ~ /\*\*Refusal:/ || body ~ /\*Class:\* *\**Refusal/) cls = "refusal"
+  if (body ~ /\*\*Breaking:/ || cw == "breaking") cls = "breaking"
+  else if (body ~ /\*\*Refusal:/ || cw == "refusal") cls = "refusal"
   # THE CLASS DECIDES THE RELEASE NUMBER, so an unreadable one may not pass as
   # Additive by default.  The two tests above match a word; everything else they
   # see is "other" — which is what Additive and Fix look like, and what a typo
-  # looks like too, so `Braeking` would skip the Breaking treatment silently,
+  # looks like too, so `### Braeking` would skip the Breaking treatment silently,
   # which is the wrong direction to fail in.  An entry states its class in its
-  # headline or in a `*Class:*` line, and where it is the latter the word has to
-  # be one CONTRIBUTING §3.8 defines.  Additive and Fix are both "other" here on
+  # headline or in the `### ` heading above it, and the word in the heading has to be
+  # one CONTRIBUTING §3.8 defines.  Additive and Fix are both "other" here on
   # purpose: neither owes a `*Breaks:*` or a `*Migration:*` line, so the checks
   # below have nothing to ask them, and the class check alone reads the word.
-  cw        = class_word()
   headlined = (body ~ /^- \*\*(Breaking|Refusal):/)
   if (cw == "") {
     if (!headlined) printf "X\t%s\t%s\n", headline(), "states no class"
   } else if (cw !~ /^(breaking|refusal|additive|fix|internal|neither|none)$/) {
     printf "X\t%s\t%s\n", headline(), "unknown class `" cw "`"
   }
-  # A **mixed** entry states the weaker class first and the stronger one in prose —
-  # "*Class:* Additive for the reading; **Breaking** for the refusal message" — and both
-  # tests above read the first word, so the entry classified as `other` and its
-  # `*Breaks:*` tokens were never put to a sibling.  Nothing said so: `report_entry`
-  # prints only breaking and refusal, and `--strict` exited 0.  The class decides the
-  # release number, so an entry naming a stronger one anywhere in its body has to lead
-  # with it.
+  # An entry under a weaker heading that names a stronger class in its body —
+  # "Additive for the reading; **Breaking** for the refusal message" — is classified
+  # `other`, and its `*Breaks:*` tokens are never put to a sibling.  The class decides
+  # the release number, so such an entry goes under the stronger heading.
   if (cls != "breaking" && body ~ /\*\*Breaking\*\*/)
-    printf "X\t%s\t%s\n", headline(), "names **Breaking** in its body but classifies as `" cw "` — lead with the strongest class"
+    printf "X\t%s\t%s\n", headline(), "names **Breaking** in its body but sits under `" cw "` — move it under ### Breaking"
   if (cls != "breaking" && cls != "refusal" && body ~ /\*\*Refusal\*\*/)
-    printf "X\t%s\t%s\n", headline(), "names **Refusal** in its body but classifies as `" cw "` — lead with the strongest class"
+    printf "X\t%s\t%s\n", headline(), "names **Refusal** in its body but sits under `" cw "` — move it under ### Refusal"
   # §3.8 asks a Breaking or Refusal entry for a migration line, and nothing read
   # it until now: the sibling sweep answers "who does this break", and a caller
   # who reads the answer next needs "what do I write instead".
@@ -291,6 +279,7 @@ function flush(   i, cls, cw, headlined) {
   next
 }
 !insec { next }
+/^### / { flush(); heading_class = tolower($2); sub(/[^a-z].*/, "", heading_class); next }
 # A col-0 line that is not a bullet ends the entry it follows: a section may
 # carry a lead paragraph and a table between its entries.
 /^[^ ]/ && !/^- / { flush(); next }

@@ -51,22 +51,22 @@
 
 (tu/deftest-kb unknown-holds-for-what-is-not-derivable
   (tu/with-terms [flies happy Tweety]
-    (v/assert kb (list 'flies Tweety) 'CxWell)
+    (v/assert kb (list flies Tweety) 'CxWell)
     (testing "a fact that is not stored is unknown"
-      (is (v/ask? kb (list 'unknown (list 'happy Tweety))))
-      (is (not (v/ask? kb (list 'unknown (list 'flies Tweety))))
+      (is (v/ask? kb (list 'unknown (list happy Tweety))))
+      (is (not (v/ask? kb (list 'unknown (list flies Tweety))))
           "a stored, believed fact is NOT unknown"))))
 
 (tu/deftest-kb unknown-follows-belief-a-later-fact-flips-it
   (tu/with-terms [flies Tweety]
     (testing "before the fact arrives, the literal is unknown"
-      (is (v/ask? kb (list 'unknown (list 'flies Tweety)))))
-    (let [h (v/assert kb (list 'flies Tweety) 'CxWell)]
+      (is (v/ask? kb (list 'unknown (list flies Tweety)))))
+    (let [h (v/assert kb (list flies Tweety) 'CxWell)]
       (testing "once asserted and believed, it is no longer unknown"
-        (is (not (v/ask? kb (list 'unknown (list 'flies Tweety))))))
+        (is (not (v/ask? kb (list 'unknown (list flies Tweety))))))
       (v/retract! kb h)
       (testing "retracting the fact makes it unknown again"
-        (is (v/ask? kb (list 'unknown (list 'flies Tweety))))))))
+        (is (v/ask? kb (list 'unknown (list flies Tweety))))))))
 
 (tu/deftest-kb unknown-refuses-an-open-goal
   ;; "must be fully bound to evaluate": an open `(unknown (flies ?x))` is not a test
@@ -84,21 +84,21 @@
 
 (tu/deftest-kb there-exists-is-a-witnessed-existence-check
   (tu/with-terms [parentOf Ann Tom Nemo]
-    (v/assert kb (list 'parentOf Ann Tom) 'CxWell)
+    (v/assert kb (list parentOf Ann Tom) 'CxWell)
     (testing "holds when the body is witnessed, projecting the variable out"
-      (is (v/ask? kb (list 'thereExists '?x (list 'parentOf '?x Tom))))
-      (is (empty? (get (tu/sole-answer (v/ask kb (list 'thereExists '?x (list 'parentOf '?x Tom)))) '?x))
+      (is (v/ask? kb (list 'thereExists '?x (list parentOf '?x Tom))))
+      (is (empty? (get (tu/sole-answer (v/ask kb (list 'thereExists '?x (list parentOf '?x Tom)))) '?x))
           "the quantified variable does not leak into the answer"))
     (testing "fails when nothing witnesses it"
-      (is (not (v/ask? kb (list 'thereExists '?x (list 'parentOf '?x Nemo))))))))
+      (is (not (v/ask? kb (list 'thereExists '?x (list parentOf '?x Nemo))))))))
 
 (tu/deftest-kb unknown-combined-with-there-exists
   (tu/with-terms [parentOf Ann Tom Orphan]
-    (v/assert kb (list 'parentOf Ann Tom) 'CxWell)
+    (v/assert kb (list parentOf Ann Tom) 'CxWell)
     (testing "(unknown (thereExists ...)) is 'nobody stands in the relation'"
-      (is (v/ask? kb (list 'unknown (list 'thereExists '?x (list 'parentOf '?x Orphan))))
+      (is (v/ask? kb (list 'unknown (list 'thereExists '?x (list parentOf '?x Orphan))))
           "no known parent of Orphan")
-      (is (not (v/ask? kb (list 'unknown (list 'thereExists '?x (list 'parentOf '?x Tom)))))
+      (is (not (v/ask? kb (list 'unknown (list 'thereExists '?x (list parentOf '?x Tom)))))
           "Tom has a known parent, so it is not unknown"))))
 
 ;; ---- neither is assertible ----------------------------------------------
@@ -107,42 +107,42 @@
   (tu/with-terms [flies Tweety]
     (testing "asserting a query operator as a fact is refused (it stores nothing)"
       (is (thrown? clojure.lang.ExceptionInfo
-                   (v/assert kb (list 'unknown (list 'flies Tweety)) 'CxWell)))
+                   (v/assert kb (list 'unknown (list flies Tweety)) 'CxWell)))
       (is (thrown? clojure.lang.ExceptionInfo
-                   (v/assert kb (list 'thereExists '?x (list 'flies '?x)) 'CxWell))))))
+                   (v/assert kb (list 'thereExists '?x (list flies '?x)) 'CxWell))))))
 
 ;; ---- unknown in a rule antecedent: derive-time blocking -----------------
 
 (tu/deftest-kb unknown-antecedent-fires-and-blocks-at-derive-time
   (tu/with-terms [pp qq rr Aa Bb]
     ;; (pp ?x) & unknown(qq ?x) => (rr ?x)
-    (v/assert kb (list 'implies (list 'and (list 'pp '?x) (list 'unknown (list 'qq '?x))) (list 'rr '?x))
+    (v/assert kb (list 'implies (list 'and (list pp '?x) (list 'unknown (list qq '?x))) (list rr '?x))
               'CxWell {:direction :forward})
-    (v/assert kb (list 'pp Aa) 'CxWell)          ; qq Aa absent -> fires
-    (v/assert kb (list 'qq Bb) 'CxWell)          ; qq Bb present *before* pp Bb -> blocked
-    (v/assert kb (list 'pp Bb) 'CxWell)
+    (v/assert kb (list pp Aa) 'CxWell)          ; qq Aa absent -> fires
+    (v/assert kb (list qq Bb) 'CxWell)          ; qq Bb present *before* pp Bb -> blocked
+    (v/assert kb (list pp Bb) 'CxWell)
     (testing "fires when the NAF query is not derivable"
-      (is (v/ask? kb (list 'rr Aa) 'CxWell)))
+      (is (v/ask? kb (list rr Aa) 'CxWell)))
     (testing "does not fire when the NAF query holds at derive time"
-      (is (not (v/ask? kb (list 'rr Bb) 'CxWell))))))
+      (is (not (v/ask? kb (list rr Bb) 'CxWell))))))
 
 ;; ---- order independence: block on late arrival, revive on retract -------
 
 (tu/deftest-kb unknown-is-order-independent-block-then-revive
   (tu/with-terms [pp qq rr Aa]
-    (v/assert kb (list 'implies (list 'and (list 'pp '?x) (list 'unknown (list 'qq '?x))) (list 'rr '?x))
+    (v/assert kb (list 'implies (list 'and (list pp '?x) (list 'unknown (list qq '?x))) (list rr '?x))
               'CxWell {:direction :forward})
-    (v/assert kb (list 'pp Aa) 'CxWell)
+    (v/assert kb (list pp Aa) 'CxWell)
     (testing "derived while the NAF query is absent"
-      (is (v/ask? kb (list 'rr Aa) 'CxWell)))
-    (let [h (v/assert kb (list 'qq Aa) 'CxWell {:strength :monotonic})]
+      (is (v/ask? kb (list rr Aa) 'CxWell)))
+    (let [h (v/assert kb (list qq Aa) 'CxWell {:strength :monotonic})]
       (testing "a later fact that satisfies the query blocks and sweeps the conclusion"
-        (is (not (v/ask? kb (list 'rr Aa) 'CxWell)))
-        (is (nil? (v/handle-of kb (list 'rr Aa) 'CxWell))
+        (is (not (v/ask? kb (list rr Aa) 'CxWell)))
+        (is (nil? (v/handle-of kb (list rr Aa) 'CxWell))
             "the conclusion is deleted, not merely disbelieved (garbage collection, not defeat)"))
       (v/retract! kb h)
       (testing "retracting it revives the conclusion by re-derivation"
-        (is (v/ask? kb (list 'rr Aa) 'CxWell))))))
+        (is (v/ask? kb (list rr Aa) 'CxWell))))))
 
 (tu/deftest-kb a-guarded-firing-over-monotonic-facts-confers-default
   ;; docs/reference.md D14.  Every write is :monotonic and nothing blocks the guard; the
@@ -256,33 +256,34 @@
 (tu/deftest-kb unknown-with-there-exists-in-a-rule
   (tu/with-terms [person owns ownerless Zed]
     ;; a person nothing owns is ownerless
-    (v/assert kb (list 'implies (list 'and (list 'person '?p)
-                                      (list 'unknown (list 'thereExists '?c (list 'owns '?c '?p))))
-                       (list 'ownerless '?p))
+    (v/assert kb (list 'implies (list 'and (list person '?p)
+                                      (list 'unknown (list 'thereExists '?c (list owns '?c '?p))))
+                       (list ownerless '?p))
               'CxWell {:direction :forward})
-    (v/assert kb (list 'person Zed) 'CxWell)
+    (v/assert kb (list person Zed) 'CxWell)
     (testing "holds while nothing witnesses the existential"
-      (is (v/ask? kb (list 'ownerless Zed) 'CxWell)))
-    (let [h (v/assert kb (list 'owns (tu/tmp-ind "Hat") Zed) 'CxWell)]
+      (is (v/ask? kb (list ownerless Zed) 'CxWell)))
+    (let [h (v/assert kb (list owns (tu/tmp-ind "Hat") Zed) 'CxWell)]
       (testing "a witness blocks it"
-        (is (not (v/ask? kb (list 'ownerless Zed) 'CxWell))))
+        (is (not (v/ask? kb (list ownerless Zed) 'CxWell))))
       (v/retract! kb h)
       (testing "removing the witness revives it"
-        (is (v/ask? kb (list 'ownerless Zed) 'CxWell))))))
+        (is (v/ask? kb (list ownerless Zed) 'CxWell))))))
 
 (tu/deftest-kb standalone-there-exists-antecedent-is-a-parent
-  (tu/with-terms [person parentOf a_parent Dad Kid Childless]
+  (tu/with-terms [person human parentOf a_parent Dad Kid Childless]
     ;; positive existential antecedent: a person with a child is a parent
-    (v/assert kb (list 'implies (list 'and (list 'person '?x)
-                                      (list 'thereExists '?y (list 'parentOf '?x '?y)))
-                       (list 'a_parent '?x))
+    (v/assert kb (list 'implies (list 'and (list person '?x)
+                                      (list 'thereExists '?y (list parentOf '?x '?y)))
+                       (list a_parent '?x))
               'CxWell {:direction :forward})
-    (v/assert kb (list 'human Dad) 'CxWell)
-    (v/assert kb (list 'person Childless) 'CxWell)
-    (v/assert kb (list 'parentOf Dad Kid) 'CxWell)
+    (v/assert kb (list 'genl human person) 'CxUniverse)
+    (v/assert kb (list human Dad) 'CxWell)
+    (v/assert kb (list person Childless) 'CxWell)
+    (v/assert kb (list parentOf Dad Kid) 'CxWell)
     (testing "fires for a witnessed existential, not for an unwitnessed one"
-      (is (v/ask? kb (list 'a_parent Dad) 'CxWell))
-      (is (not (v/ask? kb (list 'a_parent Childless) 'CxWell))))))
+      (is (v/ask? kb (list a_parent Dad) 'CxWell))
+      (is (not (v/ask? kb (list a_parent Childless) 'CxWell))))))
 
 ;; ---- a conjunctive NAF query --------------------------------------------
 ;; `(unknown (and A B))` is `exceptWhen`'s conjunction inlined per literal: closure
@@ -368,13 +369,13 @@
   ;; predicate *inside* the quantifier (`watched-query` per conjunct): keyed on
   ;; `thereExists`, which no fact carries, the arrival that completes the query is invisible.
   (tu/with-terms [person kidOf adult lonely Ppp Qqq]
-    (v/assert kb (list 'implies (list 'and (list 'person '?x)
+    (v/assert kb (list 'implies (list 'and (list person '?x)
                                       (list 'unknown
                                             (list 'and (list 'thereExists '?c (list kidOf '?x '?c))
                                                   (list adult '?x))))
                        (list lonely '?x))
               'CxWell {:direction :forward})
-    (v/assert kb (list 'person Ppp) 'CxWell)
+    (v/assert kb (list person Ppp) 'CxWell)
     (v/assert kb (list adult Ppp) 'CxWell)
     (is (v/ask? kb (list lonely Ppp) 'CxWell)
         "adult but childless — the existential conjunct is short, so the query does not hold")
@@ -428,13 +429,13 @@
   ;; its body counts — the per-conjunct case of what `naf-predicates` has always done for
   ;; a bare aggregate query.
   (tu/with-terms [person kidOf adult gg Moe K1 K2]
-    (v/assert kb (list 'implies (list 'and (list 'person '?x)
+    (v/assert kb (list 'implies (list 'and (list person '?x)
                                       (list 'unknown
                                             (list 'and (list 'agg/count 2 '?c (list kidOf '?x '?c))
                                                   (list adult '?x))))
                        (list gg '?x))
               'CxWell {:direction :forward})
-    (v/assert kb (list 'person Moe) 'CxWell)
+    (v/assert kb (list person Moe) 'CxWell)
     (v/assert kb (list adult Moe) 'CxWell)
     (v/assert kb (list kidOf Moe K1) 'CxWell)
     (is (v/ask? kb (list gg Moe) 'CxWell)
@@ -699,6 +700,134 @@
       (is (= :closed-extent
              (:reason (v/why-not kb (list month_of_year Smarch) CxCalendar)))))))
 
+;; ---- a closed extent per argument: closedExtentForArg -------------------
+
+(tu/deftest-kb a-per-argument-closed-extent-closes-only-the-named-value
+  ;; "the accounts on HostA are exactly the stored ones"
+  (tu/with-terms [accountOn Alice Carol HostA HostB CxHosts]
+    (v/assert kb (list 'genlCx CxHosts 'CxUniverse) 'CxUniverse)
+    (v/assert kb (list accountOn Alice HostA) CxHosts)
+    (testing "without the grant, an account nobody listed is merely unknown"
+      (is (not (v/ask? kb (list 'not (list accountOn Carol HostA)) CxHosts))))
+    (v/assert kb (list 'closedExtentForArg accountOn 2 HostA) CxHosts)
+    (testing "under the grant, nothing answering the positive is what answers the negative"
+      (is (v/ask? kb (list 'not (list accountOn Carol HostA)) CxHosts))
+      (is (v/ask? kb (list accountOn Alice HostA) CxHosts))
+      (is (not (v/ask? kb (list 'not (list accountOn Alice HostA)) CxHosts))
+          "a member is not refuted by its own extent"))
+    (testing "a goal whose argument 2 is another value stays open-world"
+      (is (not (v/ask? kb (list 'not (list accountOn Carol HostB)) CxHosts))))))
+
+(tu/deftest-kb the-binary-sugar-derives-the-ternary-grant
+  (tu/with-terms [accountOn Alice Carol HostA HostB CxHosts]
+    (v/assert kb (list 'genlCx CxHosts 'CxUniverse) 'CxUniverse)
+    (v/assert kb (list accountOn Alice HostA) CxHosts)
+    (v/assert kb (list 'closedExtentForArg2 accountOn HostA) CxHosts)
+    (testing "the sugar derives the ternary"
+      (is (v/ask? kb (list 'closedExtentForArg accountOn 2 HostA) CxHosts)))
+    (testing "and reads exactly as the ternary does"
+      (is (v/ask? kb (list 'not (list accountOn Carol HostA)) CxHosts))
+      (is (v/ask? kb (list accountOn Alice HostA) CxHosts))
+      (is (not (v/ask? kb (list 'not (list accountOn Carol HostB)) CxHosts))))))
+
+(tu/deftest-kb a-per-argument-closed-extent-is-scoped-to-its-context
+  (tu/with-terms [accountOn Alice Carol HostA CxHosts CxSibling]
+    (v/assert kb (list 'genlCx CxHosts 'CxUniverse) 'CxUniverse)
+    (v/assert kb (list 'genlCx CxSibling 'CxUniverse) 'CxUniverse)
+    (v/assert kb (list accountOn Alice HostA) 'CxUniverse)
+    (v/assert kb (list 'closedExtentForArg accountOn 2 HostA) CxHosts)
+    (is (v/ask? kb (list 'not (list accountOn Carol HostA)) CxHosts))
+    (is (not (v/ask? kb (list 'not (list accountOn Carol HostA)) CxSibling))
+        "a sibling theory without the grant answers open-world")))
+
+(tu/deftest-kb a-per-argument-closed-extent-follows-belief
+  (tu/with-terms [accountOn Alice HostA CxHosts]
+    (v/assert kb (list 'genlCx CxHosts 'CxUniverse) 'CxUniverse)
+    (v/assert kb (list 'closedExtentForArg accountOn 2 HostA) CxHosts)
+    (let [h (v/assert kb (list accountOn Alice HostA) CxHosts)]
+      (is (not (v/ask? kb (list 'not (list accountOn Alice HostA)) CxHosts)))
+      (v/retract! kb h)
+      (is (v/ask? kb (list 'not (list accountOn Alice HostA)) CxHosts)
+          "a retracted member leaves the extent, and the negative holds"))))
+
+(tu/deftest-kb a-per-argument-closed-extent-needs-the-position-ground
+  (tu/with-terms [accountOn Alice HostA CxHosts]
+    (v/assert kb (list 'genlCx CxHosts 'CxUniverse) 'CxUniverse)
+    (v/assert kb (list accountOn Alice HostA) CxHosts)
+    (v/assert kb (list 'closedExtentForArg accountOn 2 HostA) CxHosts)
+    (is (empty? (v/ask kb (list 'not (list accountOn Alice '?host)) CxHosts))
+        "an open argument 2 is a search over the complement, which the grant does not license")))
+
+(tu/deftest-kb a-per-argument-closed-extent-rule-antecedent-is-negation-as-failure
+  (tu/with-terms [accountOn candidate unknown_on_host Carol HostA CxHosts]
+    (v/assert kb (list 'genlCx CxHosts 'CxUniverse) 'CxUniverse)
+    (v/assert kb (list 'closedExtentForArg accountOn 2 HostA) CxHosts)
+    (v/assert kb (list 'implies (list 'and (list candidate '?u)
+                                      (list 'not (list accountOn '?u HostA)))
+                       (list unknown_on_host '?u))
+              CxHosts {:direction :forward})
+    (v/assert kb (list candidate Carol) CxHosts)
+    (testing "the rule fires on the absence of an account, with nothing negative stored"
+      (is (v/ask? kb (list unknown_on_host Carol) CxHosts)))
+    (v/assert kb (list accountOn Carol HostA) CxHosts)
+    (testing "the account arriving withdraws the firing"
+      (is (not (v/ask? kb (list unknown_on_host Carol) CxHosts))))))
+
+(tu/deftest-kb a-per-argument-closed-extent-cycle-through-negation-is-refused
+  (tu/with-terms [accountOn candidate HostA CxHosts]
+    (v/assert kb (list 'genlCx CxHosts 'CxUniverse) 'CxUniverse)
+    (v/assert kb (list 'closedExtentForArg accountOn 2 HostA) CxHosts)
+    (testing "a rule concluding P whose body reads (not (P …)) under the grant"
+      (is (thrown-with-msg?
+           clojure.lang.ExceptionInfo #"not stratified"
+           (v/assert kb (list 'implies (list 'and (list candidate '?u)
+                                             (list 'not (list accountOn '?u HostA)))
+                              (list accountOn '?u HostA))
+                     CxHosts {:direction :forward}))))))
+
+(tu/deftest-kb a-per-argument-grant-that-would-close-a-cycle-is-refused
+  ;; The other arrival order: the rule is stored first, and the grant is what would add
+  ;; the negative edge.
+  (tu/with-terms [accountOn candidate HostA CxHosts]
+    (v/assert kb (list 'genlCx CxHosts 'CxUniverse) 'CxUniverse)
+    (v/assert kb (list 'implies (list 'and (list candidate '?u)
+                                      (list 'not (list accountOn '?u HostA)))
+                       (list accountOn '?u HostA))
+              CxHosts {:direction :forward})
+    (testing "the ternary grant"
+      (is (thrown-with-msg?
+           clojure.lang.ExceptionInfo #"not stratified"
+           (v/assert kb (list 'closedExtentForArg accountOn 2 HostA) CxHosts))))
+    (testing "and its binary sugar"
+      (is (thrown-with-msg?
+           clojure.lang.ExceptionInfo #"not stratified"
+           (v/assert kb (list 'closedExtentForArg2 accountOn HostA) CxHosts))))))
+
+(tu/deftest-kb a-whole-closure-entails-every-per-argument-closure-inertly
+  (let [r '(implies (and (closed_extent_predicate ?pred) (admitsArgnum ?pred ?position)
+                         (thing ?value))
+                    (closedExtentForArg ?pred ?position ?value))
+        h (v/handle-of kb (list 'set/inertRule r) 'CxUniverse)]
+    (testing "the defining rule is stored in CxUniverse, believed, and run by neither engine"
+      (is (some? h))
+      (is (v/in? kb h))
+      (is (= #{} (:engines (v/sentex kb h)))))
+    (tu/with-terms [accountOn Alice HostA CxHosts]
+      (v/assert kb (list 'genlCx CxHosts 'CxUniverse) 'CxUniverse)
+      (v/assert kb (list 'binary_predicate accountOn) CxHosts)
+      (v/assert kb (list accountOn Alice HostA) CxHosts)
+      (v/assert kb (list 'closed_extent_predicate accountOn) CxHosts)
+      (is (empty? (v/sentexes-matching kb (list 'closedExtentForArg accountOn '?n '?v) CxHosts))
+          "a whole-predicate grant stores no per-argument grant"))))
+
+(tu/deftest-kb why-not-says-the-extent-is-closed-for-the-argument
+  (tu/with-terms [accountOn Carol HostA HostB CxHosts]
+    (v/assert kb (list 'genlCx CxHosts 'CxUniverse) 'CxUniverse)
+    (v/assert kb (list 'closedExtentForArg accountOn 2 HostA) CxHosts)
+    (is (= :closed-extent (:reason (v/why-not kb (list accountOn Carol HostA) CxHosts))))
+    (is (= :not-stored (:reason (v/why-not kb (list accountOn Carol HostB) CxHosts)))
+        "another value of the argument is simply not stored")))
+
 ;; ---- forall: sugar for the nested NAF ----------------------------------
 
 (deftest forall-desugars-to-a-nested-unknown
@@ -857,17 +986,17 @@
     (testing "an unknown whose free variable no generator binds is refused"
       (is (thrown-with-msg?
            clojure.lang.ExceptionInfo #"not closed"
-           (v/assert kb (list 'implies (list 'and (list 'person '?x) (list 'unknown (list 'likes '?x '?z)))
-                              (list 'loner '?x))
+           (v/assert kb (list 'implies (list 'and (list person '?x) (list 'unknown (list likes '?x '?z)))
+                              (list loner '?x))
                      'CxWell {:direction :forward}))))
     (testing "and so is a conjunction one of whose conjuncts is open — closure is what
               makes the conjuncts independent ground checks"
       (is (thrown-with-msg?
            clojure.lang.ExceptionInfo #"not closed"
-           (v/assert kb (list 'implies (list 'and (list 'person '?x)
+           (v/assert kb (list 'implies (list 'and (list person '?x)
                                              (list 'unknown (list 'and (list knows '?x)
                                                                   (list likes '?x '?z))))
-                              (list 'loner '?x))
+                              (list loner '?x))
                      'CxWell {:direction :forward}))))))
 
 (tu/deftest-kb there-exists-variable-must-be-local
@@ -875,8 +1004,8 @@
     (testing "a quantified variable that escapes its thereExists is refused"
       (is (thrown-with-msg?
            clojure.lang.ExceptionInfo #"escapes its quantifier"
-           (v/assert kb (list 'implies (list 'and (list 'person '?x) (list 'thereExists '?x (list 'foo '?x)))
-                              (list 'bar '?x))
+           (v/assert kb (list 'implies (list 'and (list person '?x) (list 'thereExists '?x (list foo '?x)))
+                              (list bar '?x))
                      'CxWell {:direction :forward}))))))
 
 ;; ---- stratification: no cycle through negation --------------------------
@@ -884,18 +1013,18 @@
 (tu/deftest-kb a-cycle-through-unknown-is-refused
   (tu/with-terms [aa bb cc dd ee]
     (testing "an acyclic NAF rule is accepted"
-      (is (v/assert kb (list 'implies (list 'and (list 'aa '?x) (list 'unknown (list 'bb '?x)))
-                             (list 'cc '?x))
+      (is (v/assert kb (list 'implies (list 'and (list aa '?x) (list 'unknown (list bb '?x)))
+                             (list cc '?x))
                     'CxWell {:direction :forward})))
     (testing "closing the loop — a rule concluding the NAF predicate — is refused"
       (is (thrown-with-msg?
            clojure.lang.ExceptionInfo #"not stratified"
-           (v/assert kb (list 'implies (list 'cc '?x) (list 'bb '?x)) 'CxWell {:direction :forward}))))
+           (v/assert kb (list 'implies (list cc '?x) (list bb '?x)) 'CxWell {:direction :forward}))))
     (testing "a one-rule cycle (unknown on what it concludes) is refused"
       (is (thrown-with-msg?
            clojure.lang.ExceptionInfo #"not stratified"
-           (v/assert kb (list 'implies (list 'and (list 'dd '?x) (list 'unknown (list 'ee '?x)))
-                              (list 'ee '?x))
+           (v/assert kb (list 'implies (list 'and (list dd '?x) (list 'unknown (list ee '?x)))
+                              (list ee '?x))
                      'CxWell {:direction :forward}))))))
 
 (tu/deftest-kb a-cycle-through-any-conjunct-of-a-NAF-conjunction-is-refused
@@ -928,22 +1057,22 @@
 (tu/deftest-kb every-backward-chainer-evaluates-unknown-in-a-backward-only-rule
   (tu/with-terms [pp qq rr Aa Bb]
     (v/assert kb (list 'set/backwardRule
-                       (list 'implies (list 'and (list 'pp '?x) (list 'unknown (list 'qq '?x)))
-                             (list 'rr '?x)))
+                       (list 'implies (list 'and (list pp '?x) (list 'unknown (list qq '?x)))
+                             (list rr '?x)))
               'CxWell)
-    (v/assert kb (list 'pp Aa) 'CxWell)
-    (v/assert kb (list 'pp Bb) 'CxWell)
-    (v/assert kb (list 'qq Bb) 'CxWell)
+    (v/assert kb (list pp Aa) 'CxWell)
+    (v/assert kb (list pp Bb) 'CxWell)
+    (v/assert kb (list qq Bb) 'CxWell)
     (testing "the rule forward-derives nothing (it is backward-only)"
-      (is (empty? (v/sentexes-matching kb (list 'rr '?x) 'CxWell))))
+      (is (empty? (v/sentexes-matching kb (list rr '?x) 'CxWell))))
     (testing "every backward chainer expands the rule and honours the unknown"
       ;; the node engine (`query` at a depth) and the recur DFS must agree
       (doseq [provable? [#(v/query? kb % 'CxWell {:max-depth 2})
                          #(v/provable? kb % 'CxWell)]]
-        (is (provable? (list 'rr Aa)) "qq Aa absent -> provable")
-        (is (not (provable? (list 'rr Bb))) "qq Bb present -> not provable"))
-      (is (= 1 (count (v/prove kb (list 'rr Aa) 'CxWell))))
-      (is (= 0 (count (v/prove kb (list 'rr Bb) 'CxWell)))))))
+        (is (provable? (list rr Aa)) "qq Aa absent -> provable")
+        (is (not (provable? (list rr Bb))) "qq Bb present -> not provable"))
+      (is (= 1 (count (v/prove kb (list rr Aa) 'CxWell))))
+      (is (= 0 (count (v/prove kb (list rr Bb) 'CxWell)))))))
 
 ;; ---- prove/backward now evaluate a deferred antecedent ------------------
 ;; The gap that was: the recursive chainer discharged an antecedent by fact
@@ -983,17 +1112,17 @@
 
 (tu/deftest-kb unknown-holds-of-a-defeated-default
   (tu/with-terms [happy Zed]
-    (v/assert kb (list 'happy Zed) 'CxWell {:strength :default})
+    (v/assert kb (list happy Zed) 'CxWell {:strength :default})
     (testing "while believed, it is not unknown"
-      (is (not (v/ask? kb (list 'unknown (list 'happy Zed))))))
+      (is (not (v/ask? kb (list 'unknown (list happy Zed))))))
     ;; a monotonic negation defeats the default: (happy Zed) goes OUT but stays stored
-    (v/assert kb (list 'not (list 'happy Zed)) 'CxWell {:strength :monotonic})
+    (v/assert kb (list 'not (list happy Zed)) 'CxWell {:strength :monotonic})
     (testing "the default is now stored-but-disbelieved"
-      (is (some? (v/handle-of kb (list 'happy Zed) 'CxWell)) "still stored")
-      (is (not (v/ask? kb (list 'happy Zed) 'CxWell)) "but not believed"))
+      (is (some? (v/handle-of kb (list happy Zed) 'CxWell)) "still stored")
+      (is (not (v/ask? kb (list happy Zed) 'CxWell)) "but not believed"))
     (testing "so the belief-sensitive unknown now holds"
-      (is (v/ask? kb (list 'unknown (list 'happy Zed))))
-      (is (not (v/ask? kb (list 'unknown (list 'not (list 'happy Zed)))))
+      (is (v/ask? kb (list 'unknown (list happy Zed))))
+      (is (not (v/ask? kb (list 'unknown (list 'not (list happy Zed)))))
           "the believed negation is *not* unknown"))))
 
 (tu/deftest-kb a-defeat-that-releases-an-unknown-antecedent-is-order-independent
@@ -1038,20 +1167,20 @@
 
 (tu/deftest-kb multiple-unknowns-block-if-any-holds
   (tu/with-terms [pp qq ss rr Aa]
-    (v/assert kb (list 'implies (list 'and (list 'pp '?x)
-                                      (list 'unknown (list 'qq '?x))
-                                      (list 'unknown (list 'ss '?x)))
-                       (list 'rr '?x))
+    (v/assert kb (list 'implies (list 'and (list pp '?x)
+                                      (list 'unknown (list qq '?x))
+                                      (list 'unknown (list ss '?x)))
+                       (list rr '?x))
               'CxWell {:direction :forward})
-    (v/assert kb (list 'pp Aa) 'CxWell)
+    (v/assert kb (list pp Aa) 'CxWell)
     (testing "fires only when BOTH inners are absent"
-      (is (v/ask? kb (list 'rr Aa) 'CxWell)))
-    (let [h (v/assert kb (list 'ss Aa) 'CxWell)]
+      (is (v/ask? kb (list rr Aa) 'CxWell)))
+    (let [h (v/assert kb (list ss Aa) 'CxWell)]
       (testing "one inner holding is enough to block"
-        (is (not (v/ask? kb (list 'rr Aa) 'CxWell))))
+        (is (not (v/ask? kb (list rr Aa) 'CxWell))))
       (v/retract! kb h)
       (testing "and revives when it leaves"
-        (is (v/ask? kb (list 'rr Aa) 'CxWell))))))
+        (is (v/ask? kb (list rr Aa) 'CxWell))))))
 
 ;; ---- subtype fan-out: the NAF query and its trigger follow genl ---------
 ;; `(unknown (super ?x))` must be blocked by a `(sub ?x)` fact — the level-6 query
@@ -1089,22 +1218,22 @@
     (v/assert kb (list 'genlCx CxSubA CxPar) 'CxWell)
     (v/assert kb (list 'genlCx CxSubB CxPar) 'CxWell)
     ;; rule + generator live in SubA, so the conclusion is placed in SubA
-    (v/assert kb (list 'implies (list 'and (list 'pp '?x) (list 'unknown (list 'qq '?x)))
-                       (list 'rr '?x))
+    (v/assert kb (list 'implies (list 'and (list pp '?x) (list 'unknown (list qq '?x)))
+                       (list rr '?x))
               CxSubA {:direction :forward})
-    (v/assert kb (list 'pp Aa) CxSubA)
+    (v/assert kb (list pp Aa) CxSubA)
     (testing "the conclusion is derived in SubA"
-      (is (v/ask? kb (list 'rr Aa) CxSubA)))
+      (is (v/ask? kb (list rr Aa) CxSubA)))
     ;; a qq fact in the *sibling* SubB is invisible from SubA, so it must NOT block
-    (let [h (v/assert kb (list 'qq Aa) CxSubB)]
+    (let [h (v/assert kb (list qq Aa) CxSubB)]
       (testing "a fact in an unseen sibling context does not satisfy the NAF query"
-        (is (v/ask? kb (list 'rr Aa) CxSubA)
+        (is (v/ask? kb (list rr Aa) CxSubA)
             "(qq Aa) in SubB is not visible from SubA, so (unknown (qq Aa)) still holds"))
       (v/retract! kb h))
     ;; but a qq fact in SubA itself IS visible, so it blocks
-    (let [h (v/assert kb (list 'qq Aa) CxSubA)]
+    (let [h (v/assert kb (list qq Aa) CxSubA)]
       (testing "a fact in the placement context does block"
-        (is (not (v/ask? kb (list 'rr Aa) CxSubA))))
+        (is (not (v/ask? kb (list rr Aa) CxSubA))))
       (v/retract! kb h))))
 
 ;; ---- asked again at every reader below the placement --------------------
@@ -1564,11 +1693,11 @@
 
 (tu/deftest-kb there-exists-binds-a-vector-of-variables
   (tu/with-terms [rel Aa Bb]
-    (v/assert kb (list 'rel Aa Bb) 'CxWell)
+    (v/assert kb (list rel Aa Bb) 'CxWell)
     (testing "a vector binder closes off all its variables"
-      (is (= #{} (sx/free-vars (list 'thereExists ['?x '?y] (list 'rel '?x '?y)))))
-      (is (v/ask? kb (list 'thereExists ['?x '?y] (list 'rel '?x '?y))))
-      (is (not (v/ask? kb (list 'thereExists ['?x '?y] (list 'rel '?x 'NoSuchThing))))))))
+      (is (= #{} (sx/free-vars (list 'thereExists ['?x '?y] (list rel '?x '?y)))))
+      (is (v/ask? kb (list 'thereExists ['?x '?y] (list rel '?x '?y))))
+      (is (not (v/ask? kb (list 'thereExists ['?x '?y] (list rel '?x 'NoSuchThing))))))))
 
 (tu/deftest-kb a-lookup-budget-keeps-unknown-rather-than-inverting-it
   ;; dropping `UnknownProver` past the cap would not under-report: an empty result for

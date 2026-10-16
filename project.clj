@@ -54,7 +54,7 @@
              "-XX:G1PeriodicGCInterval=15000" "-XX:ParallelGCThreads=2" "-XX:ConcGCThreads=1"]
       (or heap (not (re-find #"-Xmx" jvm-opts))) (conj (str "-Xmx" (or heap "4g"))))))
 
-(defproject com.vaelii/vaelii "0.26.0"
+(defproject com.vaelii/vaelii "0.27.0"
   :description "Vaelii — a contextualized common-sense knowledge base with a
                 count-aware trie index, forward/backward inference,
                 and JTMS truth maintenance, over an in-memory or on-disk store."

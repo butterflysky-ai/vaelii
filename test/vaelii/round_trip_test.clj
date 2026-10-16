@@ -883,6 +883,83 @@
               (is (empty? (dangling-refs target)))))))
       (finally (rm-rf! dump)))))
 
+(defn- splice-twin-rule-dump!
+  "Edit `dir` into two dump rules that are one rule here, each with its own copy of the
+  same meta-sentex, and return `{:twin-meta … :rests-on-it …}`.
+
+  The rule a meta-sentex names is stored a second time under a fresh id, which the sentex
+  pass collapses onto the first.  The meta-sentex is stored a second time too, naming
+  that fresh id: as the dump spells them the two meta-sentexes differ, and they are one
+  only once the rewrite resolves both ids to the one rule.  A justification frame hangs
+  off the copy, so the merge has a reference to carry across."
+  [^File dir]
+  (let [meta*   (read-string (slurp (io/file dir "meta.edn")))
+        comp*   (:compression meta* :none)
+        sx-file (io/file dir "sentexes.nippy.stream")
+        j-file  (io/file dir "justifications.nippy.stream")
+        frames  (vec (frames/read-chunked-seq sx-file comp*))
+        jframes (vec (frames/read-chunked-seq j-file comp*))
+        named   (fn [s] (some sx/handle-id (tree-seq sequential? seq s)))
+        meta-fr (first (filter #(named (:sentence %)) frames))
+        rule-fr (first (filter #(= (named (:sentence meta-fr)) (:id %)) frames))
+        plain   (first (remove #(named (:sentence %)) frames))
+        twin    (+ 1000 (long (apply max (keep :id frames))))
+        frames* (conj frames
+                      (assoc rule-fr :id twin)
+                      (-> meta-fr
+                          (assoc :id (inc twin))
+                          (update :sentence
+                                  #(walk/postwalk
+                                    (fn [x] (if (sx/handle-id x) (sx/sentex-handle twin) x))
+                                    %))))
+        jframe  {:id          (inc (long (apply max 0 (keep :id jframes))))
+                 :informant   :import
+                 :antecedents [(inc twin)]
+                 :consequence (:id plain)
+                 :bindings    {}
+                 :strength    :monotonic}]
+    (is (some? rule-fr) "the fixture exports the rule its meta-sentex names, or this proves nothing")
+    (frames/write-frames! sx-file frames* {:compression comp* :chunk-size 64})
+    (frames/write-frames! j-file (conj jframes jframe) {:compression comp* :chunk-size 64})
+    (spit (io/file dir "meta.edn")
+          (pr-str (-> meta*
+                      (update :sentex-count + 2)
+                      (cond-> (:justification-count meta*)
+                        (update :justification-count inc)))))
+    {:twin-meta (inc twin) :rests-on-it (:id jframe)}))
+
+(deftest meta-sentexes-the-rewrite-makes-equal-are-stored-once
+  ;; Two rules that collapse leave two meta-sentexes that differ only by the dump id
+  ;; each names.  The rewrite resolves both to the one rule, and the second is merged
+  ;; onto the first rather than stored beside it — so a second round trip, which sees
+  ;; the two as one key from the start, has nothing left to collapse.
+  (let [dump  (temp-dir "twin-rule")
+        again (temp-dir "twin-rule-again")]
+    (rm-rf! dump)
+    (rm-rf! again)
+    (try
+      (tu/with-cleared-kb [source memory-kb]
+        (build! source (terms))
+        (export/export! source dump {:compression :none})
+        (splice-twin-rule-dump! dump)
+        (tu/with-cleared-kb [target memory-kb]
+          (let [s (imp/import-dump target dump {:belief? :stored})]
+            (testing "the twin rule collapses in the sentex pass and its meta-sentex in the rewrite"
+              (is (= :remapped (:handle-policy s)))
+              (is (= 2 (:collapsed s))))
+            (testing "the store holds each content once"
+              (let [cs (map #(content-of target %) (p/sentex-ids (:records target)))]
+                (is (= (count cs) (count (set cs))))))
+            (testing "the justification resting on the merged copy rests on the survivor"
+              (is (zero? (:dropped-justifications s)))
+              (is (empty? (dangling-refs target))))
+            (export/export! target again {:compression :none})
+            (tu/with-cleared-kb [third memory-kb]
+              (let [s2 (imp/import-dump third again {:belief? :stored})]
+                (is (zero? (:collapsed s2)) "the export carries no record twice")
+                (is (= (v/sentex-count target) (v/sentex-count third))))))))
+      (finally (rm-rf! dump) (rm-rf! again)))))
+
 (deftest recover-leaves-out-a-justification-that-rests-on-nothing
   ;; What `recover` does when a store holds one anyway.  It can: the records are a durable
   ;; store and `delete-sentex!` is on its protocol, so a caller, another dialect's loader,

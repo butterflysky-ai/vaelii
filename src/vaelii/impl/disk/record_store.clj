@@ -813,6 +813,11 @@
     {:sentexes       (kind-fingerprint (:sentexes kinds) e)
      :justifications (kind-fingerprint (:justifications kinds) e)}))
 
+(extend-type DiskRecordStore
+  p/ImageStamping
+  (index-stamp [store] (slot-fingerprint store))
+  (belief-stamp [store] (reasoning-fingerprint store)))
+
 (defn fsync
   "fsync every kind's log + idx, and rewrite the counters blob when the handle counter has
   moved since the last tick.

@@ -403,7 +403,7 @@
     :reset :shape :short-transfer :solver-failed :solver-unavailable
     :stacked-batch
     :stacked-fork :stale-index-layout :stale-index-records :still-exporting :still-loading :still-stopping
-    :still-writing
+    :still-writing :stopping
     :store-unusable :too-many-kbs :too-many-kept :too-many-subscriptions :too-many-waiters
     :torn-snapshot :truncated-dump :unauthorized :unbound-deferred :uncleared-forcing
     :unforkable-index :unknown-backend

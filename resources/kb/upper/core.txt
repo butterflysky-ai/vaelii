@@ -24,6 +24,40 @@
 (unary_predicate closed_extent_predicate)
 (genl closed_extent_predicate predicate)
 
+(comment closedExtentForArg
+         "(closedExtentForArg ?predicate ?position ?value) means that ?predicate's believed extent is complete for the sentences whose argument ?position is ?value: nothing answering a ground (?predicate …) with ?value at ?position is what answers its (not (?predicate …)). The grant closed_extent_predicate makes, narrowed to one argument value. (closedExtentForArg accountOn 2 HostA) says the accounts on HostA are exactly the believed ones, and (accountOn ?x HostB) stays open-world beside it. A goal whose argument ?position is not ground is not closed. Read from the asking context's genlCx ancestor set, and belief-following, as closed_extent_predicate is.")
+(ternary_predicate closedExtentForArg)
+(arg closedExtentForArg 1 predicate)
+(arg closedExtentForArg 2 positive_integer)
+;; A whole-predicate closure entails the per-argument closure at every admitted position and
+;; every value.  Inert: a forward rule would store one grant per value.  (thing ?value) binds
+;; ?value, which range restriction requires of a consequent variable, and is true of every
+;; term.
+(set/inertRule (implies (and (closed_extent_predicate ?pred) (admitsArgnum ?pred ?position) (thing ?value)) (closedExtentForArg ?pred ?position ?value)))
+
+(comment closedExtentForArg1
+         "(closedExtentForArg1 ?predicate ?value) is the binary spelling of (closedExtentForArg ?predicate 1 ?value). The two rules below state the equivalence. The rule deriving the ternary is a forward rule, so the engine reads only the ternary; the rule deriving the binary spelling is inert, so a ternary grant mints no binary twin.")
+(binary_predicate closedExtentForArg1)
+(arg closedExtentForArg1 1 predicate)
+(set/forwardRule (implies (and (closedExtentForArg1 ?predicate ?value)) (closedExtentForArg ?predicate 1 ?value)))
+(set/inertRule (implies (and (closedExtentForArg ?predicate 1 ?value)) (closedExtentForArg1 ?predicate ?value)))
+
+(comment closedExtentForArg2
+         "(closedExtentForArg2 ?predicate ?value) is the binary spelling of (closedExtentForArg ?predicate 2 ?value).")
+(binary_predicate closedExtentForArg2)
+(arg closedExtentForArg2 1 predicate)
+(set/forwardRule (implies (and (closedExtentForArg2 ?predicate ?value)) (closedExtentForArg ?predicate 2 ?value)))
+(set/inertRule (implies (and (closedExtentForArg ?predicate 2 ?value)) (closedExtentForArg2 ?predicate ?value)))
+
+(comment closedExtentForArg3
+         "(closedExtentForArg3 ?predicate ?value) is the binary spelling of (closedExtentForArg ?predicate 3 ?value).")
+(binary_predicate closedExtentForArg3)
+(arg closedExtentForArg3 1 predicate)
+(set/forwardRule (implies (and (closedExtentForArg3 ?predicate ?value)) (closedExtentForArg ?predicate 3 ?value)))
+(set/inertRule (implies (and (closedExtentForArg ?predicate 3 ?value)) (closedExtentForArg3 ?predicate ?value)))
+
+(termsRelated closed_extent_predicate closedExtentForArg closedExtentForArg1 closedExtentForArg2 closedExtentForArg3)   ;; the closed-extent grants
+
 (comment agg/avg
          "(agg/avg ?mean ?value ?body) means that ?mean is the mean of the distinct numeric ?value satisfying ?body. No answer at all over an empty ?body, an average over nothing being a division by zero however it is dressed up. A query operator, never stored.")
 (ternary_predicate agg/avg)
@@ -249,7 +283,9 @@
 (genl language linguistic)
 ;; An organization has no location in any space; its members and its buildings have one.
 (genl organization aspatial)
-(genl person tangible)
+;; A person is not necessarily a massed body: a sentient construct can be a person with
+;; no commitment either way on tangible or intangible.
+(genl person thing)
 ;; A time is uninterrupted or intermittent, and an uninterrupted time is a moment or a
 ;; stretch, never both: an instant has no extent.  abstract.txt comments the five types and
 ;; places time under acausal; time.txt types its calendar results time_interval and its
@@ -629,11 +665,22 @@
 (arg arityMin 2 non_negative_integer)
 
 (comment admitsArgnum
-         "(admitsArgnum ?relation ?argnum) means that positive argument position ?argnum exists in a well-formed application of ?relation. It asks about one position, not the application's total arity. Answered at query time from the relation's declared arity and variable-arity mark: a fixed-arity relation admits one through its arity, a variable-arity relation every positive position.")
+         "(admitsArgnum ?relation ?argnum) means that positive argument position ?argnum exists in a well-formed application of ?relation. It asks about one position, not the application's total arity. Answered at query time from the relation's declared arity and variable-arity mark. The inert rules below state the same definition; the prover, not the rules, answers it.")
 (binary_predicate admitsArgnum)
 (set/monotonic (instance_relation_predicate admitsArgnum))
 (arg admitsArgnum 1 relation)
 (arg admitsArgnum 2 positive_integer)
+;; admitsArgnum's definition, as set/inertRule: stored, believed and browsable, and run by
+;; neither engine, because the prover already answers every admitsArgnum goal and a forward
+;; rule would store a fact per relation and position.  The first three are the rules a
+;; predAllInstance would stamp; they are written as rules because predAllInstance stamps a
+;; forward default rule.
+(set/inertRule (implies (relation ?relation) (admitsArgnum ?relation 1)))
+(set/inertRule (implies (at_least_binary ?relation) (admitsArgnum ?relation 2)))
+(set/inertRule (implies (at_least_ternary ?relation) (admitsArgnum ?relation 3)))
+(set/inertRule (implies (and (unbounded_arity ?relation) (positive_integer ?position)) (admitsArgnum ?relation ?position)))
+(set/inertRule (implies (and (bounded_arity ?relation) (arityMax ?relation ?max) (positive_integer ?position) (not (greaterThan ?position ?max))) (admitsArgnum ?relation ?position)))
+(set/inertRule (implies (and (arity ?relation ?arity) (positive_integer ?position) (not (greaterThan ?position ?arity))) (admitsArgnum ?relation ?position)))
 
 (comment at_least_binary
          "The type of relations of arity 2 or greater, fixed or variable. Derived from arity and from arityMin.")
@@ -1014,23 +1061,26 @@
 (argArg predAllExistsPlaceholder 5 3)
 
 (comment PredExistsAllFn
-         "(PredExistsAllFn ?pred ?dep ?indep) denotes the sanctioned placeholder for the ?dep filler predExistsAll requires at ?pred's first position: one filler that bears ?pred to every member of ?indep, so it takes no subject. An unreifiable_function; distinct from the other Exists cells' placeholders; never asserted by the engine. See docs/predall.md.")
+         "(PredExistsAllFn ?pred ?dep ?indep ?subject) denotes the sanctioned placeholder for the ?dep filler that bears ?pred to ?subject, a member of ?indep, under a predExistsAll declaration: (PredExistsAllFn worksFor person company Acme) is the person (predExistsAll worksFor person company) requires to work for Acme. The subject is an argument because the filler a predExistsAll declaration requires varies with the member it is required for, exactly as under predAllExists with the argument positions swapped. An unreifiable_function, so a ground application stays a structural NAT the reader keeps readable inside the sentence, and distinct from the other Exists cells' placeholders. An ontological marker, not a skolem witness: the engine never asserts it. See docs/predall.md.")
 (unreifiable_function PredExistsAllFn)
-(ternary_function PredExistsAllFn)
+(fixed_arity_function PredExistsAllFn)
+(arity PredExistsAllFn 4)
 (arg PredExistsAllFn 1 binary_predicate)
 (genlArg PredExistsAllFn 2 thing)
 (genlArg PredExistsAllFn 3 thing)
+(argArg PredExistsAllFn 4 3)
 (resultArg PredExistsAllFn 2)
 (functionCorrespondingPredicate PredExistsAllFn predExistsAllPlaceholder)
 
 (comment predExistsAllPlaceholder
-         "(predExistsAllPlaceholder ?pred ?dep ?indep ?placeholder) means that ?placeholder is the term (PredExistsAllFn ?pred ?dep ?indep) names: the ?dep filler a predExistsAll declaration over the first three arguments requires. PredExistsAllFn is the corresponding function, and its value is the last argument. Inferentially inert like the cell. See docs/predall.md.")
+         "(predExistsAllPlaceholder ?pred ?dep ?indep ?subject ?placeholder) means that ?placeholder is the term (PredExistsAllFn ?pred ?dep ?indep ?subject) names: the ?dep filler that bears ?pred to ?subject under a predExistsAll declaration over the first three arguments. PredExistsAllFn is the corresponding function, and its value is the last argument. Inferentially inert like the cell: the engine derives nothing from a fact on this predicate but the memberships its argument types draw. See docs/predall.md.")
 (fixed_arity_predicate predExistsAllPlaceholder)
-(arity predExistsAllPlaceholder 4)
+(arity predExistsAllPlaceholder 5)
 (arg predExistsAllPlaceholder 1 binary_predicate)
 (genlArg predExistsAllPlaceholder 2 thing)
 (genlArg predExistsAllPlaceholder 3 thing)
-(argArg predExistsAllPlaceholder 4 2)
+(argArg predExistsAllPlaceholder 4 3)
+(argArg predExistsAllPlaceholder 5 2)
 
 (comment PredExistsInstanceFn
          "(PredExistsInstanceFn ?pred ?indep ?fixed) denotes the sanctioned placeholder for the ?indep member predExistsInstance requires at ?pred's first position, against the fixed filler ?fixed. One member satisfies the declaration, so it takes no subject. An unreifiable_function; distinct from the other Exists cells' placeholders; never asserted by the engine. See docs/predall.md.")
@@ -1074,7 +1124,7 @@
 (genlArg predAllExists 3 thing)
 
 (comment predExistsAll
-         "(predExistsAll ?pred ?dep ?indep) means that some member of collection ?dep bears ?pred, at position 1, to every instance of collection ?indep: exists y in ?dep such that for all x in ?indep, (?pred y x). The argument-swapped twin of predAllExists — the existential filler sits in ?pred's first position and the universal in its second. Inferentially inert like the whole Exists class; (PredExistsAllFn ?pred ?dep ?indep) is its sanctioned placeholder.")
+         "(predExistsAll ?pred ?dep ?indep) means that every instance of collection ?indep has some member of collection ?dep bearing ?pred to it, at position 1: for all x in ?indep, exists y in ?dep, (?pred y x). (predExistsAll worksFor person company) means that every company has at least one person who works for it. predAllExists with ?pred's argument positions swapped: the universal sits in ?pred's second position and the existential filler in its first. The universal outscopes the existential, as in every cell of the family that quantifies both positions. Inferentially inert like the whole Exists class; (PredExistsAllFn ?pred ?dep ?indep ?subject) is the sanctioned placeholder an author may use to name the filler the declaration requires for the member ?subject.")
 (ternary_predicate predExistsAll)
 (arg predExistsAll 1 binary_predicate)
 (genlArg predExistsAll 2 thing)
@@ -1378,6 +1428,7 @@
 (context CxMereology)
 (context CxNormalPhysicalConditions)
 (context CxPerception)
+(context CxRealWorld)
 (context CxSize)
 (context CxSocial)
 (context CxSocialExtension)
@@ -1858,16 +1909,21 @@
          "(declined_rule_macro ?declaration) means that a reviewer read the kb-integrity rule-macro suggestion ?declaration and keeps the rule it was suggested for as written — most often a set/defaultRule that is meant to be a default. ?declaration is the suggested declaration as the sweep reports it, written as a quoted argument, for example (declined_rule_macro (genl livesIn locatedIn)). The rule-macro pass reads the record from the rule's context and does not report that suggestion; nothing else reads it and it draws no inference. See docs/integrity.md.")
 (unary_predicate declined_rule_macro)
 
-;; --- Lacuna proposals (upper ontology overhaul) ---
-;; Two predicates the engine does not yet act on (inert, no inference path — see
-;; vaelii.impl.predicates):
+;; genlInverse is binary genl with arguments 1 and 2 swapped. The engine reads it in
+;; the matching fan beside genl: a chain of genl and genlInverse edges swaps the
+;; arguments exactly when it holds an odd number of genlInverse edges, so two of them
+;; compose to genl.
 (binary_predicate genlInverse)
-(binary_predicate typeGenl)
 (arg genlInverse 1 binary_predicate)
 (arg genlInverse 2 binary_predicate)
+(comment genlInverse "Binary `genl` with arguments 1 and 2 swapped. (genlInverse ?spec ?genl-inv) means (?spec ?x ?y) entails (?genl-inv ?y ?x), so a stored (?spec a b) answers a (?genl-inv b a) goal and satisfies a (?genl-inv ?x ?y) antecedent, and a justification names the edge. Two genlInverse edges in a row compose to genl. Does not license the converse: a (?genl-inv b a) fact concludes nothing about ?spec.")
+
+;; --- Lacuna proposals (upper ontology overhaul) ---
+;; A predicate the engine does not yet act on (inert, no inference path — see
+;; vaelii.impl.predicates):
+(binary_predicate typeGenl)
 (arg typeGenl 1 at_least_metatype)
 (arg typeGenl 2 unary_predicate)
-(comment genlInverse "Like binary `genl`, but with the arg order flipped. (genlInverse ?spec ?genl-inv) means (?spec ?x ?y) entails (?genl-inv ?y ?x). Does not license the converse.")
 (comment typeGenl "Higher-order genl: (typeGenl ?classifier ?genl) means every instance of ?classifier is a genl of ?genl.")
 (termsRelated genlInverse inverse)
 

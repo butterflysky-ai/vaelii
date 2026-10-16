@@ -26,8 +26,8 @@
   policies that move belief: `config/assertive-arg-types?`, and the forced-monotonic
   roster the stored declarations give and where each is stated (`declared-roster`).  The
   records fingerprint differs by place, because each place is checked against something
-  different.  A disk image carries the record store's `reasoning-fingerprint`, read off the
-  slots without decoding a record.  A dump's image carries content fingerprints of the
+  different.  A store's own image carries the record store's `p/belief-stamp` — on the
+  disk store its `reasoning-fingerprint`, read off the slots without decoding a record.  A dump's image carries content fingerprints of the
   sentexes and the justifications the dump streams (`fingerprint/accumulator`), which an
   import recomputes while it lands them.
 
@@ -82,7 +82,6 @@
             [vaelii.impl.dense-jtms :as dense]
             [vaelii.impl.disk.backend :as disk]
             [vaelii.impl.disk.files :as dfiles]
-            [vaelii.impl.disk.record-store :as drs]
             [vaelii.impl.io.thaw :as safe]
             [vaelii.impl.journal :as journal]
             [vaelii.impl.jtms :as jtms]
@@ -97,7 +96,6 @@
             DataOutputStream File FileInputStream FileOutputStream]
            [java.nio.file CopyOption Files StandardCopyOption]
            [vaelii.impl.dense_jtms DenseTms]
-           [vaelii.impl.disk.record_store DiskRecordStore]
            [vaelii.impl.types.reasoning Reasoning]))
 
 (def format-version
@@ -147,11 +145,12 @@
   (some-> (:reasoning kb) deref :tms))
 
 (defn applies?
-  "Does `kb` keep a reasoning image in its own directory — a `:disk-snapshot` KB (the one
-  carrying a `:snapshot-dir`) over the durable record store, on the dense network?"
+  "Does `kb` keep a reasoning image in its own directory — a KB on the `:snapshot` index
+  (the one carrying a `:snapshot-dir`) over a record store that answers the image stamp
+  (`p/ImageStamping`), on the dense network?"
   [kb]
   (and (some? (:snapshot-dir kb))
-       (instance? DiskRecordStore (:records kb))
+       (satisfies? p/ImageStamping (:records kb))
        (instance? DenseTms (network kb))))
 
 (defn refusal
@@ -211,18 +210,21 @@
   `:libraries` is carried for a reader of the manifest; the source digest already covers
   it.  `:recover`, the step timings of the last recover of `kb`'s belief (`{:ms total
   :steps {step ms}}`, filed by `vaelii.impl.recovery`), is carried when `kb` holds one,
-  for a later rebuild to report its progress against; `decision` does not read it."
-  [kb records]
-  (let [sid (si/source-identity)
-        lr  (some-> (:unrecovered kb) deref :last-recover)]
-    (cond-> {:format    format-version
-             :network   dense/image-version
-             :records   records
-             :source    (:digest sid)
-             :libraries (:libraries sid)
-             :policy    {:assertive-arg-types (boolean (config/assertive-arg-types?))
-                         :forced-monotonic    (vec (sort (declared-roster kb)))}}
-      lr (assoc :recover lr))))
+  for a later rebuild to report its progress against; `decision` does not read it.
+  `source`, when given, is the digest stamped in place of the running one: the source a
+  trusted image's belief was last derived under in full (`:recover? :trust`)."
+  ([kb records] (stamp kb records nil))
+  ([kb records source]
+   (let [sid (si/source-identity)
+         lr  (some-> (:unrecovered kb) deref :last-recover)]
+     (cond-> {:format    format-version
+              :network   dense/image-version
+              :records   records
+              :source    (or source (:digest sid))
+              :libraries (:libraries sid)
+              :policy    {:assertive-arg-types (boolean (config/assertive-arg-types?))
+                          :forced-monotonic    (vec (sort (declared-roster kb)))}}
+       lr (assoc :recover lr)))))
 
 (defn decision
   "Why the image `manifest` describes cannot be installed into a KB whose stamp is `now`,
@@ -329,57 +331,68 @@
   deciding would pass the next open's check.  The write is therefore declined while a
   settle holds the network (`jtms/held`), and committed only when the change clock read
   before the sections equals the one read after them; the clock moves on every mutation
-  in the process, so a write beside another KB's writer is declined as well."
-  [kb]
-  (when (and (applies? kb) (writable? kb) (nil? (jtms/held (reasoning/tms kb))))
-    (try
-      (let [t0      (System/nanoTime)
-            clock   (observe/change-clock)
-            records (drs/reasoning-fingerprint (:records kb))
-            moved?  #(or (some? (jtms/held (reasoning/tms kb)))
-                         (not= clock (observe/change-clock))
-                         (not= records (drs/reasoning-fingerprint (:records kb))))
-            m       (write-sections! kb (disk-dir kb) (stamp kb records) #(not (moved?)))]
-        (if m
-          (trove/log! {:level :info :id ::written
-                       :msg (format "wrote the reasoning image for %s in %.0f ms"
-                                    (:snapshot-dir kb) (/ (- (System/nanoTime) t0) 1e6))})
-          (trove/log! {:level :warn :id ::records-moved
-                       :msg (str "reasoning image for " (:snapshot-dir kb) " abandoned: the"
-                                 " records or the belief moved while it was written")}))
-        m)
-      (catch Throwable t
-        (trove/log! {:level :warn :id ::write-failed :error t
-                     :msg (str "reasoning image for " (:snapshot-dir kb) " not written ("
-                               (.getMessage t) ") — the next open recovers")})
-        nil))))
+  in the process, so a write beside another KB's writer is declined as well.
+
+  `source` is stamped in place of the running digest (`stamp`)."
+  ([kb] (save! kb nil))
+  ([kb source]
+   (when (and (applies? kb) (writable? kb) (nil? (jtms/held (reasoning/tms kb))))
+     (try
+       (let [t0      (System/nanoTime)
+             clock   (observe/change-clock)
+             records (p/belief-stamp (:records kb))
+             moved?  #(or (some? (jtms/held (reasoning/tms kb)))
+                          (not= clock (observe/change-clock))
+                          (not= records (p/belief-stamp (:records kb))))
+             m       (write-sections! kb (disk-dir kb) (stamp kb records source)
+                                      #(not (moved?)))]
+         (if m
+           (trove/log! {:level :info :id ::written
+                        :msg (format "wrote the reasoning image for %s in %.0f ms"
+                                     (:snapshot-dir kb) (/ (- (System/nanoTime) t0) 1e6))})
+           (trove/log! {:level :warn :id ::records-moved
+                        :msg (str "reasoning image for " (:snapshot-dir kb) " abandoned: the"
+                                  " records or the belief moved while it was written")}))
+         m)
+       (catch Throwable t
+         (trove/log! {:level :warn :id ::write-failed :error t
+                      :msg (str "reasoning image for " (:snapshot-dir kb) " not written ("
+                                (.getMessage t) ") — the next open recovers")})
+         nil)))))
 
 (defn- save-at-close!
-  "The close-time write: `save!` when the records moved since the image on disk, and only
-  when the source identity still equals `source`, the digest belief was derived under."
-  [kb source]
+  "The close-time write: `save!` stamped with `stamped` when the records moved since the
+  image on disk, and only when the source identity still equals `running`, the digest of
+  the code that has been moving belief.  The two differ for a trusted image: `stamped` is
+  the source its belief was last derived under in full, and `running` the build that
+  installed it and settled every write since."
+  [kb stamped running]
   (when (applies? kb)
     (let [m (read-manifest (disk-dir kb))]
       (cond
-        (not= source (:digest (si/source-identity)))
+        (not= running (:digest (si/source-identity)))
         (trove/log! {:level :info :id ::source-moved
                      :msg (str "reasoning image for " (:snapshot-dir kb) " not refreshed at"
                                " close: the engine source changed since belief was derived")})
 
-        (or (nil? m) (not= (:records m) (drs/reasoning-fingerprint (:records kb))))
-        (save! kb)
+        (or (nil? m) (not= (:records m) (p/belief-stamp (:records kb))))
+        (save! kb stamped)
 
         :else nil))))
 
 (defn register-close!
   "Arrange for `kb`'s image to be refreshed when its directory closes.  `source` is the
-  source identity's digest belief was derived under, and the digest now when the caller
-  has none.  A no-op for a KB that does not keep an image, or that `refusal` names a
-  reason for."
+  source identity's digest belief was last derived under in full, and the digest now when
+  the caller has none; the refreshed image is stamped with it.  The close writes only while
+  the source on disk is still the one this call saw, which a trusted image's `source` is
+  not.  A no-op for a KB that does not keep an image, or that `refusal` names a reason
+  for."
   [kb source]
   (when (and (applies? kb) (nil? (refusal kb)))
-    (let [source (or source (:digest (si/source-identity)))]
-      (disk/register-reasoning-image! (:snapshot-dir kb) #(save-at-close! kb source)))))
+    (let [running (:digest (si/source-identity))
+          source  (or source running)]
+      (disk/register-reasoning-image! (:snapshot-dir kb)
+                                      #(save-at-close! kb source running)))))
 
 (defn register-rebuild-close!
   "Arrange for `kb`'s directory close to stop a belief rebuild and then refresh the image,
@@ -390,7 +403,7 @@
   [kb stop! source]
   (disk/register-reasoning-image! (:snapshot-dir kb)
                                   #(do (stop!)
-                                       (when-let [s (source)] (save-at-close! kb s)))
+                                       (when-let [s (source)] (save-at-close! kb s s)))
                                   stop!))
 
 (defn source-digest
@@ -465,11 +478,11 @@
 
 (defn install!
   "Install a `:disk-snapshot` KB's own image in place of a recover — `install-from!` over
-  its directory, against the record store's `reasoning-fingerprint`, under `accept`."
+  its directory, against the record store's `p/belief-stamp`, under `accept`."
   ([kb] (install! kb #{}))
   ([kb accept]
    (if (applies? kb)
-     (install-from! kb (disk-dir kb) #(drs/reasoning-fingerprint (:records kb)) accept)
+     (install-from! kb (disk-dir kb) #(p/belief-stamp (:records kb)) accept)
      {:reasoning :recover :reason :not-applicable})))
 
 ;; ---- trusting and verifying a source change -----------------------------------

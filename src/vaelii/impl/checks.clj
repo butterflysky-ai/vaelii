@@ -403,7 +403,7 @@
                             (concat (mapv first (tax/reach-support tax :genl t' t context))
                                     (visibility-support kb (:id m) context)))))))
           (sort-by (juxt #(nm/name-key (nm/functor (:sentence %))) #(nm/name-key (:context %)))
-                   (kb/type-memberships kb x context)))))
+                   (res/type-memberships kb x context)))))
 
 (defn- outside-declared-type?
   "Does `arg` fail the `(arg P n t)` demand, as seen from `context`?
@@ -781,8 +781,8 @@
 ;;
 ;; **The walk is over the positions the sentence actually has, not a re-counted tail.**
 ;; every position the sentence has is walked, including one past a length its relation
-;; is bound to: such a tuple is stored, and the settle places it as an arity nogood
-;; (`vaelii.impl.decide`).  The covering declarations are read
+;; is bound to: such a tuple is stored and held inert in the `:out` forced set
+;; (`vaelii.impl.decide.arity`).  The covering declarations are read
 ;; through the same `decls` reader the singular forms use, so a super-predicate's covering
 ;; declaration binds a sub-predicate's tuples for `args-problem`'s reason.
 
@@ -1543,6 +1543,14 @@
   (let [target (list 'not (list t x))]
     (handle-namings (res/matches-visible kb target context) target true)))
 
+(defn- separation-denial-handles
+  "The handles of the believed memberships `(s x)` visible from `context` whose type a
+  separation keeps apart from `t` under the soundness rule (`res/separation-denials`),
+  each once, in content order: the sentexes a derived `(not (t x))` rests on, and so the
+  members a refuted cover names for the part `t`."
+  [kb t x context]
+  (into [] (comp (map :membership) (distinct)) (res/separation-denials kb t x context)))
+
 (defn- cover-refutations
   "A cover every one of whose parts is denied of a term the whole holds, as violation
   maps.
@@ -1560,8 +1568,10 @@
   `:opposing-handles` names every other member of the nogood, for the reason
   `:anti-transitive` names both steps of its chain: the contradiction is not a pair, and
   arbitration that could see only one side of it would defeat the one sentex it could
-  name whatever the rest were worth.  The declaration is not a member (the comment on
-  the map says why).
+  name whatever the rest were worth.  A part denied through a separation names the
+  membership the separation denies it through (`separation-denial-handles`), the same
+  witnesses `provers/DisjointnessNegationProver` answers from.  The declaration is not a
+  member (the comment on the map says why).
 
   Scoped to the asserting context throughout, as `disjoint-problems` is: the declaration,
   the membership and each negation must be visible from `context`, since a context is
@@ -1576,46 +1586,65 @@
             ;; entry point sees: the last negation completing a refutation, and the
             ;; membership arriving under negations already stored.
             part (when neg? (nm/functor lit))
-            x    (first (nm/args lit))]
+            x    (first (nm/args lit))
+            ;; A part the membership `(t x)` puts `x` in (`t` or a supertype of it) is
+            ;; denied only by a stored negation.  A closed extent's negation as failure
+            ;; is withdrawn when a member arrives, and the membership under assertion is
+            ;; that member, so reading the denial before it is stored would make the
+            ;; arrival order decide.
+            stored-only? (fn [p] (and (nil? part)
+                                      (or (= p (nm/functor lit))
+                                          (tax/genl? tax (nm/functor lit) p context))))]
         (when (checkable-term? x)
-          (let [decls (if neg?
-                        (mapv (fn [[whole parts _]] [whole parts])
-                              (tax/covers-naming-visible tax part context))
-                        (tax/covers-over tax (nm/functor lit) context))]
-            (for [[whole parts] decls
-                  :when (or (nil? part)
-                            (provers/conjunction-derivable? kb [(list whole x)] {} context))
-                  ;; every part *but this one*: on the refusal path the sentence under
-                  ;; assertion is not stored yet and holds by assumption, and on the
-                  ;; settle path it is stored and would answer here anyway.
-                  ;; A part the membership `(t x)` puts `x` in (`t` or a supertype of
-                  ;; it) is denied only by a stored negation.  A closed extent's
-                  ;; negation as failure is withdrawn when a member arrives, and the
-                  ;; membership under assertion is that member, so reading the denial
-                  ;; before it is stored would make the arrival order decide.
-                  :when (every? (fn [p]
-                                  (or (= p part)
-                                      (if (and (nil? part)
-                                               (or (= p (nm/functor lit))
-                                                   (tax/genl? tax (nm/functor lit) p context)))
-                                        (seq (negation-handles kb p x context))
-                                        (provers/conjunction-derivable?
-                                         kb [(list 'not (list p x))] {} context))))
-                                parts)]
-              {:type :cover :sentence sentence :types (vec (cons whole parts))
-               ;; The membership and the other negations, and **not** the declaration
-               ;; the conviction is read through — `disjoint`'s rule, for `disjoint`'s
-               ;; reason: a nogood holding the declaration would, on defeating it, read a
-               ;; taxonomy without the cover on the next pass, find no violation, revive
-               ;; the declaration and oscillate.  The evidence is what a refuted cover
-               ;; convicts; the cover is the standing claim it is convicted against.
-               :opposing-handles
-               (into (if part (vec (membership-handles kb whole x context)) [])
-                     (mapcat #(when-not (= % part) (negation-handles kb % x context))
-                             parts))
-               :message (str "coverage violated: " x " is a " whole
-                             ", which every part of the declared cover "
-                             (str/join ", " parts) " is now denied of")})))))))
+          ;; one read of the term's memberships for every part a separation is asked to
+          ;; deny (`res/*membership-memo*`): nothing is written while the covers are read
+          (binding [res/*membership-memo* (or res/*membership-memo* (volatile! {}))]
+            (doall
+             (let [decls (if neg?
+                           (mapv (fn [[whole parts _]] [whole parts])
+                                 (tax/covers-naming-visible tax part context))
+                           (tax/covers-over tax (nm/functor lit) context))]
+               (for [[whole parts] decls
+                     :when (or (nil? part)
+                               (provers/conjunction-derivable? kb [(list whole x)] {} context))
+                     ;; every part *but this one*: on the refusal path the sentence under
+                     ;; assertion is not stored yet and holds by assumption, and on the
+                     ;; settle path it is stored and would answer here anyway.
+                     ;; the parts denied only by a stored negation first: each is a posting
+                     ;; read, and the first one undenied ends the test before a part asks
+                     ;; the provers
+                     :when (every? (fn [p]
+                                     (or (= p part)
+                                         (if (stored-only? p)
+                                           (seq (negation-handles kb p x context))
+                                           (provers/conjunction-derivable?
+                                            kb [(list 'not (list p x))] {} context))))
+                                   (sort-by (complement stored-only?) parts))]
+                 {:type :cover :sentence sentence :types (vec (cons whole parts))
+                  ;; The membership, the other negations and the memberships a separation
+                  ;; denies a part through (`separation-denial-handles`), and **not** the
+                  ;; declaration the conviction is read through — `disjoint`'s rule, for
+                  ;; `disjoint`'s reason: a nogood holding the declaration would, on
+                  ;; defeating it, read a taxonomy without the cover on the next pass, find
+                  ;; no violation, revive the declaration and oscillate.  The evidence is
+                  ;; what a refuted cover convicts; the cover is the standing claim it is
+                  ;; convicted against.  A separation and the `genl` edges it climbs are
+                  ;; grounds in the same way.  Naming the denying membership is what makes a
+                  ;; cover refuted through a derived denial arbitrable: the violation names
+                  ;; the stored sentexes it is against, so the write is stored and placed
+                  ;; rather than refused (docs/nmtms.md, "What a refusal may rest on").
+                  :opposing-handles
+                  (into (if part (vec (membership-handles kb whole x context)) [])
+                        (comp (remove #(= % part))
+                              (mapcat #(if (stored-only? %)
+                                         (negation-handles kb % x context)
+                                         (concat (negation-handles kb % x context)
+                                                 (separation-denial-handles kb % x context))))
+                              (distinct))
+                        parts)
+                  :message (str "coverage violated: " x " is a " whole
+                                ", which every part of the declared cover "
+                                (str/join ", " parts) " is now denied of")})))))))))
 
 (defn- cover-refutation
   "The first refuted cover, for the refusal paths."
@@ -3150,9 +3179,16 @@
   [sx]
   (and (not (rules/rule? sx)) (= 'genlCx (nm/functor (:sentence sx)))))
 
+(defn forced-out?
+  "Is the stored fact `sx` held in the `:out` forced set: a denial of a roster literal
+  (`inert-denial?`), or a tuple whose length breaks its functor's (`arity/inert-tuple?`,
+  docs/taxonomy.md, \"Arity\")?"
+  [kb sx]
+  (boolean (or (inert-denial? kb (:sentence sx)) (arity/inert-tuple? kb sx))))
+
 (defn force-sentex!
   "Write the `:mono` and `:out` memberships of the stored sentex `sx` into the network.
-  The assert path calls it before the premise mark, so a forced-out denial is never IN,
+  The assert path calls it before the premise mark, so a forced-out fact is never IN,
   even for one relabel.  A membership already right writes nothing."
   [kb sx]
   (let [tms (reasoning/tms kb)
@@ -3162,7 +3198,7 @@
                 (jtms/set-forced tms kind [h] on?)))]
     (put :mono (forced-premise? sx))
     (when-not (rules/rule? sx)
-      (put :out (inert-denial? kb (:sentence sx))))))
+      (put :out (forced-out? kb sx)))))
 
 (defn- rule-sentex
   "The stored rule at `h`, or nil when `h` names no stored rule."
@@ -3282,7 +3318,7 @@
       (reduce (fn [acc jid]
                 (let [rh (:informant (jtms/justification tms jid))]
                   (if (rule-sentex kb rh) (void acc jid rh sx) acc)))
-              (put acc :out h (inert-denial? kb (:sentence sx)))
+              (put acc :out h (forced-out? kb sx))
               (sort (jtms/supports tms h))))))
 
 (defn force-sentexes!
@@ -3674,7 +3710,7 @@
                                            (reads/watched-rules-on index g)
                                            (when (contains? different-negatives g)
                                              (reads/as-stored-rules-by-antecedent-global index 'different))
-                                           (when (and (symbol? g) (tax/has-prop? tx :closed-extent g))
+                                           (when (and (symbol? g) (rules/closed-extent-declared? tx g))
                                              (reads/as-stored-rules-by-antecedent-global index [:not g])))
                                    #(reads? % g))]
             (.put by-pred g found)
@@ -4269,8 +4305,25 @@
                           {:type :not-stratified :rule rule-handle :context context
                            :exception-preds (vec new-exc-preds) :cycle cycle})))))))
 
+(def ^:private closed-extent-grant-arities
+  "The functors that grant a closed extent on their first argument's predicate, each with
+  the length of its sentence: the whole-predicate grant, the per-argument grant, and the
+  per-argument grant's binary spellings, which CxUniverse's forward rules turn into the
+  ternary.  The binary spellings are checked here as well, because a derived ternary
+  reaches no assert-time check."
+  '{closed_extent_predicate 2
+    closedExtentForArg      4
+    closedExtentForArg1     3
+    closedExtentForArg2     3
+    closedExtentForArg3     3})
+
 (defn check-closed-extent-stratified
-  "Throw unless declaring `(closed_extent_predicate P)` leaves the rule set stratified.
+  "Throw unless declaring `(closed_extent_predicate P)`, `(closedExtentForArg P n v)` or a
+  binary spelling of the second leaves the rule set stratified.
+
+  A per-argument grant adds the same negative edge on P as the whole-predicate grant: the
+  edge is on the predicate, and which argument value the grant closes is decided at
+  derive time.
 
   The grant is what turns a closed `(not (P …))` antecedent from a lookup into negation
   as failure, so it adds a negative edge to every stored rule carrying one — and can close
@@ -4286,7 +4339,8 @@
   Runs before anything is written, so a refused grant leaves no mark, no posting and no
   cycle."
   [kb sentence context]
-  (when (and (= 'closed_extent_predicate (nm/functor sentence)) (= 2 (count sentence)))
+  (when (and (sequential? sentence)
+             (= (get closed-extent-grant-arities (nm/functor sentence)) (count sentence)))
     (let [pred (second sentence)]
       (when-let [[node cycle]
                  (->> (reads/as-stored-rules-by-antecedent-global (:index kb) [:not pred])
@@ -4332,17 +4386,23 @@
 
   **Fast path:** no stored rule carries a negative edge (`negative-edge-rules`), so the
   graph has none and no walk can find a cycle.  That is every rule in the bundled
-  starter, so an ordinary `genl` assert pays two set reads and stops.
+  starter, so an ordinary `genl` assert pays two set reads and stops.  Nor can an edge
+  whose upper end is already in the unscoped closure of its lower end: it moves no
+  closure, so it adds no graph edge.  A re-derived argument-type mint a stored edge
+  subsumes is that case, and stops at one reachability test, read first because the
+  gate's roster read costs every stored rule a negative edge leaves.
 
   The edge is added to a **detached copy** of the taxonomy rather than to the real
   one: the check runs before anything is written, and a refused edge must leave the
   cached closures untouched as well as the store."
   [kb sentence]
-  (when (and (= 'genl (nm/functor sentence)) (seq (negative-edge-rules kb)))
+  (when (= 'genl (nm/functor sentence))
     (let [[_ a b] sentence
-          probe   (tax/detached-copy (reasoning/taxonomy kb))]
-      (tax/add-genl probe a b ::probe)
-      (wff/genl-negation-cycle probe (stratification-readers kb) a b))))
+          tax     (reasoning/taxonomy kb)]
+      (when-not (or (tax/genl?-global tax a b) (empty? (negative-edge-rules kb)))
+        (let [probe (tax/detached-copy tax)]
+          (tax/add-genl probe a b ::probe)
+          (wff/genl-negation-cycle probe (stratification-readers kb) a b))))))
 
 (defn check-edge-stratified
   "Throw unless adding this taxonomy edge leaves the stored rule set stratified.

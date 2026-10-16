@@ -158,9 +158,9 @@
       (let [p (v/assert kb (list parentOf Abe Homer) ctx)
             h (sx/sentex-handle p)]
         ;; a rule concluding the positiveExample meta from a trigger — the meta is DEDUCED
-        (v/assert kb (list 'implies (list 'marks_example '?t)
+        (v/assert kb (list 'implies (list marks_example '?t)
                            (list 'positiveExample '?t h)) ctx {:direction :forward})
-        (v/assert kb (list 'marks_example parentOf) ctx)
+        (v/assert kb (list marks_example parentOf) ctx)
         (let [found (examples-of kb 'positiveExample)]
           (is (= 1 (count found)) "the deduced example meta is believed and swept")
           (doseq [e found]

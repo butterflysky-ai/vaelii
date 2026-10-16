@@ -332,9 +332,6 @@
 ;; stamped is made.
 (set/forwardRule (implies (and (tangibleOutput ?e ?x) (doneBy ?e ?d) (made ?d)) (made ?x)))
 
-(comment tool "An artifact used to perform work.")
-(genl tool made)
-
 (comment vehicle "An artifact for transporting people or goods.")
 (genl vehicle made)
 
@@ -362,8 +359,16 @@
 (set/monotonic (disjoint container organism))
 (set/monotonic (disjoint container person))
 (set/monotonic (disjoint container substance))
+;; An animal is never a building, a piece of clothing, a furniture or a machine.
+(set/monotonic (disjoint animal building))
+(set/monotonic (disjoint animal clothing))
+(set/monotonic (disjoint animal furniture))
+(set/monotonic (disjoint animal machine))
+;; animal and vehicle are disjoint at the default strength rather than monotonic: a
+;; fiction below CxWell may except the default and hold a term that is both. CxRealWorld
+;; restates the same separation monotonic, so the real world can never hold the overlap.
+(disjoint animal vehicle)
 (set/monotonic (disjoint building furniture))
-(set/monotonic (disjoint building tool))
 (set/monotonic (disjoint building vehicle))
 (set/monotonic (disjoint clothing building))
 (set/monotonic (disjoint clothing furniture))

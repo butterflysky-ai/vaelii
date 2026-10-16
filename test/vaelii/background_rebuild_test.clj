@@ -6,7 +6,8 @@
   refuses writes.  Belief is rebuilt under this build on a second KB over the same stores,
   and one `vreset!` then replaces the installed belief with the rebuilt one; a read view
   taken before it reads the installed belief whole.  A close or a `recover` during the
-  rebuild stops the rebuild first."
+  rebuild stops the rebuild first.  `:recover? :trust` installs the same image and keeps
+  it: no rebuild, writes accepted at once, and the image's source stamp kept at close."
   (:require [clojure.edn :as edn]
             [clojure.java.io :as io]
             [clojure.set :as set]
@@ -403,3 +404,38 @@
           (finally
             (v/close! kb)
             (rm-rf! dir)))))))
+
+(deftest a-trusted-image-is-kept-writable-and-keeps-its-source-stamp
+  (tu/with-snapshot-platform
+    (let [dir (store!)]
+      (try
+        (let [kb (v/open-kb {:backend :disk-snapshot :dir dir :recover? :trust})]
+          (try
+            (testing "the image answers, no rebuild runs, and writes are accepted"
+              (is (= ['(dog Rex)] (dogs kb)))
+              (is (not (:stale-belief (kb/write-hazards kb))))
+              (is (nil? (v/rebuild-progress kb)))
+              (is (some? (v/assert kb '(dog Fido) 'CxUniverse))))
+            (testing "a write settles under this build over the trusted belief"
+              (is (= #{'(dog Rex) '(dog Fido)} (set (dogs kb))))
+              (is (some #(= 'Fido (get % '?x)) (v/ask kb '(animal ?x) 'CxUniverse))))
+            (finally (v/close! kb))))
+        (is (= "stale" (:source (stamp dir)))
+            "the close stamps the source the belief was last derived under in full")
+        (let [recovers (atom 0)
+              real     @#'recovery/recover-from-records
+              kb       (with-redefs-fn {#'recovery/recover-from-records
+                                        (fn [& args] (swap! recovers inc) (apply real args))}
+                         #(v/open-kb {:backend :disk-snapshot :dir dir :recover? :trust}))]
+          (try
+            (is (= #{'(dog Rex) '(dog Fido)} (set (dogs kb)))
+                "a second trusted open installs the image the first one closed with")
+            (is (zero? @recovers)
+                "the close wrote the trusted session's write into the image, so nothing recovers")
+            (finally (v/close! kb))))
+        (let [kb (v/open-kb {:backend :disk-snapshot :dir dir})]
+          (try
+            (is (= #{'(dog Rex) '(dog Fido)} (set (dogs kb))))
+            (finally (v/close! kb))))
+        (is (not= "stale" (:source (stamp dir))) "an :auto open recovers and restamps")
+        (finally (rm-rf! dir))))))

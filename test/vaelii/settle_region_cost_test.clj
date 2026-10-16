@@ -12,7 +12,7 @@
     plain fact retracted beside each edge is the control, and `clash_oracle_test` /
     `negation_oracle_test` hold the answers.
   * A `genl` edge no `functional` or `anti_symmetric` mark stands above hands no fact
-    below it to a merge derivation and recomputes no arity candidate.
+    below it to a merge derivation.
   * A definitional clash is re-asked at a reader only once the reader withdraws a ground.
   * The phase clock charges six buckets, and a settle's total is the sum of its own.
   * A settle reads the standing merges and `except`s only where they moved: a batch of
@@ -27,19 +27,14 @@
   * Nogoods placed below their ingredients over one shared subsumption read its routes
     once per pass.
   * A nogood whose subsumption is one edge, seen where its members are or the only edge
-    out of its functor, is placed with no witness walk or route search, and a placement
+    out of its type, is placed with no witness walk or route search, and a placement
     pass holds the routes of one batch of nogoods at a time.
   * A settle's tuple placement reads the `genl` edges' lower ends against the marks with
-    one closure per marked predicate, however many edges the settle relabels.
-  * The arity placement reads its candidates' functors against those lower ends with no
-    closure walk, and the candidates a `genlCx` move reaches cut each predicate above
-    them to the exact-length holders once."
+    one closure per marked predicate, however many edges the settle relabels."
   (:require [clojure.set :as set]
             [clojure.test :refer [deftest is testing]]
             [vaelii.core :as v]
             [vaelii.impl.chain :as chain]
-            [vaelii.impl.decide :as decide]
-            [vaelii.impl.decide.arity :as arity]
             [vaelii.impl.decide.membership :as membership]
             [vaelii.impl.decide.negation :as negation]
             [vaelii.impl.jtms :as jtms]
@@ -231,11 +226,10 @@
 ;; ---- a genl edge's merge sweeps ------------------------------------------
 
 (defn- edge-sweep-calls
-  "Facts handed to the two merge derivations, and arity recomputes, while `f` runs."
+  "Facts handed to the two merge derivations while `f` runs."
   [f]
   (let [calls (atom {})
-        vs    [#'special/derive-functional-equalities #'special/derive-antisymmetric-equalities
-               #'arity/recompute-arity]]
+        vs    [#'special/derive-functional-equalities #'special/derive-antisymmetric-equalities]]
     (with-redefs-fn (into {} (map (fn [v] (let [orig @v]
                                             [v (fn [& args]
                                                  (swap! calls update (:name (meta v)) (fnil inc 0))
@@ -245,8 +239,7 @@
     @calls))
 
 (deftest a-genl-edge-under-no-merge-mark-re-derives-no-fact-below-it
-  ;; each fact below the edge is an exact-arity membership, so a fact handed back to every
-  ;; candidate family recomputes its predicate's arity candidates
+  ;; each fact below the edge is an exact-arity membership
   (let [kb   (tu/fresh)
         m    {:strength :monotonic}
         edge (fn [top] (edge-sweep-calls
@@ -259,8 +252,7 @@
       (let [small (edge 'sre_top1)]
         (dotimes [i n]
           (v/assert kb (list 'binary_predicate (symbol (str "sreRel" (inc i)))) 'CxUniverse m))
-        (is (= small (edge 'sre_top2)) "flat in the facts below the edge")
-        (is (not (contains? small 'recompute-arity)) "the edge brings no length"))
+        (is (= small (edge 'sre_top2)) "flat in the facts below the edge"))
       (finally (tu/clear-kb! kb)))))
 
 (defn- seeds-sent
@@ -510,68 +502,6 @@
           (is (= 1 @walks))))
       (finally (tu/clear-kb! kb)))))
 
-(deftest an-arity-placement-reads-its-candidates-against-genl-ends-with-no-closure-walk
-  ;; CxUniverse  (arity sraRel 2) and k sub-predicates of sraRel, each holding a ternary
-  ;; tuple, and 3n `genl` edges between collections in the same settle: the arity
-  ;; placement reads every candidate's functor against every edge's lower end.
-  (let [kb (tu/isolated-fresh)
-        k  12]
-    (try
-      (tu/with-shipped-config
-        (let [inside? (atom false)
-              walks   (atom 0)
-              found   (atom #{})
-              under   @#'arity/members-under
-              closure @#'tax/closure-of]
-          (with-redefs-fn {#'arity/members-under (fn [& args]
-                                                   (reset! inside? true)
-                                                   (try (let [r (apply under args)] (swap! found into r) r)
-                                                        (finally (reset! inside? false))))
-                           #'tax/closure-of      (fn [& args]
-                                                   (when @inside? (swap! walks inc))
-                                                   (apply closure args))}
-            #(v/with-deferred-settle kb
-               (v/assert kb '(arity sraRel 2) 'CxUniverse {:strength :monotonic})
-               (dotimes [i k]
-                 (let [q (symbol (str "sraSub" i))]
-                   (v/assert kb (list 'genl q 'sraRel) 'CxUniverse {:strength :monotonic})
-                   (v/assert kb (list q 'SraA 'SraB 'SraC) 'CxUniverse {})))
-               (dotimes [i (* 3 n)]
-                 (v/assert kb (list 'genl (symbol (str "sra_c" (inc i))) (symbol (str "sra_c" (quot i 3))))
-                           'CxUniverse {}))))
-          (is (= k (count @found)))
-          (is (zero? @walks))))
-      (finally (tu/clear-kb! kb)))))
-
-(deftest the-candidates-a-move-reaches-cut-each-predicate-above-them-once
-  ;; CxSrbR → CxUniverse, (arity srbTop 2) in CxSrbR over a chain of 20 predicates in
-  ;; CxUniverse, and k sub-predicates of the chain's foot, each holding a ternary tuple:
-  ;; the candidates a move to CxSrbR reaches climb the same chain.
-  (let [kb (tu/isolated-fresh)
-        k  12
-        l  20]
-    (try
-      (tu/with-shipped-config
-        (v/assert kb '(genlCx CxSrbR CxUniverse) 'CxUniverse {:strength :monotonic})
-        (v/with-deferred-settle kb
-          (v/assert kb '(arity srbTop 2) 'CxSrbR {:strength :monotonic})
-          (dotimes [i l]
-            (v/assert kb (list 'genl (symbol (str "srbL" (inc i))) (if (zero? i) 'srbTop (symbol (str "srbL" i))))
-                      'CxUniverse {:strength :monotonic}))
-          (dotimes [i k]
-            (let [q (symbol (str "srbSub" i))]
-              (v/assert kb (list 'genl q (symbol (str "srbL" l))) 'CxUniverse {:strength :monotonic})
-              (v/assert kb (list q 'SrbA 'SrbB 'SrbC) 'CxUniverse {}))))
-        (let [tax  (reasoning/taxonomy kb)
-              c    (decide/synced kb)
-              hits (atom nil)
-              cuts (count (calls-to #'arity/exact-bound?
-                                    #(reset! hits (arity/reached kb (decide/write-view tax) c #{'CxSrbR}))))]
-          (is (= k (count @hits)))
-          ;; each predicate on the chain once, and each candidate's own functor
-          (is (<= cuts (+ k l 2)) (str cuts " exact-length probes"))))
-      (finally (tu/clear-kb! kb)))))
-
 (defn- held-by-passes
   "The terms each reading pass's neighbour cache holds once its walks return
   (`tax/with-neighbours`), over the settle of `f`."
@@ -585,11 +515,11 @@
       f)
     @held))
 
-(deftest an-arity-placement-pass-holds-no-targets-down-closure
-  ;; CxUniverse  (arity shaTop_t 2) on 3 tops, each over `fans` predicates of its own,
-  ;; shaMid under every top, and 2 predicates under shaMid and under 70 sides that sort
-  ;; after it, each holding a ternary tuple: every route walk from one passes its first
-  ;; 64 expansions and prunes, and what the pass holds does not grow with the fans.
+(deftest a-placement-pass-holds-no-targets-down-closure
+  ;; CxUniverse  (disjoint sha_top_t sha_other) on 3 tops, each over `fans` types of its
+  ;; own, sha_mid under every top, and 2 types under sha_mid and under 70 sides that sort
+  ;; after it, each holding a term also in sha_other: every route walk from one passes its
+  ;; first 64 expansions and prunes, and what the pass holds does not grow with the fans.
   (let [held (fn [fans]
                (let [kb (tu/isolated-fresh)
                      m  {:strength :monotonic}]
@@ -598,39 +528,44 @@
                      (let [h (held-by-passes
                               #(v/with-deferred-settle kb
                                  (dotimes [t 3]
-                                   (let [top (symbol (str "shaTop" t))]
-                                     (v/assert kb (list 'arity top 2) 'CxUniverse m)
-                                     (v/assert kb (list 'genl 'shaMid top) 'CxUniverse m)
+                                   (let [top (symbol (str "sha_top" t))]
+                                     (v/assert kb (list 'disjoint top 'sha_other) 'CxUniverse m)
+                                     (v/assert kb (list 'genl 'sha_mid top) 'CxUniverse m)
                                      (dotimes [j fans]
-                                       (v/assert kb (list 'genl (symbol (str "shaTop" t "F" j)) top) 'CxUniverse m))))
+                                       (v/assert kb (list 'genl (symbol (str "sha_top" t "_f" j)) top) 'CxUniverse m))))
                                  (dotimes [i 2]
-                                   (let [q (symbol (str "shaQ" i))]
-                                     (v/assert kb (list 'genl q 'shaMid) 'CxUniverse m)
+                                   (let [q (symbol (str "sha_q" i))
+                                         x (symbol (str "ShaX" i))]
+                                     (v/assert kb (list 'genl q 'sha_mid) 'CxUniverse m)
                                      (dotimes [j 70]
-                                       (v/assert kb (list 'genl q (symbol (str "shaSide" j))) 'CxUniverse m))
-                                     (v/assert kb (list q 'ShaA 'ShaB 'ShaC) 'CxUniverse {})))))]
+                                       (v/assert kb (list 'genl q (symbol (str "sha_side" j))) 'CxUniverse m))
+                                     (v/assert kb (list q x) 'CxUniverse {})
+                                     (v/assert kb (list 'sha_other x) 'CxUniverse {})))))]
                        [(count (v/sentexes-with-functor kb 'contradicts)) (reduce + h)]))
                    (finally (tu/clear-kb! kb)))))
         [n10 w10] (held 10)
         [n40 w40] (held 40)]
-    (is (= 2 n10 n40))
+    (is (pos? n10))
+    (is (= n10 n40))
     (is (= w10 w40) (str w10 " terms held over 10 fans, " w40 " over 40"))))
 
 (deftest descent-placements-over-a-shared-subsumption-read-its-routes-once
-  ;; CxSrdD → CxUniverse, (arity srdTop 2) and n ternary srdQ tuples in CxUniverse, and
-  ;; (genl srdQ srdTop) in CxSrdD alone: CxUniverse sees no route, so each of the n arity
-  ;; nogoods is placed below it, in CxSrdD, over the one subsumption.
+  ;; CxSrdD → CxUniverse, (disjoint srd_top srd_other) and n terms each in srd_q and
+  ;; srd_other in CxUniverse, and (genl srd_q srd_top) in CxSrdD alone: CxUniverse sees no
+  ;; route, so each of the n membership nogoods is placed below it, in CxSrdD, over the
+  ;; one subsumption.
   (let [kb (tu/isolated-fresh)]
     (try
       (tu/with-shipped-config
         (v/assert kb '(genlCx CxSrdD CxUniverse) 'CxUniverse {:strength :monotonic})
         (let [searches (count (calls-to #'tax/reach-supports
                                         #(v/with-deferred-settle kb
-                                           (v/assert kb '(arity srdTop 2) 'CxUniverse {:strength :monotonic})
-                                           (v/assert kb '(genl srdQ srdTop) 'CxSrdD {:strength :monotonic})
+                                           (v/assert kb '(disjoint srd_top srd_other) 'CxUniverse {:strength :monotonic})
+                                           (v/assert kb '(genl srd_q srd_top) 'CxSrdD {:strength :monotonic})
                                            (dotimes [i n]
-                                             (v/assert kb (list 'srdQ (symbol (str "SrdA" i)) 'SrdB 'SrdC)
-                                                       'CxUniverse {})))))
+                                             (let [x (symbol (str "SrdA" i))]
+                                               (v/assert kb (list 'srd_q x) 'CxUniverse {})
+                                               (v/assert kb (list 'srd_other x) 'CxUniverse {}))))))
               placed   (v/sentexes-with-functor kb 'contradicts)]
           (is (= n (count placed)))
           (is (every? #(= 'CxSrdD (:context %)) placed))
@@ -638,26 +573,28 @@
           (is (<= searches 2) (str searches " route searches for " n " nogoods"))))
       (finally (tu/clear-kb! kb)))))
 
-(defn- arity-world!
-  "In one deferred settle, `n` ternary tuples of their own predicate under each of three
-  shapes of subsumption to a predicate bound to two arguments: `sraQ_i` with one edge to
-  sraTop in CxUniverse, `srbQ_i` with its only edge, to srbTop, in CxSrbD, and `srcQ_i`
-  over srcMid in CxSrbD.  CxUniverse sees the first edge, so those nogoods place there; it
-  sees neither of the others, so those descend to CxSrbD."
+(defn- descent-world!
+  "In one deferred settle, SrX in sr_other and in `n` types under each of three shapes of
+  subsumption to a type disjoint from sr_other: `sra_q_i` with one edge to sra_top in
+  CxUniverse, `srb_q_i` with its only edge, to srb_top, in CxSrbD, and `src_q_i` over
+  src_mid in CxSrbD.  CxUniverse sees the first edge, so those nogoods place there; it
+  sees neither of the others, so those descend to CxSrbD.  The nogoods are all SrX's, so
+  one placement pass reads them."
   [kb n]
   (let [m {:strength :monotonic}]
     (v/assert kb '(genlCx CxSrbD CxUniverse) 'CxUniverse m)
     (v/with-deferred-settle kb
-      (doseq [top '[sraTop srbTop srcTop]] (v/assert kb (list 'arity top 2) 'CxUniverse m))
-      (v/assert kb '(genl srcMid srcTop) 'CxSrbD m)
+      (doseq [top '[sra_top srb_top src_top]] (v/assert kb (list 'disjoint top 'sr_other) 'CxUniverse m))
+      (v/assert kb '(genl src_mid src_top) 'CxSrbD m)
+      (v/assert kb '(sr_other SrX) 'CxUniverse {})
       (dotimes [i n]
-        (let [[a b c] (map #(symbol (str % i)) ["sraQ" "srbQ" "srcQ"])]
-          (v/assert kb (list 'genl a 'sraTop) 'CxUniverse m)
-          (v/assert kb (list 'genl b 'srbTop) 'CxSrbD m)
-          (v/assert kb (list 'genl c 'srcMid) 'CxSrbD m)
-          (doseq [q [a b c]] (v/assert kb (list q 'SraA 'SraB 'SraC) 'CxUniverse {})))))))
+        (let [[a b c] (map #(symbol (str % i)) ["sra_q" "srb_q" "src_q"])]
+          (v/assert kb (list 'genl a 'sra_top) 'CxUniverse m)
+          (v/assert kb (list 'genl b 'srb_top) 'CxSrbD m)
+          (v/assert kb (list 'genl c 'src_mid) 'CxSrbD m)
+          (doseq [q [a b c]] (v/assert kb (list q 'SrX) 'CxUniverse {})))))))
 
-(deftest an-arity-placement-over-one-edge-runs-no-witness-walk-or-route-search
+(deftest a-placement-over-one-edge-runs-no-witness-walk-or-route-search
   (let [kb (tu/isolated-fresh)
         k  20]
     (try
@@ -665,11 +602,11 @@
         (let [walks    (atom {})
               count-in (fn [v k] (let [orig @v] [v (fn [& args] (swap! walks update k (fnil inc 0)) (apply orig args))]))]
           (with-redefs-fn (into {} [(count-in #'tax/bfs-witness-path :bfs) (count-in #'tax/uncovered-routes :search)])
-            #(arity-world! kb k))
+            #(descent-world! kb k))
           (let [placed (v/sentexes-with-functor kb 'contradicts)]
             (is (= (* 3 k) (count placed)))
             (is (= {'CxUniverse k 'CxSrbD (* 2 k)} (frequencies (map :context placed)))))
-          ;; CxUniverse sees no edge out of srbQ_i or srcQ_i, and srcQ_i's routes climb two
+          ;; CxUniverse sees no edge out of srb_q_i or src_q_i, and src_q_i's routes climb two
           ;; edges, so its search alone is run
           (is (zero? (get @walks :bfs 0)) (str @walks))
           (is (= k (get @walks :search 0)) (str @walks))))
@@ -688,7 +625,7 @@
         (with-redefs-fn (cond-> {#'chain/route-placements (fn [& args] (swap! most max (swap! open inc)) (apply planned args))
                                  #'chain/place-justified! (fn [& args] (swap! open dec) (apply written args))}
                           batch (assoc batch 8))
-          #(arity-world! kb k))
+          #(descent-world! kb k))
         (is (= (* 3 k) (count (v/sentexes-with-functor kb 'contradicts))))
         (is (<= @most 8) (str @most " nogoods planned and unwritten at once")))
       (finally (tu/clear-kb! kb)))))
@@ -709,11 +646,11 @@
   ;; the world above, two supporters on some edges and a second route on some, placed
   ;; with every shortcut and a batch of 4, and with the walks taken and one plan
   (let [world! (fn [kb]
-                 (arity-world! kb 12)
+                 (descent-world! kb 12)
                  (v/with-deferred-settle kb
                    (dotimes [i 6]
-                     (v/assert kb (list 'genl (symbol (str "sraQ" i)) 'sraTop) 'CxSrbD {})
-                     (v/assert kb (list 'genl (symbol (str "srbQ" i)) 'srcMid) 'CxUniverse {:strength :monotonic}))))
+                     (v/assert kb (list 'genl (symbol (str "sra_q" i)) 'sra_top) 'CxSrbD {})
+                     (v/assert kb (list 'genl (symbol (str "srb_q" i)) 'src_mid) 'CxUniverse {:strength :monotonic}))))
         run    (fn [redefs]
                  (let [kb (tu/isolated-fresh)]
                    (try
@@ -728,5 +665,5 @@
                       direct (assoc direct (constantly nil))
                       every  (assoc every @#'tax/uncovered-routes)
                       batch  (assoc batch Integer/MAX_VALUE)))]
-    (is (< 40 (count plain)))
+    (is (= 36 (count plain)))
     (is (= plain (run (cond-> {} batch (assoc batch 4)))))))

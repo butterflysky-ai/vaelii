@@ -155,7 +155,7 @@ Three properties hold, each of them `arg`'s:
   convicts a tail symbol the KB places outside the type, with no retroactive reach.
 
 The walk is over the positions a sentence has, not a re-counted tail. A tuple of a length
-its relation's binding denies is stored and placed as an arity nogood
+its relation's binding denies is stored and held inert in the `:out` forced set
 ([taxonomy.md](taxonomy.md#arity)); the covering check walks every position such a tuple
 has.
 
@@ -252,7 +252,7 @@ entails — is found by the settle from the stored records in the same way.
 
 A derivation at an arity its type denies is stored too. With `t` declared binary, `(arg rel
 1 t)` and `(rel Rex Mary)` store the fact and `(t Rex)`, and a reader that sees the binding
-reads `(t Rex)` OUT as an arity nogood
+reads `(t Rex)` OUT as an inert tuple
 (`argtype_entail_test/an-entailment-of-a-length-its-type-denies-is-read-out`,
 [taxonomy.md](taxonomy.md#arity)).
 
@@ -580,7 +580,10 @@ its context.  The family is keyed by the justification and not by the sentence: 
 The types and members under a `genl` edge are gathered once per settle over **all** the
 edges it moved (`special/edge-route-candidates`, one `tax/specs-of-all` walk), not once per
 edge: a `recover` moves every edge together, and per edge it would walk a subtree as many
-times as edges leave it.
+times as edges leave it. A `recover`'s settle moves the whole store, and while fewer mints
+are stored than sentexes it reads no moved record: it asks each stored mint
+`checks/subsumed-mint`, and reads the `genlCx` edges off the index
+(`record_fetch_cost_test/a-recover-pages-the-mints-not-the-store`).
 
 The family holds exactly the records a stored mint justification concludes.
 `special/entail-arg-type` files a record as it stores the justification, from the sentence
@@ -603,8 +606,8 @@ re-deriving the mints that departure can have released (`special/withheld-releas
 
 | the record that left | the facts re-derived |
 |---|---|
-| a membership `(T x)` | the facts naming `x`, for the mints about `x` |
-| a `genl` edge `(genl sub super)` | the same, for `sub`, each type under it and each member of one |
+| a membership `(T x)` | the facts naming `x`, for the memberships of `x` in `T` and the types above it |
+| a `genl` edge `(genl sub super)` | the facts naming `sub`, each type under it and each member of one, for every mint about each |
 | a cover | the same, per part |
 | a `genlCx` edge `(genlCx sub super)` | every fact stored in a context under `sub` |
 
@@ -677,7 +680,7 @@ declarations; the target materialized those entailments when it first became bel
 | a **function application** in the position | `args-problem` / `genls-problem` check it against the function's declared `result` / `genlResult` and refuse where the result misses ([nat.md](nat.md)) — but nothing is minted, a declared result being a claim about the *function* and not about this application, and a compound having no membership to mint |
 | a genuine negation, or a rule | not argument-checked, so not entailed from either |
 | a **query** | nothing, ever. The entailment is on the store path alone |
-| a bulk or dump load | skipped: `*bulk-load?*` draws none of the three arrival orders (the fact, the declaration, the `genl` edge), and a dump import writes records directly. `v/record-arg-types`, run once after the load on the recovered KB, records what the stored facts derive, so the store then holds what a per-fact load holds (`argtype_entail_test/a-bulk-loaded-store-records-its-derivations-once`) |
+| a bulk or dump load | skipped: `*bulk-load?*` draws none of the four arrival orders (the fact, the declaration, the `genl` edge, and the `genlCx` edge the settle drains), and a dump import writes records directly. `v/record-arg-types`, run once after the load on the recovered KB, records what the stored facts derive, so the store then holds what a per-fact load holds (`argtype_entail_test/a-bulk-loaded-store-records-its-derivations-once`) |
 
 ## Cost
 

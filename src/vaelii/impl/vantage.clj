@@ -342,12 +342,18 @@
   it can be read rather than a test on a decision already made."
   [tax goal-functor stored-functor]
   (when (and (symbol? goal-functor) (symbol? stored-functor)
-             (not= goal-functor stored-functor)
-             ;; the global closure is the gate, exactly as it is forward: a functor pair
-             ;; the closure does not relate was matched by something else (a variable
-             ;; functor, say) and has no path to witness
-             (contains? (tax/genls-global tax stored-functor) goal-functor))
-    (tax/reach-support tax :genl stored-functor goal-functor nil)))
+             (not= goal-functor stored-functor))
+    ;; the global closure is the gate, exactly as it is forward: a functor pair the
+    ;; closure does not relate was matched by something else (a variable functor, say)
+    ;; and has no path to witness.  A pair related across `genlInverse` edges is
+    ;; witnessed at the parity the forward link carries (`chain/subsumption-links`).
+    (if (contains? (tax/genls-global tax stored-functor) goal-functor)
+      (tax/reach-support tax :genl stored-functor goal-functor nil)
+      (let [[st sw] (tax/signed-closure tax :up stored-functor nil)]
+        (cond (contains? st goal-functor)
+              (tax/signed-reach-support tax stored-functor goal-functor false nil nil)
+              (contains? sw goal-functor)
+              (tax/signed-reach-support tax stored-functor goal-functor true nil nil))))))
 
 (defn- join-carrying-contexts
   "The conjunctive join, carrying the context of every ingredient it used.

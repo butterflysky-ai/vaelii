@@ -129,15 +129,15 @@
 
 (tu/deftest-kb a-causal-event-instance-is-a-causal-event
   (tu/with-terms [Occurrence]
-    (v/assert kb (list 'causal 'Occurrence) 'CxUniverse)
-    (v/assert kb (list 'event 'Occurrence) 'CxUniverse)
-    (is (believes? kb (list 'causal_event 'Occurrence) 'CxUniverse)
+    (v/assert kb (list 'causal Occurrence) 'CxUniverse)
+    (v/assert kb (list 'event Occurrence) 'CxUniverse)
+    (is (believes? kb (list 'causal_event Occurrence) 'CxUniverse)
         "something both causal and an event is concluded a causal_event")))
 
 (tu/deftest-kb an-acausal-non-event-is-not-a-causal-event
   (tu/with-terms [Record]
-    (v/assert kb (list 'acausal 'Record) 'CxUniverse)
-    (is (not (believes? kb (list 'causal_event 'Record) 'CxUniverse))
+    (v/assert kb (list 'acausal Record) 'CxUniverse)
+    (is (not (believes? kb (list 'causal_event Record) 'CxUniverse))
         "an acausal thing that is not an event is not a causal_event")))
 
 ;; ---- the divisions are declared disjoint ---------------------------------
@@ -159,9 +159,9 @@
 
 (tu/deftest-kb a-single-thing-cannot-be-both-causal-and-acausal
   (tu/with-terms [Thing]
-    (v/assert kb (list 'causal 'Thing) 'CxUniverse)
-    (is (some? (v/handle-of kb (list 'causal 'Thing) 'CxUniverse)) "the first membership holds")
-    (is (tu/stored-in-clash? kb (list 'acausal 'Thing) 'CxUniverse)
+    (v/assert kb (list 'causal Thing) 'CxUniverse)
+    (is (some? (v/handle-of kb (list 'causal Thing) 'CxUniverse)) "the first membership holds")
+    (is (tu/stored-in-clash? kb (list 'acausal Thing) 'CxUniverse)
         "the disjoint membership is stored as a contradiction the settle weighs")))
 
 ;; ---- what has mass can be a cause ----------------------------------------
@@ -171,8 +171,8 @@
   (is (v/ask? kb (list 'genl 'tangible 'causal) 'CxUniverse)
       "tangible is a kind of causal")
   (tu/with-terms [Rock]
-    (v/assert kb (list 'stone 'Rock) 'CxUniverse)
-    (is (v/ask? kb (list 'causal 'Rock) 'CxUniverse)
+    (v/assert kb (list 'stone Rock) 'CxUniverse)
+    (is (v/ask? kb (list 'causal Rock) 'CxUniverse)
         "a rock, a tangible through stone and substance, reads causal")))
 
 (tu/deftest-kb a-tangible-cannot-be-acausal
@@ -190,8 +190,8 @@
   (is (v/ask? kb (list 'genl 'organization 'causal) 'CxUniverse)
       "organization is a kind of causal")
   (tu/with-terms [Acme]
-    (v/assert kb (list 'organization 'Acme) 'CxUniverse)
-    (is (v/ask? kb (list 'causal 'Acme) 'CxUniverse)
+    (v/assert kb (list 'organization Acme) 'CxUniverse)
+    (is (v/ask? kb (list 'causal Acme) 'CxUniverse)
         "an organization reads causal")))
 
 ;; ---- doneBy / performedBy: an event's doer --------------------------------

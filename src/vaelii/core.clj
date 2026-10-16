@@ -130,12 +130,13 @@
   | `:base` / `:overlay` | the two halves of an `:overlay` fork | — |
   | `:tms` | `:dense` or `:reference` truth-maintenance representation | `:dense` |
   | `:naming` | `:strict` / `:warn` / `:off` — what the public entry point does with a name | `:strict` |
-  | `:recover?` | `:auto` (or `true`) / `:background` / `:warn` / `false` — what a non-empty store gets | `:auto` |
+  | `:recover?` | `:auto` (or `true`) / `:background` / `:trust` / `:warn` / `false` — what a non-empty store gets | `:auto` |
   | `:oplog?` | `true` (or `:each`) / `:tick` / `false` — an operation log, and when its frames are fsynced | `false` |
 
   The seven legal backends and why the eighth is refused: docs/storage.md.  What
   `:recover? :background` installs, and what it refuses until its rebuild finishes:
-  docs/storage.md, \"Rebuilding behind an image\".  What `:oplog?` attaches, and what an
+  docs/storage.md, \"Rebuilding behind an image\"; what `:trust` keeps instead: \"Trusting
+  an image\".  What `:oplog?` attaches, and what an
   open with it restores: docs/storage.md, \"The operation log\".  The naming
   policy and what no setting moves: docs/naming.md.  `fork` is the ergonomic spelling of
   `:overlay` and takes its base from a live KB; the raw form takes `:base` opts instead,
@@ -890,6 +891,24 @@
   sees it."
   [kb c] (tax/context-down (reasoning/taxonomy kb) c))
 
+(defn min-context-parents
+  "The **minimal** contexts context `c` inherits from: the contexts `c` reaches over one
+  `genlCx` edge with no other such context strictly below them.  Every other context
+  `c` sees (`context-up`) is seen through one of these, so the set is `c`'s position in
+  the context lattice read from below.  A stated `(genlCx CxLeaf CxTop)` beside
+  `CxLeaf → CxMid → CxTop` leaves `CxTop` out.  Read as `context-up` reads: an edge an
+  `except` hides from `c` is not walked.  Not reflexive.  One memoized closure read per
+  direct parent.  A set; `#{}` when `c` is not a node in the context hierarchy."
+  [kb c] (tax/min-context-parents (reasoning/taxonomy kb) c))
+
+(defn max-context-children
+  "The **maximal** contexts that inherit from context `c`: the contexts that reach `c`
+  over one `genlCx` edge with no other such context strictly above them.
+  `min-context-parents`, the other direction.  Read as `context-down` reads: while an
+  `except` reaches a `genlCx` edge, a context is a member when `c` is one of its own
+  `min-context-parents`."
+  [kb c] (tax/max-context-children (reasoning/taxonomy kb) c))
+
 (defn sees?
   "Does context `k` see assertions made in context `y`?  True iff `y` is in `k`'s
   genlCx up-closure (reflexively, so a context sees itself)."
@@ -1192,10 +1211,10 @@
     bulk premise carries none.
 
   It stores, indexes and believes the same sentex for the same fact, with one exception:
-  no argument-type entailment is drawn, neither the fact's own nor what a declaration or
-  a `genl` edge draws over the stored facts (docs/argtypes.md).  `record-arg-types`
-  records them afterwards, and a KB loaded this way answers as a per-fact load does once
-  it has run.  Bind it only around a load whose facts are known
+  no argument-type entailment is drawn, neither the fact's own nor what a declaration, a
+  `genl` edge or a `genlCx` edge draws over the stored facts (docs/argtypes.md).
+  `record-arg-types` records them afterwards, and a KB loaded this way answers as a
+  per-fact load does once it has run.  Bind it only around a load whose facts are known
   well-formed and pairwise distinct; normal `assert` (the default) keeps every
   guarantee.  Pair it with `with-deferred-settle` (one settle at the end) and
   `{:chain? false}` for the full fast path — `bulk-assert-facts!` does all three."
@@ -2715,6 +2734,26 @@
 ;; still runs per assert, so the one closing settle sees the same stored state a
 ;; per-assert settle would have.
 
+(defn- batch-settle-inputs
+  "What a `with-deferred-settle` batch's `:settle` frame records: whether the batch was
+  written under `*bulk-load?*`, and whether a write in it would have seeded chaining from
+  the `genlCx` moves its own settle drained (`settle/*batch-seeds-moves*`)."
+  []
+  {:bulk-load?  *bulk-load?*
+   :seed-moves? (if-let [v settle/*batch-seeds-moves*] @v special/*seed-moves?*)})
+
+(defn- closing-settle
+  "The settle that closes a `with-deferred-settle` batch, under the inputs its `:settle`
+  frame records (`in`, `batch-settle-inputs`), or under the batch in force when `in` is
+  nil.  A batch written under `*bulk-load?*` draws no argument types over the `genlCx`
+  moves it settles (`special/*entail-moves?*`), and a batch none of whose writes chained
+  seeds no chaining from them (`special/*seed-moves?*`), as a settle per write would not."
+  [kb in]
+  (let [{:keys [bulk-load? seed-moves?]} (or in (batch-settle-inputs))]
+    (binding [special/*entail-moves?* (not bulk-load?)
+              special/*seed-moves?*   seed-moves?]
+      (settle/settle kb))))
+
 (defmacro with-deferred-settle
   "Run `body` — a batch of `assert` / `assert-rule` / `ist` calls on `kb` — with
   belief settled **once** at the end instead of after every assertion.
@@ -2725,7 +2764,9 @@
   forward-chains, but the `settle` is deferred, and one `settle` runs after `body`.
   The result is identical belief — settle is computed from current state, not
   accumulated, and beliefs are order-independent — for one reconciliation instead of
-  N.  Returns `body`'s value.
+  N.  The closing settle chains from the `genlCx` moves it settles only when a write of
+  the batch chained, so a batch of `{:chain? false}` writes chains nothing, as a settle
+  per write would not.  Returns `body`'s value.
 
     (v/with-deferred-settle kb
       (doseq [f facts] (v/assert kb f 'CxSome))
@@ -2758,9 +2799,13 @@
   `(let [kb#        ~kb
          outermost# (not *defer-settle?*)]
      ;; the reading a report diffs against, taken before the batch's first write
-     (binding [settle/*batch-reading* (if outermost#
-                                        (volatile! (settle/reading-before kb# nil))
-                                        settle/*batch-reading*)]
+     (binding [settle/*batch-reading*      (if outermost#
+                                             (volatile! (settle/reading-before kb# nil))
+                                             settle/*batch-reading*)
+               ;; whether a write of the batch would have seeded chaining from its moves
+               settle/*batch-seeds-moves* (if outermost#
+                                            (volatile! false)
+                                            settle/*batch-seeds-moves*)]
        (let [res# (try
                     (binding [*defer-settle?* true
                               tax/*defer-depths?* true]
@@ -2780,8 +2825,8 @@
          ;; the closing settle is a write of its own: on a KB with an operation log it is
          ;; recorded as a `:settle` frame after the batch's writes (`vaelii.impl.oplog`)
          (when outermost#
-           (oplog/run-op kb# :settle :replay [] (constantly nil)
-                         (fn [_#] (settle/settle kb#))))
+           (oplog/run-op kb# :settle :replay [] #'batch-settle-inputs
+                         (fn [in#] (#'closing-settle kb# in#))))
          res#))))
 
 (defn assert-many
@@ -2846,8 +2891,7 @@
                                              :facts-per-sec (if (pos? ms)
                                                               (/ (double done) (/ ms 1000.0))
                                                               0.0)))))
-         hs          (binding [*bulk-load?* true
-                               special/*seed-moves?* false]
+         hs          (binding [*bulk-load?* true]
                        (with-deferred-settle kb
                          ;; the counting arm only when somebody is listening: a load with
                          ;; no callback pays nothing for the option it did not pass
@@ -6774,6 +6818,25 @@
                       :context (:context o)
                       :defeat-class (defeat-class kb (:id o))}))))
 
+(defn- denied-literal
+  "`why-not`'s `:denies` for the inert denial `sx`, whose `why-not` map so far is `base`:
+  the literal `S` it denies, the handle of `S` in its context or nil, whether that context
+  believes `S`, and how `S` is on the roster (`decide/literal-roster`), with the
+  declarations the context sees in content order."
+  [kb sx base]
+  (let [tax (reasoning/taxonomy kb)
+        c   (:context sx)
+        s   (second (sx/sentence-of sx))
+        h   (kb/find-sentex-handle kb s c)
+        r   (decide/literal-roster tax s)]
+    {:sentence  (second (:sentence base))
+     :handle    h
+     :believed? (boolean (and h (res/believed-at? kb h c)))
+     :roster    (when r
+                  (assoc r :declarations
+                         (into [] (comp (filter (fn [[_ dc]] (tax/sees? tax c dc))) (map key))
+                               (sort-by (comp nm/print-key val) (:declarations r)))))}))
+
 (defn- why-not-handle
   "`why-not` of a stored handle — the original arity, factored out so the sentence
   arity can delegate to it."
@@ -6828,10 +6891,13 @@
                                       :defeat d}))
                                  (exc/defeats-hiding kb handle (:context sx))))
       ;; held OUT by the labeller, or read inert at its own context: a denial of a
-      ;; roster literal (docs/nmtms.md)
+      ;; roster literal, or a tuple whose length breaks its functor's (docs/nmtms.md)
       (or (jtms/forced? (reasoning/tms kb) :out handle)
           (exc/roster-inert-at? kb handle (:context sx)))
-      (assoc base :believed? false :reason :inert)
+      (let [b (clashes/inert-binding kb sx)]
+        (cond-> (assoc base :believed? false :reason :inert)
+          b                                  (assoc :binding b)
+          (sx/negation? (:sentence base))    (assoc :denies (denied-literal kb sx base))))
       :else
       (let [rvoid   (set (exc/roster-void-at kb handle (:context sx)))
             void?   #(or (jtms/forced? (reasoning/tms kb) :void (:id %)) (contains? rvoid (:id %)))
@@ -7079,11 +7145,11 @@
   | `:superseded` | an equality merge restated it under its class representative; it lost no argument and retracting the equality gives it straight back | `:superseded-by` `:rewrites` |
   | `:defeated` | the target of a placed `defeat` in force at its own context, whose handles `:defeats` names and whose nogoods convict through the declarations `:grounds` names, as a clash report's do | `:contradicted-by` `:defeats` `:grounds` |
   | `:withdrawn` | IN in the network, and not believed at its own context because every justification rests on a handle a placed `defeat` in force there hides; each `:withdrawn-by` entry names that handle, its context, the `:defeat` and the defeat's context under `:vantage` (docs/nmtms.md) | `:withdrawn-by` |
-  | `:inert` | a denial of a literal on the forced-monotonic roster as its own context reads it, stored and held OUT there (docs/nmtms.md) | — |
+  | `:inert` | a denial of a literal on the forced-monotonic roster as its own context reads it, or a tuple whose length breaks its functor's, stored and held OUT (docs/nmtms.md). `:binding` names the length the tuple breaks, `{:length n}` or `{:min m}`, the predicate `:via` binds it and the binding handles under `:grounds` (docs/taxonomy.md, \"Arity\"). `:denies` names the literal a denial denies: its `:sentence`, its `:handle` in the same context or nil, whether that context believes it under `:believed?`, and under `:roster` the `:predicate` putting it on the roster, the roster `:kind`, whether the engine's own roster holds it under `:global?`, and the `:declarations` the context sees | `:binding` for a tuple, `:denies` for a denial |
   | `:forced-conclusion` | not a premise, and a supporting justification is a firing held void, at its own context, for concluding a roster literal from antecedents off the roster (docs/nmtms.md). Each `:convicted` entry names the `:rule` and the antecedent predicates `:off-roster` that a `forced_monotonic_predicate` declaration puts on the roster; `:support` lists the other justifications as `:unsupported` does | `:convicted` `:support` |
   | `:unsupported` | not a premise, and every supporting justification has an antecedent that is OUT | `:support` with `:missing` |
   | `:excepted` | *(sentence arity only)* a rule applied and its `exceptWhen` query held, so it concluded nothing | `:rule` `:exception` `:via` |
-  | `:closed-extent` | *(sentence arity only)* nothing stored or derived says so, **and** `(closed_extent_predicate P)` is visible here — so the KB is not silent about it, it says the extent is complete and this is not in it | — |
+  | `:closed-extent` | *(sentence arity only)* nothing stored or derived says so, **and** `(closed_extent_predicate P)` is visible here, or a `(closedExtentForArg P n v)` whose position `n` the sentence fills with `v` — so the KB is not silent about it, it says the extent is complete and this is not in it | — |
 
   A believed handle yields `{:believed? true}` and no `:reason`.  An empty `:support`
   under `:unsupported` means it never had a justification at all.  A nil handle is
@@ -7147,7 +7213,7 @@
             ;; a closed extent is the *more specific* answer than "nobody said so": the
             ;; KB is not silent about this sentence, it says the extent is complete and
             ;; this is not in it — which is what makes `(not S)` derivable (docs/naf.md)
-            :reason (if (provers/closed-extent? kb (nm/functor sentence) context)
+            :reason (if (provers/closed-extent-for? kb sentence context)
                       :closed-extent
                       :not-stored)})))))
   ([kb sentence context opts]
@@ -8015,8 +8081,8 @@
   "The `:backend` to pass `open-kb` for the store in `dir`, read off its files, or nil when
   `dir` holds no store: `:disk-snapshot` for a mapped index image, `:disk-log` for a
   write-ahead-logged index, `:disk-columnar` for records with no index file, `:sqlite` for
-  the SQLite adapter's file, and `:pg-disk-log` for a local index whose records are on a
-  server (the open then needs `:pg`).  An open under the wrong backend throws nothing and
+  the SQLite adapter's file, and `:pg-disk-log` or `:pg-snapshot` for a local index or its
+  images whose records are on a server (the open then needs `:pg`).  An open under the wrong backend throws nothing and
   returns an empty KB, so a caller opening a directory it did not write reads the backend
   here rather than naming one."
   [dir]
@@ -8313,10 +8379,12 @@
 
 (defn- argue-results
   "Query results for `goal` in `context` — a seq of binding maps (an empty map for a
-  ground goal), or nil if not provable.  Rules fire only with `:max-depth`."
+  ground goal), or nil if not provable.  Rules fire only with `:max-depth`.  A ground
+  goal has one answer at most, so its search stops at the first."
   [kb goal context opts]
   (seq (if (:max-depth opts)
-         (query kb goal context opts)
+         (query-capped kb goal context opts
+                       (when-not (sx/some-symbol? sx/variable? goal) 1))
          (ask kb goal context))))
 
 (defn- argue-justification
@@ -8352,7 +8420,7 @@
                (not (sx/some-symbol? sx/variable? goal)))
       (if (:proof? opts)
         (:proof (first results))
-        (:proof (first (query kb goal context (assoc opts :proof? true))))))))
+        (:proof (first (query-capped kb goal context (assoc opts :proof? true) 1)))))))
 
 (defn- argue-defeat-class
   "The JTMS defeat-class (`:monotonic` / `:default`) of `sentence` in `context`, or nil."
@@ -8532,7 +8600,7 @@
  (assoc (into {} (map (fn [[v [op _]]] [op v])) write-ops)
         :settle (fn [kb]
                   (oplog/run-op kb :settle :replay [] (constantly nil)
-                                (fn [_] (settle/settle kb))))))
+                                (fn [in] (closing-settle kb in))))))
 
 ;; ---- reads during a background rebuild's install ----------------------------
 ;; A KB opened with `:recover? :background` answers from an earlier build's reasoning image
@@ -8581,8 +8649,8 @@
     :explain-levels :export! :export-text! :exposed-clashes :find-sentexes
     :find-sentexes-all :find-terms :functional-at-instant-violations :genl? :genls
     :handle-of :handles :has-prop? :in? :inverse-of :isa? :ist :justification
-    :kb-integrity :kb-quality :last-program :lookup :max-specs :metatype-members
-    :min-genls :separating-covers
+    :kb-integrity :kb-quality :last-program :lookup :max-context-children :max-specs
+    :metatype-members :min-context-parents :min-genls :separating-covers
     :possible-relations
     :premise? :props :provable? :prove :prove-within :provenance
     :qualitative-network :qualitative-scenario :qualitative-scenarios :query

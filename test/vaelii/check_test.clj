@@ -180,7 +180,7 @@
   (tu/with-neutral-kb [kb kb-with-starter]
     (tu/with-terms [dog Muffet CxThe]
       (is (= #{:shape} (types-of-check kb (list dog Muffet) "CxThe")))
-      (is (= #{:shape} (types-of-check kb 'dog CxThe)))
+      (is (= #{:shape} (types-of-check kb dog CxThe)))
       ;; a non-map opts is an opts problem, not a shape one — the same
       ;; `:unknown-option` `assert` throws, since `shape-problems` runs its guard
       (is (= #{:unknown-option}

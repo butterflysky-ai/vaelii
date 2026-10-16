@@ -3,7 +3,8 @@
 #
 # `scripts/lib/runlog.sh` records a run as it finishes, so the ledger starts
 # empty in a checkout that has been building for weeks.  The verdicts are not
-# missing, though: every gate left `target/gate/run-*/{lint,test,perf}.log` and
+# missing, though: every gate left `logs/gate/run-*/{lint,test,perf}.log` (or
+# `target/gate/run-*/` in a checkout at an older revision) and
 # every matrix left `logs/test-matrix/run-*/summary.tsv`, and each of those
 # opens with the revision stamp `scripts/lib/revision.sh` writes.  This reads
 # them and appends the rows nothing wrote at the time.
@@ -123,7 +124,7 @@ emit() {
 }
 
 # ---- the gate stages ---------------------------------------------------------
-for dir in target/gate/run-*; do
+for dir in logs/gate/run-* target/gate/run-*; do
   [[ -d "$dir" ]] || continue
   for stage in lint test perf; do
     log="$dir/$stage.log"

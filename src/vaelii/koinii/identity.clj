@@ -453,7 +453,7 @@
   a hand-built `{:admin? true}` included, so a governed agent cannot self-register or
   self-promote.  Returns the agent id."
   [kb principal agent-id display-name trust]
-  (ingest-into kb principal registry-context (list 'agent agent-id))
+  (ingest-into kb principal registry-context (list 'registered_agent agent-id))
   (ingest-into kb principal registry-context (list 'displayNameOf agent-id display-name))
   (ingest-into kb principal registry-context (list 'trustLevel agent-id trust))
   agent-id)
@@ -523,10 +523,10 @@
   (object-of kb 'displayNameOf agent-id))
 
 (defn registered-agents
-  "Every registered agent id — the extent of `(agent ?a)` in `CxRegistry`.  'Which
-  agents exist' as a plain context-scoped read."
+  "Every registered agent id — the extent of `(registered_agent ?a)` in `CxRegistry`.
+  'Which agents exist' as a plain context-scoped read."
   [kb]
-  (->> (v/sentexes-matching kb (list 'agent '?a) registry-context)
+  (->> (v/sentexes-matching kb (list 'registered_agent '?a) registry-context)
        (map (comp second :sentence))
        distinct))
 

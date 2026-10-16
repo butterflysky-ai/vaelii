@@ -110,9 +110,9 @@
       (is (= 1 (count (v/prove kb [(list birdY '?x) (list nestsY '?x)] CxStory)))
           "a one-solution join over two conjuncts")
       (testing "a conjunct that is not a sentence is what the join entry point refuses"
-        (let [d (refusal #(v/prove kb [(list birdY '?x) 'nestsY] CxStory))]
+        (let [d (refusal #(v/prove kb [(list birdY '?x) nestsY] CxStory))]
           (is (= :shape (:type d)))
-          (is (= 'nestsY (:conjunct d)) "and it names the conjunct, not just the goal")))
+          (is (= nestsY (:conjunct d)) "and it names the conjunct, not just the goal")))
       (testing "and `nil` is a conjunct like any other, not the absence of one"
         ;; The guard tests *whether* a bad conjunct exists rather than reading the value
         ;; of the first one, because `nil` is a value it could find.  Read the other way,

@@ -26,8 +26,8 @@ with forward/backward inference and JTMS truth maintenance.
 
 ## Quick start
 
-As a dependency — Leiningen `[com.vaelii/vaelii "0.26.0"]`, or deps.edn
-`com.vaelii/vaelii {:mvn/version "0.26.0"}` — from [Clojars](https://clojars.org/com.vaelii/vaelii).
+As a dependency — Leiningen `[com.vaelii/vaelii "0.27.0"]`, or deps.edn
+`com.vaelii/vaelii {:mvn/version "0.27.0"}` — from [Clojars](https://clojars.org/com.vaelii/vaelii).
 To work on it instead:
 
 ```sh

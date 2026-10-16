@@ -31,9 +31,13 @@
   all treated as determinate here, which is what makes `predAllSpecified` the exact
   antagonist of `predAllExists`."
   (:require [vaelii.impl.naming :as nm]
+            [vaelii.impl.protocols :as p]
             [vaelii.impl.provers :as provers]
             [vaelii.impl.quasiquote :as quasiquote]
-            [vaelii.impl.resolution :as res]))
+            [vaelii.impl.reads :as reads]
+            [vaelii.impl.resolution :as res]
+            [vaelii.impl.taxonomy :as tax]
+            [vaelii.impl.types.reasoning :as reasoning]))
 
 (defn indeterminate-term?
   "Is `term` an **indeterminate** filler in `ctx` — a member of the extensible
@@ -215,17 +219,19 @@
      [(get b '?pred) (get b '?indep)])))
 
 (defn- legacy-ternary-declarations
-  "The retired ternary `(functor pred a b)` sentexes still believed in `ctx`, as
-  `[pred a b]` tuples in content order.  A fresh assert of the shape is refused (the
-  functors are `binary_predicate`s and the arity classes are disjoint), but the bulk import path
-  builds records without the assert-time checks, so a pre-migration dump's ternary
-  declarations load intact — and, matching neither the binary ask pattern nor any
-  audit, would otherwise vanish from the sweep entirely, turning an unmigrated KB
-  into a fake clean sweep."
+  "The retired ternary `(functor pred a b)` sentexes stored in a context `ctx` sees, as
+  `[pred a b]` tuples in content order, belief unread: each breaks the functor's binary
+  shape, so it is inert and no ask answers it.  The bulk import path builds records
+  without the assert-time checks, so a pre-migration dump's ternary declarations load
+  intact, and an unread one would turn an unmigrated KB into a fake clean sweep."
   [kb functor ctx]
-  (content-ordered
-   (for [b (quasiquote/ask-prepared kb (list functor '?pred '?a '?b) ctx)]
-     [(get b '?pred) (get b '?a) (get b '?b)])))
+  (let [up   (tax/context-up (reasoning/taxonomy kb) ctx)
+        recs (:records kb)]
+    (content-ordered
+     (for [h  (reads/as-stored-with-functor-in (:index kb) functor up)
+           :let [s (:sentence (p/get-sentex recs h))]
+           :when (and (seq? s) (= 4 (count s)))]
+       (vec (rest s))))))
 
 (defn specified-declaration-audits
   "Every declaration audit as a lazy stream of `[declaration result]` entries.

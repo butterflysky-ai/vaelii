@@ -28,14 +28,10 @@
   [tax]
   {:tax                 tax
    :genls-global        (partial tax/genls-global tax)
-   :direct-genls-global (partial tax/direct-genls-global tax)
    :specs-global        (partial tax/specs-global tax)
    :genl?-global        (partial tax/genl?-global tax)
    :genls-global-meets? (partial tax/genls-global-meets? tax)
    :genls-global-among  (partial tax/genls-global-among tax)
-   :genls-global-union  (partial tax/genls-global-union tax)
-   :specs-global-while  (partial tax/specs-global-while tax)
-   :genls-global-while  (partial tax/genls-global-while tax)
    :context-up-global   (partial tax/context-up-global tax)
    :context-down-global (partial tax/context-down-global tax)})
 
@@ -171,6 +167,20 @@
         (and (next literal) (every? predicate-spelled? (rest literal)))
         (merge (declarations tax :forced-between-predicates f))))))
 
+(defn literal-roster
+  "How `literal` is on the roster over every reader (`roster-literal?`), or nil when it is
+  not: `{:predicate f :kind k :global? g :declarations {handle context}}`.  `kind` is the
+  roster property `f` carries, `global?` whether `baseline-roster` holds it, and
+  `declarations` the stored declarations giving it, a `global?` member's included."
+  [tax literal]
+  (when (roster-literal? tax literal)
+    (let [f    (nm/functor literal)
+          kind (if (on-roster? tax :forced-monotonic f) :forced-monotonic :forced-between-predicates)]
+      {:predicate    f
+       :kind         kind
+       :global?      (global? tax kind f)
+       :declarations (or (declarations tax kind f) {})})))
+
 (defn note-candidate!
   "Keep `:nogood-candidates` in step with the fact `sx` arriving (`stored?` true) or
   leaving.  Runs at the store primitive and the removal choke point, after the index
@@ -292,19 +302,6 @@
   (let [c (synced kb)]
     [c (journal/position c) (journal/since c since)]))
 
-(defn note-reading-moved!
-  "An `except` of `h` arrived or left, or `h`'s class moved: queue what `h` grounds for the
-  families whose placement reads what a reader believes and sees
-  (`arity/note-reading-moved!`)."
-  [kb h]
-  (arity/note-reading-moved! kb h))
-
-(defn arity-held?
-  "Does the arity index keep a candidate or the binding of a pair (`arity/held?`), read
-  off the index as written, with no sync?"
-  [kb]
-  (arity/held? @(reasoning/nogood-candidates kb)))
-
 (defn placed-kind
   "The kind a nogood over the member handles `ms` placed as a conclusion reports under,
   read off the members' sentences: `:negation` for a `B` beside `(not B)`, the membership
@@ -320,23 +317,22 @@
             (when (or (= a (list 'not b)) (= b (list 'not a))) :negation)))
         (let [w (write-view (reasoning/taxonomy kb))]
           (or (membership/kind-of w recs ms) (related/kind-of w recs ms)))
-        (let [c (synced kb)] (or (tuple/kind-of kb c ms) (arity/kind-of kb c ms))))))
+        (tuple/kind-of kb (synced kb) ms) (arity/kind-of kb ms))))
 
 (defn exempt-at?
   "Does a reader with ancestor set `up` read no conviction of the placed nogood over the
   member handles `ms`: a membership nogood whose separation a `siblingDisjointException`
   it sees removes (`membership/exempt-at?`), a contradicted `orthogonal` whose separation
   such an exception removes (`related/exempt-at?`),
-  a determinant pair whose fillers it reads as one class (`tuple/exempt-at?`), or an
-  arity nogood it reads no binding for (`arity/exempt-at?`).  `hidden?` names the handles
-  the reader does not believe or see, or is nil.  False for any other nogood."
+  or a determinant pair whose fillers it reads as one class (`tuple/exempt-at?`).
+  `hidden?` names the handles the reader does not believe or see, or is nil.  False for
+  any other nogood."
   [kb ms up hidden?]
   (let [tax  (reasoning/taxonomy kb)
         recs (:records kb)]
     (or (membership/exempt-at? tax recs ms up)
         (related/exempt-at? (write-view tax) recs ms up)
-        (and (seq (tax/equality-edges tax)) (tuple/exempt-at? kb (synced kb) ms up hidden?))
-        (and (arity-held? kb) (arity/exempt-at? kb (synced kb) ms up hidden?)))))
+        (and (seq (tax/equality-edges tax)) (tuple/exempt-at? kb (synced kb) ms up hidden?)))))
 
 (defn verdict
   "The verdict on nogood `members` from `class-of` (`handle -> defeat-class`) and
@@ -359,7 +355,7 @@
 ;; ---- derived state (docs/caches.md, "The derived-state register") ----------------
 
 (caches/register-derived
- {:id :J1 :label "Candidate journal" :kind :journal :keyed-by :handle :reads [:N1 :N3 :N5]
+ {:id :J1 :label "Candidate journal" :kind :journal :keyed-by :handle :reads [:N1 :N5]
   :holds-content? false
   :retired-by {:stored :K :removed :K :respelled :K :edge :K :declared :K :edge-belief :K
                :inherited :K :settle-pass :K :recover :R :image-install :R}

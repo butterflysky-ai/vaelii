@@ -23,9 +23,7 @@
   (docs/namespaces.md, \"The layering\").  `vaelii.core` hands its own `retract!` in."
   (:require [vaelii.impl.context-nat :as context-nat]
             [vaelii.impl.nat :as nat]
-            [vaelii.impl.settle :as settle]
-            [vaelii.impl.special :as special]
-            [vaelii.impl.wiring :refer [*defer-settle?*]]))
+            [vaelii.impl.settle :as settle]))
 
 ;; ---- computed genlCx edges: the merges they license -----------------------
 
@@ -35,9 +33,7 @@
   `{:chain? false}`.  The producer runs after the write that entails the edge has
   settled, so the edge needs a settle of its own."
   [kb built? opts]
-  (when (and built? (not *defer-settle?*))
-    (binding [special/*seed-moves?* (:chain? opts true)]
-      (settle/settle kb)))
+  (when built? (settle/settle-write kb (:chain? opts true)))
   nil)
 
 ;; ---- the assert path ------------------------------------------------------

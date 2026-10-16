@@ -226,14 +226,14 @@ it by the last datum's fan-out, since the bound is checked between datums). A co
 no layer count to bound a cascade by, so there the cap is the *whole* bound — which is
 why the corpus card carries one of its own.
 
-**A chained load chains once, at the end.** Every loader asserts with `:chain? false` and
-the pass runs after it, which is what the option says and the only shape that pays: firing
-rules against a KB whose rules are half loaded costs more and reaches the same fixpoint.
-It is also the only arrangement that can be *reported*, since a pass has a phase and a
-per-assertion cascade has nowhere to say anything. Chaining is off by default, and the
-cards that offer it are the two shipped ontologies, the generator and a corpus — a dump
-and a store rebuild belief instead (`:belief?` / `:recover?`), which is a different
-question from deriving what the rules conclude.
+**A chained load chains once, at the end.** The generator and the corpus loader assert
+with `:chain? false`, and the pass runs after them: firing rules against a KB whose rules
+are half loaded costs more and reaches the same fixpoint. A pass is also the only
+arrangement that can be *reported*, since a pass has a phase and a per-assertion cascade
+has nowhere to say anything. Chaining is off by default, and only those two cards offer
+it. The two shipped ontologies chain per assertion as they load, so a closing pass over
+either derives no new sentex. A dump and a store rebuild belief instead (`:belief?` /
+`:recover?`), which is a different question from deriving what the rules conclude.
 
 The KB an entry loads into is in memory by default, over a space the catalog claims
 (from 100 up, clear of the block the test suite owns). A corpus or dump card's
@@ -271,15 +271,17 @@ The other source kinds are built from this engine's files and are in sync alread
   premise attributed to the load that stored it, compared as the form a KB file writes
   (`text/premise-entries`). A strength that differs is one form retracted and another
   asserted, since `assert` only raises a premise's strength.
-- **CxUniverse is locked to the shipped files.** Its premises end up exactly what the
-  upper files and the `unary_predicate` batch produce: a premise there that the engine
-  does not ship is retracted, whoever wrote it. Two kinds of sentex are exempt. A
-  `genlCx` premise is stored in CxUniverse whichever context states it, so an author's
-  edge stays. A sentex that is not a premise (a lifted `decontextualized_predicate` copy,
-  a rule firing) is no premise to compare. `assert` does not refuse a premise written into
-  CxUniverse; the next sync retracts it.
-- **The `kb/middle/` contexts are the engine's** and end up stating exactly what it
-  ships. A context an author wires into the topology is not one of them and is not read.
+- **CxUniverse is locked to the shipped files where it speaks the engine's vocabulary.**
+  A premise there that the engine does not ship is retracted, whoever wrote it, when every
+  term it names is one a shipped premise names (`sync/vocabulary`). Three kinds of sentex
+  are exempt. A premise naming any other term is about an author's vocabulary, so a
+  corpus's own declarations in CxUniverse stay. A `genlCx` premise is stored in CxUniverse
+  whichever context states it, so an author's edge stays. A sentex that is not a premise
+  (a lifted `decontextualized_predicate` copy, a rule firing) is no premise to compare.
+  `assert` does not refuse a premise written into CxUniverse; the next sync retracts it
+  when it names only the engine's terms.
+- **The `kb/middle/` contexts are the engine's** and end up stating what it ships, under
+  the same vocabulary rule. A context an author wires into the topology is not one of them and is not read.
 - **Only the layers a KB has.** A middle file whose context holds nothing is not loaded,
   and the upper layer and the `unary_predicate` batch are loaded only into a KB whose
   CxUniverse holds a premise the upper load ships, so a vocabulary KB stays one.

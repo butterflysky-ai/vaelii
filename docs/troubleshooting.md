@@ -606,6 +606,7 @@ so one vocabulary reads both.
 | `:still-loading` | an export was asked for while the KB is still being written | [catalog.md](catalog.md) |
 | `:still-stopping` | an unload was asked for while the loader has not reached an interruptible point | [catalog.md](catalog.md) |
 | `:still-writing` | an unload was asked for while a job — a chaining run, a sync of the shipped contexts — writes that KB | [catalog.md](catalog.md) |
+| `:stopping` | the daemon received an op after its server began to stop, and the op did not run | [operations.md](operations.md) |
 | `:store-unusable` | a disk store stopped: it was closed, a thread interrupt closed one of its channels, or a write or an fsync failed. `:reason` says which, and every call refuses until the directory is opened again | [storage.md](storage.md#a-store-that-stops) |
 | `:too-many-kbs` | the catalog already holds its maximum of loaded KBs; `:entries` names them — unload one first | [catalog.md](catalog.md#loading) |
 | `:too-many-kept` | an `abduce` with `{:keep? true}` while the KB already holds its maximum of kept abduction contexts; `:contexts` names them — `abduce-discard!` one first | [abduction.md](abduction.md#isolation) |

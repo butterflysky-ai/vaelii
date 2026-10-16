@@ -113,8 +113,10 @@ believed?(W, S, C) = S is in believed(W, C)
      (decision 7);
    - **`anti_transitive`**: `(P a b)`, `(P b c)` and `(P a c)`, three members
      ([nmtms.md](nmtms.md#a-nogood-is-a-set-anti_transitive-has-three-members));
-   - **`covering`**: `(W x)` and a believed `(not (A x))` for every part `A` of a
-     believed `(covering W A …)`; grounds the declaration and the `genl` route
+   - **`covering`**: `(W x)` and a denier of every part `A` of a believed `(covering W A
+     …)`: a believed `(not (A x))`, or a believed membership `(S x)` of another type a
+     believed `disjoint` separates from `A` with every `genl` edge on both sides
+     `:monotonic`; grounds the declaration, the `disjoint` and the `genl` routes
      ([taxonomy.md](taxonomy.md#covering-a-whole-and-the-parts-named-against-it));
    - **inherited**: a stored `(not (P … A …))` beside a claim `(P … W …)` that a believed
      `(transitiveInArgInverse P n genl)` carries down a `genl` path from `W` to `A`, when every
@@ -250,9 +252,9 @@ builders of `vaelii.ref.*` wrote are now citations of these decisions by number.
     `(arity P n)`, an exact-arity class membership, a `variable_arity` membership and
     `(arityMin P m)`; for that read, a `:monotonic` membership whose type reaches an
     exact-arity class through `:monotonic` `genl` edges binds as the class membership does,
-    those edges standing at roster strength. An `arity` violation is a one-member nogood, the tuple,
-    with the binding as its ground, placed as an `irreflexive` violation is (decision 16,
-    [taxonomy.md](taxonomy.md#arity)). A
+    those edges standing at roster strength. A tuple that breaks its binding is held inert in
+    the `:out` forced set at every context, at either strength, and forms no nogood
+    ([taxonomy.md](taxonomy.md#arity)). A
     defeasible disjointness is written as a `:default` rule concluding a denial, which
     forms a negation nogood. The engine holds it through invariant 6. Sections:
     [taxonomy.md](taxonomy.md#disjointness), [taxonomy.md](taxonomy.md#arity) and
@@ -484,7 +486,7 @@ by the world extractor with `:unsupported`, so the generator cannot produce one.
 | quantities | no | [quantity.md](quantity.md) |
 | `disjoint_metatype`, `sibling_disjoint` | no; `sibling_disjoint` is on the roster (invariant 6) | [taxonomy.md](taxonomy.md#disjointness) |
 | `partition`, `separating` | no; `partition` is on the roster (invariant 6) | [taxonomy.md](taxonomy.md#partition-and-separating-add-no-separation-mechanism-of-their-own) |
-| `arity` | no; on the roster, and a violation is a one-member nogood (invariant 6) | [taxonomy.md](taxonomy.md#arity) |
+| `arity` | no; on the roster, and a tuple breaking a binding is inert (invariant 6) | [taxonomy.md](taxonomy.md#arity) |
 | the ASP solver | no | [asp.md](asp.md), [labeling.md](labeling.md) |
 | `asymmetric` | yes, as the `asymmetric` family; on the roster (invariant 2) | [inherit.md](inherit.md#asymmetric-p) |
 | `genl` between predicates of arity 2 or more | yes, on the roster (invariant 5); the generator writes none | [taxonomy.md](taxonomy.md#predicate-metadata) |

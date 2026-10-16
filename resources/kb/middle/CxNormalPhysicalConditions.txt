@@ -1,9 +1,9 @@
 ;; CxNormalPhysicalConditions — the states of matter of stuff at ordinary room temperature
-;; and pressure. Sees the shared upper ontology via CxUniverse. CxWell does not see it,
-;; so the everyday contexts below CxWell assume no temperature and serve a story set on
-;; Mars as well as one set in a kitchen. A context opts in by placing itself under this
-;; one, and a context under both CxWell and this one reads the everyday theories at room
-;; temperature.
+;; and pressure, in the real world. Sees CxRealWorld, so it inherits the whole shared
+;; ontology and excludes every fiction. CxWell does not see it, so the everyday contexts
+;; below CxWell assume no temperature and serve a story set on Mars as well as one set in
+;; a kitchen. A context opts in by placing itself under this one, and a context under
+;; both CxWell and this one reads the everyday theories at room temperature.
 ;;
 ;; abstract.txt places solid, liquid, gas and plasma under substance and separates them,
 ;; and says nothing about which substance is in which state. A substance's state depends
@@ -11,7 +11,7 @@
 ;; conditions. This theory fixes the ordinary ones: a room, a kitchen, a street on a mild
 ;; day. A theory of another temperature states its own states beside this one.
 
-(genlCx CxNormalPhysicalConditions CxUniverse)
+(genlCx CxNormalPhysicalConditions CxRealWorld)
 
 ;; ---- the solids ---------------------------------------------------------
 ;; Stone, wood and glass are solid at room temperature. Glass is an amorphous solid: a

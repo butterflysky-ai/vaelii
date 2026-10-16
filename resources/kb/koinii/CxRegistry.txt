@@ -7,21 +7,21 @@
 ;; agent about itself, so no agent can self-promote.
 ;;
 ;; The three predicates are the identity substrate: a membership
-;; mark (agent), a display name (displayNameOf), and a trust value (trustLevel).
-;; Per-agent CONTEXTS carry "who said what"; this registry carries "who is who, and
-;; how much their word weighs" for the adjudication policies to read.
+;; mark (registered_agent), a display name (displayNameOf), and a trust value
+;; (trustLevel). Per-agent CONTEXTS carry "who said what"; this registry carries "who
+;; is who, and how much their word weighs" for the adjudication policies to read.
 
 (genlCx CxRegistry CxUniverse)  ; CxRegistry speaks CxUniverse's vocabulary
 
-(comment agent
-         "(agent ?agent) means that ?agent is a registered koinii participant. The membership mark of the registry: an id earns a place here only by an admin register-agent, so 'which agents exist' is the extent of this one predicate — a plain context-scoped read of CxRegistry. The id is a stable individual constant (CapitalCamelCase, e.g. AgentAtlas); its per-agent context is CxAtlas by convention (identity/context-for), so identity fixes where the agent may write.")
-(genl agent thing)
+(comment registered_agent
+         "(registered_agent ?agent) means that ?agent is a registered koinii participant. The membership mark of the registry: an id earns a place here only by an admin register-agent, so 'which agents exist' is the extent of this one predicate — a plain context-scoped read of CxRegistry. The id is a stable individual constant (CapitalCamelCase, e.g. AgentAtlas); its per-agent context is CxAtlas by convention (identity/context-for), so identity fixes where the agent may write.")
+(genl registered_agent thing)
 
 (comment displayNameOf
          "(displayNameOf ?agent ?name) means that ?name is the human-readable label for ?agent. Declared functional: one display name to an agent, so a second, different label is not a second fact but a correction (retract the old, assert the new). The stable id is what everything else keys on; the display name is for a reader.")
 (binary_predicate displayNameOf)
 (set/monotonic (instance_relation_predicate displayNameOf))
-(arg displayNameOf 1 agent)
+(arg displayNameOf 1 registered_agent)
 (arg displayNameOf 2 string)
 (set/monotonic (functional displayNameOf))
 
@@ -44,6 +44,6 @@
          "(trustLevel ?agent ?value) means that ?agent is trusted to degree ?value — a mutable NUMBER, an operator-assigned tier at bootstrap and whatever a deployment re-rates it to thereafter (koinii D3). ?value is a plain number, so its arg is number, as birthYearOf's year is integer. Declared functional: one trust value to an agent at a time, so a re-rating retracts the old and asserts the new (set-trust!) rather than storing two. The value must support the sycophancy constraint — an endorsement is a trust signal only across DISTINCT principals, same-model endorsements worth one signal between them. Nothing in the engine computes this number and no resolution policy reads it; here it is only stored and overwritten.")
 (binary_predicate trustLevel)
 (set/monotonic (instance_relation_predicate trustLevel))
-(arg trustLevel 1 agent)
+(arg trustLevel 1 registered_agent)
 (arg trustLevel 2 number)
 (set/monotonic (functional trustLevel))

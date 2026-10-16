@@ -377,6 +377,16 @@
     (not= 2 (count s))    (conj (str f " takes one argument"))
     (nm/individual? pred) (conj (str pred " is an individual; " f " marks a predicate"))))
 
+(defn closed-extent-for-arg-problems
+  "`(closedExtentForArg P n v)` — a predicate, a positive-integer position, and the value
+  that position holds in the goals whose extent the grant closes.  The value is any term."
+  [_ [f pred n :as s] _context]
+  (cond-> []
+    (not= 4 (count s))    (conj (str f " takes three arguments"))
+    (nm/individual? pred) (conj (str pred " is an individual; " f " marks a predicate"))
+    (not (and (integer? n) (pos? n)))
+    (conj (str f " position must be a positive integer"))))
+
 ;; ---- equality: rewriteOf / sameAs / equals / different -------------------
 ;; See docs/equality.md.  Three assertable relations feed one closure and one
 ;; unassertable one reads it.
@@ -595,6 +605,12 @@
     (not= 3 (count s)) (conj "inverse takes two arguments")
     (nm/individual? p) (conj (str p " is an individual; inverse relates predicates"))
     (nm/individual? q) (conj (str q " is an individual; inverse relates predicates"))))
+
+(defn genl-inverse-problems [_ [_ p q :as s] _context]
+  (cond-> []
+    (not= 3 (count s)) (conj "genlInverse takes two arguments")
+    (nm/individual? p) (conj (str p " is an individual; genlInverse relates predicates"))
+    (nm/individual? q) (conj (str q " is an individual; genlInverse relates predicates"))))
 
 ;; (Per-functor well-formedness dispatch lives in the `:wff` column of the table in
 ;; `vaelii.impl.special`, read back through `special/wff-problems` — one enumeration

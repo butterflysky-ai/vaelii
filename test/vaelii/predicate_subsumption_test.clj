@@ -18,11 +18,19 @@
   `res/concluding-rule-handles` (`specs ∩ rules-by-consequent`) and the chainers
   unify the goal against the consequent with `res/subsuming-unify`.  Exercised with
   a **backward-only** rule so forward chaining cannot materialize the subtype
-  conclusion and mask the backward path."
+  conclusion and mask the backward path.
+
+  **`genlInverse` is binary `genl` with the arguments swapped**: `(genlInverse P Q)`
+  makes a stored `(P a b)` answer `(Q b a)`, through the same fan.  The tests at the end
+  pin that every reader of the fan takes the swap — query, forward trigger, join,
+  backward rule, negation — that the swaps compose by parity along a chain (an even
+  number of `genlInverse` edges answers exactly what a `genl` chain answers), and that a
+  justification names the `genlInverse` edges as it names `genl` ones."
   (:require [clojure.test :refer [deftest is testing use-fixtures]]
             [vaelii.core :as v]
             [vaelii.impl.reads :as reads]
             [vaelii.impl.resolution :as res]
+            [vaelii.impl.sentex :as sx]
             [vaelii.impl.taxonomy :as tax]
             [vaelii.impl.types.reasoning :as reasoning]
             [vaelii.test-util :as tu]))
@@ -203,3 +211,251 @@
         (is (empty? (v/prove kb (list parentOf p c) CxB))))
       (testing "the subtype goal itself still answers from either sibling"
         (is (v/query? kb (list fatherOf p c) CxB {:max-depth 2}))))))
+
+;; ---- genlInverse: binary genl with the arguments swapped -----------------
+;; `(genlInverse P Q)` means `(P x y)` entails `(Q y x)`.  The fan carries a parity bit:
+;; a `genl` edge keeps it, a `genlInverse` edge flips it, so a chain answers with the
+;; arguments swapped exactly when it holds an odd number of `genlInverse` edges.
+
+(defn- chain!
+  "Fresh binary predicates `p0 … pn` joined bottom-up by the relations `kinds` (each
+  `'genl` or `'genlInverse`), every edge stated at `strength` in `CxUniverse`.  Answers
+  `[preds edge-handles]`."
+  ([kb kinds] (chain! kb kinds :monotonic))
+  ([kb kinds strength]
+   (let [ps (vec (repeatedly (inc (count kinds)) #(tu/fresh-term :predicate "rel")))
+         es (mapv (fn [i k] (v/assert kb (list k (ps i) (ps (inc i))) 'CxUniverse {:strength strength}))
+                  (range) kinds)]
+     [ps es])))
+
+(defn- pairs
+  "The `[?x ?y]` pairs an open `(pred ?x ?y)` ask answers from `context`."
+  [kb pred context]
+  (set (map (juxt #(get % '?x) #(get % '?y)) (v/ask kb (list pred '?x '?y) context))))
+
+(defn- because-premises
+  "The sentences a stored conclusion's first justification rests on, as a set."
+  [kb sentence]
+  (let [w (v/why kb (v/handle-of kb sentence 'CxUniverse))]
+    (set (map :sentence (:because (first (:support w)))))))
+
+(tu/deftest-kb a-genlInverse-edge-answers-the-swapped-goal
+  (tu/with-terms [childOf parentOf Tom Bob]
+    (v/assert kb (list childOf Bob Tom) 'CxUniverse {:strength :monotonic})
+    (testing "before the edge, the swapped goal is not answered"
+      (is (not (v/ask? kb (list parentOf Tom Bob) 'CxUniverse))))
+    (let [edge (v/assert kb (list 'genlInverse childOf parentOf) 'CxUniverse {:strength :monotonic})]
+      (testing "with the edge, (childOf Bob Tom) answers (parentOf Tom Bob)"
+        (is (v/ask? kb (list parentOf Tom Bob) 'CxUniverse))
+        (is (= #{[Tom Bob]} (pairs kb parentOf 'CxUniverse))))
+      (testing "and not the unswapped spelling"
+        (is (not (v/ask? kb (list parentOf Bob Tom) 'CxUniverse))))
+      (testing "either argument bound"
+        (is (= #{Bob} (set (map #(get % '?y) (v/ask kb (list parentOf Tom '?y) 'CxUniverse)))))
+        (is (= #{Tom} (set (map #(get % '?x) (v/ask kb (list parentOf '?x Bob) 'CxUniverse))))))
+      (testing "the reference fan-out and the set-algebra path agree"
+        (doseq [h? [true false]]
+          (binding [res/*hierarchical-retrieval* h?]
+            (is (= #{[Tom Bob]} (pairs kb parentOf 'CxUniverse)) (str "hierarchical " h?)))))
+      (testing "retracting the edge withdraws the answer"
+        (v/retract! kb edge)
+        (is (not (v/ask? kb (list parentOf Tom Bob) 'CxUniverse)))))))
+
+(tu/deftest-kb a-genlInverse-edge-licenses-no-converse
+  (tu/with-terms [childOf parentOf Tom Bob]
+    (v/assert kb (list 'genlInverse childOf parentOf) 'CxUniverse {:strength :monotonic})
+    (v/assert kb (list parentOf Tom Bob) 'CxUniverse {:strength :monotonic})
+    (testing "a stored (parentOf Tom Bob) answers no childOf goal"
+      (is (not (v/ask? kb (list childOf Bob Tom) 'CxUniverse)))
+      (is (empty? (pairs kb childOf 'CxUniverse))))))
+
+(tu/deftest-kb a-chain-swaps-exactly-when-it-holds-an-odd-number-of-genlInverse-edges
+  (tu/with-terms [A B]
+    (doseq [kinds [['genlInverse]
+                   ['genlInverse 'genlInverse]
+                   ['genlInverse 'genlInverse 'genlInverse]
+                   ['genlInverse 'genlInverse 'genlInverse 'genlInverse]
+                   ['genl 'genlInverse]
+                   ['genlInverse 'genl]
+                   ['genl 'genlInverse 'genl 'genlInverse 'genl]
+                   ['genlInverse 'genl 'genlInverse 'genl 'genlInverse]]]
+      (let [[ps] (chain! kb kinds)
+            top  (peek ps)
+            odd? (odd? (count (filter #{'genlInverse} kinds)))]
+        (v/assert kb (list (ps 0) A B) 'CxUniverse {:strength :monotonic})
+        (testing (pr-str kinds)
+          (is (= (if odd? #{[B A]} #{[A B]}) (pairs kb top 'CxUniverse)))
+          (doseq [h? [true false]]
+            (binding [res/*hierarchical-retrieval* h?]
+              (is (= (if odd? #{[B A]} #{[A B]}) (pairs kb top 'CxUniverse))
+                  (str "hierarchical " h?)))))))))
+
+(tu/deftest-kb an-even-genlInverse-chain-acts-exactly-like-a-genl-chain
+  ;; two and four `genlInverse` edges against the same number of `genl` edges: the same
+  ;; answers to the same goals, the same forward conclusion, and a justification of the
+  ;; same shape — the rule, the fact, and one supporter per edge
+  (tu/with-terms [A B C]
+    (doseq [n [2 4]]
+      (let [[gs ges] (chain! kb (repeat n 'genl))
+            [vs ies] (chain! kb (repeat n 'genlInverse))
+            outg     (tu/fresh-term :predicate "outG")
+            outi     (tu/fresh-term :predicate "outI")]
+        (v/assert kb (list 'implies (list (peek gs) '?x '?y) (list outg '?x '?y)) 'CxUniverse {:direction :forward})
+        (v/assert kb (list 'implies (list (peek vs) '?x '?y) (list outi '?x '?y)) 'CxUniverse {:direction :forward})
+        (v/assert kb (list (gs 0) A B) 'CxUniverse {:strength :monotonic})
+        (v/assert kb (list (vs 0) A B) 'CxUniverse {:strength :monotonic})
+        (v/assert kb (list (gs 2) B C) 'CxUniverse {:strength :monotonic})
+        (v/assert kb (list (vs 2) B C) 'CxUniverse {:strength :monotonic})
+        (testing (str n " edges: the same answers")
+          (is (= #{[A B] [B C]} (pairs kb (peek gs) 'CxUniverse)))
+          (is (= (pairs kb (peek gs) 'CxUniverse) (pairs kb (peek vs) 'CxUniverse))))
+        (testing (str n " edges: the same forward conclusion, unswapped")
+          (is (v/handle-of kb (list outg A B) 'CxUniverse))
+          (is (v/handle-of kb (list outi A B) 'CxUniverse))
+          (is (nil? (v/handle-of kb (list outi B A) 'CxUniverse))))
+        (testing (str n " edges: the same justification shape, naming every edge")
+          (let [pg (because-premises kb (list outg A B))
+                pi (because-premises kb (list outi A B))]
+            (is (= (inc n) (count pg) (count pi)))
+            (is (contains? pi (list (vs 0) A B)))
+            (is (= (set (map #(:sentence (v/sentex kb %)) ies))
+                   (disj pi (list (vs 0) A B))))
+            (is (= (set (map #(:sentence (v/sentex kb %)) ges))
+                   (disj pg (list (gs 0) A B))))))))))
+
+(tu/deftest-kb an-odd-genlInverse-chain-acts-like-one-genlInverse-edge
+  (tu/with-terms [A B]
+    (doseq [n [1 3]]
+      (let [[ps es] (chain! kb (repeat n 'genlInverse))
+            out     (tu/fresh-term :predicate "out")]
+        (v/assert kb (list 'implies (list (peek ps) '?x '?y) (list out '?x '?y)) 'CxUniverse {:direction :forward})
+        (v/assert kb (list (ps 0) A B) 'CxUniverse {:strength :monotonic})
+        (testing (str n " edges: swapped")
+          (is (= #{[B A]} (pairs kb (peek ps) 'CxUniverse)))
+          (is (v/handle-of kb (list out B A) 'CxUniverse))
+          (is (nil? (v/handle-of kb (list out A B) 'CxUniverse))))
+        (testing (str n " edges: the justification names each edge and the fact")
+          (is (= (conj (set (map #(:sentence (v/sentex kb %)) es)) (list (ps 0) A B))
+                 (because-premises kb (list out B A)))))))))
+
+(tu/deftest-kb a-forward-rule-fires-through-a-genlInverse-edge
+  ;; the fatherOf/parentOf shape of `forward-chaining-fires-through-subsumption`, swapped
+  (tu/with-terms [childOf parentOf hasChild Tom Bob]
+    (let [edge (v/assert kb (list 'genlInverse childOf parentOf) 'CxUniverse {:strength :monotonic})
+          _    (v/assert kb (list 'implies (list parentOf '?x '?y) (list hasChild '?x '?y))
+                         'CxUniverse {:direction :forward})
+          fact (v/assert kb (list childOf Bob Tom) 'CxUniverse {:strength :monotonic})
+          h    (v/handle-of kb (list hasChild Tom Bob) 'CxUniverse)]
+      (testing "the rule on parentOf fires on the childOf fact, swapped"
+        (is h)
+        (is (nil? (v/handle-of kb (list hasChild Bob Tom) 'CxUniverse))))
+      (testing "the justification names the genlInverse edge and the fact"
+        (is (= #{edge fact} (set (map :handle (:because (first (:support (v/why kb h)))))))))
+      (testing "argue reads the stored conclusion's justification"
+        (let [a (v/argue kb (list hasChild Tom Bob) 'CxUniverse)]
+          (is (= :true (:verdict a)))
+          (is (some #(= edge (:handle %)) (:because (first (:support (:for-why a))))))))
+      (testing "retracting the edge withdraws the conclusion"
+        (v/retract! kb edge)
+        (is (not (v/ask? kb (list hasChild Tom Bob) 'CxUniverse)))))))
+
+(tu/deftest-kb the-fact-arriving-first-fires-the-rule-when-the-edge-arrives
+  (tu/with-terms [childOf parentOf hasChild Tom Bob]
+    (v/assert kb (list childOf Bob Tom) 'CxUniverse {:strength :monotonic})
+    (v/assert kb (list 'implies (list parentOf '?x '?y) (list hasChild '?x '?y))
+              'CxUniverse {:direction :forward})
+    (v/assert kb (list 'genlInverse childOf parentOf) 'CxUniverse {:strength :monotonic})
+    (is (v/handle-of kb (list hasChild Tom Bob) 'CxUniverse))))
+
+(tu/deftest-kb a-default-genlInverse-edge-is-defeasible
+  (tu/with-terms [childOf parentOf hasChild Tom Bob]
+    (let [edge (v/assert kb (list 'genlInverse childOf parentOf) 'CxUniverse {:strength :default})]
+      (v/assert kb (list 'implies (list parentOf '?x '?y) (list hasChild '?x '?y))
+                'CxUniverse {:direction :forward})
+      (v/assert kb (list childOf Bob Tom) 'CxUniverse {:strength :monotonic})
+      (testing "believed: the swapped goal answers, and the conclusion holds at the edge's class"
+        (is (v/ask? kb (list parentOf Tom Bob) 'CxUniverse))
+        (is (= :default (:defeat-class (v/why kb (v/handle-of kb (list hasChild Tom Bob) 'CxUniverse))))))
+      (let [hn (v/assert kb (list 'not (list 'genlInverse childOf parentOf)) 'CxUniverse
+                         {:strength :monotonic})]
+        (testing "defeated: neither the swapped goal nor the conclusion"
+          (is (not (v/in? kb edge)))
+          (is (not (v/ask? kb (list parentOf Tom Bob) 'CxUniverse)))
+          (is (not (v/ask? kb (list hasChild Tom Bob) 'CxUniverse))))
+        (testing "retracting the defeater revives both"
+          (v/retract! kb hn)
+          (is (v/ask? kb (list parentOf Tom Bob) 'CxUniverse))
+          (is (v/ask? kb (list hasChild Tom Bob) 'CxUniverse)))))))
+
+(tu/deftest-kb an-except-on-the-genlInverse-edge-hides-its-conclusions
+  (tu/with-terms [childOf parentOf Tom Bob CxHide]
+    (v/assert kb (list 'genlCx CxHide 'CxUniverse) 'CxUniverse {:strength :monotonic})
+    (let [edge (v/assert kb (list 'genlInverse childOf parentOf) 'CxUniverse {:strength :monotonic})]
+      (v/assert kb (list childOf Bob Tom) 'CxUniverse {:strength :monotonic})
+      (is (v/ask? kb (list parentOf Tom Bob) CxHide))
+      (let [eh (v/assert kb (list 'except (sx/sentex-handle edge)) CxHide {:strength :monotonic})]
+        (testing "the context holding the except reads no swap"
+          (is (not (v/ask? kb (list parentOf Tom Bob) CxHide))))
+        (testing "the context above it still does"
+          (is (v/ask? kb (list parentOf Tom Bob) 'CxUniverse)))
+        (testing "retracting the except restores it"
+          (v/retract! kb eh)
+          (is (v/ask? kb (list parentOf Tom Bob) CxHide)))))))
+
+(tu/deftest-kb a-genlInverse-edge-answers-only-where-it-is-visible
+  (tu/with-terms [childOf parentOf Tom Bob CxA CxB]
+    (v/assert kb (list 'genlCx CxA 'CxUniverse) 'CxUniverse)
+    (v/assert kb (list 'genlCx CxB 'CxUniverse) 'CxUniverse)
+    (v/assert kb (list 'genlInverse childOf parentOf) CxA {:strength :monotonic})
+    (v/assert kb (list childOf Bob Tom) 'CxUniverse {:strength :monotonic})
+    (doseq [h? [true false]]
+      (binding [res/*hierarchical-retrieval* h?]
+        (testing (str "hierarchical-retrieval " h?)
+          (is (v/ask? kb (list parentOf Tom Bob) CxA))
+          (is (not (v/ask? kb (list parentOf Tom Bob) CxB)))
+          (is (v/ask? kb (list parentOf Tom Bob) '?ctx)))))))
+
+(tu/deftest-kb a-genlInverse-edge-swaps-only-binary-facts
+  (tu/with-terms [rel3 sup3 A B C]
+    (v/assert kb (list 'genlInverse rel3 sup3) 'CxUniverse {:strength :monotonic})
+    (v/assert kb (list rel3 A B C) 'CxUniverse {:strength :monotonic})
+    (testing "a ternary fact answers no goal on the general predicate"
+      (is (empty? (v/ask kb (list sup3 '?x '?y '?z) 'CxUniverse)))
+      (is (empty? (v/ask kb (list sup3 '?x '?y) 'CxUniverse))))))
+
+(tu/deftest-kb a-negation-carries-through-a-genlInverse-edge-contrapositively
+  ;; (P x y) ⊢ (Q y x), so ¬(Q y x) ⊢ ¬(P x y)
+  (tu/with-terms [childOf parentOf Tom Bob]
+    (v/assert kb (list 'genlInverse childOf parentOf) 'CxUniverse {:strength :monotonic})
+    (v/assert kb (list 'not (list parentOf Tom Bob)) 'CxUniverse {:strength :monotonic})
+    (is (v/ask? kb (list 'not (list childOf Bob Tom)) 'CxUniverse))
+    (is (not (v/ask? kb (list 'not (list childOf Tom Bob)) 'CxUniverse)))))
+
+(tu/deftest-kb a-rule-concluding-a-genlInverse-spec-answers-the-general-goal
+  ;; the backward dual: a backward-only rule concludes childOf, and a parentOf goal is
+  ;; answered through it with the arguments swapped
+  (tu/with-terms [childOf parentOf sonOf Tom Bob]
+    (let [p (symbol "?p") c (symbol "?c")]
+      (v/assert kb (list 'genlInverse childOf parentOf) 'CxUniverse {:strength :monotonic})
+      (v/assert-rule kb [(list sonOf '?x '?y)] (list childOf '?x '?y)
+                     'CxUniverse {:direction :backward})
+      (v/assert kb (list sonOf Bob Tom) 'CxUniverse {:strength :monotonic})
+      (testing "the node engine"
+        (is (contains? (set (v/query kb (list parentOf p c) 'CxUniverse {:max-depth 2}))
+                       {p Tom c Bob}))
+        (is (not (v/query? kb (list parentOf Bob Tom) 'CxUniverse {:max-depth 2}))))
+      (testing "prove"
+        (is (some #(and (= Tom (% p)) (= Bob (% c))) (v/prove kb (list parentOf p c) 'CxUniverse)))))))
+
+(tu/deftest-kb with-no-genlInverse-edge-the-fan-is-the-genl-closure
+  ;; the relation-genl reading is untouched when no genlInverse edge exists
+  (tu/with-terms [fatherOf motherOf parentOf A B]
+    (v/assert kb (list 'genl fatherOf parentOf) 'CxUniverse {:strength :monotonic})
+    (v/assert kb (list 'genl motherOf parentOf) 'CxUniverse {:strength :monotonic})
+    (v/assert kb (list fatherOf A B) 'CxUniverse {:strength :monotonic})
+    (let [tx (reasoning/taxonomy kb)]
+      (is (= (tax/specs tx parentOf 'CxUniverse) (res/sub-predicates kb parentOf 'CxUniverse)))
+      (is (= (tax/specs-global tx parentOf) (res/sub-predicates kb parentOf '?ctx)))
+      (is (= (tax/genls tx fatherOf 'CxUniverse) (res/super-predicates kb fatherOf 'CxUniverse)))
+      (is (empty? (res/swapped-sub-predicates kb parentOf 'CxUniverse)))
+      (is (empty? (res/swapped-super-predicates kb fatherOf 'CxUniverse))))))

@@ -1,0 +1,13 @@
+;; CxRealWorld — the real world. Sees CxWell, so it inherits the whole shared
+;; ontology. A context representing an invented setting is a sibling under CxWell
+;; instead of a context under CxRealWorld, so an exception a fiction states never
+;; reaches what holds of the real world.
+;;
+;; CxUniverse states (disjoint animal vehicle) at the default strength, so a fiction
+;; below CxWell may except it and hold a term that is both an animal and a vehicle.
+;; This context restates the same separation monotonic, so the real world can never
+;; hold the overlap.
+
+(genlCx CxRealWorld CxWell)
+
+(set/monotonic (disjoint animal vehicle))

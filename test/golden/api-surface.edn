@@ -88,8 +88,10 @@
   last-program "[[conn]]",
   levels "[[conn]]",
   lookup "[[conn level goal] [conn level goal context]]",
+  max-context-children "[[conn c]]",
   max-specs "[[conn t] [conn t context]]",
   metatype-members "[[conn m]]",
+  min-context-parents "[[conn c]]",
   min-genls "[[conn t] [conn t context]]",
   poll "[[conn token cursor] [conn token cursor opts]]",
   possible-relations "[[conn calculus context a b]]",
@@ -272,8 +274,10 @@
   load-text! "[[kb source]]",
   log-level "[[]]",
   lookup "[[kb level goal] [kb level goal context]]",
+  max-context-children "[[kb c]]",
   max-specs "[[kb t] [kb t context]]",
   metatype-members "[[kb m]]",
+  min-context-parents "[[kb c]]",
   min-genls "[[kb t] [kb t context]]",
   negative? "[[sentex]]",
   open-kb "[[] [opts]]",
@@ -436,8 +440,10 @@
    :last-program
    :levels
    :lookup
+   :max-context-children
    :max-specs
    :metatype-members
+   :min-context-parents
    :min-genls
    :poll
    :possible-relations
@@ -560,8 +566,10 @@
    :last-program
    :levels
    :lookup
+   :max-context-children
    :max-specs
    :metatype-members
+   :min-context-parents
    :min-genls
    :possible-relations
    :premise?

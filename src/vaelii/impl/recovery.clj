@@ -409,11 +409,14 @@
       ;; refusal is a claim about what the KB *believes*.  A re-fire that placed something
       ;; the narrowed re-chain had not owes a second settle.
       (step! :refusals)
-      (let [{:keys [derived]} (chain/rerecord-refusals! kb)]
+      (let [{:keys [derived]} (chain/rerecord-refusals! kb)
+            ;; ...and the class memberships a metatype route derives, which a store
+            ;; written with no belief holds no justification for
+            classes? (chain/resync-arity-classes! kb)]
         ;; ...and the lifts and declarations still waiting on an absent type,
         ;; which that re-fire does not reach
         (special/rebuild-pending! kb)
-        (when (pos? (long (or derived 0))) (settle/settle kb))))
+        (when (or classes? (pos? (long (or derived 0)))) (settle/settle kb))))
     ;; the settle above places the inherited clashes and stands aside from the other
     ;; families, and a store written with no belief holds none placed: the nogoods the
     ;; rebuilt index queued are placed where they stand (`chain/place-nogoods!`)
@@ -560,6 +563,24 @@
       (.start))
     nil))
 
+(defn- trust-installed!
+  "Keep the image just installed into `kb`, written under engine source `image-source`
+  other than this build's, as `:recover? :trust` asks: no rebuild runs, and the close-time
+  image refresh stamps `image-source` again, so the image goes on naming the source its
+  belief was last derived under in full, until a `recover` re-derives it under this one.
+  The settles this KB runs move belief under this build wherever they reach.  `ms` is the
+  install's wall time, nil when the caller timed none."
+  [kb image image-source ms]
+  (trove/log! {:level :info :id ::reasoning-image-trusted
+               :msg (str "installed the reasoning image for " (:snapshot-dir kb)
+                         (when ms (format " in %.0f ms" (double ms)))
+                         "; it was written under engine source "
+                         (subs (str image-source) 0 (min 12 (count (str image-source))))
+                         " and is trusted (:recover? :trust): settles apply this build's"
+                         " code to what they reach, and recover re-derives it all")})
+  (swap! (:unrecovered kb) assoc :last-recover (:recover image))
+  (reasoning-image/register-close! kb image-source))
+
 (defn recover
   "The implementation of `vaelii.core/recover` — build the in-memory JTMS and taxonomy for
   the persistent stores.  The public contract, and when a caller runs it, are on
@@ -576,7 +597,10 @@
   Under `kb/*background-belief?*`, which `open-kb` binds for `:recover? :background`, an
   image declined only for its engine source is installed anyway, and `start-rebuild!`
   rebuilds belief under this build behind it.  A call while such a rebuild runs stops the
-  rebuild and runs it on the calling thread instead."
+  rebuild and runs it on the calling thread instead.
+
+  Under `kb/*trust-source?*`, which `open-kb` binds for `:recover? :trust`, such an image is
+  installed and kept (`trust-installed!`): no rebuild runs and writes are accepted at once."
   [kb]
   (kb/stop-rebuild! kb)
   (if (:stale-belief @(:unrecovered kb))
@@ -586,7 +610,9 @@
       kb)
     (let [t0 (System/nanoTime)
           {:keys [reasoning reason source image-source image]}
-          (reasoning-image/install! kb (if kb/*background-belief?* #{:source-differs} #{}))
+          (reasoning-image/install! kb (if (or kb/*background-belief?* kb/*trust-source?*)
+                                         #{:source-differs}
+                                         #{}))
           ms #(/ (- (System/nanoTime) t0) 1e6)]
       (case reasoning
         :installed
@@ -598,14 +624,16 @@
             (reasoning-image/register-close! kb source))
 
         :stale
-        (do (trove/log! {:level :info :id ::reasoning-image-stale
-                         :msg (format (str "installed the reasoning image for %s in %.0f ms; it was"
-                                           " written under engine source %s, so belief is being"
-                                           " rebuilt under this build, and writes are refused"
-                                           " until the rebuilt belief is installed")
-                                      (:snapshot-dir kb) (ms)
-                                      (subs (str image-source) 0 (min 12 (count (str image-source)))))})
-            (start-rebuild! kb image source))
+        (if kb/*trust-source?*
+          (trust-installed! kb image image-source (ms))
+          (do (trove/log! {:level :info :id ::reasoning-image-stale
+                           :msg (format (str "installed the reasoning image for %s in %.0f ms; it was"
+                                             " written under engine source %s, so belief is being"
+                                             " rebuilt under this build, and writes are refused"
+                                             " until the rebuilt belief is installed")
+                                        (:snapshot-dir kb) (ms)
+                                        (subs (str image-source) 0 (min 12 (count (str image-source)))))})
+              (start-rebuild! kb image source)))
 
         (do (when (reasoning-image/applies? kb)
               (trove/log! {:level :info :id ::reasoning-image-declined
@@ -634,12 +662,19 @@
   dump's manifest carries.  Returns `{:reasoning :installed}` or `{:reasoning :recovered
   :reason r}`, `r` the reason `reasoning-image/install-from!` gave for declining the image."
   [kb dir records]
-  (let [{:keys [reasoning reason source]} (reasoning-image/install-from!
-                                           kb dir (constantly records))]
-    (if (= :installed reasoning)
+  (let [{:keys [reasoning reason source image-source image]}
+        (reasoning-image/install-from! kb dir (constantly records) #{:source-differs})]
+    (case reasoning
+      :installed
       (do (reasoning-image/register-close! kb source)
           (kb/note-hazards! kb {:no-belief false})
           {:reasoning :installed})
+      ;; a dump's image written under other engine source is trusted, as `:recover? :trust`
+      ;; trusts a store's
+      :stale
+      (do (trust-installed! kb image image-source nil)
+          (kb/note-hazards! kb {:no-belief false})
+          {:reasoning :installed :trusted image-source})
       (do (recover kb)
           {:reasoning :recovered :reason reason}))))
 

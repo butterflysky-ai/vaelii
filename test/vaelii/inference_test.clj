@@ -240,6 +240,60 @@
                                 (vals @(:nodes sess)))]
             (is (zero? (count repeats)) "nodes carrying a repeated conjunct")))))))
 
+(tu/deftest-kb a-residual-that-asks-its-own-goal-again-builds-no-node
+  ;; `meet` is the intersection of `whole` and `side`, so its rule rewrites the goal
+  ;; (whole ?x) into (whole ?x) ∧ (side ?x): the parent's question and one more literal.
+  ;; Beside one recursive rule, building those children expands 19,531 nodes at depth 8
+  ;; for either goal below; without them the search expands one node per depth.
+  (tu/with-terms [whole side meet trustsOf CxMeet]
+    (tu/with-terms [MeetEv MeetSrc MeetA MeetNone]
+      (doseq [s [(list 'genl meet whole) (list 'genl meet side) (list side MeetEv)
+                 (list trustsOf MeetEv MeetSrc) (list whole MeetSrc)
+                 (list trustsOf MeetA MeetEv)]]
+        (v/assert kb s CxMeet))
+      (v/assert-rule kb [(list whole '?x) (list side '?x)] (list meet '?x) CxMeet
+                     {:direction :backward})
+      (v/assert-rule kb [(list trustsOf '?x '?y) (list whole '?y)] (list whole '?x) CxMeet
+                     {:direction :backward})
+      (doseq [[goal expected] [[(list whole '?x)
+                                #{{'?x MeetSrc} {'?x MeetEv} {'?x MeetA}}]
+                               [(list whole MeetNone) #{}]]]
+        (let [sess (inf/session kb [goal] CxMeet {:max-depth 8})]
+          (is (= expected (set (doall (inf/search-seq sess)))) (pr-str goal))
+          (is (<= (:expanded (inf/tree-stats sess)) 9) (pr-str goal)))))))
+
+(tu/deftest-kb a-residual-that-asks-a-spec-of-its-goal-builds-no-node
+  ;; `left` and `right` are specs of `outer`, and each is concluded from the other, so
+  ;; rewriting (outer ?x) through either rule asks a spec of (outer ?x).  The leaf answers
+  ;; (outer ?x) from both specs' facts through the genl closure.
+  (tu/with-terms [outer left right tagged marked CxSpec]
+    (tu/with-terms [SpecL SpecR]
+      (doseq [s [(list 'genl left outer) (list 'genl right outer) (list left SpecL)
+                 (list tagged SpecL) (list right SpecR) (list marked SpecR)]]
+        (v/assert kb s CxSpec))
+      (v/assert-rule kb [(list left '?x) (list tagged '?x)] (list right '?x) CxSpec
+                     {:direction :backward})
+      (v/assert-rule kb [(list right '?x) (list marked '?x)] (list left '?x) CxSpec
+                     {:direction :backward})
+      (let [sess (inf/session kb [(list outer '?x)] CxSpec {:max-depth 8})]
+        (is (= #{{'?x SpecL} {'?x SpecR}} (set (doall (inf/search-seq sess)))))
+        (is (= 1 (:expanded (inf/tree-stats sess))))))))
+
+(tu/deftest-kb an-interrupted-thread-throws-at-the-next-step-and-keeps-the-session
+  (tu/with-terms [parentOf anc CxStop]
+    (tu/with-terms [StopA StopB]
+      (v/assert kb (list parentOf StopA StopB) CxStop)
+      (v/assert-rule kb [(list parentOf '?x '?z)] (list anc '?x '?z) CxStop
+                     {:direction :backward})
+      (let [sess (inf/session kb [(list anc StopA '?z)] CxStop {:max-depth 2})]
+        (try
+          (.interrupt (Thread/currentThread))
+          (is (thrown? InterruptedException (inf/step! sess)))
+          (is (not (Thread/interrupted)) "the throw cleared the flag")
+          (finally (Thread/interrupted)))
+        (is (= #{{'?z StopB}} (set (doall (inf/search-seq sess))))
+            "the interrupted step expanded nothing, so the search resumes from the root")))))
+
 ;; ---- deferred literals ---------------------------------------------------
 
 (tu/deftest-kb a-deferred-literal-is-computed-and-never-rewritten

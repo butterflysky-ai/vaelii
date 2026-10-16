@@ -527,6 +527,54 @@
           (is (zero? calls) "and a single probe takes the pruned unfiltered walk"))
         (v/retract! kb eh)))))
 
+(tu/deftest-kb the-nearest-context-neighbours-follow-a-genlCx-except
+  ;; `CxLeaf` reaches `CxTop` through `CxMid` and by an edge of its own.  The nearest
+  ;; parents of a context are read as that context reads its ancestor set
+  ;; (`context-up`), and a context is a nearest child of the contexts its own read names
+  ;; as nearest parents, which is how `context-down` reads each candidate.
+  (let [M {:strength :monotonic}]
+    (testing "an except on the nearer edge, stated in the context under the edge"
+      (tu/with-terms [CxTop CxMid CxLeaf]
+        (let [tx (reasoning/taxonomy kb)]
+          (v/assert kb (list 'genlCx CxTop 'CxWell) 'CxUniverse M)
+          (v/assert kb (list 'genlCx CxMid CxTop) 'CxUniverse M)
+          (v/assert kb (list 'genlCx CxLeaf CxTop) 'CxUniverse M)
+          (let [near-h (v/assert kb (list 'genlCx CxLeaf CxMid) 'CxUniverse M)]
+            (is (= #{CxMid} (tax/min-context-parents tx CxLeaf)))
+            (is (= #{CxMid} (tax/max-context-children tx CxTop)))
+            (is (= #{CxLeaf} (tax/max-context-children tx CxMid)))
+            (let [eh (v/assert kb (list 'except (sx/sentex-handle near-h)) CxLeaf M)]
+              (is (not (contains? (set (tax/context-up tx CxLeaf)) CxMid))
+                  "the context no longer sees the nearer parent")
+              (is (= #{CxTop} (tax/min-context-parents tx CxLeaf))
+                  "so the farther parent is its nearest one")
+              (is (= #{CxMid CxLeaf} (tax/max-context-children tx CxTop))
+                  "and it is a nearest child of the farther parent")
+              (is (= #{} (tax/max-context-children tx CxMid))
+                  "and no child of the parent it does not see")
+              (is (every? (set (tax/context-down tx CxTop)) (tax/max-context-children tx CxTop)))
+              (v/retract! kb eh)
+              (is (= #{CxMid} (tax/min-context-parents tx CxLeaf)))
+              (is (= #{CxMid} (tax/max-context-children tx CxTop)))
+              (is (= #{CxLeaf} (tax/max-context-children tx CxMid))))))))
+    (testing "an except on the edge above the nearer parent, stated in the context below both"
+      (tu/with-terms [CxTop CxMid CxLeaf]
+        (let [tx (reasoning/taxonomy kb)]
+          (v/assert kb (list 'genlCx CxTop 'CxWell) 'CxUniverse M)
+          (v/assert kb (list 'genlCx CxLeaf CxMid) 'CxUniverse M)
+          (v/assert kb (list 'genlCx CxLeaf CxTop) 'CxUniverse M)
+          (let [far-h (v/assert kb (list 'genlCx CxMid CxTop) 'CxUniverse M)
+                eh    (v/assert kb (list 'except (sx/sentex-handle far-h)) CxLeaf M)]
+            (is (= #{CxMid CxTop} (tax/min-context-parents tx CxLeaf))
+                "the context reaches the farther parent by its own edge alone")
+            (is (= #{CxTop} (tax/min-context-parents tx CxMid))
+                "the nearer parent reads no except and keeps its edge")
+            (is (= #{CxMid CxLeaf} (tax/max-context-children tx CxTop)))
+            (is (= #{CxLeaf} (tax/max-context-children tx CxMid)))
+            (v/retract! kb eh)
+            (is (= #{CxMid} (tax/min-context-parents tx CxLeaf)))
+            (is (= #{CxMid} (tax/max-context-children tx CxTop)))))))))
+
 ;; ---- 4b. an except a rule concluded ------------------------------------
 ;;
 ;; A visibility `except` is one of the structural integrate arms — nothing about its

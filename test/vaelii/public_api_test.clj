@@ -51,6 +51,17 @@
       (let [cs (set (v/contexts kb))]
         (is (every? cs [CxLeaf CxMid CxTop]))))))
 
+(tu/deftest-kb the-nearest-genlCx-neighbours-are-readable-from-core
+  ;; `(genlCx CxLeaf CxTop)` is stated beside `CxLeaf → CxMid → CxTop`
+  (tu/with-terms [CxLeaf CxMid CxTop]
+    (v/assert kb (list 'genlCx CxMid CxTop)  'CxUniverse)
+    (v/assert kb (list 'genlCx CxLeaf CxMid) 'CxUniverse)
+    (v/assert kb (list 'genlCx CxLeaf CxTop) 'CxUniverse)
+    (is (= #{CxMid} (v/min-context-parents kb CxLeaf)))
+    (is (= #{CxMid} (v/max-context-children kb CxTop)))
+    (is (= #{CxLeaf} (v/max-context-children kb CxMid)))
+    (is (= #{} (v/max-context-children kb CxLeaf)))))
+
 (tu/deftest-kb predicate-metadata-is-readable-from-core
   (tu/with-terms [siblingOf ancestorOf parentOf childOf spouseOf]
     (v/assert kb (list 'symmetric siblingOf)   'CxUniverse)

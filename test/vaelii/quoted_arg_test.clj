@@ -65,7 +65,7 @@
     (tu/with-terms [tagOf label]
       (v/assert kb (list 'unary_predicate tagOf) 'CxUniverse)
       (v/assert kb (list 'genl label 'thing) 'CxUniverse)
-      (v/assert kb (list 'arg tagOf 1 'label) 'CxUniverse)          ; the REFERENT must be a label
+      (v/assert kb (list 'arg tagOf 1 label) 'CxUniverse)          ; the REFERENT must be a label
       (v/assert kb (list 'quotedArg tagOf 1 'string) 'CxUniverse)   ; the TERM must be a string
       (testing "a string value passes quotedArg and fails arg: the declaration derives
               `label` a type, and a string is not one"
@@ -78,7 +78,7 @@
   (tu/with-terms [speaks agent]
     (v/assert kb (list 'unary_predicate speaks) 'CxUniverse)
     (v/assert kb (list 'genl agent 'thing) 'CxUniverse)
-    (v/assert kb (list 'quotedArg speaks 1 'agent) 'CxUniverse)   ; agent is not a syntactic type
+    (v/assert kb (list 'quotedArg speaks 1 agent) 'CxUniverse)   ; agent is not a syntactic type
     (is (nil? (refusal kb (list speaks "Bob")))
         "a string against a non-syntactic type is not convicted")
     (is (nil? (refusal kb (list speaks 5)))

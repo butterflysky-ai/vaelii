@@ -62,9 +62,9 @@
     (v/assert kb (list otherOf D E) 'CxUniverse)
     (is (empty? (v/violations kb)))))
 
-(tu/deftest-kb a-rebuild-reads-the-arity-nogood-the-same
-  ;; The candidate index is rebuilt by `recover`, so the reading after a restart is the
-  ;; reading before it.
+(tu/deftest-kb a-rebuild-reads-the-inert-tuple-the-same
+  ;; `recover` rebuilds the `:out` members (`arity/drain!`), so the reading after a
+  ;; restart is the reading before it.
   (tu/with-terms [rebuiltOf A B C]
     (v/assert kb (list rebuiltOf A B C) 'CxUniverse)
     (v/assert kb (list 'arity rebuiltOf 2) 'CxUniverse)
@@ -79,22 +79,20 @@
     (is (some? (v/assert kb (list firstOf A B C) 'CxUniverse)))
     (is (not (v/ask? kb (list firstOf A B C) 'CxUniverse)))))
 
-(deftest an-arity-nogood-never-takes-the-binding-out
-  ;; The binding is the ground of the nogood and not a member, and it is on the
-  ;; forced-monotonic roster: written at `:default`, it is never a loser.  A
-  ;; `:monotonic` tuple against it is a hard clash, so both stay believed and `conflicts`
-  ;; reports the pair; no dilemma opens.
+(deftest a-monotonic-tuple-breaking-a-binding-is-inert-and-the-binding-stays-in
+  ;; The binding is on the forced-monotonic roster, and the tuple breaking it is in the
+  ;; `:out` forced set at `:monotonic` as at `:default`.  No dilemma opens, and `conflicts`
+  ;; reports the tuple grounded on the declaration.
   (is (not (contains? checks/arbitrable-kinds :arity)))
   (tu/with-neutral-kb [kb #(v/open-kb (tu/scratch-space))]
     (tu/with-terms [relOf A B C]
-      (v/assert kb (list relOf A B C) 'CxUniverse {:strength :monotonic})
-      (let [decl (v/assert kb (list 'arity relOf 2) 'CxUniverse)]
+      (let [t    (v/assert kb (list relOf A B C) 'CxUniverse {:strength :monotonic})
+            decl (v/assert kb (list 'arity relOf 2) 'CxUniverse)]
         (is (empty? (v/contradictions kb)) "no dilemma is opened")
-        (is (= [[:arity [decl]]] (mapv (juxt :kind #(mapv :handle (:grounds %))) (v/conflicts kb)))
-            "a hard clash grounded on the declaration")
-        (is (v/ask? kb (list 'arity relOf 2) 'CxUniverse)
-            "the declaration is not defeated, so it still constrains everything else")
-        (is (v/ask? kb (list relOf A B C) 'CxUniverse))))))
+        (is (= [[:arity [t] [decl]]]
+               (mapv (juxt :kind :handles #(mapv :handle (:grounds %))) (v/conflicts kb))))
+        (is (v/ask? kb (list 'arity relOf 2) 'CxUniverse))
+        (is (not (v/ask? kb (list relOf A B C) 'CxUniverse)))))))
 
 ;;; ── interArg: the conditional argument constraint ───────────────────
 

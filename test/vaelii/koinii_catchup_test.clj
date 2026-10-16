@@ -49,7 +49,7 @@
   [kb f]
   (let [^Server server (serve/start kb {:port 0 :token nil})
         port (serve/port server)
-        conn #(vc/client "localhost" port {:token nil :timeout-ms 5000})
+        conn #(vc/client "localhost" port {:token nil})
         wire #(ch/join (ch/wire (conn)) 'CxDeploy %)]
     (try (f conn wire) (finally (.stop server)))))
 

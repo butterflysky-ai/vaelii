@@ -429,6 +429,7 @@ naming a pair, spelled **`<records>-<index>`**.
 | `:sqlite` | durable (SQLite file) | RAM map | an Apache adapter, resolved lazily — below |
 | `:pg-memory` | durable (Postgres) | RAM map | an Apache adapter — rebuilt on open, every open |
 | `:pg-disk-log` | durable (Postgres) | durable, **local** | the index files belong to the writer's host, not to the KB |
+| `:pg-snapshot` | durable (Postgres) | native trie, **mapped from a local image** | `:disk-snapshot`'s two images, kept on the writer's host and stamped by the adapter |
 | `:overlay` | a decorator | a decorator | a fork over a frozen base — [overlay.md](overlay.md) |
 
 `:memory` is the one pair that is the same store on both axes, named for the store rather
@@ -582,13 +583,12 @@ rather than as a phantom, and neither is visible to a reader afterwards.
 `:index :snapshot` writes that rebuilt index to disk and **maps it back** instead of
 recomputing it — `vaelii.impl.disk.index-snapshot`.
 
-**It pairs with `:disk` records and with nothing else.** The stamp below is the *disk*
-record store's slot fingerprint — a reading of its own slot files, taken under its own
-kind locks, which no other record store keeps and the `RecordStore` protocol has no method to
-ask for. So `{:index :snapshot}` over `:memory`, `:sqlite` or `:pg` records is refused
-with `:unknown-backend` (`:mismatch :illegal-pair`), and records on a server take
-`:pg-disk-log` for a durable index
-or `:pg-memory` and the rebuild.
+**It pairs with records whose store stamps an image** (`p/ImageStamping`): `:disk`, whose
+stamp is a reading of its own slot files taken under its own kind locks, and `:pg`
+(`:pg-snapshot`), whose adapter keeps one row a trigger moves in the same transaction as
+every write. So `{:index :snapshot}` over `:memory` or `:sqlite` records is refused with
+`:unknown-backend` (`:mismatch :illegal-pair`), and a `:pg` adapter that predates the
+protocol is refused at open with `:missing-adapter`.
 
 **It is a representation, and it is not a promise that the image is valid.** Those are
 two different things and the name carries only the first. What `{:backend
@@ -756,7 +756,8 @@ throws closes the directories it opened without writing either image
 failed one found.
 
 Nothing installs an image whose source digest differs from the running engine's, except
-`:recover? :background` (below), which rebuilds belief behind the image it installs. A caller
+`:recover? :background` (below), which rebuilds belief behind the image it installs, and
+`:recover? :trust` and a dump's import (both below), which keep it. A caller
 that believes a particular source change moves no belief has no way to say so, by design:
 the digest is the only check standing between an engine edit and belief computed under
 the code before it, and the identity has been wrong in that direction before.
@@ -795,6 +796,18 @@ of the KB holding the belief the read began with. A read that begins before the 
 reads the installed belief to its end, and a lazy sequence it returns reads that belief
 when realized; no public read sees the network of one belief beside the taxonomy of the
 other. A KB with no install pending is passed through unchanged after one atom read.
+
+**Trusting an image.** `open-kb` with `:recover? :trust` installs the same image
+`:background` would, and keeps it: no rebuild runs, the KB is writable at once, and
+`write-hazards` reports no `:stale-belief`. Belief moves under the running build only where
+a settle reaches, so a record no write touches keeps the label the earlier build gave it,
+and `recover` re-derives all of it under this build on demand. The close-time image write
+stamps the source the image was read under, not the running one, so the image goes on naming
+the source its belief was last derived under in full: a later `:auto` open still declines it,
+and a later `:trust` open keeps it again. The open logs `::reasoning-image-trusted` with that
+source. It is the mode for a development prompt whose engine changes between opens, where a
+recover or a rebuild per change costs the time the image exists to save; a caller that needs
+belief this build derived in full opens with `:auto` (docs/web.md).
 
 **The rebuild writes no record.** The rebuild KB reads the open KB's record store through
 `overlay.frozen/frozen-records`, which refuses every write with `:unrecovered-kb`, so no
@@ -839,7 +852,10 @@ opens agreed on `in?` for every handle and held the same clash pairs.
 
 **A dump carries one too.** `export!` writes the same three files under `<dump>/reasoning/`
 by default (`:belief? false` omits them), and `import!` with `{:belief? true}` installs
-them in place of the recover it would otherwise run. The records half of a dump image's
+them in place of the recover it would otherwise run. A dump image written under another
+engine source is installed and trusted as `:recover? :trust` trusts a store's, and the
+summary's `:reasoning-image` names that source under `:trusted`: a dump moves a KB between
+stores, and a recover on landing would redo the derivation the dump carries. The records half of a dump image's
 stamp is content rather than slots, because a dump lands in a different store: the export
 folds `fingerprint/record-hash` over the sentex frames and `fingerprint/justification-hash`
 over the justification frames it writes, and the import folds the same two over the
@@ -847,7 +863,8 @@ records it lands. The network is read after both walks, so the export writes no 
 the change clock moved during it: a write between the walks and the network would stamp
 labels the streamed records never had with those records' fingerprints. The import tries the image only when it kept every handle the dump
 gave, since the network names its nodes by handle; the summary's `:reasoning-image` reports
-`{:reasoning :installed}` or `{:reasoning :recovered :reason r}`.
+`{:reasoning :installed}` (with `:trusted` when the image's source differs) or
+`{:reasoning :recovered :reason r}`.
 
 An installed image is the state of the KB that wrote it: its labels, which equal a recover's
 because belief is order independent, and its derivation depths and settle readings, which a
@@ -871,7 +888,7 @@ index rebuild and the recover the records would otherwise need.
 | `:tick` | attached | on the durability daemon's tick (`vaelii.disk.sync-ms`), and before the operation writes a record the log's generation began with |
 
 The log is read on `{:backend :disk-snapshot}` with `:recover? :auto` only. Another
-backend, a `:recover?` of `:background`, `:warn` or `false`, and a value outside the table
+backend, a `:recover?` of `:background`, `:trust`, `:warn` or `false`, and a value outside the table
 are refused with `:unknown-option`: a restore installs the images only a `:disk-snapshot`
 KB keeps, and an open with a log builds belief one way or the other.
 
@@ -1114,6 +1131,24 @@ KB its own `:dir`, or delete the directory to rebuild against the records now be
 
 `close!` releases both halves: the pool the store built, and the index directory's
 exclusive lock.
+
+### `:pg-snapshot`: the two images over records on a server
+
+`:pg-snapshot` is `:disk-snapshot` with the records in Postgres: the index image and the
+reasoning image live under `:dir` on the writer's host, and an open installs both instead
+of reindexing and recovering, as it does over `:disk` records. Each image is stamped with
+the adapter's stamp row — a uuid minted with the store and a count a statement-level trigger
+on the record table moves with every insert, update, delete, truncate and `COPY`, in the
+same transaction — so one row read at open says whether the records moved since the images
+were written, and the uuid says whether they are the same records at all. The directory is
+held to one database as `:pg-disk-log`'s is, needs `:dir` for the same reason, and takes
+the single-writer lock itself, since no component opens there.
+
+Over `:disk-snapshot` it adds the server's `pg_dump`, PITR and replication of the
+records. Each record fetch the LRU does not answer is a round trip, so a settle that
+reaches widely, or a full recover, runs slower than over local records. A write that
+reaches the records while the images do not (a crash, another writer) moves the stamp, and
+the next open discards both images and rebuilds.
 
 ### Durability, and whose it is
 
@@ -1774,7 +1809,8 @@ registry). The **taxonomy** and **JTMS graph** are in-memory, so a KB constructe
 against an existing store has to rebuild them. `open-kb`'s `:recover? :auto` default
 does it at construction (`true` is an alias for it); `:background` does the same except
 over a reasoning image an earlier engine build wrote, which it installs and rebuilds behind
-("Rebuilding behind an image"); `:warn` leaves them empty and says
+("Rebuilding behind an image"), and `:trust` installs that image and keeps it ("Trusting an
+image"); `:warn` leaves them empty and says
 so, `false` leaves them empty in silence, and both leave the repair to a `core/recover`
 call of the caller's own. Nothing else is a setting — a value `recover-modes` does not
 name is refused (`:unknown-option`) rather than read as the warn branch, since a KB that

@@ -123,6 +123,25 @@
   (a-premise-id [store]
     "Some handle marked a premise, or nil."))
 
+(defprotocol ImageStamping
+  "**Optional**: a record store an index image or a reasoning image may be stamped against.
+  Each image is written with the stamp its records answered at the time, and installed only
+  while they still answer the same one, so a stamp has to move whenever a record is added,
+  deleted or re-stored — a premise mark included — and differ between two unrelated stores.
+  It is read at every open and close of a KB keeping images, so it has to cost no walk of
+  the records.
+
+  The `:disk` store answers off its slot files (`record-store/slot-fingerprint`,
+  `reasoning-fingerprint`); the `:pg` adapter answers one row a trigger moves in the same
+  transaction as each write.  A store that does not implement it keeps no image, and
+  `open-kb` refuses the `:snapshot` index over it."
+  (index-stamp [store]
+    "The stamp an index image is validated against: any value, compared with `=`, that
+     moves when a sentex is added, deleted or re-stored.")
+  (belief-stamp [store]
+    "The stamp a reasoning image is validated against: as `index-stamp`, and moving when
+     a justification does too."))
+
 (defprotocol RecordSink
   "An open bulk write.  A caller opens one with `capabilities/sentex-sink` /
   `justification-sink`, writes a stream of records to it, and **closes it**

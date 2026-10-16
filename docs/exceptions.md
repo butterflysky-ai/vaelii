@@ -1014,6 +1014,11 @@ So the walk runs on `genl` assert as well, once per edge, from the edge
   of the graph-as-it-would-be without the real closures learning anything.
 - Only *additions* need checking. `specs` grows monotonically with the edge set, so
   removing an edge only removes graph edges; a retraction can never close a cycle.
+- Only an addition that moves the closure needs checking. When `b` is already in `a`'s
+  unscoped `genl` closure, the edge adds no graph edge, and the check stops at that one
+  reachability test before any roster read. A re-derived argument-type mint that a stored
+  edge subsumes is this case (`lein perf`'s `edge-stratification-subsumed`: 16x the
+  excepted rules reading `b`, under 2x).
 
 `stratification_edge_test` compares the walk with the probe's whole graph, built along
 the edges over the spec closures, on the reference generator's random worlds: the same

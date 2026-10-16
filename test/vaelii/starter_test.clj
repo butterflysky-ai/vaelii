@@ -238,7 +238,7 @@
 (tu/deftest-kb starter-documents-its-vocabulary
   (testing "every ontology type carries exactly one comment"
     (doseq [t '[thing intangible tangible temporal
-                substance made natural formation body_part food organism vehicle tool building
+                substance made natural formation body_part food organism vehicle building
                 animal plant mammal bird fish reptile insect person human dog cat
                 lion mouse hare wolf tortoise ant grasshopper
                 penguin eagle sparrow tree flower]]

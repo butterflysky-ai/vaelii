@@ -81,7 +81,8 @@
 # while the gate waits, and the slot is released before the perf stage.
 #
 # Env:
-#   GATE_OUT        log directory (default target/gate/run-<pid>)
+#   GATE_OUT        log directory (default logs/gate/run-<pid>)
+#   GATE_KEEP_RUNS  past run directories kept under logs/gate (default 40)
 #   GATE_JOBS       default shard count for the test stage
 #   GATE_MAX_CONCURRENT  gate test stages admitted at once, box-wide (default 2, 0 = no cap)
 #   GATE_NO_WAIT    exit 75 instead of waiting when every gate slot is held
@@ -104,14 +105,16 @@
 # so two gates run in it at once.  Sharing one `test.log`, `perf.log` or shard log hands
 # the reader the other run's verdict with nothing to say so, and a gate whose verdict may
 # belong to someone else is not a gate.  Do not collapse these back to a single
-# directory.  The logs and the shard scratch go under `target/gate/run-<pid>`, and
-# `target/gate/latest` points at the newest, which is what to tail.
+# directory.  The logs and the shard scratch go under `logs/gate/run-<pid>`, and
+# `logs/gate/latest` points at the newest, which is what to tail.  Under `logs/`, not
+# `target/`: `lein jar`, `lein install` and `lein clean` empty `target/`, and one of them
+# during a gate deletes its shard logs, so the gate finds no exit marker and records the
+# run as interrupted.  `runlog_prune` keeps the newest GATE_KEEP_RUNS directories.
 #
-# The **timings** deliberately do not move with them: they are feedback for the next run
-# rather than output of this one, so they stay at `target/gate/test-timings.tsv` and
-# every run in the checkout shares them (`scripts/test-parallel.sh`).  That split is the
-# whole fix — a per-run directory that swallowed the timings would leave every gate
-# sharding blind, which costs wall clock and reports nothing.
+# The **timings** do not move with them: they are feedback for the next run rather than
+# output of this one, so every run in the checkout shares `logs/test-timings.tsv`
+# (`scripts/test-parallel.sh`), where neither a per-run directory nor `lein clean`
+# reaches them.
 #
 # ^C takes the stages with it and says so: every stage runs in a process group of its
 # own, the handler signals those groups, and the run directory gets an `INTERRUPTED`
@@ -134,14 +137,17 @@ cd "$ROOT" || exit 1
 # the box-wide gate slots the test stage waits for
 # shellcheck source=scripts/lib/slots.sh
 . "$ROOT/scripts/lib/slots.sh"
+# `runlog_prune`, which rotates the run directories
+# shellcheck source=scripts/lib/runlog.sh
+. "$ROOT/scripts/lib/runlog.sh"
 
-GATE_ROOT="${GATE_ROOT:-target/gate}"
+GATE_ROOT="${GATE_ROOT:-logs/gate}"
 OUT="${GATE_OUT:-$GATE_ROOT/run-$$}"
 # the test stage reads this, and reading a *different* variable is how the two halves of
 # one directory drift apart — set it here rather than letting `test-parallel.sh` default
 # on its own, or `GATE_OUT` moves the four stage logs and leaves the shard logs behind
 export VAELII_GATE_OUT="$OUT"
-export VAELII_GATE_TIMINGS="${VAELII_GATE_TIMINGS:-$GATE_ROOT/test-timings.tsv}"
+export VAELII_GATE_TIMINGS="${VAELII_GATE_TIMINGS:-logs/test-timings.tsv}"
 TAIL_LINES=40
 
 fail_fast=0; quick=0; all=0; sequential=0; brief=0; release=0; with_perf=0
@@ -299,6 +305,7 @@ wanted () {                    # is stage $1 in this run?
   return 0
 }
 
+[[ -z "${GATE_OUT:-}" ]] && runlog_prune "$GATE_ROOT" "${GATE_KEEP_RUNS:-40}"
 mkdir -p "$OUT" || exit 1
 # `latest` is a convenience and never a source of truth: it is repointed per run, so a
 # concurrent gate moves it under you.  Tail it to watch; cite `$OUT` when reporting.

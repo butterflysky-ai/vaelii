@@ -1417,18 +1417,32 @@
                :handles  hs
                :class    (:class c)})))))))
 
+(defn claims-stored?
+  "Does the store hold a sentex whose functor is `pred` or a predicate below it
+  (`tax/specs-global`), in either polarity, in any context, believed or not?  False means
+  `claims` of `pred` is empty for every goal and every reader, since every claim is a
+  stored statement on a predicate the matcher fans `pred` over.  The closure is unscoped
+  because it answers for every reader: a scoped fan is a subset of it.  One index count
+  per predicate in the closure, memoized on `pred`."
+  [kb pred]
+  (memoized [::claims-stored pred]
+            #(let [idx (:index kb)]
+               (boolean (some (fn [f] (pos? (reads/stored-count-with-functor idx f)))
+                              (tax/specs-global (reasoning/taxonomy kb) pred))))))
+
 (defn separated-preserved
   "The predicates a stored declaration names (`declared`) that the taxonomy separates from
-  the type `s` at `context` (`tax/separation-test`), sorted: a membership `(s x)` denies
-  `(P x)` for each.  At `'?ctx` the read is unscoped and exempts no pair, the union of
-  what every reader separates.  A type no separation reaches reads no declaration.
-  Memoized on `[s context]`."
+  the type `s` at `context` (`tax/separation-test`) and that some stored claim states
+  (`claims-stored?`), sorted: a membership `(s x)` denies `(P x)` for each.  At `'?ctx`
+  the read is unscoped and exempts no pair, the union of what every reader separates.  A
+  type no separation reaches reads no declaration.  Memoized on `[s context]`."
   [kb s context]
   (memoized [::separated s context]
             #(when (symbol? s)
                (when-let [sep? (separation-test (reasoning/taxonomy kb) s context)]
-                 (filterv sep? (into (sorted-set) (comp (map first) (remove #{s}))
-                                     (memoized [::declared] (fn [] (declared kb)))))))))
+                 (filterv (fn [p] (and (sep? p) (claims-stored? kb p)))
+                          (into (sorted-set) (comp (map first) (remove #{s}))
+                                (memoized [::declared] (fn [] (declared kb)))))))))
 
 (defn separated-claims
   "The **known-true** claims that reach `(P x)` by preservation, for each `P` the taxonomy

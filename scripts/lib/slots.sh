@@ -36,20 +36,27 @@
 # bootstrap parent).  `pgrep -f` matches the full argv and excludes itself, so a bash script,
 # a `tail -f` on a log or this call is never counted; the `java.*vaelii` shape keeps it to
 # JVMs.  A rough estimate across this checkout AND its siblings — erring toward fewer slots.
+# The arguments are process groups whose JVMs are not counted: a running matrix passes its
+# own configurations' groups, so it does not count its own JVMs as load.
 running_vaelii_count() {
-  local pids pid cmd n=0
+  local pids pid row pg cmd n=0 skip=" $* "
   pids=$(pgrep -f 'java.*vaelii' 2>/dev/null) || pids=''
   for pid in $pids; do
-    cmd=$(ps -o command= -p "$pid" 2>/dev/null) || continue
+    row=$(ps -o pgid=,command= -p "$pid" 2>/dev/null) || continue
+    read -r pg cmd <<<"$row"
     case "$cmd" in
-      *leiningen.core.main*) ;;   # the launcher parent; its project JVM is the one counted
-      *) n=$((n + 1)) ;;
+      *leiningen.core.main*) continue ;;   # the launcher parent; its project JVM is counted
     esac
+    [[ "$skip" == *" $pg "* ]] || n=$((n + 1))
   done
   printf '%s\n' "$n"
 }
 
-default_slots() {
+# slots_beside [pgid…] prints `<slots> <running> <base>`: the rule above, with the JVMs in
+# those process groups left out of `running`.  A running matrix re-reads it
+# (scripts/test-matrix.sh).
+# shellcheck disable=SC2120  # scripts/test-matrix.sh passes the process groups
+slots_beside() {
   local pcores=''
   # perflevel0 is the performance tier on Apple Silicon; the key is absent everywhere else.
   pcores=$(sysctl -n hw.perflevel0.logicalcpu 2>/dev/null) || pcores=''
@@ -58,8 +65,14 @@ default_slots() {
   [[ -n "$pcores" ]] || pcores=4
 
   local base=$((pcores - 2)); (( base < 1 )) && base=1
-  local running; running=$(running_vaelii_count)
+  local running; running=$(running_vaelii_count "$@")
   local slots=$((base - running)); (( slots < 1 )) && slots=1
+  printf '%s %s %s\n' "$slots" "$running" "$base"
+}
+
+default_slots() {
+  local slots running base
+  read -r slots running base < <(slots_beside)
 
   # Say when the load term moved the number off the plain P−2 default; quiet when it did not.
   if (( running > 0 )); then
@@ -111,7 +124,9 @@ require_primary() {
 #   red     `<epoch> <run dir>` of the last red matrix, until a green one; see below
 #   jobs    the running matrix's slot count, set by `--set-jobs <n>` and re-read by its
 #           scheduler every pass; taking and releasing the lock clear it, so a count
-#           set for one matrix never carries into the next
+#           set for one matrix never carries into the next.  A matrix started with no
+#           `--jobs` and given no `--set-jobs` re-reads the slot rule instead, each pass
+#           a configuration ends and every MATRIX_SLOTS_EVERY seconds (`slots_beside`)
 
 matrix_state_dir() {
   local d

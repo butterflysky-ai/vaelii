@@ -169,9 +169,8 @@
 
 ;; ---- the arity paths ----------------------------------------------------
 ;;
-;; The four probes below time what `decide/arity`, `arity/relation-length` and
-;; `arity/own-length` do for a write, an edge move, a read and
-;; a recover.  `lein perf`'s arity checks judge growth between two sizes, so a constant
+;; The four probes below time what `decide/arity` and `arity/relation-length` do for a
+;; write, an edge move, a read and a recover.  `lein perf`'s arity checks judge growth between two sizes, so a constant
 ;; added at both sizes passes them.
 
 (def ^:private strong {:strength :monotonic})
@@ -245,7 +244,7 @@
 
 (defn- arity-read
   "`describe` and an `admitsArgnum` ask over each of 100 predicates (20 of each binding of
-  `arity-assert`), 80 passes: the reads that reach `arity/own-length`."
+  `arity-assert`), 80 passes: the reads that reach `arity/relation-length`."
   []
   (let [kb (fresh-kb)
         ps (into [] cat (vals (arity-bound-predicates kb 20)))]

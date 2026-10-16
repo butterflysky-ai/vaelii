@@ -437,7 +437,7 @@
        (is (= {:reasoning :installed} (:reasoning-image im)))
        (same-as! (whole a) (whole b))))))
 
-(deftest a-dump-image-under-another-source-is-declined-and-the-import-recovers
+(deftest a-dump-image-under-another-source-is-installed-and-trusted
   (tu/with-snapshot-platform
     (export-import
      (fn [_])
@@ -445,8 +445,9 @@
        (let [f (io/file dump "reasoning" "manifest.edn")]
          (spit f (pr-str (assoc (edn/read-string (slurp f)) :source "0")))))
      (fn [a b _ im]
-       (is (= {:reasoning :recovered :reason :source-differs} (:reasoning-image im)))
-       (is (= (belief a) (belief b)))))))
+       (is (= {:reasoning :installed :trusted "0"} (:reasoning-image im)))
+       (is (not (:stale-belief (v/write-hazards b))) "a trusted image refuses no write")
+       (same-as! (whole a) (whole b))))))
 
 (deftest a-kb-running-its-own-code-exports-no-image
   (tu/with-snapshot-platform

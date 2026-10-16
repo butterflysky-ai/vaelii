@@ -26,62 +26,62 @@
 
 (tu/deftest-kb one-type-intersection-is-out-below-the-arity-floor
   (tu/with-terms [combined_kind type_a]
-    (v/assert kb (list 'genl 'type_a 'thing) 'CxUniverse)
+    (v/assert kb (list 'genl type_a 'thing) 'CxUniverse)
     ;; arityMin is three (the combined kind plus at least two types); the intersection
-    ;; of a single type is that type, and the reader takes it OUT as an arity nogood.
-    (is (tu/stored-in-clash? kb (list 'intersection 'combined_kind 'type_a) 'CxUniverse)
+    ;; of a single type is that type, and the tuple is held inert and read OUT.
+    (is (tu/stored-in-clash? kb (list 'intersection combined_kind type_a) 'CxUniverse)
         "(intersection combined one-type) is one argument below the floor")))
 
 ;; ---- binary: intersection -> genl ----------------------------------------
 
 (tu/deftest-kb binary-intersection-derives-genl-of-each-type
   (tu/with-terms [combined_kind type_a type_b]
-    (v/assert kb (list 'genl 'type_a 'thing) 'CxUniverse)
-    (v/assert kb (list 'genl 'type_b 'thing) 'CxUniverse)
-    (v/assert kb (list 'intersection 'combined_kind 'type_a 'type_b) 'CxUniverse)
-    (is (v/ask? kb (list 'genl 'combined_kind 'type_a) 'CxUniverse)
+    (v/assert kb (list 'genl type_a 'thing) 'CxUniverse)
+    (v/assert kb (list 'genl type_b 'thing) 'CxUniverse)
+    (v/assert kb (list 'intersection combined_kind type_a type_b) 'CxUniverse)
+    (is (v/ask? kb (list 'genl combined_kind type_a) 'CxUniverse)
         "combined kind is genl the first type it intersects")
-    (is (v/ask? kb (list 'genl 'combined_kind 'type_b) 'CxUniverse)
+    (is (v/ask? kb (list 'genl combined_kind type_b) 'CxUniverse)
         "combined kind is genl the second type it intersects")))
 
 ;; ---- binary: membership --------------------------------------------------
 
 (tu/deftest-kb binary-intersection-concludes-membership-from-the-conjuncts
   (tu/with-terms [combined_kind type_a type_b]
-    (v/assert kb (list 'genl 'type_a 'thing) 'CxUniverse)
-    (v/assert kb (list 'genl 'type_b 'thing) 'CxUniverse)
-    (v/assert kb (list 'intersection 'combined_kind 'type_a 'type_b) 'CxUniverse)
-    (v/assert kb (list 'type_a 'Item) 'CxUniverse)
-    (v/assert kb (list 'type_b 'Item) 'CxUniverse)
-    (is (believes? kb (list 'combined_kind 'Item) 'CxUniverse)
+    (v/assert kb (list 'genl type_a 'thing) 'CxUniverse)
+    (v/assert kb (list 'genl type_b 'thing) 'CxUniverse)
+    (v/assert kb (list 'intersection combined_kind type_a type_b) 'CxUniverse)
+    (v/assert kb (list type_a 'Item) 'CxUniverse)
+    (v/assert kb (list type_b 'Item) 'CxUniverse)
+    (is (believes? kb (list combined_kind 'Item) 'CxUniverse)
         "a thing that is each type is a member of the combined kind")))
 
 (tu/deftest-kb binary-intersection-membership-needs-every-conjunct
   (tu/with-terms [combined_kind type_a type_b]
-    (v/assert kb (list 'genl 'type_a 'thing) 'CxUniverse)
-    (v/assert kb (list 'genl 'type_b 'thing) 'CxUniverse)
-    (v/assert kb (list 'intersection 'combined_kind 'type_a 'type_b) 'CxUniverse)
-    (v/assert kb (list 'type_a 'Item) 'CxUniverse)
-    (is (not (believes? kb (list 'combined_kind 'Item) 'CxUniverse))
+    (v/assert kb (list 'genl type_a 'thing) 'CxUniverse)
+    (v/assert kb (list 'genl type_b 'thing) 'CxUniverse)
+    (v/assert kb (list 'intersection combined_kind type_a type_b) 'CxUniverse)
+    (v/assert kb (list type_a 'Item) 'CxUniverse)
+    (is (not (believes? kb (list combined_kind 'Item) 'CxUniverse))
         "being only one of the types does not make a member of the combined kind")))
 
 ;; ---- ternary -------------------------------------------------------------
 
 (tu/deftest-kb ternary-intersection-derives-genl-and-membership
   (tu/with-terms [combined_kind type_a type_b type_c]
-    (v/assert kb (list 'genl 'type_a 'thing) 'CxUniverse)
-    (v/assert kb (list 'genl 'type_b 'thing) 'CxUniverse)
-    (v/assert kb (list 'genl 'type_c 'thing) 'CxUniverse)
-    (v/assert kb (list 'intersection 'combined_kind 'type_a 'type_b 'type_c) 'CxUniverse)
-    (is (v/ask? kb (list 'genl 'combined_kind 'type_c) 'CxUniverse)
+    (v/assert kb (list 'genl type_a 'thing) 'CxUniverse)
+    (v/assert kb (list 'genl type_b 'thing) 'CxUniverse)
+    (v/assert kb (list 'genl type_c 'thing) 'CxUniverse)
+    (v/assert kb (list 'intersection combined_kind type_a type_b type_c) 'CxUniverse)
+    (is (v/ask? kb (list 'genl combined_kind type_c) 'CxUniverse)
         "combined kind is genl the third type in a ternary intersection")
     (testing "membership requires all three"
-      (v/assert kb (list 'type_a 'Item) 'CxUniverse)
-      (v/assert kb (list 'type_b 'Item) 'CxUniverse)
-      (is (not (believes? kb (list 'combined_kind 'Item) 'CxUniverse))
+      (v/assert kb (list type_a 'Item) 'CxUniverse)
+      (v/assert kb (list type_b 'Item) 'CxUniverse)
+      (is (not (believes? kb (list combined_kind 'Item) 'CxUniverse))
           "two of three is not enough")
-      (v/assert kb (list 'type_c 'Item) 'CxUniverse)
-      (is (believes? kb (list 'combined_kind 'Item) 'CxUniverse)
+      (v/assert kb (list type_c 'Item) 'CxUniverse)
+      (is (believes? kb (list combined_kind 'Item) 'CxUniverse)
           "all three makes a member"))))
 
 ;; ---- the forward reading, at every reader and in every arrival order ------

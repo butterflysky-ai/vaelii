@@ -110,6 +110,15 @@
   [sentence]
   (map #(if (vector? %) sx/not-functor %) (antecedent-predicates sentence)))
 
+(defn- signed-reach
+  "`p`'s global `genl` closure in direction `dir` (`:up` or `:down`), together with the
+  predicates `genlInverse` edges reach either way round (`tax/signed-closure`): every
+  predicate an antecedent or fact on `p` can meet through the matching fan.  The plain
+  closure itself on a KB declaring no `genlInverse`."
+  [tax dir p]
+  (let [[st sw] (tax/signed-closure tax dir p nil)]
+    (if (empty? sw) st (into st sw))))
+
 (defn trigger-keys
   "The antecedent-index keys an arriving fact `sentence` triggers rules through, and the
   trigger side of `antecedent-key`.
@@ -120,29 +129,32 @@
   entails `(not (q a))` for every *spec* `q` of `p` — so it triggers `[:not q]` for each
   spec of its body's predicate.
 
-  **Enumerated from `roster` rather than from the spec closure**, `roster` being the set
-  of keys some stored rule reads (`reads/as-stored-rule-keys`).  The two sides of the mirror
-  are not the same size: the positive fan walks the *up* set, which a hierarchy bounds by
-  its depth, while the negative one walks the *down* set, which on a broad ontology is
-  most of it — an arriving `(not (thing X))` would cost one index probe per type in the
-  KB.  Keeping the negated keys some rule actually reads costs one `genls` membership
-  test per such key, and rules reading a negation are few.  The positive side is the up
-  set intersected with the roster, walking the smaller of the two.  Complete because the
-  roster is the rule index's own root level, written in the batch that files the keys.
+  Each side is the closure intersected with the keys some stored rule reads, the rule
+  index's root level (`reads/as-stored-rule-keys`), walking the smaller of the two: a
+  membership test per closure term, or one pass over the stored keys.  The pass costs
+  every key on a backend that decodes the set, and a chaining run asks once per datum.
+  The two closures are not the same size: the up set is bounded by the hierarchy's depth,
+  while the down set is most of a broad ontology, so the spec walk stops at the stored key
+  count (`tax/specs-global-within`) and `(not (thing X))` takes the pass.
 
   The closures are unscoped: a firing is placed in a context the join decides, so the
   keys are a superset over every reader that the placement narrows."
-  [tax sentence roster]
+  [tax sentence index]
   (let [k (antecedent-key sentence)]
     (if (vector? k)
       (let [g (second k)]
-        (into [] (comp (filter vector?)
-                       (filter #(contains? (tax/genls-global tax (second %)) g)))
-              roster))
-      (let [up (tax/genls-global tax k)]
-        (if (< (count roster) (count up))
-          (into [] (filter #(contains? up %)) roster)
-          (into [] (filter #(contains? roster %)) up))))))
+        (reads/as-stored-rule-keys-meeting
+         index
+         ;; the bounded spec walk sees no genlInverse edge, so a KB declaring one takes
+         ;; the pass
+         (fn [n] (when (tax/genl-inverse-free? tax)
+                   (some->> (tax/specs-global-within tax g n) (map #(vector :not %)))))
+         #(and (vector? %) (contains? (signed-reach tax :up (second %)) g))))
+      (let [up (delay (signed-reach tax :up k))]
+        (reads/as-stored-rule-keys-meeting
+         index
+         (fn [n] (when (<= (count @up) (long n)) @up))
+         #(contains? @up %))))))
 
 (defn consequent-key
   "`consequent-predicate` of a rule whose consequent pattern is `c0`, read off the
@@ -412,8 +424,9 @@
 ;; complete, so nothing being stored about `(P a)` is enough to conclude `(not (P a))`
 ;; (docs/naf.md).  In a rule body that turns a *closed* negative antecedent into a NAF
 ;; literal: withheld from the join, decided at derive time, and maintained on the same
-;; re-check index `unknown` uses.  The structural half lives here; whether the grant is
-;; in force is a taxonomy read the callers pass in.
+;; re-check index `unknown` uses.  `(closedExtentForArg P n v)` grants the same for the
+;; goals whose argument n is v.  The structural half lives here; whether a grant is in
+;; force is a taxonomy read the callers pass in.
 
 (defn negative-literal?
   "Is `a` a `(not (P …))` literal with a flat, symbol-headed body — the form a closed
@@ -437,19 +450,32 @@
         bound (into #{} (mapcat sx/free-vars) gens)]
     (filterv #(and (negative-literal? %) (every? bound (sx/free-vars %))) antes)))
 
+(defn closed-extent-declared?
+  "Does `tx` declare a closed extent on `pred` anywhere — whole, by
+  `closed_extent_predicate`, or for some argument value, by `closedExtentForArg`?
+
+  Unscoped and blind to the grant's position and value.  The callers are the join, the
+  re-check index and the stratification graph, and each over-approximates safely: a
+  literal selected here is decided at derive time by the full level-6 question in the
+  conclusion's context, which `ClosedExtentProver` answers only where a grant matching the
+  literal is visible."
+  [tx pred]
+  (or (tax/has-prop? tx :closed-extent pred)
+      (tax/has-prop? tx :closed-extent-arg pred)))
+
 (defn closed-extent-antecedents
   "The closed negative antecedents of `antes` whose predicate `tx` declares a closed
-  extent — read **unscoped**, because the join has no placement context to scope by, and
-  an over-selected literal is one derive time decides correctly anyway: it asks the full
-  level-6 question in the conclusion's context, which a context without the grant answers
-  exactly as it does today.
+  extent (`closed-extent-declared?`) — read **unscoped**, because the join has no
+  placement context to scope by, and an over-selected literal is one derive time decides
+  correctly anyway: it asks the full level-6 question in the conclusion's context, which a
+  context without the grant answers exactly as it does today.
 
   Gated on the KB declaring any closed extent at all, so a KB not using the feature pays
-  one set read on the join path and stops."
+  two set reads on the join path and stops."
   [tx antes]
-  (if (empty? (tax/props tx :closed-extent))
+  (if (and (empty? (tax/props tx :closed-extent)) (empty? (tax/props tx :closed-extent-arg)))
     []
-    (filterv #(tax/has-prop? tx :closed-extent (nm/functor (second %)))
+    (filterv #(closed-extent-declared? tx (nm/functor (second %)))
              (closed-negative-antecedents antes))))
 
 (defn closed-extent-predicates-of
@@ -460,6 +486,33 @@
   catches a `(P a)` arriving and a `(not (P a))` arriving alike."
   [tx rule-sentence]
   (keep #(nm/functor (second %)) (closed-extent-antecedents tx (antecedents rule-sentence))))
+
+(defn separation-denial-predicates
+  "The types a separation's denial can move a negated literal of `queries` on, as the
+  re-check index's extra keys: for each `(not (T …))` a re-check watches
+  (`watched-literals`) with a unary `T`, every type a declaration separates `T` from
+  (`tax/separating-partners`, read unscoped with no exception, a superset over every
+  reader).  `provers/DisjointnessNegationProver` answers `(not (T x))` from a membership
+  `(S x)` of a type below one of them, and the trigger fans an arriving `(S x)` out to
+  `S`'s supertypes (`special/recheck-on-predicate`), so a rule posted under them is
+  re-checked when such a membership arrives or leaves.  Empty for a `T` no separation
+  reaches."
+  [tx queries]
+  (distinct
+   (for [l     (mapcat watched-literals queries)
+         :when (and (seq? l) (= 'not (first l)))
+         :let  [b (second l)]
+         :when (and (seq? b) (= 2 (count b)) (symbol? (first b)) (tax/separable? tx (first b)))
+         p     (sort (tax/separating-partners tx (first b) nil (constantly false)))]
+     p)))
+
+(defn separation-denial-predicates-of
+  "`separation-denial-predicates` of a raw rule *sentence*'s `unknown` antecedents: the
+  extra keys the re-check index posts the rule under beside `recheck-predicates`
+  (`special/index-rule-sentex`), a taxonomy read as `closed-extent-predicates-of` is."
+  [tx rule-sentence]
+  (separation-denial-predicates tx (mapcat sx/naf-query-conjuncts
+                                           (naf-antecedents-of rule-sentence))))
 
 (defn has-nested-naf?
   "Does this rule carry a NAF query with a **NAF inside it** — a nested `(unknown …)`,

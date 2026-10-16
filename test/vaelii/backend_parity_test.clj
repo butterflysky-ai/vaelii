@@ -167,7 +167,7 @@
   backend added to it reaches this namespace as a failing test rather than as a session
   nobody ran.
 
-  All four are exempt for one of two reasons, and neither is \"it would be slow\"."
+  All five are exempt for one of two reasons, and neither is \"it would be slow\"."
   {:disk-snapshot
    (str "the image is an index representation over :disk records, and a first session on"
         " a fresh directory builds the columnar store and reindexes — which is exactly"
@@ -176,7 +176,8 @@
         " index_snapshot_test's whole subject.")
    :sqlite      "an Apache-2.0 sibling adapter, not on this repository's classpath"
    :pg-memory   "an Apache-2.0 sibling adapter, and it wants a server"
-   :pg-disk-log "an Apache-2.0 sibling adapter, and it wants a server"})
+   :pg-disk-log "an Apache-2.0 sibling adapter, and it wants a server"
+   :pg-snapshot "an Apache-2.0 sibling adapter, and it wants a server"})
 
 (deftest every-backend-is-run-or-excused
   ;; The roster is `kb/backend-names` and this gate covers part of it, so the part it does

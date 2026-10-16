@@ -32,12 +32,14 @@
             [clojure.string :as str]
             [clojure.test :refer [is]]
             [clojure.walk :as walk]
+            [taoensso.trove :as trove]
             [vaelii.core :as v]
             [vaelii.host.core-context :as core-context]
             [vaelii.host.seed :as seed]
             [vaelii.host.starter :as starter]
             [vaelii.impl.checks :as checks]
             [vaelii.impl.config :as config]
+            [vaelii.impl.disk.backend :as disk]
             [vaelii.impl.disk.index-snapshot :as index-snapshot]
             [vaelii.impl.except :as exc]
             [vaelii.impl.jtms :as jtms]
@@ -51,6 +53,7 @@
             [vaelii.impl.special :as special]
             [vaelii.impl.types.reasoning :as reasoning])
   (:import [java.io File]
+           [java.lang.management ManagementFactory ThreadInfo]
            [java.nio.file Files]
            [java.nio.file.attribute FileAttribute]
            [java.util.concurrent ExecutionException FutureTask]))
@@ -496,7 +499,8 @@
   moves to a new fork space and the one it held is dropped: clearing a fork hides its base
   for the rest of the process (docs/overlay.md), and a fork that hides its base never
   takes the merge read the arm exists to run.  On every other storage the slot's space is
-  cleared."
+  cleared, and a disk store a fault stopped (`:store-unusable`) is closed and opened again,
+  so the test that latched it is the only one it fails."
   [s opts]
   (if (overlay?)
     (let [old  (get @fork-spaces s)
@@ -510,7 +514,19 @@
       (swap! fork-spaces assoc s (fork-space))
       (some-> old drop-fork-space!)
       (v/open-kb (merge (slot-opts s) opts)))
-    (doto (v/open-kb (merge (slot-opts s) opts)) (clear-kb!))))
+    (let [opts (merge (slot-opts s) opts)
+          open #(doto (v/open-kb opts) (clear-kb!))]
+      (try (open)
+           (catch clojure.lang.ExceptionInfo e
+             (when-not (= :store-unusable (:type (ex-data e))) (throw e))
+             ;; the store's own `::store-faulted` line marks where the fault happened;
+             ;; this one marks that later tests ran on a reopened store
+             (trove/log! {:level :warn :id ::reopened-faulted-store
+                          :msg "reopening a disk store an earlier fault stopped"
+                          :data (select-keys (ex-data e) [:reason :path])})
+             (doseq [d (kb/durable-dirs opts)]
+               (disk/close-dir! d {:images? false}))
+             (open))))))
 
 (defn scratch-space
   "The opts of the KB on the shared scratch space as it stands now — what `test-kb`
@@ -1001,6 +1017,30 @@
     (if (<= m n)
       all
       (mapv #(nth all (quot (* % m) n)) (range n)))))
+
+;; ---- threads -----------------------------------------------------------
+
+(defn blocked-on?
+  "Is some thread blocked entering `monitor`?"
+  [monitor]
+  (let [mx (ManagementFactory/getThreadMXBean)]
+    (boolean (some (fn [^ThreadInfo info]
+                     (and info
+                          (= Thread$State/BLOCKED (.getThreadState info))
+                          (some-> (.getLockInfo info) .getIdentityHashCode
+                                  (= (System/identityHashCode monitor)))))
+                   (.getThreadInfo mx (.getAllThreadIds mx))))))
+
+(defn await-blocked-on
+  "Poll until some thread is blocked entering `monitor`, for at most `timeout-ms`, and
+  answer whether one is.  A test holding `monitor` reads the answer once, so its
+  assertion count does not depend on how long the wait took."
+  [monitor timeout-ms]
+  (let [deadline (+ (System/currentTimeMillis) timeout-ms)]
+    (loop []
+      (cond (blocked-on? monitor)                       true
+            (> (System/currentTimeMillis) deadline)     false
+            :else (do (Thread/sleep 5) (recur))))))
 
 ;; ---- content snapshots + auto-teardown ----------------------------------
 

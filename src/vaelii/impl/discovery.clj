@@ -203,6 +203,32 @@
       (into (nm/args body))
       true not-empty)))
 
+(defn- separated-reach
+  "The stored memberships the stored claims of the preserved `preds` can deny, read from the
+  claims (`inherit/claim-reach-separated`, every class and polarity): the whole store's
+  membership questions.  A predicate no stored claim states (`inherit/claims-stored?`)
+  reaches nothing, and one stops reading its claims once they reach every stored
+  membership of its separated types.  The claims are read over the unscoped closure of
+  each predicate, a superset over every reader, since each asker re-reads its own."
+  [kb preds]
+  (let [idx  (:index kb)
+        recs (:records kb)
+        tax  (reasoning/taxonomy kb)]
+    (into #{}
+          (mapcat (fn [pred]
+                    (when (inherit/claims-stored? kb pred)
+                      (let [all (reduce + (map #(reads/stored-count-with-functor idx %)
+                                               (inherit/separated-types kb pred)))]
+                        (when (pos? all)
+                          (reduce (fn [acc h]
+                                    (let [acc (into acc (when-let [s (p/get-sentex recs h)]
+                                                          (inherit/claim-reach-separated
+                                                           kb (sx/sentence-of s) pred)))]
+                                      (if (>= (count acc) all) (reduced acc) acc)))
+                                  #{}
+                                  (mapcat #(reads/as-stored-with-functor idx %) (tax/specs-global tax pred))))))))
+          preds)))
+
 (defn- preserving-moves
   "What the moved handles `moves` (`[handle region?]`, `region?` false for a withdrawal
   alone) re-open, as `[whole reached sep-moved?]`: the predicates whose stored extent is
@@ -218,8 +244,9 @@
   that reads it.
 
   A preserved predicate's extent re-opens the memberships of the types separated from it
-  (`inherit/separated-types`), and a type a moved `genl` edge or separation reaches
-  (`separation-ends`) that is separated from a preserved predicate re-opens the
+  (`inherit/separated-types`) when a stored claim states it (`inherit/claims-stored?`),
+  and a type a moved `genl` edge or separation reaches (`separation-ends`) that is
+  separated from such a predicate (`inherit/separated-preserved`) re-opens the
   memberships of every type at or below it.  `sep-moved?` is true when a handle has no
   record or a `genl` edge or separation moved, for the caller to re-ask the memberships
   `inherit/separated-claims` answered."
@@ -272,7 +299,8 @@
                       (boolean (or sep-moved? (nil? s) ends))]))))
              [#{} #{} false]
              moves)]
-        [(into whole (mapcat #(inherit/separated-types kb %)) (filter preds whole))
+        [(into whole (comp (filter #(inherit/claims-stored? kb %)) (mapcat #(inherit/separated-types kb %)))
+               (filter preds whole))
          reached
          sep-moved?]))))
 
@@ -316,7 +344,8 @@
   passes before it moved, and `region`, the settle's whole window, when the mark is from an
   earlier window.  Under `*whole-store-region?*` with a region the store's size, nothing is
   carried, no extent is swept, and the questions are the preserved predicates' stored
-  extents (docs/nmtms.md, \"The inherited-clash memo\").  An entry keyed by or reading a
+  extents and the memberships their stored claims reach (`separated-reach`; docs/nmtms.md,
+  \"The inherited-clash memo\").  An entry keyed by or reading a
   handle of `declared`, the facts a roster declaration that moved reaches, is asked
   again: the declaration moves which claims the vantage believes."
   [kb pairs region prev reach first? moved declared]
@@ -387,8 +416,8 @@
         ;; region handle
         ask     (-> (set dropped)
                     (into (if whole?
-                            (mapcat #(reads/as-stored-with-functor idx %)
-                                    (into preds (mapcat #(inherit/separated-types kb %)) preds))
+                            (concat (mapcat #(reads/as-stored-with-functor idx %) preds)
+                                    (separated-reach kb preds))
                             handles))
                     (into reached)
                     (into (mapcat #(reads/as-stored-with-functor idx %)) whole)

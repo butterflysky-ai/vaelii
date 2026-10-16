@@ -645,7 +645,8 @@
   per name so a name cannot inherit another's excuse."
   {:sqlite      "the com.vaelii/sqlite adapter is an Apache-2.0 sibling and is not on this repository's classpath, so no configuration here can select it"
    :pg-memory   "the com.vaelii/postgres adapter is an Apache-2.0 sibling, and it wants a server the suite does not stand up"
-   :pg-disk-log "the com.vaelii/postgres adapter is an Apache-2.0 sibling, and it wants a server the suite does not stand up"})
+   :pg-disk-log "the com.vaelii/postgres adapter is an Apache-2.0 sibling, and it wants a server the suite does not stand up"
+   :pg-snapshot "the com.vaelii/postgres adapter is an Apache-2.0 sibling, and it wants a server the suite does not stand up"})
 
 (deftest every-backend-is-swept-or-excused
   ;; `test-backends.sh`, `test-sweeps.sh` and `test-matrix.sh` all read one bash array, so
@@ -708,7 +709,7 @@
     (testing "an arm for an axis no row declares, which reads nil for every field"
       (is (= :undeclared-arm
              (:mismatch (refusal {:record-arms (assoc (:record-arms tables) :tape arm)})))))
-    (testing "two record axes claiming the image, which one fingerprint cannot stamp"
+    (testing "a record axis claiming the image that may not persist an index beside it"
       (is (= :image-axis
              (:mismatch (refusal {:record-axes (assoc-in (:record-axes tables)
                                                          [:sqlite :image?] true)})))))

@@ -1,8 +1,9 @@
 ;; SPDX-License-Identifier: SSPL-1.0
 ;; Copyright © 2026 Vaelii LLC and the Vaelii contributors.
 (ns vaelii.sync-test
-  "`sync!` locks CxUniverse's premises to the shipped files, brings the middle contexts to
-  what this engine ships, and touches nothing an author put anywhere else.
+  "`sync!` locks CxUniverse's premises about the engine's vocabulary to the shipped files,
+  brings the middle contexts to what this engine ships, and touches nothing an author put
+  anywhere else, nor a premise naming an author's term.
 
   Each test builds its KB in a private in-RAM space of this namespace's own, restored from
   the suite's starter or upper dump, so the edits a test makes to the shipped contexts
@@ -68,17 +69,34 @@
         (is (= in-sync (sync/plan kb @ships)))
         (finally (tu/clear-kb! kb))))))
 
-(deftest an-author-premise-in-cxuniverse-is-retracted
-  (let [fact '(unary_predicate shipped_authored_kind)]
+(def ^:private note
+  "An author's premise in CxUniverse that names only shipped terms."
+  '(comment mammal "an author's note on a shipped term"))
+
+(deftest an-author-premise-about-shipped-terms-in-cxuniverse-is-retracted
+  (let [other '(comment bird "another author's note")]
     (in-both-orders :authored
-                    [#(v/assert % fact 'CxUniverse)
-                     #(v/assert % '(unary_predicate shipped_other_kind) 'CxUniverse)]
+                    [#(v/assert % note 'CxUniverse)
+                     #(v/assert % other 'CxUniverse)]
                     (fn [kb]
-                      (is (= #{['CxUniverse fact] ['CxUniverse '(unary_predicate shipped_other_kind)]}
+                      (is (= #{['CxUniverse note] ['CxUniverse other]}
                              (set (map (juxt :context :form) (:remove (sync/plan kb @ships))))))
                       (is (= {:added 0 :removed 2 :refused []} (sync/sync! kb @ships)))
-                      (is (nil? (v/handle-of kb fact 'CxUniverse)))
+                      (is (nil? (v/handle-of kb note 'CxUniverse)))
                       (is (= in-sync (sync/plan kb @ships)))))))
+
+(deftest a-premise-naming-a-term-the-engine-does-not-ship-survives-the-sync
+  (let [fact '(unary_predicate shipped_authored_kind)
+        rule '(implies (bird ?x) (shipped_flagged ?x))]
+    (in-both-orders :foreign
+                    [#(v/assert % fact 'CxUniverse)
+                     #(v/assert % '(arity shipped_authored_relation 2) 'CxUniverse)
+                     #(v/assert % rule 'CxBiology)]
+                    (fn [kb]
+                      (is (= in-sync (sync/plan kb @ships)))
+                      (is (= {:added 0 :removed 0 :refused []} (sync/sync! kb @ships)))
+                      (is (some? (v/handle-of kb fact 'CxUniverse)))
+                      (is (some? (v/handle-of kb rule 'CxBiology)))))))
 
 (deftest an-author-genlcx-edge-survives-the-sync
   (tu/with-terms [CxAuthorAbove CxAuthorBelow]
@@ -112,12 +130,12 @@
         less (into [] (remove #(= gone %)) @ships)]
     ;; the premise as the load stored it, and retracted and stated again after the rest
     (in-orders :removed
-               {"loaded"   [#(v/assert % '(unary_predicate shipped_stale_kind) 'CxUniverse)]
-                "restated" [#(v/assert % '(unary_predicate shipped_stale_kind) 'CxUniverse)
+               {"loaded"   [#(v/assert % note 'CxUniverse)]
+                "restated" [#(v/assert % note 'CxUniverse)
                             #(v/retract! % (v/handle-of % (:form gone) 'CxUniverse))
                             #(v/assert % (:form gone) 'CxUniverse)]}
                (fn [kb]
-                 (is (= #{['CxUniverse (:form gone)] ['CxUniverse '(unary_predicate shipped_stale_kind)]}
+                 (is (= #{['CxUniverse (:form gone)] ['CxUniverse note]}
                         (set (map (juxt :context :form) (:remove (sync/plan kb less)))))
                      "the plan retracts a premise the files no longer state")
                  (is (= {:added 0 :removed 2 :refused []} (sync/sync! kb less)))
@@ -164,12 +182,12 @@
         sentence (:form lowered)]
     (in-both-orders :lowered
                     [#(v/assert % sentence 'CxUniverse {:strength :monotonic})
-                     #(v/assert % '(unary_predicate shipped_lowered_kind) 'CxUniverse)]
+                     #(v/assert % note 'CxUniverse)]
                     (fn [kb]
                       (testing "the plan retracts the known-true form and asserts the default one"
                         (is (= {:add    [{:context 'CxUniverse :form sentence}]
                                 :remove #{['CxUniverse (list 'set/monotonic sentence)]
-                                          ['CxUniverse '(unary_predicate shipped_lowered_kind)]}}
+                                          ['CxUniverse note]}}
                                (update (sync/plan kb @ships) :remove
                                        #(into #{} (map (juxt :context :form)) %)))))
                       (testing "the sync leaves it held at :default"
@@ -201,8 +219,8 @@
 
 (deftest an-exception-the-engine-does-not-ship-goes-with-its-rule
   (let [kb   (open-kb :except tu/load-starter!)
-        rule '(implies (bird ?x) (shipped_flagged ?x))
-        form (list 'exceptWhen '(shipped_exempt ?x) rule)]
+        rule '(implies (bird ?x) (mammal ?x))
+        form (list 'exceptWhen '(fish ?x) rule)]
     (try
       (v/assert kb form 'CxBiology)
       (let [[entry] (:remove (sync/plan kb @ships))]

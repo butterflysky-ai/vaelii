@@ -79,6 +79,9 @@
         (is (contains? (set (ok-result handler :context-down ['CxUniverse])) CxClosure))
         (is (true? (ok-result handler :sees? [CxClosure 'CxUniverse])))
         (is (false? (ok-result handler :sees? ['CxUniverse CxClosure]))))
+      (testing "the nearest genlCx neighbours, both directions"
+        (is (= #{'CxUniverse} (set (ok-result handler :min-context-parents [CxClosure]))))
+        (is (contains? (set (ok-result handler :max-context-children ['CxUniverse])) CxClosure)))
       (testing "the declared predicate properties, and the inverse pairing"
         (is (true? (ok-result handler :has-prop? [:symmetric siblingOf])))
         (is (contains? (set (ok-result handler :props [:symmetric])) siblingOf))

@@ -2133,14 +2133,44 @@
   [kb pred context]
   (and (symbol? pred) (tax/has-prop? (reasoning/taxonomy kb) :closed-extent pred context)))
 
+(defn closed-extent-for-arg?
+  "Is the believed extent of `sentence`'s predicate declared **complete for this
+  sentence** as read from `context` — is a `(closedExtentForArg P n v)` visible up its
+  `genlCx` ancestor set whose position `n` in `sentence` is ground and equal to `v`?
+
+  Scoped and belief-following exactly as `closed-extent?` is.  The taxonomy prop
+  `:closed-extent-arg` is the gate: it says some per-argument grant on P is visible from
+  `context`, so a predicate nobody closed by argument pays one set read and stops.  The
+  grant's position and value are then read back from the believed grants visible here."
+  [kb sentence context]
+  (let [pred (nm/functor sentence)]
+    (boolean
+     (and (symbol? pred)
+          (tax/has-prop? (reasoning/taxonomy kb) :closed-extent-arg pred context)
+          (some (fn [[_ b]]
+                  (let [n (get b '?n)]
+                    (and (integer? n) (pos? n) (< n (count sentence))
+                         (let [arg (nth sentence n)]
+                           (and (empty? (sx/free-vars arg)) (= arg (get b '?v)))))))
+                (res/matches-visible kb (list 'closedExtentForArg pred '?n '?v) context))))))
+
+(defn closed-extent-for?
+  "Is `sentence`'s believed extent declared complete from `context` — by a
+  `closed_extent_predicate` grant on its predicate, or by a `closedExtentForArg` grant
+  whose position and value the sentence matches?"
+  [kb sentence context]
+  (or (closed-extent? kb (nm/functor sentence) context)
+      (closed-extent-for-arg? kb sentence context)))
+
 (defrecord ClosedExtentProver []
   Prover
-  ;; `(not (P a …))` where P's extent is declared complete from here.  Ground only, for
-  ;; `unknown`'s reason: an open `(not (P ?x))` is a search over the domain's complement.
+  ;; `(not (P a …))` where P's extent is declared complete from here, whole or for the
+  ;; value one argument holds.  Ground only, for `unknown`'s reason: an open
+  ;; `(not (P ?x))` is a search over the domain's complement.
   (applicable?  [_ kb goal context]
     (and (rules/negative-literal? goal)
          (empty? (sx/free-vars goal))
-         (closed-extent? kb (nm/functor (second goal)) context)))
+         (closed-extent-for? kb (second goal) context)))
   (est-bindings [_ _ _ _] 1)                    ; a ground test: it holds or it does not
   ;; a bounded level-6 subquery on the positive goal, so at worst a closure
   (cost         [_ _ _ _] :compute)
@@ -2484,6 +2514,39 @@
                   (ancestor-necessary-conditions kb coll context))
           [{}]
           [])))))
+
+;; ---- disjointness: (not (T x)) from a believed membership in a separated type ----
+;; `(not (T x))` holds when `x` is believed a member of a type `S` that a visible
+;; separation keeps apart from `T` (a `disjoint` pair, a disjoint metatype, a
+;; `sibling_disjoint` parent or a `partition`, each closed under `genl` on both sides),
+;; and every `genl` edge the separation climbs on either side holds at `:monotonic`.  A
+;; `:default` edge applies forward and does not contrapose: "a `pa` is typically a `pb`"
+;; leaves room for an atypical `pa` outside `pb`.  `res/separation-denials` is the read,
+;; and the cover family names the same witnesses (`checks/cover-refutations`).
+;; Open-world: it fires on a positive membership, never on an unprovable one.
+
+(defrecord DisjointnessNegationProver []
+  Prover
+  ;; A ground `(not (T x))` for a unary `T` a separation reaches (`tax/separable?`).
+  ;; Ground, for `unknown`'s reason: an open `(not (T ?x))` enumerates the members of
+  ;; every type separated from `T`, which is a search over the complement of an extent.
+  (applicable? [_ kb goal _context]
+    (and (rules/negative-literal? goal)
+         (empty? (sx/free-vars goal))
+         (let [lit (second goal)]
+           (and (= 1 (count (rest lit)))
+                (symbol? (first lit))
+                (tax/separable? (reasoning/taxonomy kb) (first lit))))))
+  (est-bindings [_ _ _ _] 1)                    ; a ground test: ¬member holds or it does not
+  (cost         [_ _ _ _] :lookup)              ; a cached closure read per held type
+  ;; Augments a stored `(not (T x))` (FactProver) and the other negation provers; the
+  ;; union dedups, so they agree wherever more than one answers.
+  (completeness [_ _ _ _] 50)
+  (solve [_ kb goal context]
+    (let [[t x] (second goal)]
+      (if (res/separation-denied? kb t x context)
+        [{}]
+        []))))
 
 ;; ---- covering: the part a cover leaves when every other is ruled out -----
 ;;
@@ -3003,7 +3066,8 @@
    (->EvaluableProver) (->ExpressionKindProver) (->DifferentProver) (->EqualityProver) (->EvaluateProver) (->QuantityProver)
    (->AdmitsArgnumProver)
    (->UnknownProver) (->ThereExistsProver) (->ForallProver) (->ClosedExtentProver)
-   (->DefnSufficientProver) (->DefnNecessaryNegationProver) (->CoveringProver)
+   (->DefnSufficientProver) (->DefnNecessaryNegationProver) (->DisjointnessNegationProver)
+   (->CoveringProver)
    (->AggregateProver) (->BeliefProjectionProver)
    ;; FactProver before ArgTypeProver: both are :lookup / completeness 50, so vector
    ;; order breaks the stable-sort tie in the union path (`solve-goal-with`).  A stored

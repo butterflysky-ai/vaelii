@@ -50,6 +50,7 @@ SCRIPTS=(
   scripts/test-full-kb.sh
   scripts/test-selector.sh
   scripts/test-shuffle.sh
+  scripts/lib/ns-timings.sh
   scripts/lib/revision.sh
   scripts/lib/runlog.sh
   scripts/runlog-backfill.sh

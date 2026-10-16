@@ -1083,6 +1083,26 @@
         (v/assert kb (list 'except (list 'sentexHandle (v/assert kb d U))) U M)))
     (doall (for [_ (range 3)] (quot (nanos (v/recover kb)) (quot (* p (dec p)) 2))))))
 
+(defn- recover-membership-sync
+  "n terms each holding a member of an n-member `disjoint_metatype` and a type no
+  separation reaches, so the first sync after a `recover` tests every kept term's pair
+  (`membership/sync-memberships`).  Each type's separation frame is read once per sync, and
+  a pair whose second type no separation reaches is not tested, so each term costs a
+  constant.  Each reading is one `recover`, divided by n."
+  [n]
+  (let [kb (fresh-kb)
+        M  {:strength :monotonic}]
+    (v/with-deferred-settle kb
+      (v/assert kb '(disjoint_metatype prms_meta) 'CxPerf M)
+      (v/assert kb '(genl prms_plain thing) 'CxPerf M)
+      (doseq [i (range n)]
+        (v/assert kb (list 'prms_meta (symbol (str "prms_m" i))) 'CxPerf M))
+      (doseq [i (range n)
+              :let [x (symbol (str "PRMS" i))]]
+        (v/assert kb (list 'prms_m0 x) 'CxPerf M)
+        (v/assert kb (list 'prms_plain x) 'CxPerf M)))
+    (doall (for [_ (range 3)] (quot (nanos (v/recover kb)) n)))))
+
 (defn- negation-load
   "n negative facts whose bodies are stored in ONE polarity only — the negation-heavy load
   that carries no contradiction at all.
@@ -1267,6 +1287,24 @@
        (nanos (dotimes [i reads-per-reading]
                 (reads/watched-rule? st (mod (+ i r) n))))))))
 
+(defn- trigger-keys-beside-rules
+  "`rules/trigger-keys` for a positive and a negated fact on a predicate no rule reads,
+  against n rules each reading a predicate of its own, on the `:dense` index.
+
+  `chain/fire-rules-for` asks it once per datum a chaining run touches.  A read of the
+  rule index's root level builds a set of every stored key on the `:dense` index, so a
+  read of it per datum grows with n, and a membership test per closure term does not."
+  [n]
+  (let [st  (dense/dense-index-store {:space [::trigger]})
+        tax (reasoning/taxonomy (fresh-kb))]
+    (p/clear-index! st)
+    (doseq [i (range n)] (rules/index-rule st i [(symbol (str "pTkR" i))] nil 'CxPerf))
+    (doall
+     (for [_ (range 100)]
+       (nanos (dotimes [_ reads-per-reading]
+                (rules/trigger-keys tax '(pTkFact TkA) st)
+                (rules/trigger-keys tax '(not (pTkFact TkA)) st)))))))
+
 (defn- overlay-selectivity
   "`reads/stored-count-in-context` on a fork, for a context root of n handles the fork has
   never touched — a flat posting's cardinality, read through the overlay's `kv-count`.
@@ -1414,14 +1452,14 @@
 (defn- arity-reach-trigger
   "n **conforming** facts of a predicate whose arity was declared before any of them.
 
-  A binding recomputes the arity candidates of the functors below it when it arrives, and a
-  fact of a declared predicate is no binding: `decide/note-candidate!` reads its shape in
-  the candidate index, finds that the shape breaks no stored length (`candidate-shape?`),
-  and writes nothing.  So an ordinary fact arriving must cost the same at 2,000 as at 250, and
+  A binding refreshes the shapes of the functors below it when it arrives, and a fact of a
+  declared predicate is no binding: the store hook asks whether its shape breaks its
+  functor's length (`arity/inert-tuple?`), answered from the length entries, and queues
+  nothing for a conforming one.  So an ordinary fact arriving must cost the same at 2,000 as at 250, and
   a recompute run per fact turns a linear load quadratic here and in no test.
 
-  Conforming on purpose: a violating fact enters the candidate index and the settle places
-  its nogood, which is `arity-binding-arrival`'s workload; what this separates is a pass
+  Conforming on purpose: a violating fact is held inert, which is
+  `arity-binding-arrival`'s workload; what this separates is a pass
   that runs per fact from one that runs per binding."
   [n]
   (let [kb (fresh-kb)]
@@ -2072,7 +2110,7 @@
                (nanos (dotimes [_ 1000] (v/believed? kb h 'CxPerf))))))))
 
 (defn- arity-exempt-read
-  "A thousand reads of one tuple's belief at a context below its arity nogood's placement,
+  "A thousand reads of one tuple's belief at a context below a second length's binding,
   beside n unrelated predicates each bound to two arguments.
 
   ```
@@ -2080,10 +2118,9 @@
    └─ CxAerV  (arity pAerHi 3)
   ```
 
-  The tuple's functor binds no length of its own.  `CxPerf` reads the one length above it
-  and places the nogood there; `CxAerV` reads two lengths above it, binds it to none, and
-  believes the tuple.  The read walk reads that binding off the bound predicates above
-  the functor (`arity/exempt-at?`), so it reads none of the n unrelated bindings."
+  The tuple's functor binds no length of its own, and the two lengths above it leave it
+  unbound at every context, so the tuple is believed and the two bindings are a pair.
+  The read reads no binding, so it reads none of the n unrelated bindings."
   [n]
   (let [kb (fresh-kb)
         M  {:strength :monotonic}]
@@ -2378,9 +2415,9 @@
   defeat takes OUT at the reader, beside n ternary tuples of a predicate bound to three
   arguments under one bound to two.
 
-  The tuples' shape is an arity candidate, since a length above the functor differs, and
-  the functor's own binding holds them, so the settle places no nogood over them and the
-  read walk reads none of them (docs/nmtms.md, \"A nogood placed as a conclusion\").  A
+  A length above the functor differs from the tuples' length, and the functor's own
+  binding holds them, so they are not inert and the read walk reads none of them
+  (docs/nmtms.md, \"A nogood placed as a conclusion\").  A
   read reading every candidate tuple reads here as growth."
   [n]
   (let [kb (fresh-kb)
@@ -2821,7 +2858,8 @@
   derive over the subtree only when a mark of their family stands over the edge's upper
   end.  An arm gated on the mark being declared anywhere reads every fact of the subtree
   per edge, and the antisymmetric one offers each back to the candidate index, where a
-  membership recomputes its predicate's arity candidates.  Written unchained, so the
+  membership queues its predicate's shapes for the inert-tuple refresh.  Written
+  unchained, so the
   reading is the two arms' alone."
   [n]
   (let [kb (fresh-kb)
@@ -2864,10 +2902,11 @@
                      timed  (genl pgacv_j_t pgac7_t)
   ```
 
-  The edge brings the chain's length to its lower end, and the arrival recomputes the
-  functors under a conflict below that end (`arity/conflicts-below`), of which there are
-  none.  Asking each functor under a conflict whether it reaches the lower end is one
-  reachability walk per functor per edge."
+  The edge brings the chain's length to its lower end, and the settle's refresh reads the
+  functors at or below that end and the pairs above it (`arity/drain!`,
+  `arity/pair-sets`), none of which is under the conflict.  Asking each functor under a
+  conflict whether it reaches the lower end is one reachability walk per functor per
+  edge."
   [n]
   (let [kb    (fresh-kb)
         m     {:strength :monotonic}
@@ -2947,6 +2986,29 @@
              (nanos (v/assert kb (list 'genl (symbol (str "psusub" i "_t")) 'psutop_t)
                               'CxPerf {:strength :monotonic}))))))
 
+(defn- edge-stratification-subsumed
+  "The stratification check of one `genl` edge from `psssub_t` to `psstop_t`, which a
+  stored chain through `pssmid_t` already connects, beside n excepted rules reading
+  `psstop_t`.
+
+  The check is `checks/edge-stratification-violation`, which asks without writing, so
+  every sample asks the same edge.  The edge moves no closure, so it adds no edge to the
+  rule dependency graph and the check stops at one reachability test.  A walk from each
+  rule reading a predicate above the upper end expands the n excepted rules."
+  [n]
+  (let [kb (fresh-kb)]
+    (v/assert kb '(genl psssub_t pssmid_t) 'CxPerf {:strength :monotonic})
+    (v/assert kb '(genl pssmid_t psstop_t) 'CxPerf {:strength :monotonic})
+    (doseq [i (range n)]
+      (v/assert kb (list 'exceptWhen (list (symbol (str "pssexc" i "_t")) '?x)
+                         (list 'set/defaultRule
+                               (list 'implies (list 'and (list 'psstop_t '?x))
+                                     (list (symbol (str "pssseen" i "_t")) '?x))))
+                'CxPerf {}))
+    (doall (for [_ (range edge-writes)]
+             (nanos (dotimes [_ reads-per-reading]
+                      (checks/edge-stratification-violation kb '(genl psssub_t psstop_t))))))))
+
 (defn- taxonomy-edge-arbitration
   "One `genl` edge — a fresh subtype under a fresh supertype, with nothing above it,
   nothing below it and no separation anywhere near it — written on a KB carrying n
@@ -3007,10 +3069,9 @@
   "One `binary_predicate` membership asserted, read through and retracted, over a
   predicate holding n binary tuples beside one `:default` ternary tuple.
 
-  The membership takes the ternary tuple out of belief and leaves its label IN: the
-  arrival recomputes the candidate shapes of the predicate from the tracked shapes, and
-  the settle places the one-member nogood from the candidate index with the membership as
-  its ground (docs/nmtms.md, \"A nogood placed as a conclusion\"), so neither the arrival,
+  The membership binds the predicate to two arguments: the settle's refresh reads the
+  predicate's shape roster and the tuples of the ternary shape alone, and holds that tuple
+  inert (`arity/drain!`, docs/nmtms.md, \"The nogood families\"), so neither the arrival,
   its settle nor the first read at the tuple's context reads a binary tuple."
   [n]
   (let [kb (fresh-kb)]
@@ -3029,9 +3090,9 @@
   and a binary tuple, one of them also a `:default` ternary tuple; timed per hundred
   predicates.
 
-  The edge binds each member to two arguments, so the arrival recomputes the candidates of
-  the members of the metatype (`arity/meta-moved`) and the settle places the ternary
-  tuple's nogood; the retraction recomputes them again.  The cost per member is flat in
+  The edge binds each member to two arguments, so the arrival stores each member's
+  `(binary_predicate P)` (`chain/sync-arity-classes!`) and the settle's refresh holds the
+  ternary tuple inert; the retraction withdraws them again.  The cost per member is flat in
   n, so a walk of anything beyond the metatype's members reads as growth."
   [n]
   (let [kb (fresh-kb)
@@ -3072,9 +3133,9 @@
   (`decide/rebuild-candidates!`, `decide/synced`), over 4,096 facts and n predicates each
   bound to two arguments, with no tuple and no `genl` parent.
 
-  The rebuild owes the arity candidates whole, and the first read computes them for the
-  functors of stored facts and the lower ends of `genl` edges, so it reads none of the n
-  bindings."
+  The rebuild owes the arity shapes whole, which the settle's first refresh computes for
+  the functors of stored facts (`arity/drain!`), so the rebuild and the read read none of
+  the n bindings."
   [n]
   (let [kb (fresh-kb)
         M  {:strength :monotonic}]
@@ -3084,12 +3145,60 @@
     (doall (for [_ (range 5)]
              (nanos (do (decide/rebuild-candidates! kb) (decide/synced kb)))))))
 
+(defn- arity-refresh-under-bound-chain
+  "A chain of n predicates, each bound to two arguments in CxUniverse, then the arity
+  shapes owed whole as `recover` owes them and settled (`decide/rebuild-candidates!`,
+  `arity/drain!`), read per hundred predicates.
+
+  The whole refresh syncs the pairs of every bound predicate (`arity/pair-sets`), and a
+  predicate with one length at or above it reads no closure (`arity/lengths-of`).  A walk
+  of each predicate's ancestors costs its depth in the chain, so the reading grows with
+  n."
+  [n]
+  (let [kb (fresh-kb)
+        M  {:strength :monotonic}
+        ch (fn [i] (symbol (str "pArc" i)))]
+    (v/with-deferred-settle kb
+      (dotimes [i (dec n)] (v/assert kb (list 'genl (ch i) (ch (inc i))) 'CxPerf M))
+      (dotimes [i n] (v/assert kb (list 'arity (ch i) 2) 'CxUniverse M)))
+    (doall (for [_ (range 3)]
+             (quot (nanos (do (decide/rebuild-candidates! kb) (settle/settle kb))) (quot n 100))))))
+
+(defn- arity-pairs-below-a-queued-binding
+  "A chain of n predicates, each bound to two arguments in CxUniverse but the bottom one,
+  bound to three, with the arity length entries pinned to a weight of 64
+  (`set-cache-limit`); then a binding of the top predicate stored and retracted, the
+  store timed through its settle and read per hundred predicates.
+
+  The settle syncs the pairs at the top predicate and below it (`arity/pair-sets` under
+  `:both`), which asks each predicate below it for the lengths stored at or below it
+  (`arity/below-lengths`).  The sync holds each answer for its pass, so each is built
+  once.  An answer the bounded entries evict before it is read is built again from the
+  chain below it, and reads here as growth with n."
+  [n]
+  (let [kb (fresh-kb)
+        M  {:strength :monotonic}
+        ch (fn [i] (symbol (str "pApb" i)))]
+    (v/with-deferred-settle kb
+      (dotimes [i (dec n)] (v/assert kb (list 'genl (ch i) (ch (inc i))) 'CxPerf M))
+      (dotimes [i n] (v/assert kb (list 'arity (ch i) (if (zero? i) 3 2)) 'CxUniverse M)))
+    (settle/settle kb)
+    (v/set-cache-limit :arity-lengths 64)
+    (try
+      (doall (for [_ (range 5)]
+               (let [h (atom nil)
+                     t (nanos (reset! h (v/assert kb (list 'arity (ch (dec n)) 2) 'CxPerf M)))]
+                 (v/retract! kb @h)
+                 (quot t (quot n 100)))))
+      (finally (v/set-cache-limit :arity-lengths nil)))))
+
 (defn- bound-type-load
   "n types in eight levels under one root, each below three types of the level above,
   then every type bound to one argument, the bottom level first, each binding timed.
 
-  A length arriving at a type reaches only the types below it that do not already hold
-  it (docs/nmtms.md, \"The nogood families\").  Bottom level first makes the
+  A length arriving at a type refreshes only the subtypes whose own binding does not give
+  it (`arity/moved-below`), and the pairs it forms are read only in the subtypes storing
+  another length (docs/nmtms.md, \"The nogood families\").  Bottom level first makes the
   last bindings the top level's, whose subtypes are most of the load and all bound
   already, so the readings are what an arrival costs where nothing below it moves: the
   walk stops at each child.  A recompute of every subtype per binding reads here as
@@ -5018,7 +5127,8 @@
        └─ CxPjE_e, e < 60    timed  (genlCx CxPjE_e CxPjA), then retracted
   ```
 
-  The edge moves one placement of each nogood, so j is content the edge does not name."
+  The edge moves one placement of each nogood, so j is content the edge does not name.
+  Under `:arity`, nogood i is a tuple held inert at every context, which no edge places."
   [family j]
   (let [kb (fresh-kb)
         M  {:strength :monotonic}
@@ -5207,7 +5317,7 @@
   too.  With `:hard?` both members of each nogood are `:monotonic`, so each places a
   `(contradicts …)` and no defeat.  With `:sib?` one `siblingDisjointException` is stated
   in `CxPdc`.  With `:arity` k, `CxPdAr`, which no reader sees, binds `pdcAr` to two
-  arguments and states k tuples of three, each an arity nogood placed there.
+  arguments and states k tuples of three, each held inert at every context.
 
   ```
   CxUniverse
@@ -5271,7 +5381,7 @@
 
 (defn- default-chain-beside-unseen-arity-candidates
   "`chain-beside-defeats` over a `:default` chain of depth d, read where sixteen placed
-  `(contradicts …)` are seen, beside 64 arity nogoods placed where no reader sees."
+  `(contradicts …)` are seen, beside 64 inert tuples whose binding no reader sees."
   [d]
   (chain-beside-defeats d :default {:hard? true :seen? true :arity 64}))
 
@@ -5772,6 +5882,17 @@
     :max-ratio 2.0
     :run       recover-discovery-separated-term}
 
+   ;; Both ends measured 2026-10-14, load 12.  Healthy: 0.29x (0.080 against 0.023 ms per
+   ;; term).  Defective, each kept term's types reading their separation frames again, each
+   ;; a scan of the n members: 3.32x (0.140 against 0.465 ms).  2.0 is the file's bound for
+   ;; a flat claim.
+   {:name      :recover-membership-sync
+    :group     :recover
+    :claim     "8x the kept terms over one n-member disjoint_metatype costs under 2x per term at recover — each type's separation frame is read once per sync"
+    :sizes     [500 4000]
+    :max-ratio 2.0
+    :run       recover-membership-sync}
+
    ;; Both ends measured 2026-10-03 in one warm JVM each, load 19.  Above: 0.48x, 1.23x
    ;; and 0.70x (7.73 ms against 5.41).  Below, the image carrying no decision and no
    ;; reading, so the first write decides every reader: 11.30x, 6.91x and 3.78x (4.56 ms
@@ -5872,6 +5993,16 @@
     :max-ratio 2.0
     :run       exception-roster-gate}
 
+   ;; Measured 2026-10-14 per batch of a positive and a negated call: 0.704 ms at 64 and
+   ;; 0.690 ms at 2,048 (0.98x).  Reading every stored key per call, 1.10 ms against
+   ;; 26.7 ms (24x).
+   {:name      :trigger-keys-beside-rules
+    :group     :index
+    :claim     "rules/trigger-keys for a fact no rule reads is flat in how many antecedent keys the stored rules take"
+    :sizes     [64 2048]
+    :max-ratio 2.0
+    :run       trigger-keys-beside-rules}
+
    {:name      :overlay-selectivity
     :group     :index
     :claim     "a fork's count of a flat posting is flat in the size of the base posting it inherits"
@@ -5931,6 +6062,26 @@
     :sizes     [1000 16000]
     :max-ratio 2.0
     :run       arity-rebuild-beside-bindings}
+
+   ;; Measured 2026-10-14 over a whole settle per hundred predicates: 2.1 ms at 250 and
+   ;; 1.2 ms at 4,000 (0.58x).  With each predicate walking its ancestors, 104 ms against
+   ;; 1,583 ms (15x).
+   {:name      :arity-refresh-under-bound-chain
+    :group     :argtypes
+    :claim     "16x the predicates of a chain each bound in CxUniverse costs under 2x per hundred predicates at the whole arity refresh"
+    :sizes     [250 4000]
+    :max-ratio 2.0
+    :run       arity-refresh-under-bound-chain}
+
+   ;; Measured 2026-10-14 per hundred predicates: 0.844 ms at 256 and 0.486 ms at 4,096
+   ;; (0.58x).  With the lengths below each predicate held in the bounded length entries,
+   ;; 2.80 ms against 30.1 ms (10.8x).
+   {:name      :arity-pairs-below-a-queued-binding
+    :group     :argtypes
+    :claim     "16x the predicates of a chain under a queued binding costs under 2x per hundred predicates at the pair sync, past the length entries' bound"
+    :sizes     [256 4096]
+    :max-ratio 2.0
+    :run       arity-pairs-below-a-queued-binding}
 
    {:name      :bound-type-load
     :group     :argtypes
@@ -6317,6 +6468,16 @@
     :max-ratio 2.0
     :run       edge-stratification-unreached}
 
+   ;; Measured 2026-10-14 per batch of 500 checks: 0.869 ms at 8 and 0.296 ms at 128
+   ;; (0.34x).  Walking from every reader above the upper end, 45.9 ms against 917 ms
+   ;; (20x).
+   {:name      :edge-stratification-subsumed
+    :group     :taxonomy
+    :claim     "a genl edge the closure already holds is flat in the excepted rules reading its upper end"
+    :sizes     [8 128]
+    :max-ratio 2.0
+    :run       edge-stratification-subsumed}
+
    ;; Full runs from 2026-10-05, where membership nogoods are placed where they are seen
    ;; whole and no reader decides them, to 2026-10-10 read 0.97x-1.5x over six runs,
    ;; against 11.71x-39.26x on the runs before it.  With every standing pair re-derived per
@@ -6586,14 +6747,15 @@
 
    ;; n CxUniverse roster declarations, each denied in CxUniverse, so a placed defeat every
    ;; reader sees names each one, and no denial or rule reads a declared predicate.  The roster
-   ;; reading runs no `in-force?` for the n.  Calibrated from both ends under `--only`:
-   ;; healthy 1.20x (3.64 ms/op against 4.36), and with the reading weighing every
-   ;; declaration's defeats, 3.20x.
+   ;; reading runs no `in-force?` for the n.  Both ends read warm, 20 rounds in one JVM,
+   ;; 2026-10-16, load 3: healthy 1.92x to 2.31x over the last eight rounds at 554940a2e
+   ;; and at the 0.26.0 cut, and full runs 1.92x to 2.25x; with the reading weighing every
+   ;; declaration's defeats, 3.87x on the coldest round and 5.4x to 6.6x warm.
    {:name      :membership-clash-beside-denied-cxuniverse-declarations
     :group     :placement
-    :claim     "16x the CxUniverse roster declarations denied in CxUniverse beside a membership clash costs under 2x per write"
+    :claim     "16x the CxUniverse roster declarations denied in CxUniverse beside a membership clash costs under 3.5x per write"
     :sizes     [8 128]
-    :max-ratio 2.0
+    :max-ratio 3.5
     :run       membership-clash-beside-denied-cxuniverse-declarations}
 
    ;; A roster declaration beside n stating contexts that share one descendant with n
@@ -6955,7 +7117,7 @@
    ;; for a flat claim.
    {:name      :arity-exempt-read
     :group     :argtypes
-    :claim     "16x the unrelated arity bindings costs under 2x per read of a tuple at a reader its arity nogood exempts"
+    :claim     "16x the unrelated arity bindings costs under 2x per read of a tuple whose supers bind two lengths"
     :sizes     [64 1024]
     :max-ratio 2.0
     :run       arity-exempt-read}
@@ -7383,7 +7545,7 @@
 
    {:name      :context-edge-beside-arity-placements
     :group     :placement
-    :claim     "4x the placements each arity nogood holds costs under 2x per genlCx edge giving it one more"
+    :claim     "4x the contexts below sixteen inert tuples costs under 2x per genlCx edge adding one more"
     :sizes     [15 60]
     :max-ratio 2.0
     :run       #(context-edge-beside-placements :arity %)}

@@ -1295,7 +1295,8 @@
   [kb g]
   (let [f (first g)]
     (or (sx/variable? f)
-        (> (count (res/sub-predicates kb f '?ctx)) 1))))
+        (> (count (res/sub-predicates kb f '?ctx)) 1)
+        (boolean (seq (res/swapped-sub-predicates kb f '?ctx))))))
 
 (defn- join-matches
   "The stored facts satisfying the substituted antecedent `g` at the wildcard context —
@@ -2330,7 +2331,16 @@
                                       ;; negated: contravariant, so the antecedent is the spec
                                       (and (vector? ak) (vector? fk)) [(second ak) (second fk)])))))))
                   (distinct)
-                  (filter (fn [[sub super]] (contains? (tax/genls-global tax sub) super))))
+                  (keep (fn [[sub super :as link]]
+                          (if (contains? (tax/genls-global tax sub) super)
+                            link
+                            ;; reached across `genlInverse` edges: the link carries the
+                            ;; parity the match was read at, which its witness walks
+                            (let [[st sw] (tax/signed-closure tax :up sub nil)]
+                              (cond (contains? st super) [sub super false]
+                                    (contains? sw super) [sub super true])))))
+                  ;; a `[sub super swapped?]` link reached both ways is one subsumption
+                  (distinct))
             matched))))
 
 (defn- subsumption-support
@@ -2362,11 +2372,19 @@
         supporter-class (if memo
                           (fn [h] (held memo [:class h] #(jtms/defeat-class tms h)))
                           #(jtms/defeat-class tms %))
-        walk  (fn [[sub super]] (tax/reach-support (reasoning/taxonomy kb) :genl sub super
-                                                   vantage supporter-class))
+        walk  (fn [[sub super :as link]]
+                (if (= 2 (count link))
+                  (tax/reach-support (reasoning/taxonomy kb) :genl sub super
+                                     vantage supporter-class)
+                  (tax/signed-reach-support (reasoning/taxonomy kb) sub super (nth link 2)
+                                            vantage supporter-class)))
+        ;; a `genlInverse` link's witness also reads the flat cache, which the `genl`
+        ;; read scope does not key, so only a `genl` link is held
         read  (if memo
                 (let [scope (tax/read-scope (reasoning/taxonomy kb) :genl vantage)]
-                  (fn [link] (held memo [:genl link scope (reading)] #(walk link))))
+                  (fn [link] (if (= 2 (count link))
+                               (held memo [:genl link scope (reading)] #(walk link))
+                               (walk link))))
                 walk)]
     (reduce (fn [acc link]
               (if-let [hs (read link)]
@@ -2397,9 +2415,16 @@
                    (fn [h] (held memo [:class h] #(jtms/defeat-class tms h)))
                    #(jtms/defeat-class tms %))
         rank     #(strength/rank-of (or (class-of %) :default))
-        walk     (fn [[sub super]] (tax/reach-supports tax :genl sub super nil class-of))
+        walk     (fn [[sub super :as link]]
+                   (if (= 2 (count link))
+                     (tax/reach-supports tax :genl sub super nil class-of)
+                     ;; one route across `genlInverse` edges: the fewest of them
+                     (when-let [r (tax/signed-reach-support tax sub super (nth link 2) nil class-of)]
+                       [r])))
         per-link (mapv (if memo
-                         (fn [link] (held memo [:genl-routes link (reading)] #(walk link)))
+                         (fn [link] (if (= 2 (count link))
+                                      (held memo [:genl-routes link (reading)] #(walk link))
+                                      (walk link)))
                          walk)
                        links)]
     (when (every? seq per-link)
@@ -2866,6 +2891,161 @@
                  (if new? [h] []))))
             minted))))
 
+;; ---- the class a metatype route binds --------------------------------------------
+;;
+;; A `:monotonic` membership `(T P)` whose type reaches an exact-arity class `C` through
+;; `genl` edges IN at `:monotonic` binds P's length as `(C P)` does (docs/taxonomy.md,
+;; "Arity").  The engine stores `(C P)` in CxUniverse, justified by the membership and one
+;; path's edges (`arity/class-paths`), and keeps the justifications in step with the
+;; edges here.  No KB rule states it: the rule would need a variable functor, and it reads
+;; an antecedent's class.
+
+(def arity-class-informant
+  "The informant of a justification of a class membership `(C P)` a metatype route
+  derives (`sync-arity-classes!`)."
+  'arityClass)
+
+(defn- class-route-ok?
+  "Does the `genl` edge supporter `[h ctx]` carry a metatype route: IN at `:monotonic`?"
+  [tms [h _]]
+  (and (jtms/in? tms h) (= :monotonic (jtms/defeat-class tms h))))
+
+(defn- arity-class-justifications
+  "`{[sentence antecedents] jid}`: the justifications under `arity-class-informant` the
+  stored membership `m` grounds, each keyed by its conclusion's sentence and its
+  antecedents as a set."
+  [kb m]
+  (let [tms  (reasoning/tms kb)
+        recs (:records kb)]
+    (into {} (keep (fn [jid]
+                     (let [j (jtms/justification tms jid)]
+                       (when (= arity-class-informant (:informant j))
+                         (when-let [c (p/get-sentex recs (:consequence j))]
+                           [[(:sentence c) (set (:antecedents j))] jid])))))
+          (jtms/dependents tms m))))
+
+(defn- place-arity-class!
+  "Store the class membership `sentence` in CxUniverse, justified under
+  `arity-class-informant` by `antes` at `:monotonic`, as `{:new [handle …] :violations
+  [v]}`: the new class membership and the types its argument constraints mint, or the
+  violation that leaves it unstored (`checks/constraint-admission`)."
+  [kb sentence antes]
+  (let [tms      (reasoning/tms kb)
+        recs     (:records kb)
+        ctx      sx/root-context
+        existing (kb/find-sentex-handle kb sentence ctx)
+        adm      (when-not existing (checks/constraint-admission kb sentence ctx))]
+    (if-let [v (:violation adm)]
+      {:new [] :violations [(assoc v :sentence sentence :context ctx)]}
+      (let [[h s new?] (if existing
+                         [existing (p/get-sentex recs existing) false]
+                         (let [[h s] (kb/create-sentex kb sentence ctx)] [h s true]))]
+        (when new?
+          (checks/force-sentex! kb s)
+          (special/derived-sentex-added kb s h))
+        (jtms/ensure-node tms h (inc (long (reduce (fn [d a] (max (long d) (long (jtms/depth tms a))))
+                                                   0 antes))))
+        (when-not (jtms/has-justification? tms arity-class-informant antes h)
+          (let [just (jtms/->just (p/next-id recs) arity-class-informant
+                                  (kb/antecedent-order kb antes) h {} :monotonic)]
+            (p/put-justification recs just)
+            (jtms/add-justification tms just)))
+        (let [args (when new? (special/deduce-arg-types kb (:entailments adm) h ctx))]
+          {:new        (cond-> (into [] (special/minted-seeds kb (:new args))) new? (conj h))
+           :violations (vec (:violations args))})))))
+
+(defn sync-arity-classes!
+  "Bring the class memberships the stored memberships `hs` derive in step with the
+  `genl` edges as they stand, as `{:new [handle …] :violations [v]}`, the new handles the
+  chaining seeds.  A membership `(T x)` stored as a fact at `:monotonic` derives `(C x)`
+  for each class `arity/class-paths` gives over the edges IN at `:monotonic`, justified
+  by the membership and that path's edges (`place-arity-class!`).  A justification under
+  `arity-class-informant` the membership grounds that the edges no longer give is
+  dropped, so the justifications are a function of the stored state."
+  [kb hs]
+  (let [tms  (reasoning/tms kb)
+        recs (:records kb)
+        ok?  #(class-route-ok? tms %)
+        ms   (->> (set hs)
+                  (keep #(p/get-sentex recs %))
+                  (nm/sort-by-content-key (fn [m] [(:sentence m) (:context m)])))]
+    (reduce
+     (fn [acc m]
+       (let [h     (:id m)
+             [t x] (arity/membership-of m)
+             want  (if (and t (= :monotonic (jtms/defeat-class tms h)))
+                     (into {} (map (fn [[c path]] [[(list c x) (into #{h} path)] path]))
+                           (arity/class-paths kb t ok?))
+                     {})
+             have  (arity-class-justifications kb h)
+             gone  (into [] (keep (fn [[k jid]] (when-not (contains? want k) jid))) have)]
+         (when (seq gone)
+           (apply-removals! kb (reduce (fn [r jid]
+                                         (let [r' (jtms/drop-justification! tms jid)]
+                                           (p/delete-justification! recs jid)
+                                           (merge-with into r r')))
+                                       nil gone)))
+         (reduce (fn [acc [s antes]] (merge-with into acc (place-arity-class! kb s (vec antes))))
+                 acc
+                 (nm/sort-by-content-key first (remove #(contains? have %) (keys want))))))
+     {:new [] :violations []}
+     ms)))
+
+(defn- class-route-memberships
+  "The stored memberships whose class memberships the stored fact `sentence` moves: a
+  membership `(T x)` of a type reaching an exact-arity class (`arity/reaches-class?`),
+  itself; and a class membership `(C x)`, the memberships of `x` in a type reaching one,
+  whose class memberships a relabel of `(C x)` can have moved.  With `relabel?`, a
+  membership moves nothing: what it derives reads its class and the edges, not its
+  belief.  A `genl` edge moves them through the taxonomy (`arity-class-ends-moved!`)."
+  [kb sentence h relabel?]
+  (when (and (seq? sentence) (symbol? (first sentence)))
+    (let [[f a]  sentence
+          recs   (:records kb)
+          idx    (:index kb)
+          route? (fn [t] (and (symbol? t) (not (contains? arity/exact-classes t))
+                              (arity/reaches-class? kb t)))
+          of-x   (fn [x] (into [] (filter #(let [[t x'] (arity/membership-of (p/get-sentex recs %))]
+                                             (and (= x x') (route? t))))
+                               (reads/as-stored-unary-with-arg-global idx x)))]
+      (cond
+        (and (= 2 (count sentence)) (symbol? a) (contains? arity/exact-classes f)) (of-x a)
+        (and (= 2 (count sentence)) (symbol? a) (not relabel?) (route? f))          [h]))))
+
+(defn arity-class-ends-moved!
+  "Sync the class memberships of the stored memberships of every type at or below one of
+  `ends`, the lower ends of moved `genl` edges (`arity/take-class-ends!`), that reaches an
+  exact-arity class (`sync-arity-classes!`), over the unscoped closure: the class
+  membership is stored in CxUniverse and reads the edges in every context, as a
+  relation's length does.  Answers `{:new :violations}`."
+  [kb ends]
+  (let [tax  (reasoning/taxonomy kb)
+        idx  (:index kb)
+        recs (:records kb)
+        ts   (into #{} (comp (filter #(and (symbol? %) (arity/reaches-class? kb %)))
+                             (mapcat #(conj (set (tax/specs-global tax %)) %)))
+                   ends)
+        ms   (into #{} (comp (mapcat #(reads/as-stored-with-functor idx %))
+                             (filter #(some? (arity/membership-of (p/get-sentex recs %)))))
+                   ts)]
+    (if (seq ms) (sync-arity-classes! kb ms) {:new [] :violations []})))
+
+(defn arity-classes-moved!
+  "Sync the class memberships the stored records `sxs` move (`class-route-memberships`,
+  `sync-arity-classes!`): a membership arriving, its class rising, or a relabel of a class
+  membership or of a sentence installing `genl` edges (`relabel?`), which syncs below the
+  edges' lower ends (`tax/installed-edges`, `arity-class-ends-moved!`): a strength change
+  moves no edge in the taxonomy.  Answers `{:new :violations}`."
+  [kb sxs relabel?]
+  (when-not relabel? (arity/classes-synced! kb (keep :id sxs)))
+  (let [facts (filter #(and % (nil? (:antecedent %))) sxs)
+        ms    (into #{} (mapcat #(class-route-memberships kb (:sentence %) (:id %) relabel?)) facts)
+        ends  (when relabel? (into #{} (comp (mapcat #(tax/installed-edges (:sentence %))) (map first))
+                                   facts))]
+    (merge-with into
+                (if (seq ms) (sync-arity-classes! kb ms) {:new [] :violations []})
+                (if (seq ends) (arity-class-ends-moved! kb ends) {:new [] :violations []}))))
+
 (defn- place-fact-conclusion
   "Persist/justify a rule conclusion `conseq` in context `pctx` at justification
   `strength` (:monotonic / :default); return the handles newly created (for
@@ -3074,12 +3254,15 @@
               ;; ...and a derived `genl` edge between predicates brings stored
               ;; sub-predicate facts under the declarations above them, as an asserted
               ;; one does
-              down (special/entail-under-edge kb conseq)]
+              down (special/entail-under-edge kb conseq)
+              ;; ...and the class membership a metatype route derives from a derived
+              ;; membership or edge, as from an asserted one
+              cls  (when new? (arity-classes-moved! kb [s] false))]
           (when (or (seq (:violations mig)) (seq (:violations lift)) (seq (:violations args))
-                    (seq (:violations back)) (seq (:violations down)))
+                    (seq (:violations back)) (seq (:violations down)) (seq (:violations cls)))
             (violations/report kb (concat (:violations mig) (:violations lift)
                                           (:violations args) (:violations back)
-                                          (:violations down))))
+                                          (:violations down) (:violations cls))))
           ;; The arms above install the conclusion in its cache unconditionally, and a
           ;; valid firing makes that right.  A void one leaves the node OUT from its
           ;; creation, so no settle's region names it: reconcile its caches here, as
@@ -3091,6 +3274,7 @@
               (into-some (special/minted-seeds kb (:new args)))
               (into-some (special/minted-seeds kb (:new back)))
               (into-some (special/minted-seeds kb (:new down)))
+              (into-some (:new cls))
               ;; a *derived* genl edge makes stored facts matchable at a supertype
               ;; they did not have, exactly as an asserted one does — same seeds, or
               ;; the fixpoint would depend on which rule fired first
@@ -3241,21 +3425,37 @@
   `[handle context]` supporters, each context `placements-over` places the members,
   those supporters and the route's subsumptions at, with the members, the supporters and
   the edge handles it names as antecedents.  A placement that reads a
-  `siblingDisjointException` exempting a mark route's separated pair is left out
-  (`tax/route-exempted?`), and so is one the route's `:excluded-at` names.  Given the
+  `siblingDisjointException` exempting a mark route's separated pair, or one of the
+  route's `:pairs`, is left out (`tax/route-exempted?`), and so is one the route's
+  `:excluded-at` names.  A route through a separation's denial (`membership/routes`)
+  holds its separation to the soundness rule of `res/separation-denials`: each of its
+  `:strict-links` reaches at `:monotonic` from the placement (`tax/reach-strength`), and
+  each supporter chosen for one of its `:strict-keys` holds at `:monotonic`
+  (`res/holding-class`).  Given the
   context set `within`, only the placements in it (`placements-over`)."
   [kb members routes within]
   (let [tax   (reasoning/taxonomy kb)
         recs  (:records kb)
         exc?  (tax/sib-exceptions? tax)
+        cls   (delay (res/holding-class kb))
         mctxs (mapv #(:context (p/get-sentex recs %)) members)]
     (into #{}
-          (for [{:keys [keys links choices excluded-at] :as route} routes
-                sups (or choices (route-supporters kb keys))
+          (for [{:keys [keys links choices excluded-at strict-links strict-keys pairs] :as route} routes
+                sups (cond->> (or choices (route-supporters kb keys))
+                       (seq strict-keys)
+                       (filter (fn [sups]
+                                 (every? (fn [[k [h]]] (or (not (contains? strict-keys k))
+                                                           (= :monotonic (@cls h))))
+                                         (map vector (seq keys) sups)))))
                 :let [[ps m] (placements-over kb links (into (vec members) (map first) sups)
                                               (into mctxs (map second) sups) within)]
                 pctx ps
                 :when (not (and exc? (tax/route-exempted? tax route pctx)))
+                :when (not (and exc? (seq pairs)
+                                (some #(tax/route-exempted? tax {:pair % :mark? true} pctx) pairs)))
+                :when (every? (fn [[sub super]]
+                                (= :monotonic (tax/reach-strength tax :genl sub super pctx @cls)))
+                              strict-links)
                 :when (not (and excluded-at (excluded-at pctx)))]
             [pctx (-> (set members) (into (map first) sups) (into (get m pctx)))]))))
 
@@ -3409,7 +3609,9 @@
   of those gone, and return the handles created: the nogoods of the terms `moved` names
   (`membership/take-moved!`), of the terms with a membership or denial among the handles
   `fresh` the pass relabelled or `placed` (`placed-members`), of the terms holding a type
-  under a separation or cover declaration among `fresh` (`membership/terms-under`), and
+  under a separation or cover declaration among `fresh` (`membership/terms-under`), of the
+  terms under the lower end of a `genl` edge among `fresh`, whose defeat class a
+  separation's denial reads (`membership/terms-under-edges`), and
   of the terms with a candidate a `genlCx` move reaches or a type under a ground stated
   where it reaches (`reach-handles` over `reach`, `ground-ends`).
   Each is placed at the placements its routes give (`membership/routes`,
@@ -3423,6 +3625,9 @@
           full (-> (set (keys moved))
                    (into (membership/terms-of kb c fresh))
                    (into (membership/terms-of kb c placed))
+                   ;; a relabelled `genl` edge can move its defeat class, which a cover
+                   ;; refuted through a separation's denial reads at the placement
+                   (into (membership/terms-under-edges kb w c (genl-lower-ends kb fresh)))
                    (into (membership/terms-under kb w c (into #{} (comp (keep #(tax/separation-ends tax %)) cat)
                                                               (tax/supported-keys tax fresh))))
                    (into (when (= ::all rh) (membership/nogoods-terms c))))
@@ -3512,41 +3717,58 @@
                      #(tuple/routes kb w c %)
                      (fn [ms core] (tuple/owned? tax ms core)))))))
 
-(defn- place-arities!
-  "Place the arity nogoods whose placement can have moved, and remove the placements of
-  those gone, and return the handles created: the nogoods holding a handle `moved` names
-  (`arity/take-moved!`), a candidate or a binding the pass relabelled (`fresh`) or a
-  relabelled placement names (`placed`), a candidate under a `genl` edge among `fresh`
-  (`arity/members-under`), and a candidate a `genlCx` move reaches, under a ground stated
-  where it reaches, or convicted by a binding stated there (`reach-handles` over `reach`,
-  `arity/reached`).  Each is placed at the placements its routes give (`arity/routes`,
-  `route-placements`).  Reads nothing while the index keeps no candidate and queued
-  nothing."
-  [kb c moved reach fresh placed]
-  (when (or (seq moved) (arity/held? c))
-    (let [tax  (reasoning/taxonomy kb)
-          w    (decide/write-view tax)
-          rh   (reach-handles kb c reach)
-          mem? #(arity/member? kb c %)
-          full (-> (set moved)
-                   (into (filter mem?) fresh)
-                   (into (filter mem?) placed)
-                   (into (arity/members-under kb w c (genl-lower-ends kb fresh)))
-                   (into (when (= ::all rh) ((:handles arity/family) kb c))))
-          rhs  (when (vector? rh)
-                 (let [[hs gs] rh]
-                   (-> (filterv mem? hs)
-                       (into (arity/members-under kb w c (genl-lower-ends kb gs)))
-                       (into (arity/reached kb w c (:below reach))))))]
-      (when (or (seq full) (seq rhs))
-        (place-sets! kb reach full rhs #(arity/nogoods-holding kb w c %) (constantly true)
-                     #(arity/routes kb w c % (fn [h] (exc/closure-excepted-anywhere? kb h)))
-                     (fn [ms core] (arity/owned? kb ms core)))))))
+(defn- placed-pair-sets
+  "The member sets of the placed arity pairs (`arity/kind-of`) that a nogood justification
+  resting on the handle `h` concludes in CxUniverse with the two members as its only
+  antecedents, the justification `sync-arity-pairs!` stores.  Another family's nogood over
+  the same members carries its grounds, and is placed where both members are seen."
+  [kb h]
+  (let [tms  (reasoning/tms kb)
+        recs (:records kb)]
+    (into #{} (keep (fn [jid]
+                      (let [j (jtms/justification tms jid)
+                            c (when (= nogood-informant (:informant j))
+                                (p/get-sentex recs (:consequence j)))
+                            s (:sentence c)]
+                        (when (and (= sx/root-context (:context c)) (= 'contradicts (nm/functor s)))
+                          (let [ms (into #{} (keep sx/handle-id) (rest s))]
+                            (when (and (= ms (set (:antecedents j))) (arity/kind-of kb ms))
+                              ms))))))
+          (jtms/dependents tms h))))
+
+(defn- sync-arity-pairs!
+  "Place one `(contradicts …)` in CxUniverse for each arity pair at a predicate of `ps`
+  (`{p dirs}`, `arity/drain!`, `arity/pair-sets`), justified by its two bindings, remove
+  the placements of the pairs at it that no longer stand, and return the handles created.
+  Both members are on the roster, so the verdict places no `defeat`
+  (`place-justified!`).  Under `:up`, a pair with a predicate below `p` is left to that
+  predicate's own sync."
+  [kb ps]
+  (let [recs (:records kb)
+        root sx/root-context
+        key  (fn [ms] (vec (sort (map #(nm/print-key (:sentence (p/get-sentex recs %))) ms))))
+        ;; `pair-sets`' closure answers, kept while no `genl` edge moves
+        held (volatile! nil)
+        memo (fn [] (let [tax (reasoning/taxonomy kb)
+                          g   [(tax/relation-epoch tax) (tax/relation-gen tax :genl)]]
+                      (when-not (= g (first @held)) (vreset! held [g (volatile! {})]))
+                      (second @held)))]
+    (reduce
+     (fn [made [q dirs]]
+       (let [want (arity/pair-sets kb q dirs (memo))
+             have (cond->> (into #{} (mapcat #(placed-pair-sets kb %)) (arity/root-bindings kb q))
+                    (= :up dirs) (into #{} (remove #(arity/below-pair? kb q % (memo)))))]
+         (doseq [ms (sort-by key (remove want have))]
+           (place-justified! kb ms [] #(= ms %)))
+         (into made (mapcat #(place-justified! kb % [[root %]] (fn [core] (= % core))))
+               (sort-by key (remove have want)))))
+     [] (sort-by (comp nm/print-key first) ps))))
 
 (defn placement-queued?
   "Has the negation, membership, related-types, tuple or arity index queued a nogood the
   settle places again (`negation/take-moved!`, `membership/take-moved!`,
-  `related/take-moved!`, `tuple/take-moved!`, `arity/take-moved!`)?  A rebuilt index
+  `related/take-moved!`, `tuple/take-moved!`), or does the arity family owe a refresh
+  (`arity/moved?`)?  A rebuilt index
   queues every standing one (`recover`).  The negation family keeps no candidate rows:
   after a rebuild every pair is owed while a body is stored in both polarities
   (`decide/placements-owed?`, `reads/stores-opposed?`)."
@@ -3554,7 +3776,8 @@
   (let [c (decide/synced kb)]
     (or (negation/moved? c)
         (and (decide/placements-owed? c) (reads/stores-opposed? (:index kb)))
-        (membership/moved? c) (related/moved? c) (tuple/moved? c) (arity/moved? c))))
+        (membership/moved? c) (related/moved? c) (tuple/moved? c)
+        (arity/moved? (reasoning/taxonomy kb) c) (arity/classes-queued? (reasoning/taxonomy kb) c))))
 
 (def ^:private roster-declaration-kinds
   "The roster property each roster declaration functor gives its predicate."
@@ -3634,8 +3857,9 @@
   "Place, once a settle pass, the nogoods of the families placed as conclusions whose
   placement can have moved since the last call, and return the handles created: the
   negation pairs (`place-negations!`), the membership nogoods (`place-memberships!`), the
-  related-types nogoods (`place-related!`), the tuple nogoods (`place-tuples!`) and the
-  arity nogoods (`place-arities!`).  Every family detects over the network's IN label, a
+  related-types nogoods (`place-related!`) and the tuple nogoods (`place-tuples!`), after
+  the arity family's refresh of its inert tuples and pairs (`arity/drain!`,
+  `sync-arity-pairs!`).  Every family detects over the network's IN label, a
   superseded member included (`jtms/network-in?`), so a supersession moves no placement.
   Each family reads what its write-time index queued, the handles among `region` (a delay)
   relabelled that `read` (a volatile set) does not hold yet, which this adds, the handles
@@ -3656,32 +3880,38 @@
                               (jtms/dependents tms h)))
         placing (fn [held? moved] (if held? moved (into #{} (filter holds?) moved)))
         tmoved (placing (tuple/held? tax c) (tuple/take-moved! kb))
-        amoved (placing (arity/held? c) (arity/take-moved! kb))]
-    (when (or (reads/stores-opposed? (:index kb)) (seq mmoved) (seq (membership/nogoods-terms c))
-              (seq rmoved) (related/orthogonals? kb (decide/write-view tax))
-              (seq tmoved) (tuple/held? tax c) (seq amoved) (arity/held? c)
-              (related/held? kb c))
+        ;; the arity refresh alone runs the other families' placement reads for nothing
+        others? (or (reads/stores-opposed? (:index kb)) (seq mmoved) (seq (membership/nogoods-terms c))
+                    (seq rmoved) (related/orthogonals? kb (decide/write-view tax))
+                    (seq tmoved) (tuple/held? tax c) (related/held? kb c))]
+    (when (or others? (arity/moved? tax c) (arity/relabel-owed? kb (remove @read @region)))
       (let [reach  @reach
             fresh  (into [] (comp (distinct) (remove @read)) @region)
             _      (vswap! read into fresh)
             ;; an except arriving or leaving moves a placement with no relabel of the
             ;; handle it names or of what rests on it (`special/except-moved`, its
             ;; consequence closure), drained once a pass
+            _      (arity/note-relabelled! kb fresh)
             fresh  (into fresh (remove (set fresh))
                          (jtms/consequence-closure (reasoning/tms kb) (special/except-moved kb)))
             ;; a roster declaration arriving, or stated where a `genlCx` move reaches,
             ;; moves the verdicts over its predicate's facts with no relabel of them
-            fresh  (into fresh (remove (set fresh))
-                         (declared-reach kb (into fresh (declarations-in kb (:below reach)))))
-            psets  (placed-members kb fresh)
+            fresh  (if others?
+                     (into fresh (remove (set fresh))
+                           (declared-reach kb (into fresh (declarations-in kb (:below reach)))))
+                     fresh)
+            psets  (when others? (placed-members kb fresh))
             placed (into #{} cat psets)
             made   (binding [*witnesses* (volatile! nil)]
                      (-> []
-                         (into (place-negations! kb bodies reach first? fresh placed))
-                         (into (place-memberships! kb c mmoved reach fresh placed))
-                         (into (place-related! kb c rmoved reach fresh psets))
-                         (into (place-tuples! kb c tmoved reach fresh placed))
-                         (into (place-arities! kb c amoved reach fresh placed))))]
+                         ;; first, since a tuple the refresh holds inert is OUT in the
+                         ;; network every other family detects over
+                         (into (sync-arity-pairs! kb (arity/drain! kb)))
+                         (cond-> others?
+                           (-> (into (place-negations! kb bodies reach first? fresh placed))
+                               (into (place-memberships! kb c mmoved reach fresh placed))
+                               (into (place-related! kb c rmoved reach fresh psets))
+                               (into (place-tuples! kb c tmoved reach fresh placed))))))]
         ;; a placement this pass created is relabelled by its creation alone, so the next
         ;; pass does not read it as moved and place its nogood again
         (vswap! read into made)
@@ -4799,7 +5029,7 @@
         body (if (= sx/not-functor ffn) (kb/body-under-not fact) fact)
         bfn  (nm/functor body)]
     (boolean
-     (or (seq (rules/trigger-keys (reasoning/taxonomy kb) fact (reads/as-stored-rule-keys (:index kb))))
+     (or (seq (rules/trigger-keys (reasoning/taxonomy kb) fact (:index kb)))
          (seq (qkb/calculi-triggered-by kb bfn))
          (inherit/rejoin-rules kb fact)
          (permuting-rejoin-rules kb fact)
@@ -4851,9 +5081,9 @@
         comps    (commuting-components-of kb fact)
         ;; a positive fact's predicate and its supertypes; a negative fact's `[:not q]`
         ;; keys for the specs `q` of its body's predicate, which is the direction a genl
-        ;; edge carries through a negation — read off the rule roster rather than off
-        ;; that closure (`rules/trigger-keys`)
-        preds    (rules/trigger-keys (reasoning/taxonomy kb) fact (reads/as-stored-rule-keys (:index kb)))
+        ;; edge carries through a negation — each the closure intersected with the rule
+        ;; roster, read from the smaller side (`rules/trigger-keys`)
+        preds    (rules/trigger-keys (reasoning/taxonomy kb) fact (:index kb))
         ;; the antecedent index is complete and posts on storage, so each candidate's own
         ;; record decides whether it may fire here — forward-capable, and believed, which
         ;; for a rule is `res/rule-believed?` rather than the `jtms/in?` a fact takes
@@ -5192,6 +5422,27 @@
                                  (jtms/in? (reasoning/tms kb) rh))))
                         roster)]
       (when (seq live) (chain kb live nil)))))
+
+(defn resync-arity-classes!
+  "Sync the class memberships of every stored membership of a type below an exact-arity
+  class (`sync-arity-classes!`), chain from the new ones, and answer whether one was
+  placed.  `recover`'s half of the derivation: a store written with no belief holds no
+  justification under `arity-class-informant`, and its closing settle replays only the
+  stored ones."
+  [kb]
+  (arity/take-class-ends! kb)
+  (let [tax  (reasoning/taxonomy kb)
+        idx  (:index kb)
+        recs (:records kb)
+        ts   (into #{} (comp (mapcat #(tax/specs-global tax %)) (remove arity/exact-classes))
+                   arity/exact-classes)
+        ms   (into [] (comp (mapcat #(reads/as-stored-with-functor idx %))
+                            (filter #(some? (arity/membership-of (p/get-sentex recs %)))))
+                   (nm/sort-by-content-key nm/print-key compare ts))
+        {:keys [new violations]} (if (seq ms) (sync-arity-classes! kb ms) {:new []})]
+    (violations/report kb violations)
+    (when (seq new) (chain kb new nil))
+    (boolean (seq new))))
 
 (defn chain-all
   "One fixpoint from `seed`, strict and defeasible rules on the same agenda (there

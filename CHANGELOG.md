@@ -5,400 +5,387 @@ Notable changes to `vaelii`, newest first. Versions follow
 entry raises the minor. What each class means, and why a **Refusal** is patch-eligible,
 is [CONTRIBUTING.md §3](CONTRIBUTING.md).
 
-**Releases before 0.26.0 are summarized rather than reproduced.** Each one
+**Releases before 0.27.0 are summarized rather than reproduced.** Each one
 keeps its title, its class census and every `*Breaks:*` token, so an upgrade across
 several releases is still a grep for the name you call. The full entry prose for a
 released version is in this file's git history, at the tag of the release that shipped
 it — `git show v0.16.0:CHANGELOG.md`.
 
-## 0.26.0 — 2026-10-13 — "Upper ontology loaded into CxUniverse with a sync to the shipped files, one relation length read at every context, the `forced_monotonic_predicate` roster scoped to its readers, `time` and `situation` restructured"
+## 0.27.0 — 2026-10-15 — "Arity clashes held inert and `:monotonic` class memberships stored, `predExistsAll` scoped universal-first, `:pg-snapshot` and `:recover? :trust`, `genlInverse` and `closedExtentForArg`"
 
 | Area | Change |
 |---|---|
-| contexts | CxCore, CxAbstract, CxLife, CxMeasure, CxOrganism, CxReflection, CxSociety, CxSpace and CxTime removed; every file under `resources/kb/upper/` loads into CxUniverse; `vaelii.host.spindle` → `vaelii.host.sync`; `sync!` retracts a CxUniverse premise no shipped file states |
-| arity | `arity/relation-length` read the same at every context; the fourteen binding functors `decontextualized_predicate`; `describe`'s `:arity-via`; `admitsArgnum`, `relation?` and `kb-integrity` read an inherited length; a metatype membership binds only at `:monotonic` |
-| roster and defeat | `forced_monotonic_predicate` forces at the contexts that see and believe it; `violations`' `:forced-conclusion` read off the stored void firings; a defeat-dependency cycle read to a fixed point and, up to eight defeats, in one reading from every entry |
-| KB | `time` → `uninterrupted_time` under a broad `time`; `situation` partitioned into `fluent` and `happening`; `causal` below `temporal`; `TimeOfFn`, `timeOf`, `spatial_event`, `hollow`; situations and events located or not |
-| text and browser | `(set/inert S)` in a text KB; `export-text!` writes inert sentexes and refuses `:unrecovered-kb`; the dev browser syncs the shipped files and the loaded KBs both ways |
-| storage | index layout 14 (`:tax-named`); a recover from the records writes the index image once |
-| answers | `Quote` forms are constants to unification; `bravely`/`cautiously` read the asking context; `handle-of` on an `exceptWhen` answers the exception; the uberjar builds under a 255-byte file name limit |
+| arity | a tuple breaking its functor's length inert at every context; `why-not`'s `:inert` with `:binding`; one `:arity` conflict per inert tuple; one CxUniverse `contradicts` per pair of exact-length bindings, with no `defeat`; a `:monotonic` metatype route stores `(C P)` under an `arityClass` justification |
+| predall | `predExistsAll` puts the universal outside the existential; `PredExistsAllFn` at arity 4; `predExistsAllPlaceholder` at arity 5 |
+| storage | `:pg-snapshot` over Postgres records; `p/ImageStamping`; `open-kb`'s `:recover? :trust`; `import!` installs a dump image written under other engine source; a dump's index replays in bounded heap; a remapped import merges collapsed meta-sentexes |
+| inference | `genlInverse` through `tax/signed-closure`; `closedExtentForArg` and its binary spellings; a separated membership answers `(not (T x))`, and a fully denied cover is a `:cover` nogood; the node engine re-asks no goal; `argue` stops at a ground side's first answer; an interrupt stops a search |
+| contexts and KB | `min-context-parents`, `max-context-children`; CxRealWorld under CxWell; `animal` disjoint from `building`, `clothing`, `furniture` and `machine`, and `:monotonic` from `vehicle` in CxRealWorld; `tool` retired; `(genl person tangible)` dropped; `registered_agent`; the shipped-context sync retracts only premises about shipped vocabulary |
+| settle and daemon | a `{:chain? false}` batch chains nothing; a recover's mint re-draw, arity pairs, separations, trigger keys and stratification read once per sync; a daemon stop interrupts no write |
+| browser | role colours; Clojure layout for meta-sentexes; comment markup; browsing history; `why-not`'s `:denies` rendered |
 
-Six entries are **Breaking** and none is a **Refusal**. Each carries its own
-`*Migration:*` line, and the table indexes them by what a 0.25.0 caller changes.
+Three entries are **Breaking** and none is a **Refusal**. Each carries its own
+`*Migration:*` line, and the table indexes them by what a 0.26.0 caller changes.
 
 | If your code… | Then |
 |---|---|
-| names CxCore, CxAbstract, CxLife, CxMeasure, CxOrganism, CxReflection, CxSociety, CxSpace or CxTime, requires `vaelii.host.spindle`, or states author premises in CxUniverse | rebuild the store from the shipped files; require `vaelii.host.sync`; state author content in a context of its own |
-| relies on `time` being a moment or a stretch, on a `situation` being static or an event, or states an `initiates` or `terminates` subject only `event` or `temporal` | write `uninterrupted_time` or `uninterrupted_situation`; state the subject `causal_event` |
-| binds a relation's length in one context only, or through a `:default` metatype membership | make it a relation of its own per theory; state the membership and its edges `:monotonic`; read `describe`'s `:arity-via` |
-| relies on a `forced_monotonic_predicate` declaration at a context that does not see or believe it | state the declaration in a context every reader of the predicate sees |
-| reads `:forced-conclusion` entries from `preview`'s `:violations`, or clears them with `clear-violations!` | read `why-not` on the conclusion, or `violations` after the write |
-| opens a durable index or a `:disk-snapshot` image written by 0.25.0 | nothing: the first open rebuilds the index from the records |
+| reads an arity clash from a placed `defeat` or a per-context `contradicts`, or relies on a `:monotonic` tuple that breaks its functor's length being believed | read `why-not`'s `:inert` or the `:arity` conflicts; restate the tuple at the bound length |
+| counts an exact-arity class's members with `sentexes-with-functor`, or reads `why` of a class membership | keep the `premise?` handles where only the asserted memberships are wanted |
+| states `predExistsAll`, or applies `PredExistsAllFn` or `predExistsAllPlaceholder` | read each declaration as "every `?indep` member has some `?dep` member bearing the predicate to it"; add the `?indep` member as the fourth argument of each application and placeholder fact |
 
 ### Breaking
 
-- **CxUniverse holds the whole upper ontology, and a sync locks its premises to the
-  shipped files.** `core.txt` and every other file under `resources/kb/upper/` load into
-  CxUniverse, and CxCore, CxAbstract, CxLife, CxMeasure, CxOrganism, CxReflection,
-  CxSociety, CxSpace and CxTime are no longer contexts. A vocabulary KB loads the whole
-  upper layer. `vaelii.host.sync/sync!` retracts a CxUniverse premise no shipped file
-  states and restates one whose strength differs; it leaves every `genlCx` edge and every
-  lifted copy alone. A binding an upper file states is a CxUniverse premise and has no
-  copy. The starter stores 3,497 sentexes and 1,954 justifications, where with one
-  context per upper file and the length-binding copies below it stored 4,177 and 2,631;
-  its load takes a median 5.2 s where it took 12.6 s, and its recover 0.33 s where it
-  took 2.6 s. The ontology adds `(type organism)`, `(typeGenl folk_species organism)` and
-  `(typeGenl folk_biological_class organism)`, which the `predAllSpecified typeGenl` audit
-  read missing once one context held both files.
-  [contexts.md](docs/contexts.md#the-context-topology),
-  [catalog.md](docs/catalog.md#a-loaded-kb-states-this-engines-shipped-contexts).
+- **A tuple that breaks its functor's length is inert, and an arity clash is no longer
+  placed.** The settle holds such a tuple in the `:out` forced set at every context, at
+  `:default` and `:monotonic` alike: it is stored, never believed and fires no rule. The
+  length is read off the bindings and `genl` edges of every context, and an `except` of a
+  binding or of an edge leaves it bound. `why-not` answers `:inert` with `:binding`, the
+  length and the bindings stating it, and `conflicts` reports one `:arity` conflict per
+  inert tuple. Two exact lengths of one relation, or of two relations a `genl` edge
+  relates, are one `contradicts` stored in CxUniverse per pair of binding copies, with no
+  `defeat` and no route. [taxonomy.md](docs/taxonomy.md#arity).
 
-  *Class:* **Breaking** (the nine upper contexts are gone; an author premise stated in CxUniverse is retracted at the next sync; `vaelii.host.spindle` is `vaelii.host.sync`).
-  *Migration:* rebuild the store from the shipped files; state author content in a context of its own, below CxUniverse or wired above it with `(genlCx CxUniverse CxYours)`.
-  *Breaks:* `CxCore`, `CxAbstract`, `CxLife`, `CxMeasure`, `CxOrganism`, `CxReflection`, `CxSociety`, `CxSpace`, `CxTime`, `vaelii.host.spindle`, `sync-spindle!`, `spindle/shipped`, `seed/root-contexts`, `:spindle`, `CxCore.txt`, `CxUniverse.txt`
+  *Migration:* read an arity clash from `why-not`'s `:inert` or from the `:arity` conflicts, not from a placed `defeat`.
+  *Breaks:* `why-not`, `conflicts`, `believed?`
 
-- **`time` and `situation` each gain a broad parent, and causation is tied to time.**
-  `(partition temporal uninterrupted intermittent)` divides what is in time by whether it
-  has a gap. The old `time` is renamed `uninterrupted_time`, and `time_point` and
-  `time_interval` partition it. A new `time` is partitioned into `uninterrupted_time` and
-  `intermittent_time`, each the intersection of `time` with one side. The old
-  `situation`'s partition into `static_situation` and `event` moves to
-  `uninterrupted_situation`, the intersection of `uninterrupted` and `situation`. The
-  broad `situation` is partitioned into `fluent` and the new `happening`;
-  `static_situation` is the intersection of `uninterrupted` and `fluent`, and `event` the
-  intersection of `uninterrupted` and `happening`. `causes`' effect, `(disjoint time
-  situation)` and `(orthogonal situation spatial)` name the broad `situation`;
-  `(orthogonal uninterrupted_situation spatial)`, `(orthogonal situation spatiotemporal)` and
-  `(orthogonal happening spatial)` are stated too, and `(disjoint tangible situation)`
-  holds: a situation is located in its region, not made of the matter in it. A tangible
-  is `uninterrupted` by default. `(partition thing causal
-  acausal)` and `(genl causal temporal)` move to core.txt, beside `(genl atemporal acausal)`.
-  `initiates` and `terminates` take a `causal` first argument. A rule in CxUniverse
-  concludes `(instantNotAfter (StartFn ?cause) (StartFn ?effect))` from `(causes ?cause
-  ?effect)`. `(genl fluent aspatial)` is dropped, since a held state can have a place.
-  `quantity` is below `temporal` and `acausal` and disjoint from `situation`. time.txt adds
-  `TimeOfFn`, the time a temporal thing occupies, with its corresponding predicate
-  `timeOf`, and a rule making every time its own time.
-  [taxonomy.md](docs/taxonomy.md#the-three-partitions-of-thing),
-  [time.md](docs/time.md#the-time-a-thing-occupies).
+- **A `:monotonic` metatype route stores the exact-arity class membership it binds.** A
+  membership `(T P)` stored at `:monotonic`, whose type reaches an exact-arity class `C`
+  through `genl` edges IN at `:monotonic`, stores `(C P)` in CxUniverse under an
+  `arityClass` justification whose antecedents are the membership and one path's edges.
+  `why` of `(C P)` names them, and `(C P)` goes OUT when the membership or an edge leaves.
+  `sentexes-with-functor` and the counts of the nine exact-arity classes include the
+  derived memberships. Every moved `genl` edge syncs the memberships at or below its lower
+  end, including an edge a `partition`, `covering` or `separating` declaration installs.
+  The starter derives 208 such justifications, 31 of them on a class membership nothing
+  asserts. [taxonomy.md](docs/taxonomy.md#arity).
 
-  *Class:* **Breaking** (`time_point` and `time_interval` no longer cover `time`, a
-  `situation` denied being an `event` is no longer concluded a `static_situation`, and an
-  `initiates` or `terminates` subject must be `causal`).
-  *Migration:* write `uninterrupted_time` where a KB relied on `time` being a moment or a
-  stretch, and `uninterrupted_situation` where it relied on a `situation` being static or
-  an event. A KB that states `(fluent X)` beside `(spatial X)` stores both. An effect
-  stated to start before its cause is a qualitative inconsistency once the point
-  reasoner is registered. State the subject of an `initiates` or `terminates` fact
-  `causal_event` where the KB states it only `event` or `temporal`: under
-  `VAELII_ASSERTIVE_ARG_TYPES=0` the fact is refused `:arg-type`.
-  *Breaks:* `time`, `situation`, `fluent`, `initiates`, `terminates`, `causes`
+  *Migration:* keep `premise?` handles where a read of an exact-arity class wants the asserted memberships only.
+  *Breaks:* `sentexes-with-functor`, `why`
 
-- **A relation's length is one function, read the same at every context, and a length
-  binding stated in one context binds at every context that sees CxUniverse.** core.txt
-  declares the fourteen binding functors (`arity`, `arityMin`, the nine exact-arity
-  classes and the three `variable_arity` classes) `decontextualized_predicate` at
-  `:monotonic`, so a binding stated outside CxUniverse has a copy there. A tuple stated
-  in CxUniverse that breaks a binding stated in a context below it was believed at
-  CxUniverse; it is now OUT there, and at every reader that sees CxUniverse.
-  `arity/relation-length` answers what binds a relation's length for the
-  argument-position check, the arity nogood, `describe`'s `:arity`, `admitsArgnum` and
-  `kb-integrity`'s undeclared-arity: a relation bound to no length of its own takes the one
-  exact length the bound predicates above it agree on in each of them, `describe` names
-  the predicate it is bound on as `:arity-via`, and `relation?` answers true for an
-  inherited length of two or more where no visible declaration answers. Each reader
-  now reads a binding, a `variable_arity` membership and a `genl` edge stated in any
-  context, so a binding or an edge another context states binds the length at a reader
-  that does not see it. An engine grammar term's length is its `:shape` whatever the KB
-  binds (`(arity genl 3)` leaves `genl` binary). `thereExists`'s shape takes two
-  arguments, and the shapes of `intersection`, `covering`, `separating`, `partition`,
-  `commutativeInArgs`, `different`, `lessThan`, `greaterThan`, `partitionedByType` and
-  `termsRelated` carry the floor core.txt's `arityMin` states. A metatype membership binds
-  only at `:monotonic` with `:monotonic` edges to its exact-arity class, at every reader;
-  core.txt states the memberships and the eight `genl` edges its own metatypes bind through
-  at `:monotonic`. Two own lengths leave the relation unbound in `describe` and
-  `admitsArgnum` where the `(arity P n)` table answered, `variable_arity` releases a
-  stated exact length there, `admitsArgnum` no longer picks the class first by name, and
-  the argument-position check reads a relation under two lengths above it, or carrying
-  `variable_arity` under a bound one, as unbound. [taxonomy.md](docs/taxonomy.md#arity),
-  [contexts.md](docs/contexts.md#what-the-shipped-ontology-declares-it-of).
+- **`predExistsAll` puts the universal outside the existential, and `PredExistsAllFn`
+  takes the subject.** `(predExistsAll worksFor person company)` means that every company
+  has at least one person who works for it: `predAllExists` with the predicate's argument
+  positions swapped. The universal outscopes the existential in every cell of the family
+  that quantifies both positions. `PredExistsAllFn` takes a fourth argument, the `?indep`
+  member the filler bears the predicate to, as `PredAllExistsFn` does, so it is a
+  `fixed_arity_function` of arity 4 with `(argArg PredExistsAllFn 4 3)`.
+  `predExistsAllPlaceholder` takes that subject before the placeholder and has arity 5.
+  [predall.md](docs/predall.md#exists-the-declaration-is-a-record-and-nothing-else).
 
-  *Class:* **Breaking** (a tuple that breaks a binding stated in another context goes OUT at every context that sees CxUniverse; `sentexes-with-functor` and the counts of the fourteen functors include the CxUniverse copies; `describe`'s `:arity`, `admitsArgnum` and the argument-position check read bindings and `genl` edges in every context and no `:default` metatype route; `describe`'s `:arity`, `admitsArgnum`, `relation?` and `kb-integrity`'s undeclared-arity read a length inherited through `genl`; an engine term's KB binding is ignored).
-  *Migration:* a relation meant to take a length in one theory only, or two lengths in two contexts, is a relation of its own per theory; state a metatype membership that should bind a length, and its edges to the exact-arity class, `:monotonic`, or state the exact-arity class membership; read `describe`'s `:arity-via` to tell an inherited length from an own one; filter a read of a binding functor on `:context` where the copies are unwanted.
-  *Breaks:* `describe`, `admitsArgnum`, `relation?`, `arity`, `arityMin`, `variable_arity`, `kb-integrity`, `sentexes-with-functor`
+  *Migration:* read each `predExistsAll` declaration as "every `?indep` member has some
+  `?dep` member bearing the predicate to it", and restate one that meant a single filler
+  for every member with a named individual and `predInstanceAll`. Add the `?indep` member
+  as the fourth argument of each `PredExistsAllFn` application and as the fourth argument
+  of each `predExistsAllPlaceholder` fact.
+  *Breaks:* `predExistsAll`, `PredExistsAllFn`, `predExistsAllPlaceholder`
 
-- **A `forced_monotonic_predicate` declaration forces its predicate at the contexts that
-  see and believe it.** A declaration stated in one context put the predicate on the
-  roster in every context, so a reader that does not see the declaration read a
-  membership of it as never the loser, a denial of one as inert, a rule from it as a
-  roster rule, and a firing concluding one from antecedents off the roster as void. Those
-  four now follow the reader, and only the baseline's declarations stay global. A
-  declaration in CxUniverse reads as one stated in any other context. A declaration a
-  `:monotonic` denial defeats no longer forces its predicate at the contexts below the
-  denial, and a declaration a placed `defeat` names at a context makes no denial inert
-  there. A declaration whose `defeat` an `except` hides keeps forcing its predicate where
-  the `except` is seen, and an `except` of a placed `defeat` releases its loser beside a
-  declaration another context states. A conclusion whose valid firings are all void at
-  its context is read as hidden there. A declaration arriving after a `:default` dilemma
-  defeats the rival, as one arriving first does. Writing or retracting `(genlCx C D)`,
-  where `D` holds a declaration, reports to `watch`, `preview` and
-  `edit-with-consequences!` the denials the edge makes inert or releases. A declaration's
-  reach walks the contexts below the declaring one at most once
-  ([#129](https://github.com/vaelii/vaelii/issues/129)).
-  [nmtms.md](docs/nmtms.md#the-forced-monotonic-roster),
-  [nmtms.md](docs/nmtms.md#the-published-window).
+### Additive
 
-  *Class:* **Breaking** (belief at a context that does not see, or does not believe, a declaration stated below it, beside it or in CxUniverse).
-  *Migration:* state the declaration in a context every reader of the predicate sees; a context with no `genlCx` path to CxUniverse needs one.
-  *Breaks:* `forced_monotonic_predicate`, `forced_monotonic_between_predicates`, `has-prop?`
+- **`:pg-snapshot` keeps the index image and the reasoning image over Postgres records.**
+  A record store stamps the images it may sit under through a new optional protocol,
+  `p/ImageStamping` (`index-stamp`, `belief-stamp`); the `:disk` store answers off its slot
+  files as before, and the `com.vaelii/postgres` adapter off one row a trigger moves with
+  every write. `{:backend :pg-snapshot :pg … :dir …}` opens as `:disk-snapshot` does,
+  installing both images from `:dir` instead of reindexing and recovering, and takes the
+  directory's single-writer lock. An adapter without the protocol is refused at open with
+  `:missing-adapter`. [storage.md](docs/storage.md#pg-snapshot-the-two-images-over-records-on-a-server).
 
-- **`violations` reads its `:forced-conclusion` entries off the stored void firings.**
-  An entry stands exactly while its firing is stored and void at some reader: one per rule and
-  conclusion, gone with the firing, back when the firing is derived again, and the same
-  in every arrival order and after `recover`. `:sentence` is the conclusion's stored spelling, the entry
-  carries no `:run`, the entries follow the ledger's in content order, and
-  `clear-violations!` and the 1000-entry cap do not remove one. `preview`'s `:violations`
-  does not list them. The chainer logs a convicted firing at `:warn` once, as its
-  justification is added ([#129](https://github.com/vaelii/vaelii/issues/129)).
-  [nmtms.md](docs/nmtms.md#the-forced-monotonic-roster).
+- **`open-kb` takes `:recover? :trust`, and an import trusts a dump image written under
+  other engine source.** `:trust` installs a reasoning image declined only for its engine
+  source and keeps it: no rebuild runs, writes are accepted at once, and belief moves under
+  the running build wherever a settle reaches. The close writes the session's writes into
+  the image and keeps its source stamp, so the next `:trust` open installs it again, an
+  `:auto` open still recovers it, and `recover` re-derives all of it on demand.
+  `import!` with `{:belief? true}` now installs such a dump image instead of recovering,
+  and its summary's `:reasoning-image` reads `{:reasoning :installed :trusted <source>}`.
+  The browser opens with `:trust` under `VAELII_DEV`, in place of `:background`.
+  [storage.md](docs/storage.md#the-reasoning-image).
 
-  *Class:* **Breaking** (a `:forced-conclusion` entry is read off the stored firings, not filed in the ledger).
-  *Migration:* read `why-not` on the conclusion, or `violations` after the write, in place of `preview`'s `:violations`; match the entry against the stored spelling.
-  *Breaks:* `violations`, `clear-violations!`, `preview`
+- **`genlInverse` infers: binary `genl` with arguments 1 and 2 swapped.**
+  `(genlInverse P Q)` makes a stored `(P a b)` answer a `(Q b a)` goal, satisfy a
+  `(Q ?x ?y)` rule antecedent, and answer a `Q` goal through a rule concluding `P`. A
+  firing's justification names the `genlInverse` edges it crossed, a default edge caps the
+  conclusion at `:default`, and an `except` on the edge hides the swapped reading. The
+  matching fan walks `genl` and `genlInverse` edges together with a parity bit
+  (`tax/signed-closure`), so a chain swaps exactly when it holds an odd number of
+  `genlInverse` edges and two in a row answer what `genl` answers. The converse is not
+  licensed. docs/inference.md, "`genlInverse`: the fan with the arguments swapped",
+  records the five readers that take less than the full swap.
 
-- **The index is at layout 14: the stored `except` and `defeat` facts naming a taxonomy
-  supporter join the index.** The count trie `[:tax-named rel f ctx]` files each positive
-  `except` or `defeat` whose target installs a `genl`, `genlCx` or flat-cache key. A
-  scoped taxonomy read after a write reads one count where it built the set of every
-  stored `except` and `defeat` target on `memory-columnar`. A stored index, a
-  `:disk-snapshot` image or a dump of layout 13 is rebuilt from the records at its first
-  open or import, and answers are unchanged.
-  [indexing.md](docs/indexing.md#9-the-taxonomys-supporter-families).
+  *Migration:* none. A KB that states `(genlInverse P Q)` now reads `P` facts as swapped
+  `Q` facts.
 
-  *Class:* **Breaking** (a stored index or a `:disk-snapshot` image of layout 13 is rebuilt from the records at its first open, and a dump of layout 13 reindexes on import).
-  *Migration:* none; the first open rebuilds a durable index.
-  *Breaks:* `index-entries`, `:disk-log`, `:disk-snapshot`
+- **`closedExtentForArg` closes a predicate's extent for one argument value.**
+  `(closedExtentForArg P n v)` grants that `P`'s believed extent is complete for the
+  goals whose argument `n` is `v`, so `(not (P …))` holds there while the positive finds
+  nothing. `(closedExtentForArg accountOn 2 HostA)` answers `(not (accountOn Carol HostA))`
+  and leaves `(accountOn Carol HostB)` open-world. The grant is scoped to the asking
+  context and belief-following, reads a closed negative rule antecedent as negation as
+  failure, and is refused where it would close a cycle through negation, as
+  `closed_extent_predicate` is. `closedExtentForArg1`, `closedExtentForArg2` and
+  `closedExtentForArg3` are binary spellings that derive the ternary; an inert rule
+  states each reverse direction. Inert rules also state that a whole-predicate grant
+  entails every per-argument grant, and state `admitsArgnum`'s definition, which its
+  prover answers.
+  [naf.md](docs/naf.md#a-closed-extent-for-one-argument-value).
 
-### Additions
+- **`min-context-parents` and `max-context-children` read a context's nearest neighbours
+  in the context lattice, and a context page's concept graph draws them.**
+  `(min-context-parents kb c)` answers the contexts `c` reaches over one `genlCx` edge
+  with no other such context strictly below them, and `max-context-children` the contexts
+  that reach `c` over one `genlCx` edge with no other such context strictly above them.
+  Both read an `except` on a `genlCx` edge as `context-up` and `context-down` read one:
+  `min-context-parents` walks the edges effective for `c`, and while an `except` reaches a
+  `genlCx` edge `max-context-children` holds each direct child whose own
+  `min-context-parents` hold `c`. The daemon and `vaelii.client` serve both. The concept
+  graph's `genlCx` rows draw these sets at every expanded node, where they drew every
+  stored one-step neighbour: with `CxLeaf → CxMid → CxTop` believed and
+  `(genlCx CxLeaf CxTop)` stated, the page for `CxLeaf` draws `CxTop` above `CxMid` and
+  no arrow from `CxLeaf` to `CxTop`. The `genl` rows are unchanged.
+  [api.md](docs/api.md), [web.md](docs/web.md#a-terms-shape-drawn).
 
-- **Situations, held states and events are each located or not, and `spatial_event` names
-  an event located in some space.** core.txt states `(orthogonal situation aspatial)`,
-  `(orthogonal static_situation spatial)`, `(orthogonal static_situation aspatial)`,
-  `(orthogonal event spatial)` and `(orthogonal event aspatial)`, beside `(orthogonal
-  situation spatial)`, and states `event` and `static_situation` each orthogonal to
-  `spatiotemporal`, beside `(orthogonal situation spatiotemporal)`. A debt owed, a treaty
-  in force and a contract expiring at midnight are located nowhere; a cat on a mat and the
-  battle of Waterloo have a place. An `orthogonal` is not inherited along `genl`, so each
-  kind's pair is stated. abstract.txt defines `(intersection spatial_event event
-  spatial)` and states `(genl spatial_event spatiotemporal)`, so a battle stated an event
-  and spatial reads `spatial_event` and `spatiotemporal`. `ontology_test` pins each pair
-  with a witness, the derived edge from `event` to `temporal`, and the `spatial_event`
-  edges and membership.
+- **`why-not` of an inert denial names the literal it denies and what puts it on the
+  roster.** `:denies` carries the literal, its handle in the same context, whether that
+  context believes it, and the roster predicate, kind and declarations. The browser's
+  sentex page renders it. [nmtms.md](docs/nmtms.md#the-forced-monotonic-roster).
 
-  *Class:* **Additive** (shipped ontology content).
+- **CxRealWorld ships as a middle context under CxWell, and `animal`/`vehicle`
+  separate there monotonic.** CxUniverse states `(disjoint animal vehicle)` at the default strength,
+  so a fiction below CxWell may except it and hold a term that is both — the shipped
+  ontology still has to be able to represent fiction. CxRealWorld, which sees CxWell,
+  restates the same separation `:monotonic`, so the real world itself can never hold
+  the overlap; a fiction is a sibling of CxRealWorld under CxWell, never a context
+  under it, so a fiction's exception never reaches what holds of the real world.
+  CxNormalPhysicalConditions now sees CxRealWorld instead of CxUniverse directly, so a
+  room's temperature theory reaches the real world and never a fiction.
+  `catbus_test` pins a term that is both a cat and a bus as a represented dilemma in a
+  fiction context, the same pair losing a monotonic clash in CxRealWorld, and an
+  ordinary animal not a vehicle in CxWell with no overlap asserted.
 
-- **`hollow` names a shape, and `container` is placed under `made` and `hollow`.**
-  abstract.txt mints `hollow`: a thing that has, at that time, an interior space other
-  things can occupy, such as a cup, a building, a cave, a pitcher plant or a cupped hand.
-  `hollow` is below `spatiotemporal`, orthogonal to `made`, `organism`, `body_part`,
-  `biological` and `food`, and disjoint from `substance`. abstract.txt states `(genl
-  container hollow)` beside `(genl container made)`, so `container`, `building` and
-  `dwelling` reach `hollow`. `container` keeps its disjoints from `organism`, `person` and
-  `substance`. A made hollow thing is not concluded a container, so a potted pitcher plant
-  is no clash. A pitcher plant and a lab-grown bladder are biological and hollow, and
-  `subsumption-status` reads `biological` and `hollow` `:orthogonal`. `ontology_test` pins
-  the placement, the orthogonals, the edges, and a made hollow organism and a hollow body
-  part as no clash.
+  *Migration:* none. A context below CxWell reads `animal`/`vehicle` as separated by
+  default, as before; a context placed under CxRealWorld reads the separation
+  monotonic, and a context placed under CxNormalPhysicalConditions now also sees
+  CxRealWorld's and CxWell's content.
 
-  *Class:* **Additive** (shipped ontology content).
+- **CxUniverse separates `animal` from four made kinds.** `(disjoint animal building)`,
+  `(disjoint animal clothing)`, `(disjoint animal furniture)` and `(disjoint animal
+  machine)`, each `:monotonic`, join the made-kind separations in `abstract.txt`.
+  `organization` and `animal` are separated by the tangible/intangible partition
+  instead and needed no new fact.
 
-- **A text KB spells an inert sentex `(set/inert S)`.** `load-text!` and the shipped
-  ontology's loader store `S` through `assert-inert`: stored, indexed and durable, never
-  believed, chained or named in a clash. A rule under the wrapper is refused
-  `:not-indexable`, as `assert-inert` refuses one, and `(set/inertRule R)` stays the form
-  for a believed rule that fires in neither direction. `(set/inert …)` and
-  `(set/monotonic …)` nested in either order are refused `:shape`. `export-text!` writes
-  every inert sentex, a solve's labeling and classification contexts among them, under the
-  wrapper, and refuses `:unrecovered-kb` over a KB whose belief is not built when the store
-  holds a sentex that is neither a premise nor a TMS node
-  ([#178](https://github.com/vaelii/vaelii/issues/178)).
-  [kbs.md](docs/kbs.md#text-you-exported-yourself).
+  *Migration:* none. A term below `animal` and a term below one of the four made kinds
+  were already `:unknown` or `:orthogonal` to each other; a KB stating an overlap
+  between them now holds a disjointness nogood.
 
-  *Class:* **Additive**.
+- **The browser colours terms by role, lays out meta-sentexes as Clojure does, marks up
+  comments and keeps a browsing history.** Contexts draw blue, types pale amber,
+  predicates yellow-orange, individuals violet and literals white, and ` in ` replaces
+  ` @ ` before a context. A meta-sentex holding a rule aligns its arguments by column, as
+  the editor's `pretty-sentence` does. A comment's text links formulas, variables, stored
+  terms and `docs/` pages. A string argument sets in Atkinson Hyperlegible Next between
+  Hasklig quotes, an OUT sentex dims its sentence and keeps its role colours, and a
+  nested sentence dims by its own belief. The front page lists the last 50 terms,
+  literals and rules opened, from `localStorage`. The core and starter cards drop the
+  forward-chain option, which derived no new sentex over either. [web.md](docs/web.md).
 
-- **The dev browser syncs the shipped KB files and the loaded KBs both ways.** Under
-  `VAELII_DEV`, the first request after a file under `resources/kb/upper/` or
-  `resources/kb/middle/` is saved, added or removed submits one `:sync` job that runs
-  `sync/sync!` on every in-process KB that accepts writes and files each report on its
-  entry. After each non-GET request, what the starter KB gained or lost in CxUniverse and
-  the middle contexts is written into those files as line edits (`sync/write-back!`),
-  each premise beside its term's `comment`. [web.md](docs/web.md#working-on-it-lein-browser),
-  [catalog.md](docs/catalog.md#a-loaded-kb-states-this-engines-shipped-contexts).
+### Fix: answers
 
-  *Class:* **Additive**.
+- **A membership in a type separated from `T` answers `(not (T x))`, and the cover family
+  reads the same denial.** With `(pc Xy)` believed and `pc` separated from `pb` by a
+  visible `disjoint`, disjoint metatype, `sibling_disjoint` parent or `partition`, `query`
+  of `(not (pb Xy))` answers and `argue` of `(pb Xy)` answers `:false` where both answered
+  nothing (`provers/DisjointnessNegationProver`, `res/separation-denials`). The denial
+  climbs only `:monotonic` `genl` edges on both sides, since a default does not
+  contrapose: with `(genl pa pb)` at `:default`, `argue (pa Xy)` stays `:unknown`, and at
+  `:monotonic` it answers `:false`. A cover every part of which such a denial rules out is
+  a `:cover` nogood over the whole's membership and the denying memberships, placed by the
+  settle in every arrival order, so `contradictions` lists what `argue` reads as refuted;
+  the write that completes one is stored, never refused. A rule's `(unknown (not (T …)))`
+  antecedent and an `exceptWhen` on `(not (T …))` are re-checked when such a membership
+  or separation arrives or leaves.
+  [taxonomy.md](docs/taxonomy.md#disjointness)
+  ([#183](https://github.com/vaelii/vaelii/issues/183)).
 
-### Fixes: answers
+  *Migration:* none. A KB holding a membership under a cover whose every part another of
+  the term's memberships is separated from now holds a `:cover` nogood over them.
 
-- **A query naming a stored quoted form's variable answers instead of overflowing the
-  stack.** Asking `(awesome_rule (Quote (implies (poodle ?x) (dog ?x))))` with the stored
-  spelling threw `StackOverflowError`, and the `?y` spelling answered true by binding `?y`
-  to the quoted `?x`. A `(Quote …)` form is now a constant to matching: the stored
-  spelling answers true, another spelling or a ground instance answers false, and a query
-  variable named like a quoted one is not bound by it
-  ([#167](https://github.com/vaelii/vaelii/issues/167)).
-  [inference.md](docs/inference.md#quoted-forms-in-unification).
+- **The shipped-context sync retracts only premises about the engine's own vocabulary.**
+  A premise in CxUniverse or a `kb/middle/` context that the engine does not ship is
+  retracted only when every term it names is one a shipped premise names
+  (`sync/vocabulary`); a premise naming any other term is an author's, and stays. A KB
+  whose corpus states its own declarations in CxUniverse lost them to the first writable
+  load's sync. [contexts.md](docs/contexts.md#the-context-topology).
 
-  *Class:* **Fix**.
+- **A `{:chain? false}` write chains nothing, alone or in a `with-deferred-settle` batch.**
+  A rule's or exception's settle reads the write's own `:chain?`, as a fact's does. A
+  batch's closing settle seeded chaining from every `genlCx` move the batch made, which a
+  settle per write does not, so stored rules fired during a load that asked for none and
+  each conclusion drew argument types. `bulk-assert-facts!` already suppressed this; every
+  batch now does. [api.md](docs/api.md).
 
-- **`(bravely S)` and `(cautiously S)` read the sentexes of `S` and the dilemmas the asking
-  context sees.** `S` stored in a context the asker inherits answered false to both, and the
-  classification read every dilemma of the KB, so a context that reads no dilemma answered
-  `(cautiously S)` false for a sentence it believes. The prover now reads the sentexes of
-  `S` in the asker's `genlCx` ancestor set that it believes and sees, and classifies them
-  against the dilemmas `contradictions` reports to that context
-  ([#154](https://github.com/vaelii/vaelii/issues/154)).
-  [labeling.md](docs/labeling.md#reading-bravecautious-without-committing-bravely-s--cautiously-s).
+- **`core.txt` drops `(genl person tangible)`.** A person is not necessarily a massed
+  body: a non-biological agent can be a person with no commitment either way on
+  `tangible` or `intangible`. `person` roots to `thing` directly instead.
+  `arity_vocabulary_test`'s clash witness read `person` for an ordinary non-relation
+  type and relied on it being tangible; `animal`, already disjoint from `relation`
+  through `tangible`, takes its place.
 
-  *Class:* **Fix**.
+  *Migration:* a context that derived a term's `tangible` or `intangible` membership
+  from a `person` membership alone derives neither now; state the one that holds
+  directly.
 
-- **`handle-of` on an `(exceptWhen Q R)` sentence answers the exception's handle.** It
-  answered the rule's handle whatever `Q` was, so `retract!` on that handle removed the
-  rule. It now answers the handle `assert` returns for the exception, nil when no such
-  exception is stored, and nil for a rule stored as several.
-  [exceptions.md](docs/exceptions.md#storage-and-identity).
+- **`tool` is retired.** The ontology classifies by what a thing is, and `tool` named
+  an artifact by what it is for. `abstract.txt` drops the type, its comment, its `genl`
+  edge to `made` and `(disjoint building tool)`, and CxSocial drops `(disjoint dwelling
+  tool)`. CxComputing's comment on `software_tool` no longer sets it against `tool`.
+  `ontology_test` and `starter_test` drop it from the rosters that named the made kinds
+  and the documented vocabulary, `social_test` from dwelling's disjoints, and
+  `computing_test` its check that `software_tool` is not a `tool`.
 
-  *Class:* **Fix**.
+  *Migration:* a KB that typed a term `tool` reads no membership for it; the type and
+  every sentence naming it are gone.
 
-- **A defeat-dependency cycle is read again until no value changes, and a cycle of at most
-  eight defeats reads the same from every defeat it is entered at.** The walk broke every
-  cycle it met by putting the first loser's defeats in force and holding the others out of
-  force without reading them again, so a `:default` membership that loses to a
-  `:monotonic` firing stayed believed beside a guard defeat of a second, guarded copy of
-  the firing's rule. It also kept the values of a cycle it closed even when a member's
-  re-read had met an outer open defeat read as out of force, so the answer depended on
-  which defeat of the cycle was asked first
-  ([#129](https://github.com/vaelii/vaelii/issues/129)). Each member is now read again
-  with the others held, a cycle the answer does not move reads as it stands, and a cycle
-  of at most eight defeats takes its first consistent reading in content order, in force
-  first. A cycle of more than eight defeats takes the values of at most 2m + 1 passes,
-  and the walk does not hold it to one reading across entries. A cycle closed inside a
-  member's read and resting on no member is closed once per read, not once per assignment
-  of the cycle around it. [nmtms.md](docs/nmtms.md#a-defeat-dependency-cycle).
+- **koinii's registry mark renames from `agent` to `registered_agent`.** The name ties
+  the mark to koinii's own registration rather than reading as a general-purpose agent
+  classification. `CxRegistry.txt`, the two `vaelii.koinii.identity` functions reading
+  and writing the mark, and `docs/koinii.md` move to the new name; `register-agent`,
+  `registered-agents` and the rest of the identity API keep their names.
+  `CxSpeechActs.txt` types its 12 actor positions `registered_agent`: argument 1 of the
+  11 speech acts and argument 2 of `agentContext`.
 
-  *Class:* **Fix**.
+  *Migration:* a caller reading or writing `(agent ?a)` in `CxRegistry` reads or writes
+  `(registered_agent ?a)` instead.
 
-- **A nogood's loser that a guarded firing's antecedents include is hidden beside the
-  firing's guard defeat.** A guard defeat's force read the firing's own antecedents, so a
-  `:default` conclusion beside a `:monotonic` denial, from which a guarded rule fired that
-  its blocker blocks, read the guard defeat and the nogood's defeat as a cycle, and the
-  content order could leave the conclusion believed. A guard defeat's force now reads its
-  blockers alone. [nmtms.md](docs/nmtms.md#a-nogood-placed-as-a-conclusion).
+### Fix: performance
 
-  *Class:* **Fix**.
+- **Re-drawing a released term's mints checks only the mints that can change.** When a
+  subsuming record leaves belief, the settle draws again the mints of every fact naming
+  each term it released. A term's turn runs only while a record that released it is out:
+  it reads its departures again and skips the term when all are stored as they were and
+  believed. A departed `(T x)` can have withheld a mint `(t x)` only for `t` at or above
+  `T`, so only those mints are re-drawn. A mint whose justification already holds, or that
+  a believed record still withholds, skips the admissibility checks, and `rederive-mints`
+  holds the checks' answers until a mint is created or brought IN. The settle after a
+  recover's pair sync asked a released term's checks once per fact naming the term, where
+  it now asks each distinct mint's checks once.
 
-- **A mint is not drawn again from an inert sentex.** After a retraction released an
-  argument-type mint, the mint was justified again on an inert sentex (`assert-inert`,
-  `(set/inert S)`) that would draw it, which is no TMS datum. Under the reference TMS the
-  next retraction beneath that mint threw `ClassCastException`.
-  [argtypes.md](docs/argtypes.md#pruning-what-the-kb-says-more-specifically--vaelii_prune_subsumed_mints-on).
+- **A recover's settles read the arity pairs, separations, trigger keys and
+  stratification once per sync.** `arity/pair-sets` reads no closure for a predicate with
+  one exact length at or above it, and shares one memo across a sync while no `genl` edge
+  moves, in place of the bounded length entries. The pair sync's placed sets hold only a
+  CxUniverse nogood whose antecedents are exactly its two members. The membership sync
+  builds each type's separation frame once per sync and tests each pair once.
+  `rules/trigger-keys` probes per closure term or passes over the rule roster, whichever
+  side is smaller. `checks/edge-negation-cycle` stops at one reachability test for a
+  `genl` edge the closure already holds. A recover asks each stored mint the withdrawal
+  question instead of decoding every stored sentex, and asks a separated type's
+  memberships only where a stored claim on the preserved predicate exists. Perf checks
+  `arity-refresh-under-bound-chain`, `arity-pairs-below-a-queued-binding`,
+  `recover-membership-sync`, `trigger-keys-beside-rules` and
+  `edge-stratification-subsumed` pin the growth.
 
-  *Class:* **Fix**.
+- **A `genlCx` edge settled under `*bulk-load?*` draws no argument types over the stored
+  facts.** The settle that closes a bulk batch drained the batch's `genlCx` moves and drew
+  what each move's declarations say about the facts below it, and each minted edge walked
+  the stored rule graph, once per edge.
+  `v/record-arg-types` records the derivations after the load.
+  [argtypes.md](docs/argtypes.md#where-it-does-not-mint).
 
-### Fixes: order independence
+- **The node engine builds no child whose residual asks its own goal again.** A rewrite
+  through an `intersection` rule, or any rule whose antecedent is the goal or a spec of
+  it, no longer re-asks the goal one level down. On the starter, `(acausal ?x)` with one
+  recursive rule expands 37 nodes at depth 4, where it did not finish depth 3, and
+  `(intangible Foo1)` expands 9 at every depth. The `:stats` node counts of
+  `query-status` and `search-tree` drop; the answers do not change.
+  [inference.md](docs/inference.md#the-node-engine-vaeliiimplinference)
+  ([#101](https://github.com/vaelii/vaelii/issues/101),
+  [#182](https://github.com/vaelii/vaelii/issues/182)).
 
-- **A late `symmetric` mark, and a record a rule concludes beside a withheld mint, leave
-  the argument-type justifications of the other arrival order.** A mark arriving after
-  its facts kept the mints drawn over each row's former spelling, so a mint named the
-  declaration of the other position, and folding two rule-concluded spellings left
-  justifications naming a handle with no record. A record a rule concluded, onto which a
-  firing of the same write had minted, did not take the mints withheld before it arrived.
-  A text export reloaded in content order then held other justifications than the KB
-  loaded in authored order ([#173](https://github.com/vaelii/vaelii/issues/173)).
-  [canonicalization.md](docs/canonicalization.md#a-mark-arriving-after-the-facts-migrates-them),
-  [argtypes.md](docs/argtypes.md#pruning-what-the-kb-says-more-specifically--vaelii_prune_subsumed_mints-on).
+- **`argue` stops a ground side's search at its first answer, and an interrupt stops a
+  node-engine search.** `argue` at a `:max-depth` returns once each ground side has an
+  answer or has exhausted the bound. A `future-cancel` or `Thread.interrupt` on a running
+  `query`, `query-status` or `argue` throws `InterruptedException` at the next node
+  expansion. [inference.md](docs/inference.md#the-node-engine-vaeliiimplinference)
+  ([#182](https://github.com/vaelii/vaelii/issues/182)).
 
-  *Class:* **Fix**.
+### Fix: storage
 
-- **Which of two equally good routes a route search keeps no longer depends on edges off
-  every route.** Two partial routes tied on the search queue's key were popped in an order
-  set by whatever else was queued, so an unrelated edge could change the witness a
-  placement or an inherited conclusion names, and with it a justification's antecedents.
-  Ties are now ordered by the routes' printed terms and supporters from the source on.
-  [nmtms.md](docs/nmtms.md#a-nogood-placed-as-a-conclusion).
+- **A dump's index replays in bounded heap.** Replaying a `:records+index` dump held the
+  head of the entry stream so its `finally` could close the file, so every installed
+  entry stayed reachable and the replay's heap grew with the index, past the peak of
+  rebuilding the same index. The replay, the snapshot index load, the
+  provenance pass and the justification pre-scan now close through `frames/closer`, which
+  holds the file and not the frames.
 
-  *Class:* **Fix**.
+- **Stopping the daemon interrupts no KB write.** An op ran on the Jetty worker that read
+  the request, and a server stop interrupts a busy worker, so a stop during a disk write
+  latched the store `:store-unusable`. Each op now runs on a thread the server does not
+  own. Stopping a daemon `serve/start` returned waits for the op in progress, answers
+  parked long polls at once, and refuses the ops still queued with 503 `:stopping`.
+  [operations.md](docs/operations.md#daemon--vaeliiserve).
 
-### Fixes: build
-
-- **`lein uberjar` builds on a filesystem with a 255-byte file name limit.** AOT
-  compilation of `vaelii.impl.taxonomy` threw `File name too long` on ext4, btrfs and
-  APFS, so the uberjar and the container image did not build. The longest class file
-  name the build writes is now 191 bytes, and `lein release-gate` builds the uberjar and
-  loads `vaelii.core` from it ([#179](https://github.com/vaelii/vaelii/issues/179)).
-  [operations.md](docs/operations.md#container--the-daemon-as-an-image).
-
-  *Class:* **Fix**.
-
-### Fixes: performance
-
-- **A declaration or `genl` edge asserted under `*bulk-load?*` draws no argument types
-  over the stored facts.** A bulk load skipped only the fact's own derivations; a
-  declaration or a predicate edge still swept the stored facts and minted, and each minted
-  edge walked the stored rule graph, so a bulk load's cost grew with the stored rules
-  once per declaration. `v/record-arg-types` records the derivations
-  after the load. [argtypes.md](docs/argtypes.md#where-it-does-not-mint).
-
-  *Class:* **Fix**.
-
-- **The settle that places what a rebuilt index queued writes the arity family's
-  placements a batch at a time, and places a nogood over one edge without a walk.** A
-  placement pass read the routes of every nogood of a family before it wrote the first,
-  so a family of millions held a plan for each in the heap. Past 4,096 nogoods it now
-  reads and writes them a batch at a time in the same order. A witness from a predicate
-  with an edge straight to its target, and a route search whose source's only edge ends
-  at the target, answer without walking. Which nogoods are placed, where, and on which
-  antecedents is unchanged. [nmtms.md](docs/nmtms.md#the-placement-pass).
-
-  *Class:* **Fix**.
+- **A remapped import stores a meta-sentex once when two rules it names collapse.** The
+  sentex pass collapses by the sentence as the dump spells it, so two dump rules that
+  canonicalize to one left a copy of each meta-sentex naming each rule's dump id, and
+  the handle rewrite turned the copies into one content stored twice. The rewrite now
+  merges a record whose rewritten form an earlier record already holds, counts it in
+  `:collapsed`, and points the merged record's dump ids at the survivor, so a
+  justification or provenance entry naming it still resolves. Re-importing such a
+  KB's export collapsed those copies and failed the equal-count check.
 
 ### Internal
 
-- **A recover from the records writes the index image once, after its settles.** The
-  first open of a store with no index image wrote the image again after each settle,
-  and each later settle made the previous image stale. A process
-  killed during the recover reopens from the records.
-  [storage.md](docs/storage.md#the-cadence-and-whose-thread-it-runs-on).
+- **`disjointness-coverage-ratchet` requires at least 21456 disjoint pairs, 82.91%
+  disjoint and at most 7.07% unknown in the starter KB.** The bounds were 14211,
+  70.70% and 19.87%. Retiring `tool` drops a type from the CxWell vantage sweep, and
+  dropping `(genl person tangible)` removes pairs that edge separated; `animal`'s four
+  new made-kind disjoints and `animal`/`vehicle` add pairs back. The starter KB now
+  measures 21456 disjoint and 1829 unknown over 25878 pairs of 228 types.
 
-  *Class:* **Internal**.
+- **CI shards the memory and disk legs eight ways each, from weights each green run
+  refreshes, and `/rerun` reruns a pull request's failed jobs.** Each leg packs from its
+  own column of `scripts/ci-test-weights-{memory,disk}.tsv`; every shard records its
+  namespace times through `scripts/lib/ns-timings.sh`, and the weights job saves a green
+  leg's times to the Actions cache. A comment reading exactly `/rerun`, from the pull
+  request's author or a maintainer, reruns the failed jobs at its head commit
+  (`rerun.yml`).
 
-- **An index write allocates 1.3x to 1.5x fewer bytes per sentex.** The non-trie families
-  of a write (`flat-family-adds`) conj their ops onto the store's one batch, where each
-  built a vector that was concatenated into another. A reindex of a synthetic corpus
-  allocates 37.0 KB per sentex on `memory` and 27.5 KB on `memory-columnar` before, and
-  27.5 KB and 18.7 KB after; the index is entry-for-entry identical.
-  [indexing.md](docs/indexing.md).
+- **Gate, backend, sweep and shuffle logs live under `logs/`, and `lein test-matrix`
+  re-reads its slot count while running.** The gate's run directories move to
+  `logs/gate/`, the other runners' logs to `logs/`, and `test-full-kb`'s clone to
+  `testbench/full-kb`, so a `lein clean` during a gate no longer deletes them.
+  `runlog_prune` rotates the gate's and `test-backends`' run directories
+  (`GATE_KEEP_RUNS` 40, `BACKENDS_KEEP_RUNS` 20). A matrix started without `--jobs` or
+  `MATRIX_JOBS` re-reads the slot rule as each configuration ends and every
+  `MATRIX_SLOTS_EVERY` seconds, counting only JVMs outside its own configurations.
+  [operations.md](docs/operations.md).
 
-  *Class:* **Internal**.
+- **`scripts/ontology-graph.py` draws the `genl` graph from the believed taxonomy.**
+  `scripts/ontology-edges.clj` loads the upper ontology or the starter into an in-memory
+  KB and prints `direct-genls` and `min-genls` for every spec of `thing`, so the drawing
+  includes the edges a `partition`, `covering`, `separating` or `intersection` installs.
+  The script keeps the dot layout that fills the most of a `--ratio`-shaped sheet.
 
-- **A settle's inherited-clash discovery reads only the carried entries a move names.** It
-  tested every carried entry against each settle's moves, so the settle's cost grew with
-  the stored claims holding an entry. The entries are now filed under what each reads, and
-  `lein perf`'s `inherited-entry-except` reads 0.92x where it read 1.56x. Answers are
-  unchanged. [nmtms.md](docs/nmtms.md#the-inherited-clash-memo).
+## 0.26.0 — 2026-10-13 — "Upper ontology loaded into CxUniverse with a sync to the shipped files, one relation length read at every context, the `forced_monotonic_predicate` roster scoped to its readers, `time` and `situation` restructured"
 
-  *Class:* **Internal**.
+**25 entries** — 6 Breaking, 0 Refusal, 4 Additive, 11 Fix, 4 Internal. Every file under
+`resources/kb/upper/` loads into CxUniverse, the nine upper contexts CxCore through
+CxTime are gone, and `vaelii.host.sync/sync!` locks CxUniverse's premises to the shipped
+files. A relation's length reads the same at every context, a metatype membership binds
+only at `:monotonic`, and a `forced_monotonic_predicate` declaration forces at the
+contexts that see and believe it. `time` gains `uninterrupted_time` under a broad
+`time`, `situation` is partitioned into `fluent` and `happening`, and `hollow` and
+`spatial_event` are new. `violations` reads `:forced-conclusion` off the stored void
+firings, a text KB spells an inert sentex `(set/inert S)`, and the index is at layout
+14.
 
-- **`lein perf-ab` times the arity paths and the starter load and recover in absolute
-  milliseconds.** Four probes, `arity-assert`, `arity-edge-move`, `arity-read` and
-  `arity-recover`, run a write over bound predicates, a `genl` edge move under arity
-  conflicts, `describe` and `admitsArgnum` reads, and a disk open with its first write.
-  `starter-load` and `starter-recover` time `vaelii.starter/load-into` over an empty
-  in-memory KB and `recover` over a loaded one. `lein gate` prints `perf-ab owed` with
-  the command when a pending diff changes `decide/arity.clj` or an arity function of
-  `checks`, `kb` or `provers`, and names the starter probes when a shipped KB file or its
-  loader is about to land.
-
-  *Class:* **Internal**.
+*Breaks:* `CxCore`, `CxAbstract`, `CxLife`, `CxMeasure`, `CxOrganism`, `CxReflection`,
+`CxSociety`, `CxSpace`, `CxTime`, `vaelii.host.spindle`, `sync-spindle!`,
+`spindle/shipped`, `seed/root-contexts`, `:spindle`, `CxCore.txt`, `CxUniverse.txt`,
+`time`, `situation`, `fluent`, `initiates`, `terminates`, `causes`, `describe`,
+`admitsArgnum`, `relation?`, `arity`, `arityMin`, `variable_arity`, `kb-integrity`,
+`sentexes-with-functor`, `forced_monotonic_predicate`,
+`forced_monotonic_between_predicates`, `has-prop?`, `violations`, `clear-violations!`,
+`preview`, `index-entries`, `:disk-log`, `:disk-snapshot`
 
 ## 0.25.0 — 2026-10-11 — "Context NATs reified by position under `(result F context)`, the expression lattice in CxReflection, more placed contradictions and separations, `IndexStore` family methods and index layout 13"
 

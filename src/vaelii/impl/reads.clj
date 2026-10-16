@@ -598,6 +598,21 @@
   (prof/record-read :rule-index)
   (boolean (p/family-member? index :rule-antecedent-keys [] k)))
 
+(defn as-stored-rule-keys-meeting
+  "The antecedent keys some **stored** rule takes among a caller's candidates, as a vector,
+  read from the smaller side in one read.  `within` takes the stored key count and returns
+  the candidate keys when they are at most that many, else nil: then each candidate costs
+  a membership test.  Otherwise the stored keys `keep?` accepts, one pass over them, which
+  a backend that decodes the set pays per key."
+  [index within keep?]
+  (prof/record-read :rule-index)
+  (let [n (long (p/family-child-count index :rule-antecedent-keys []))]
+    (if (zero? n)
+      []
+      (if-let [ks (within n)]
+        (into [] (filter #(p/family-member? index :rule-antecedent-keys [] %)) ks)
+        (into [] (filter keep?) (p/family-leaf index :rule-antecedent-keys []))))))
+
 (defn as-stored-rules-in
   "Handles of the **stored** rules of `kind` stated in one of `contexts`: `:rule` for
   every rule, `:solve` for the rules a solve reads (`rules/solve-sentex?`).  The rule

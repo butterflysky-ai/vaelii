@@ -51,7 +51,7 @@
 #   TEST_SHUFFLE_SEED=42 ./scripts/test-shuffle.sh   # replay a given order
 #
 # Env:
-#   TEST_SHUFFLE_OUT    log directory (default target/test-shuffle)
+#   TEST_SHUFFLE_OUT    log directory (default logs/test-shuffle)
 #   TEST_SHUFFLE_SEED   the shuffle seed (default: a fresh one, reported per run)
 #   SUITE_PROGRESS      marks | lines | auto (scripts/lib/suite-marks.sh)
 #
@@ -126,7 +126,7 @@ else
   CONFIGS=(memory "${SHUF[@]}")
 fi
 
-OUT_DIR="${TEST_SHUFFLE_OUT:-target/test-shuffle}"
+OUT_DIR="${TEST_SHUFFLE_OUT:-logs/test-shuffle}"
 RUN_NS_COUNT=$(selected_ns_count "$SELECTOR")
 
 # the plan up front — an ordered shuffle is only reproducible if you can read what

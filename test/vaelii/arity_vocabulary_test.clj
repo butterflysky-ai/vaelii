@@ -5,7 +5,6 @@
   (:require [clojure.test :refer [is testing use-fixtures]]
             [vaelii.core :as v]
             [vaelii.host.starter :as starter]
-            [vaelii.impl.decide :as decide]
             [vaelii.impl.kb :as kb]
             [vaelii.impl.predicates :as predicates]
             [vaelii.test-util :as tu]))
@@ -168,7 +167,7 @@
     (testing "and an argument that is no relation at all derives fixed_arity's own type,
             which clashes with the one it holds"
       (tu/with-terms [someIndividual]
-        (v/assert kb (list 'person someIndividual) 'CxUniverse)
+        (v/assert kb (list 'animal someIndividual) 'CxUniverse)
         (v/assert kb (list 'fixed_arity_predicate someIndividual) 'CxUniverse)
         (is (tu/stored-in-clash? kb (list 'relation someIndividual) 'CxUniverse)
             "the position declared on fixed_arity descends to its specializations")))))
@@ -210,14 +209,14 @@
                               [QuantityFn binary_function]
                               [DayFn ternary_function]
                               [QuantityIntervalFn ternary_function]
-                              [PredExistsAllFn ternary_function]
                               [PredExistsInstanceFn ternary_function]
                               [PredInstanceExistsFn ternary_function]]]
       (is (v/isa? kb function type) (str function " is " type)))
     (is (v/isa? kb 'InstantFn 'fixed_arity_function)
         "the six-argument function stays explicitly fixed without minting a named family")
-    (is (v/isa? kb 'PredAllExistsFn 'fixed_arity_function)
-        "and so does the four-argument one"))
+    (doseq [function '[PredAllExistsFn PredExistsAllFn]]
+      (is (v/isa? kb function 'fixed_arity_function)
+          (str "and so does the four-argument " function))))
   (testing "a function may use the relation-wide variable vocabulary"
     (tu/with-terms [RepeatFn]
       (v/assert kb (list 'variable_arity_function RepeatFn) 'CxUniverse)
@@ -240,6 +239,35 @@
     (is (not (v/isa? kb 'person 'at_least_binary))))
   (testing "the ternary floor specializes the binary floor"
     (is (v/genl? kb 'at_least_ternary 'at_least_binary))))
+
+(def ^:private admits-argnum-definition
+  "admitsArgnum's defining rules as CxUniverse states them, inert."
+  '[(implies (relation ?relation) (admitsArgnum ?relation 1))
+    (implies (at_least_binary ?relation) (admitsArgnum ?relation 2))
+    (implies (at_least_ternary ?relation) (admitsArgnum ?relation 3))
+    (implies (and (unbounded_arity ?relation) (positive_integer ?position))
+             (admitsArgnum ?relation ?position))
+    (implies (and (bounded_arity ?relation) (arityMax ?relation ?max) (positive_integer ?position)
+                  (not (greaterThan ?position ?max)))
+             (admitsArgnum ?relation ?position))
+    (implies (and (arity ?relation ?arity) (positive_integer ?position)
+                  (not (greaterThan ?position ?arity)))
+             (admitsArgnum ?relation ?position))])
+
+(tu/deftest-kb admits-argnum-states-its-definition-as-inert-rules
+  (testing "each defining rule is stored in CxUniverse, believed, and run by neither engine"
+    (doseq [r admits-argnum-definition]
+      (let [h (v/handle-of kb (list 'set/inertRule r) 'CxUniverse)]
+        (is (some? h) (str "stored: " (pr-str r)))
+        (when h
+          (is (v/in? kb h))
+          (is (= #{} (:engines (v/sentex kb h))))))))
+  (testing "and none fires: no admitsArgnum fact is stored"
+    (is (empty? (v/sentexes-matching kb '(admitsArgnum ?r ?n) 'CxWell))))
+  (testing "while the prover answers as it did"
+    (is (v/ask? kb '(admitsArgnum parentOf 2) 'CxWell))
+    (is (not (v/ask? kb '(admitsArgnum parentOf 3) 'CxWell)))
+    (is (v/ask? kb '(admitsArgnum partition 40) 'CxWell))))
 
 (tu/deftest-kb admits-argnum-answers-the-position-query
   ;; #68: (admitsArgnum R n) is answered at query time from R's declared arity and
@@ -357,7 +385,7 @@
     (is (v/isa? kb 'DayFn 'ternary_function))
     (is (= 3 (arity-of kb 'DayFn)))))
 
-(tu/deftest-kb the-relation-wide-declarations-are-what-the-arity-nogoods-read
+(tu/deftest-kb the-relation-wide-declarations-are-what-the-inert-tuple-test-reads
   ;; The vocabulary is not documentation: a reader decides a tuple against the arity these
   ;; declarations bind, and `variable_arity` is the one exemption from it.
   (testing "an exact class takes a tuple of the wrong length OUT"
@@ -380,6 +408,69 @@
     (v/assert kb (list 'instance_relation_predicate hatesRel) 'CxUniverse)
     (is (tu/stored-in-clash? kb (list likesRel A B C) 'CxUniverse))
     (is (not (tu/stored-in-clash? kb (list hatesRel A B C) 'CxUniverse)))))
+
+(defn- class-support
+  "The antecedent sentences of each `arityClass` justification of `(C x)` in CxUniverse,
+  as a set of sets; nil when `(C x)` is not stored."
+  [kb c x]
+  (when-some [h (v/handle-of kb (list c x) 'CxUniverse)]
+    (into #{} (comp (filter #(= 'arityClass (:informant %)))
+                    (map #(into #{} (map (fn [a] (:sentence (v/sentex kb a)))) (:antecedents %))))
+          (v/supporting-justifications kb h))))
+
+(tu/deftest-kb a-monotonic-metatype-route-stores-the-class-membership
+  ;; The membership and each edge up to the exact class are `:monotonic`, so the engine
+  ;; stores `(binary_predicate P)` justified by them, in either arrival order and across
+  ;; a recover, and withdraws it when the membership or an edge leaves.
+  (tu/with-terms [rel_kind soft_kind likesRel hatesRel fearsRel]
+    (let [m    (list rel_kind likesRel)
+          edge (list 'genl rel_kind 'binary_predicate)
+          want #{#{m edge}}]
+      (doseq [order [[m edge] [edge m]]]
+        (let [hs (mapv #(v/assert kb % 'CxUniverse {:strength :monotonic}) order)]
+          (is (= want (class-support kb 'binary_predicate likesRel)) (pr-str order))
+          (v/recover kb)
+          (is (= want (class-support kb 'binary_predicate likesRel)) "after a recover")
+          (is (= #{m edge}
+                 (into #{} (comp (mapcat :because) (map :sentence))
+                       (:support (v/why kb (v/handle-of kb (list 'binary_predicate likesRel)
+                                                        'CxUniverse)))))
+              "why names the membership and the edge")
+          (v/retract! kb (peek hs))
+          (is (not (v/ask? kb (list 'binary_predicate likesRel) 'CxUniverse))
+              (str "withdrawn with " (pr-str (peek order))))
+          (v/retract! kb (first hs))))
+      (testing "a :default membership or edge derives nothing"
+        (v/assert kb (list rel_kind hatesRel) 'CxUniverse)
+        (v/assert kb edge 'CxUniverse {:strength :monotonic})
+        (v/assert kb (list soft_kind fearsRel) 'CxUniverse {:strength :monotonic})
+        (v/assert kb (list 'genl soft_kind 'binary_predicate) 'CxUniverse)
+        (is (= [nil nil] (mapv #(class-support kb 'binary_predicate %) [hatesRel fearsRel])))))))
+
+(tu/deftest-kb a-partition-edge-on-the-route-stores-the-class-membership-in-either-order
+  ;; `(partition whole_kind a_kind b_kind)` installs `(genl a_kind whole_kind)` with no
+  ;; `genl` sentence, so the route reads the partition as the edge's supporter.  Pinned to
+  ;; the constraint-only reading: the entailing one also mints a `genl` sentence.
+  (tu/without-entailing
+   (tu/with-terms [whole_kind a_kind b_kind likesRel]
+     (let [m    {:strength :monotonic}
+           top  (list 'genl whole_kind 'binary_predicate)
+           part (list 'partition whole_kind a_kind b_kind)
+           mem  (list a_kind likesRel)
+           want #{#{mem part top}}]
+       (doseq [order [[top mem part] [top part mem]]]
+         (let [hs (mapv #(v/assert kb % 'CxUniverse m) order)]
+           (is (= want (class-support kb 'binary_predicate likesRel)) (pr-str order))
+           (v/retract! kb (v/handle-of kb part 'CxUniverse))
+           (is (not (v/ask? kb (list 'binary_predicate likesRel) 'CxUniverse)) "withdrawn with the partition")
+           (run! #(v/retract! kb %) (remove #{(v/handle-of kb part 'CxUniverse)} (rseq hs)))))
+       (testing "a partition raised to :monotonic"
+         (let [hs [(v/assert kb top 'CxUniverse m) (v/assert kb mem 'CxUniverse m)
+                   (v/assert kb part 'CxUniverse)]]
+           (is (nil? (class-support kb 'binary_predicate likesRel)))
+           (v/assert kb part 'CxUniverse m)
+           (is (= want (class-support kb 'binary_predicate likesRel)))
+           (run! #(v/retract! kb %) (rseq hs))))))))
 
 (tu/deftest-kb the-shipped-disjoint-metatypes-bind-one-argument
   ;; each is a `:monotonic` disjoint_metatype, which reaches unary_predicate through the
@@ -724,10 +815,10 @@
       (is (tu/stored-in-clash? kb (apply list spelledRelation (repeat (inc arity) 'Tom)) 'CxUniverse)
           (str class " declares arity " arity ", so a " (inc arity) "-argument fact is read OUT"))
       (let [h (v/assert kb (apply list spelledRelation (repeat (inc arity) 'Ann)) 'CxUniverse
-                        {:strength :monotonic})
-            r (first (filter #(contains? (:nogood %) h) (v/conflicts kb)))]
-        (is (= [m] (mapv :handle (:grounds r)))
-            (str "and a :monotonic one is a hard clash grounded on the stored " class
+                        {:strength :monotonic})]
+        (is (= {:reason :inert :binding {:length arity :via spelledRelation :grounds [m]}}
+               (select-keys (v/why-not kb h) [:reason :binding]))
+            (str "and a :monotonic one is inert, its binding the stored " class
                  " membership"))))))
 
 (tu/deftest-kb the-arity-bindings-keep-the-strength-they-were-written-at
@@ -801,17 +892,16 @@
 
 (tu/deftest-kb variable-arity-application-is-floored-at-arity-min
   ;; #68: a variable-arity relation reads a chain of any length at or above the minimum
-  ;; arityMin states.  An application shorter than the minimum is an arity nogood, as a
-  ;; fixed-arity relation's wrong length is; one at or above it is believed.
+  ;; arityMin states.  An application shorter than the minimum is inert, as a fixed-arity
+  ;; relation's wrong length is; one at or above it is believed.
   (tu/with-terms [chainRel a b c]
     (v/assert kb (list 'variable_arity_predicate chainRel) 'CxUniverse)
     (let [floor (v/assert kb (list 'arityMin chainRel 2) 'CxUniverse)]
       (testing "an application shorter than the minimum is read OUT"
         (is (tu/stored-in-clash? kb (list chainRel a) 'CxUniverse)))
-      (testing "and a :monotonic one is a hard clash grounded on the arityMin declaration"
-        (let [h (v/assert kb (list chainRel b) 'CxUniverse {:strength :monotonic})
-              r (first (filter #(contains? (:nogood %) h) (v/conflicts kb)))]
-          (is (= [floor] (mapv :handle (:grounds r))))))
+      (testing "and a :monotonic one is inert, its binding the arityMin declaration"
+        (let [h (v/assert kb (list chainRel b) 'CxUniverse {:strength :monotonic})]
+          (is (= {:min 2 :via chainRel :grounds [floor]} (:binding (v/why-not kb h))))))
       (testing "an application at the minimum is believed"
         (v/assert kb (list chainRel a b) 'CxUniverse)
         (is (v/ask? kb (list chainRel a b) 'CxUniverse)))
@@ -861,66 +951,85 @@
     (v/assert kb (list 'except (list 'sentexHandle ar)) hid M)
     [ar (v/handle-of kb (list 'unary rel) 'CxUniverse) at bi]))
 
-(tu/deftest-kb a-reader-reads-no-binding-it-withdraws-through-an-except
+(tu/deftest-kb an-except-of-a-binding-leaves-the-length-bound
+  ;; The except hides the binding sentences at CxHid, and a relation's length stays bound
+  ;; at every context, so the tuples there are inert as the sibling's are.
   (tu/with-terms [rel CxHid CxSib]
     (let [[ar un at] (except-shape kb {:rel rel :hid CxHid :sib CxSib})
           out        (fn [cx] (count (remove #(v/believed? kb % cx) (get at cx))))]
       (is (some? un) "the rule derives the membership")
       (is (not-any? #(v/believed? kb % CxHid) [ar un]) "CxHid believes neither binding")
       (is (every? #(v/believed? kb % CxSib) [ar un]))
-      (is (zero? (out CxHid)) "a length the reader does not believe convicts no tuple")
-      (is (= 2 (out CxSib)) "the sibling convicts its own")
-      (testing "the membership stated as well is believed at CxHid, and convicts again"
-        (v/assert kb (list 'unary rel) 'CxUniverse {:strength :monotonic})
-        (is (v/believed? kb un CxHid))
-        (is (= 2 (out CxHid)))))))
+      (is (= [2 2] [(out CxHid) (out CxSib)]))
+      (is (= #{:inert} (into #{} (map #(:reason (v/why-not kb %))) (mapcat val at)))))))
 
-(tu/deftest-kb a-reader-reads-a-descension-pair-through-the-bindings-it-believes
+(tu/deftest-kb a-descension-pair-is-one-contradicts-in-cxuniverse
+  ;; `lo` binds three below `rel`, bound to two: one `contradicts` between the two
+  ;; bindings is stored in CxUniverse, believed at every reader below it whatever the
+  ;; except hides, and no `defeat` is placed.
   (tu/with-terms [rel lo CxHid CxSib]
     (let [[_ _ _ bi] (except-shape kb {:rel rel :lo lo :hid CxHid :sib CxSib})
-          pairs      (fn [cx] (into #{} (comp (filter #(and (v/sees? kb cx (:context %))
-                                                            (v/believed? kb (:id %) cx)))
-                                              (map #(into #{} (map second) (rest (:sentence %))))
-                                              (filter #(= :arity-descension (decide/placed-kind kb %))))
-                                    (v/sentexes-with-functor kb 'contradicts)))]
-      (is (some #(contains? % bi) (pairs CxHid))
-          "CxHid binds rel to two arguments alone, which differs from lo's three")
-      (is (empty? (pairs CxSib)) "the sibling sees two lengths of rel, which bind it to none"))))
+          lo3        (v/handle-of kb (list 'arity lo 3) 'CxUniverse)
+          placed     (into [] (filter #(= #{bi lo3} (into #{} (map second) (rest (:sentence %)))))
+                           (v/sentexes-with-functor kb 'contradicts))]
+      (is (= ['CxUniverse] (mapv :context placed)))
+      (is (every? #(v/believed? kb (:id (first placed)) %) ['CxUniverse CxHid CxSib]))
+      (is (not-any? #(some #{(list 'sentexHandle bi) (list 'sentexHandle lo3)} (rest (:sentence %)))
+                    (v/sentexes-with-functor kb 'defeat))))))
 
-;; ---- the arity nogoods are placed --------------------------------------------
+;; ---- a tuple that breaks its binding is inert ------------------------------
 
-(tu/deftest-kb an-arity-nogood-is-placed-with-its-binding-as-a-ground
+(tu/deftest-kb a-tuple-that-breaks-its-binding-is-inert-and-nothing-is-placed
   ;;   CxUniverse  (arity rel 2) monotonic
   ;;     └─ CxB    (rel Xa Xb Xc) default
   ;;          └─ CxV  (variable_arity rel)
-  ;; The tuple's nogood is placed at CxB, justified by the binding.  A relation's length
-  ;; reads the same at every context, so the `variable_arity` stated in CxV releases `rel`
-  ;; at CxB too.
+  ;; The tuple is held in the `:out` forced set at every context, and `why-not` names the
+  ;; binding.  A relation's length reads the same at every context, so the
+  ;; `variable_arity` stated in CxV releases `rel` at CxB too.
   (tu/with-terms [rel Xa Xb Xc CxB CxV]
     (v/assert kb (list 'genlCx CxB 'CxUniverse) 'CxUniverse)
     (v/assert kb (list 'genlCx CxV CxB) 'CxUniverse)
-    (let [bind (v/assert kb (list 'arity rel 2) 'CxUniverse {:strength :monotonic})
-          t    (v/assert kb (list rel Xa Xb Xc) CxB)
-          T    [(list rel Xa Xb Xc) CxB]
-          placed (fn [] (into #{} (for [f '[contradicts defeat]
-                                        s (v/sentexes-with-functor kb f)]
-                                    (tu/handle-free kb [(:sentence s) (:context s)]))))]
-      (testing "the contradicts and the defeat are stored at CxB, the binding a ground"
-        (is (= #{[(list 'contradicts T) CxB] [(list 'defeat T) CxB]} (placed)))
-        (let [[c] (v/sentexes-with-functor kb 'contradicts)]
-          (is (contains? (set (mapcat :antecedents (v/supporting-justifications kb (:id c)))) bind))))
-      (testing "no reader decides the tuple, and the defeat hides it at CxB"
-        (is (false? (v/believed? kb t CxB))))
+    (let [bind   (v/assert kb (list 'arity rel 2) 'CxUniverse {:strength :monotonic})
+          t      (v/assert kb (list rel Xa Xb Xc) CxB)
+          placed (fn [] (into [] (comp (mapcat #(v/sentexes-with-functor kb %))
+                                       (filter #(some #{(list 'sentexHandle t)} (rest (:sentence %)))))
+                              '[contradicts defeat]))]
+      (is (empty? (placed)))
+      (is (= [false false] [(v/believed? kb t CxB) (v/believed? kb t CxV)]))
+      (let [{r :reason {:keys [length via grounds]} :binding} (v/why-not kb t)]
+        ;; the rule that derives `(binary rel)` from the arity adds a second ground
+        (is (= [:inert 2 rel true] [r length via (contains? (set grounds) bind)])))
       (testing "a variable_arity stated below releases the functor at every context"
         (let [va (v/assert kb (list 'variable_arity rel) CxV {:strength :monotonic})]
-          (is (true? (v/believed? kb t CxV)))
-          (is (true? (v/believed? kb t CxB)))
+          (is (= [true true] [(v/believed? kb t CxV) (v/believed? kb t CxB)]))
           (v/retract! kb va)
           (is (false? (v/believed? kb t CxB)))))
-      (testing "retracting the binding takes the placed sentexes out"
+      (testing "retracting the binding makes the tuple believed"
         (v/retract! kb bind)
-        (is (empty? (placed)))
-        (is (true? (v/believed? kb t CxB)))))))
+        (is (true? (v/believed? kb t CxB)))
+        (is (empty? (placed)))))))
+
+(tu/deftest-kb a-breaking-tuple-is-inert-in-either-order-at-either-strength-and-after-a-recover
+  (tu/with-terms [rel Xa Xb Xc]
+    (doseq [strength [:default :monotonic]
+            order    [[:binding :tuple] [:tuple :binding]]]
+      (let [ss {:binding #(v/assert kb (list 'arity rel 2) 'CxUniverse {:strength :monotonic})
+                :tuple   #(v/assert kb (list rel Xa Xb Xc) 'CxUniverse {:strength strength})}
+            hs (into {} (map (fn [k] [k ((ss k))])) order)
+            at (pr-str strength order)]
+        (is (= :inert (:reason (v/why-not kb (:tuple hs)))) at)
+        (v/recover kb)
+        (is (= :inert (:reason (v/why-not kb (:tuple hs)))) (str at " after a recover"))
+        (run! #(v/retract! kb (hs %)) (reverse order))))))
+
+(tu/deftest-kb an-engine-term-s-binding-holds-none-of-its-tuples-inert
+  ;; `genl`'s length is its shape, so a third-length binding stored for it moves nothing
+  (tu/with-terms [low_kind high_kind]
+    (let [b (v/assert kb '(arity genl 3) 'CxUniverse)
+          e (v/assert kb (list 'genl low_kind high_kind) 'CxUniverse)]
+      (is (v/believed? kb e 'CxUniverse))
+      (v/retract! kb e)
+      (v/retract! kb b))))
 
 (def ^:private unseen-binding-rows
   "`[binding-strength order]`: the binding's strength and the arrival order of the three
@@ -962,40 +1071,35 @@
                                                    #(v/assert % (list rel Xa Xd) 'CxUniverse)))))
         (run! #(v/retract! kb %) (rseq hs))))))
 
-(tu/deftest-kb a-second-length-unbinds-the-functor-and-an-except-of-it-binds-it-again
+(tu/deftest-kb a-second-length-unbinds-the-functor-at-every-context
   ;;   CxUniverse  (arity rel 2) (arity rel 3) monotonic   (rel Xa Xb Xc Xd) default
   ;;     └─ CxR    (except (arity rel 3))
-  ;; Two lengths leave `rel` unbound in CxUniverse, so nothing is placed there and the
-  ;; tuple is believed, in every arrival order.  CxR reads `rel` bound to two, so it reads
-  ;; the tuple's nogood and does not believe the tuple.
+  ;; Two lengths leave `rel` unbound at every context, CxR included, so the tuple is
+  ;; believed in every arrival order, and the two lengths are one `contradicts` in
+  ;; CxUniverse.
   (tu/with-terms [rel Xa Xb Xc Xd CxR]
     (v/assert kb (list 'genlCx CxR 'CxUniverse) 'CxUniverse)
     (let [M      {:strength :monotonic}
           ss     {:two   #(v/assert kb (list 'arity rel 2) 'CxUniverse M)
                   :three #(v/assert kb (list 'arity rel 3) 'CxUniverse M)
                   :tuple #(v/assert kb (list rel Xa Xb Xc Xd) 'CxUniverse)}
-          orders (for [a (keys ss), b (keys ss), c (keys ss) :when (= 3 (count (hash-set a b c)))] [a b c])
-          ;; the two lengths clash with each other as well; only the tuple's nogood counts
-          ctrs   (fn [t] (count (filter #(some #{(list 'sentexHandle t)} (rest (:sentence %)))
-                                        (v/sentexes-with-functor kb 'contradicts))))]
-      (is (= #{[0 true]}
+          orders (for [a (keys ss), b (keys ss), c (keys ss) :when (= 3 (count (hash-set a b c)))] [a b c])]
+      (is (= #{true}
              (into #{} (for [order orders]
                          (let [hs (into {} (map (fn [k] [k ((ss k))])) order)
-                               r  [(ctrs (:tuple hs)) (v/believed? kb (:tuple hs) 'CxUniverse)]]
+                               r  (v/believed? kb (:tuple hs) 'CxUniverse)]
                            (run! #(v/retract! kb (hs %)) (reverse order))
-                           r))))
-          "unbound in CxUniverse in every order: nothing placed, the tuple believed")
+                           r)))))
       (let [two   ((:two ss))
             three ((:three ss))
             t     ((:tuple ss))]
-        (testing "an except of the second length below binds the functor there"
+        (testing "an except of the second length below leaves the functor unbound there"
           (let [ex (v/assert kb (list 'except (list 'sentexHandle three)) CxR M)]
-            (is (false? (v/believed? kb t CxR)))
-            (is (true? (v/believed? kb t 'CxUniverse)))
-            (v/retract! kb ex)
-            (is (true? (v/believed? kb t CxR)))))
-        (testing "the second length leaving binds the functor in CxUniverse"
+            (is (true? (v/believed? kb t CxR)))
+            (v/retract! kb ex)))
+        (is (= 1 (count (filter #(= #{two three} (into #{} (map second) (rest (:sentence %))))
+                                (v/sentexes-with-functor kb 'contradicts)))))
+        (testing "the second length leaving binds the functor at every context"
           (v/retract! kb three)
-          (is (pos? (ctrs t)))
-          (is (false? (v/believed? kb t 'CxUniverse))))
+          (is (= [false false] [(v/believed? kb t 'CxUniverse) (v/believed? kb t CxR)])))
         (v/retract! kb two)))))

@@ -33,7 +33,7 @@
   (is (holds-genl 'dwelling 'tangible 'CxWell) "container carries dwelling to tangible"))
 
 (tu/deftest-kb dwelling-is-disjoint-from-organism-substance-and-person
-  (doseq [t '[organism substance person clothing furniture tool]]
+  (doseq [t '[organism substance person clothing furniture]]
     (is (holds-disjoint 'dwelling t 'CxWell) (str "dwelling and " t)))
   (doseq [t '[building vehicle]]
     (is (= :orthogonal (v/subsumption-status tu/*kb* 'dwelling t 'CxWell)) (str "dwelling and " t))))

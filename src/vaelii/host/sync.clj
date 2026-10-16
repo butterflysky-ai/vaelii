@@ -15,12 +15,13 @@
   for the upper ontology, the middle context for a middle file.
 
   **Which contexts are synced exactly**: CxUniverse and the `kb/middle/` contexts.  A
-  premise there that the engine does not ship is retracted, a strength that differs is
-  restated, and a missing one is asserted.  CxUniverse is locked to the files with two
-  exceptions, which sync neither retracts nor restates: a `genlCx` premise, stored in
-  CxUniverse whichever file or author states it, and a sentex that is not a premise (a
-  lifted `decontextualized_predicate` copy, a rule firing).  An author's own context, wired
-  below CxUniverse, is not one of them and is not read.
+  premise there that the engine does not ship is retracted when it is about the engine's
+  own vocabulary, a strength that differs is restated, and a missing one is asserted.
+  Three kinds of sentex are left as they are: a premise naming a term no shipped premise
+  names (`vocabulary`), which states an author's vocabulary rather than the engine's; a
+  `genlCx` premise, stored in CxUniverse whichever file or author states it; and a sentex
+  that is not a premise (a lifted `decontextualized_predicate` copy, a rule firing).  An
+  author's own context, wired below CxUniverse, is not one of them and is not read.
 
   **Only added to**: any other context a shipped file's content is stored in.
 
@@ -66,6 +67,22 @@
   [form]
   (let [[sentence _] (text/peel-form form)]
     (and (seq? sentence) (= 'genlCx (first sentence)))))
+
+(defn- terms
+  "The symbols `form` names, less its variables."
+  [form]
+  (into #{} (comp (filter symbol?) (remove #(str/starts-with? (name %) "?")))
+        (tree-seq coll? seq form)))
+
+(defn vocabulary
+  "Every symbol a premise of `shipped` names: the terms the engine owns.  A held premise
+  that names a symbol outside it is about an author's vocabulary, and `plan` does not
+  retract it, whichever exact context it is stored in — the content a corpus states in
+  CxUniverse included.  The cost is a premise the engine stopped shipping together with
+  the last mention of a term it names: that term is no longer the engine's, and the
+  premise stays."
+  [shipped]
+  (into #{} (mapcat (comp terms :form)) shipped))
 
 (defn- premise-records
   [kb ids]
@@ -126,7 +143,7 @@
     :add     `{:context :form}` the shipped content `kb` lacks, in the layers it has,
              in `premises`'s order
     :remove  `{:context :form :handles}` premises in an exact context the engine does not
-             ship
+             ship, each naming only terms of its `vocabulary`
 
   A premise the engine ships at a higher strength is an `:add` alone: asserting it raises
   the held one.  One it ships at a lower strength is a `:remove` and an `:add`.
@@ -150,6 +167,7 @@
                        (filter #(and (not= root %) (pos? (v/count-in-context kb %))))
                        (distinct (filter symbol? (keep :file shipped))))
          ours    (into #{} (map (juxt :context :form)) shipped)
+         vocab   (vocabulary shipped)
          held    (into {} (mapcat #(held-forms kb %)) (filter (every-pred exact present) exact))
          wanted  (filter #(present (:file %)) shipped)
          ;; a default premise of one record, shipped known-true: the `:add` raises it.
@@ -165,7 +183,11 @@
                                       (stored? kb context form))))
                           (map #(select-keys % [:context :form])))
                     wanted)
-      :remove (into [] (comp (remove (fn [[k _]] (ours k))) (map val) (remove raised?)) held)})))
+      :remove (into [] (comp (remove (fn [[k _]] (ours k)))
+                             (map val)
+                             (remove raised?)
+                             (filter #(every? vocab (terms (:form %)))))
+                    held)})))
 
 (defn- add!
   "Assert every `{:context :form}` of `entries` into `kb`, retrying the refused ones while a
