@@ -2,7 +2,8 @@
 ;; Copyright © 2026 Vaelii LLC and the Vaelii contributors.
 (ns vaelii.web-test
   "Exercises the web handlers as pure request -> response (no live server)."
-  (:require [clojure.edn :as edn]
+  (:require [cheshire.core :as json]
+            [clojure.edn :as edn]
             [clojure.java.io :as io]
             [clojure.string :as str]
             [clojure.test :refer [deftest is testing use-fixtures]]
@@ -1767,6 +1768,36 @@
                    body))
       (is (re-find (re-pattern (str "data-href=\"/sentex/" a "\"")) body) "with its remove button")
       (is (= "" (:body (GET "/history/literals" "handles=12,x"))) "a list that does not read"))))
+
+(tu/deftest-kb the-history-keeps-only-what-the-active-kb-holds
+  (tu/with-terms [likes Ann Bob]
+    (let [a     (v/assert kb (list likes Ann Bob) 'CxUniverse)
+          gone  999999999
+          r     (GET "/history/known"
+                  (str "t=" Ann "&t=NoSuchTermAnywhere&t=%28&handles=" a "," gone))
+          known (json/parse-string (:body r))]
+      (is (= "application/json" (get-in r [:headers "content-type"])))
+      (is (true? (get known "complete")))
+      (is (= [(str Ann)] (get known "terms"))
+          "a term no stored sentex mentions, and a q that does not read, are left out")
+      (is (= [a] (get known "handles")) "a handle naming no stored sentex is left out")
+      (is (= {"complete" true "terms" [] "handles" []}
+             (json/parse-string (:body (GET "/history/known" "handles=x"))))
+          "nothing the request carries reads, so nothing is kept"))))
+
+(tu/deftest-kb the-history-is-not-judged-against-a-kb-still-loading
+  ;; a KB part-way through a load holds a prefix, so an entry it lacks may simply not
+  ;; have arrived yet; one that has finished storing and lacks only belief holds them all
+  (tu/with-terms [likes Ann Bob]
+    (v/assert kb (list likes Ann Bob) 'CxUniverse)
+    (let [ask #(json/parse-string (:body (GET "/history/known" "t=NoSuchTermAnywhere")))]
+      (with-redefs [cat/active-caveat (constantly {:status :loading :belief? false})]
+        (is (= {"complete" false} (ask)) "a load still running is not judged"))
+      (with-redefs [cat/active-caveat (constantly {:status :stopped :belief? false})]
+        (is (= {"complete" false} (ask)) "nor is one stopped part-way"))
+      (with-redefs [cat/active-caveat (constantly {:status :done :belief? false})]
+        (is (= {"complete" true "terms" [] "handles" []} (ask))
+            "a KB that has stored everything is judged, belief or not")))))
 
 (tu/deftest-kb an-inert-tuple-a-separation-caused-names-the-separation-on-the-sentex-and-term-pages
   ;; `(disjoint gladdenOf saddenOf)` mints `(genl gladdenOf thing)` through CxUniverse's

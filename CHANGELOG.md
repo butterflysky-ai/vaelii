@@ -32,6 +32,14 @@ it — `git show v0.16.0:CHANGELOG.md`.
 
 ### Additive
 
+- **The browser's history lists only what the active KB holds.** The front page's
+  Browsed panel is kept in the browser's localStorage, so a switch to another KB left it
+  listing terms and sentexes the new one does not hold, each a link to an empty page.
+  `/history/known` answers which of a history's terms and handles the active KB holds,
+  and vaelii.js forgets the rest each time it draws the panel. A KB whose load is running
+  or stopped part-way is not judged, so nothing is forgotten until its load is `:done`.
+  Switching back does not restore what was forgotten. [web.md](docs/web.md).
+
 - **`relation-arity` answers a predicate's exact arity, and the browser colours a
   predicate of three or more places red-orange and a logical connective green.** A
   connective is a `logical_connective` member: `and`, `or`, `not`, `implies`.

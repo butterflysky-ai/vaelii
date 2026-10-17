@@ -201,11 +201,47 @@
     renderHistory();
   }
 
+  const termQ = (e) => new URLSearchParams(e.href.slice("/term".length)).get("q");
+  const handleOf = (e) => e.href.slice("/sentex/".length);
+  const HANDLE_KINDS = ["literal", "rule"];
+
+  // The history is recorded against whichever KB was active at the visit, so once per
+  // panel drawn the server says which entries the active KB holds (`/history/known`) and
+  // the rest are forgotten.  Only an entry that was asked about is dropped: one recorded
+  // while the answer was on its way stays.  A KB still loading is not judged
+  // (`complete: false`), since what it lacks may not have arrived yet.
+  function pruneHistory(panel) {
+    if (panel.dataset.pruned) return;
+    panel.dataset.pruned = "1";
+    const h = readHistory();
+    const terms = h.term.map(termQ);
+    const handles = HANDLE_KINDS.flatMap((k) => h[k].map(handleOf));
+    if (!terms.length && !handles.length) return;
+    const qs = terms.map((q) => "t=" + encodeURIComponent(q))
+      .concat(["handles=" + handles.join(",")]).join("&");
+    fetch("/history/known?" + qs)
+      .then((r) => (r.ok ? r.json() : Promise.reject(r.status)))
+      .then((known) => {
+        if (!known.complete) return;
+        const askedT = new Set(terms), keptT = new Set(known.terms);
+        const askedH = new Set(handles), keptH = new Set(known.handles.map(String));
+        const now = readHistory();
+        now.term = now.term.filter((e) => !askedT.has(termQ(e)) || keptT.has(termQ(e)));
+        HANDLE_KINDS.forEach((k) => {
+          now[k] = now[k].filter((e) => !askedH.has(handleOf(e)) || keptH.has(handleOf(e)));
+        });
+        writeHistory(now);
+        renderHistory();
+      })
+      .catch(() => {});
+  }
+
   // built from elements and textContent, never from markup, since every label came out
   // of localStorage
   function renderHistory() {
     const panel = $("#history"), body = panel && panel.querySelector(".history-body");
     if (!body) return;
+    pruneHistory(panel);
     const h = readHistory();
     body.replaceChildren();
     HISTORY_KINDS.forEach(([kind, title]) => {

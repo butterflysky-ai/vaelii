@@ -23,7 +23,8 @@
   page costs in KB reads is part of what this demonstrates, since the browser reads the
   public surface alone and each read is a round-trip under `--attach`; see the `view`
   section below and docs/web.md."
-  (:require [clojure.edn :as edn]
+  (:require [cheshire.core :as json]
+            [clojure.edn :as edn]
             [clojure.java.io :as io]
             [clojure.set :as set]
             [clojure.string :as str]
@@ -6922,6 +6923,36 @@
   "What a legal `handles` looks like."
   "comma-separated sentex handles, e.g. 12,40 — each a whole number")
 
+(defn- history-known
+  "Which of the browsing history's entries the view's KB holds, as JSON
+  `{\"complete\": true, \"terms\": [q …], \"handles\": [h …]}`: of the term pages' `qs`, each
+  that parses to a term some stored sentex mentions, and of the handles `hs`, each naming
+  a stored sentex.
+
+  vaelii.js forgets the rest.  The history is recorded against whichever KB was active at
+  the visit, so a switch to another leaves it listing terms and sentexes the active KB
+  does not hold, each a link to an empty page.  Bounded as the history is: a list holds
+  `history-cap` entries, and the handles are the literal and rule lists together.
+
+  **Only once the active KB has stored everything.**  A load still running, or stopped
+  part-way, holds a prefix, and an entry missing from it may be one that has not arrived;
+  the answer is `{\"complete\": false}` and nothing is forgotten.  A KB whose load is
+  `:done` and lacks only belief (`catalog/active-caveat`) has every sentex stored, and is
+  judged."
+  [{:keys [kb]} qs hs]
+  (let [caveat (catalog/active-caveat)
+        term?  (fn [q]
+                 (let [t (param-form q)]
+                   (and (some? t) (not= unreadable t) (some? (first (v/find-sentexes kb t))))))]
+    {:status  200
+     :headers {"content-type" "application/json"}
+     :body    (json/generate-string
+               (if (and caveat (not= :done (:status caveat)))
+                 {:complete false}
+                 {:complete true
+                  :terms    (filterv term? (take history-cap qs))
+                  :handles  (filterv #(some? (v/sentex kb %)) (take (* 2 history-cap) hs))}))}))
+
 (defn- param-id
   "A `:id` path parameter as a long, or `unreadable`."
   [raw]
@@ -7674,6 +7705,14 @@
                                                                  %)))}]
          ;; the browsing history's literals, which vaelii.js names by handle and the
          ;; server draws; a `handles` that does not read is an empty row
+         ;; which history entries the active KB holds, so vaelii.js can forget the rest;
+         ;; `t` repeats, one per term, and a `handles` that does not read keeps none
+         ["/history/known" {:get (fn [req]
+                                   (let [t  (get-in req [:query-params "t"])
+                                         hs (param-handles (get-in req [:query-params "handles"]))]
+                                     (history-known (view (current target) req)
+                                                    (if (string? t) [t] (vec t))
+                                                    (if (= unreadable hs) [] hs))))}]
          ["/history/literals" {:get (fn [req]
                                       (let [hs (param-handles (get-in req [:query-params "handles"]))]
                                         (if (= unreadable hs)
