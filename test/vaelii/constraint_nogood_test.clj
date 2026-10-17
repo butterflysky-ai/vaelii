@@ -542,14 +542,16 @@
 (deftest a-membership-beside-a-denial-of-a-supertype-of-its-type-is-a-nogood-in-every-order
   ;; (dog Rex), dog ⊑ mammal ⊑ animal and (not (animal Rex)) cannot all hold, and no cover
   ;; is stored: a known-true pair is a `:supertype` conflict, and a default membership
-  ;; loses to the known-true denial, taking the reached (animal Rex) with it.
-  (doseq [[member expect] [[:monotonic :conflict] [:default :loses]]
-          order           (permutations [:edge :member :deny])]
+  ;; loses to the known-true denial, taking the reached (animal Rex) with it.  A `:default`
+  ;; mammal ⊑ animal does not contrapose, so Rex is an atypical mammal and no nogood forms.
+  (doseq [[edge member expect] [[:monotonic :monotonic :conflict] [:monotonic :default :loses]
+                                [:default :monotonic :none] [:default :default :none]]
+          order                (permutations [:edge :member :deny])]
     (tu/with-kb [kb]
       (tu/with-terms [dog mammal animal Rex]
         (let [m      {:strength :monotonic}
               denial (list 'not (list animal Rex))
-              writes {:edge   #(v/assert kb (list 'genl mammal animal) 'CxUniverse m)
+              writes {:edge   #(v/assert kb (list 'genl mammal animal) 'CxUniverse {:strength edge})
                       :member #(v/assert kb (list dog Rex) 'CxUniverse {:strength member})
                       :deny   #(v/assert kb denial 'CxUniverse m)}]
           (v/assert kb (list 'genl dog mammal) 'CxUniverse m)
@@ -557,12 +559,33 @@
           (let [hs   #{(v/handle-of kb (list dog Rex) 'CxUniverse)
                        (v/handle-of kb denial 'CxUniverse)}
                 mine (fn [rs] (filterv #(= hs (:nogood %)) rs))]
-            (testing [member order]
+            (testing [edge member order]
               (case expect
                 :conflict (is (= [:supertype] (mapv :kind (mine (v/conflicts kb)))))
                 :loses    (is (= [false false true]
                                  (mapv #(v/ask? kb % 'CxUniverse)
-                                       [(list dog Rex) (list animal Rex) denial])))))))))))
+                                       [(list dog Rex) (list animal Rex) denial])))
+                :none     (is (= [[] [] true true]
+                                 [(mine (v/conflicts kb)) (mine (v/contradictions kb))
+                                  (v/ask? kb (list dog Rex) 'CxUniverse)
+                                  (v/ask? kb denial 'CxUniverse)]))))))))))
+
+(tu/deftest-kb a-supertype-nogood-is-placed-where-its-edge-holds-at-monotonic
+  ;; dog ⊑ animal at :default in CxUniverse and at :monotonic in CxSide: the default
+  ;; (dog Rex) loses to the known-true denial in CxSide alone, and only while the
+  ;; monotonic supporter stands
+  (tu/with-terms [dog animal Rex CxSide]
+    (let [member (list dog Rex)
+          held   (fn [] (mapv #(v/ask? kb member %) [CxSide 'CxUniverse]))]
+      (v/assert kb (list 'genlCx CxSide 'CxUniverse) 'CxUniverse)
+      (v/assert kb (list 'genl dog animal) 'CxUniverse {:strength :default})
+      (v/assert kb member 'CxUniverse {:strength :default})
+      (v/assert kb (list 'not (list animal Rex)) 'CxUniverse {:strength :monotonic})
+      (is (= [true true] (held)) "a :default edge places no nogood")
+      (let [h (v/assert kb (list 'genl dog animal) CxSide {:strength :monotonic})]
+        (is (= [false true] (held)) "the monotonic supporter places it in CxSide")
+        (v/retract! kb h)
+        (is (= [true true] (held)) "and its retraction removes it")))))
 
 ;;; ── recomputed, never accumulated ─────────────────────────────────────
 

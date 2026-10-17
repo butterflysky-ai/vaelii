@@ -374,11 +374,54 @@
           :functor-extent (p/sentexes-with-args ix pred [] (ctx-scope pat))
           :trie           (p/lookup ix (sx/path pat)))))))
 
+(defn holding-class
+  "`handle → class` for a separation's denial (`tax/monotonic-route-witness`) and the
+  contrapositive fan (`contrapositive-predicates`): the live
+  JTMS defeat class of the handle, nil while it is OUT, and `:monotonic` for a believed
+  literal on the forced-monotonic roster (`decide/roster-literal?`) whatever strength it
+  was written at.  A roster literal goes OUT only by retraction (docs/nmtms.md, \"The
+  forced-monotonic roster\"), so a declaration and the part edges a `covering` installs
+  hold for every term as a `:monotonic` edge does."
+  [kb]
+  (let [tms  (reasoning/tms kb)
+        recs (:records kb)
+        tax  (reasoning/taxonomy kb)]
+    (fn [h]
+      (when-let [c (jtms/defeat-class tms h)]
+        (if (and (not= :monotonic c)
+                 (some->> (p/get-sentex recs h) :sentence (decide/roster-literal? tax)))
+          :monotonic
+          c)))))
+
+(defn contrapositive-predicates
+  "`[straight swapped]`: the predicates a negated pattern on `f` fans over from the vantage
+  `context`, `f`'s `genl` closure through the edges the reader holds at `:monotonic`
+  (`tax/contrapositive-closure` under `holding-class`).  `straight` members are read with
+  their arguments as written, `swapped` ones with arguments 1 and 2 exchanged.  The one
+  definition the negated arms of `match1`, `subsuming-unify` and `fanned-match` read."
+  [kb f context]
+  (tax/contrapositive-closure (reasoning/taxonomy kb) f context (holding-class kb)))
+
+(defn- fan-closure
+  "`[straight swapped]` for `f` in direction `dir`: `tax/signed-closure` `:down` for a
+  positive pattern, `contrapositive-predicates` for a negated one's body (`:up`)."
+  [kb dir f context]
+  (if (= dir :up)
+    (contrapositive-predicates kb f context)
+    (tax/signed-closure (reasoning/taxonomy kb) :down f context)))
+
+(defn- contraposes?
+  "Does a negated pattern on `af` fan to `ff` from `context`?  The unscoped-strength
+  closure is tested first, since it is held across clock stretches and most pairs fail it."
+  [kb af ff context]
+  (and (contains? (first (tax/signed-closure (reasoning/taxonomy kb) :up af context)) ff)
+       (contains? (first (contrapositive-predicates kb af context)) ff)))
+
 (defn- swapped-unify
   "Bindings unifying the binary `pattern` with `fact` read with its two arguments
   exchanged, when `fact`'s predicate is in `pattern`'s predicate's swapped `dir` fan
-  (`tax/signed-closure`, `:down` for a positive pattern, `:up` for a negated one's
-  body), else nil.  nil off one map read on a KB declaring no `genlInverse`."
+  (`fan-closure`, `:down` for a positive pattern, `:up` for a negated one's body), else
+  nil.  nil off one map read on a KB declaring no `genlInverse`."
   [kb dir pattern fact bindings context]
   (let [tx (reasoning/taxonomy kb)]
     (when-not (tax/genl-inverse-free? tx)
@@ -386,7 +429,7 @@
             ff (when (sequential? fact) (first fact))]
         (when (and (symbol? pf) (not (sx/variable? pf)) (symbol? ff) (not (sx/variable? ff))
                    (= 3 (count pattern)) (= 3 (count fact))
-                   (contains? (second (tax/signed-closure tx dir pf context)) ff))
+                   (contains? (second (fan-closure kb dir pf context)) ff))
           (unify-args (rest pattern) (list (nth fact 2) (nth fact 1)) bindings))))))
 
 (defn match1
@@ -408,7 +451,9 @@
   directions are exclusive: `(not (dog Muffet))` does not satisfy `(not (animal ?x))`,
   which is the reading a fan in the positive direction would give it.  Both sides must
   be negations for this to apply; a negation matched against a positive fact fails on
-  polarity as it does anywhere else.
+  polarity as it does anywhere else.  The negated fan climbs only the edges the reader
+  holds at `:monotonic` (`contrapositive-predicates`): a `:default` edge does not
+  contrapose.
 
   **The subsumption is scoped when a `context` is given**: the predicate-genl closure is
   walked only through the edges that context can see, so a match reached through a `genl`
@@ -427,7 +472,7 @@
            af (when (sequential? a) (first a))
            ff (when (sequential? f) (first f))]
        (or (if (and (symbol? af) (not (sx/variable? af)) (symbol? ff) (not= af ff)
-                    (contains? (first (tax/signed-closure (reasoning/taxonomy kb) :up af context)) ff))
+                    (contraposes? kb af ff context))
              (unify-args (rest a) (rest f))             ; genl of the body: unify the arguments
              (unify antecedent fact))
            ;; a `genlInverse` above the body's predicate: the arguments swapped
@@ -469,7 +514,8 @@
 
   **Under a negation the fan reverses**, exactly as it does in `match1`: a rule
   concluding `(not (animal ?x))` answers the goal `(not (dog Tom))`, because `dog ⊑
-  animal` entails `¬animal ⊑ ¬dog`.  Both sides must be negations; a negated goal
+  animal` entails `¬animal ⊑ ¬dog`, through the edges the reader holds at `:monotonic`
+  only (`contrapositive-predicates`).  Both sides must be negations; a negated goal
   against a positive consequent falls through to the plain `unify`, which rejects it on
   the functor.
 
@@ -490,11 +536,13 @@
          cf   (when (sequential? c) (first c))
          ;; the polarity picks the direction: a *spec* conclusion answers a positive
          ;; goal, a *genl* conclusion answers a negated one
-         reach (fn [tx f ctx] (first (tax/signed-closure tx (if neg? :up :down) f ctx)))]
+         reach? (if neg?
+                  #(contraposes? kb %1 %2 context)
+                  #(contains? (first (tax/signed-closure (reasoning/taxonomy kb) :down %1 context)) %2))]
      (or (if (and (symbol? gf) (not (sx/variable? gf))
                   (symbol? cf) (not (sx/variable? cf))
                   (not= gf cf)
-                  (contains? (reach (reasoning/taxonomy kb) gf context) cf))
+                  (reach? gf cf))
            (unify-args (rest g) (rest c) bindings)
            (unify goal consequent bindings))
          ;; a `genlInverse` spec conclusion (a genl one, under a negation): swapped
@@ -1512,16 +1560,8 @@
 
 (defn super-predicates
   "The **genl** closure of `f` from the vantage `context`: `sub-predicates` mirrored,
-  and what a *negative* pattern fans over.
-
-  A `genl` edge carries the opposite way through a negation — `dog ⊑ animal` puts
-  `(dog Muffet)` under the pattern `(animal ?x)` and `(not (animal Muffet))` under the
-  pattern `(not (dog ?x))` — so the negative fan walks up where the positive one walks
-  down.  The up set is bounded by the hierarchy's depth where the down set is a whole
-  subtree, which is why the negative fan is the cheaper of the two on a broad ontology
-  and the positive one is the fan the retrieval paths are written around.  Shared by
-  `match-pattern` and the rete alpha matcher for the same reason `sub-predicates` is:
-  so the two cannot drift."
+  through every visible edge whatever its strength.  A negative pattern fans over the
+  part of it the reader holds at `:monotonic`, `contrapositive-predicates`."
   [kb f context]
   (first (tax/signed-closure (reasoning/taxonomy kb) :up f context)))
 
@@ -1589,8 +1629,9 @@
 
   * **A variable or absent functor pins nothing** and fans not at all — one raw match on
     the sentence as written.
-  * **A negation fans its body's functor upward** (`super-predicates`), the direction a
-    `genl` edge carries through a negation, and rebuilds the `not` around each member.
+  * **A negation fans its body's functor upward** (`contrapositive-predicates`), the
+    direction a `genl` edge carries through a negation, over the edges the reader holds at
+    `:monotonic`, and rebuilds the `not` around each member.
   * **A singleton closure is `f` itself**, since both closures are reflexive, so there is
     nothing to fan and the as-written retrieval is the whole answer.  Counted rather than
     compared against a freshly built `#{f}`; the same reading `chain/fanning-functor?`
@@ -1608,7 +1649,7 @@
          body (if neg? (second sentence) sentence)
          f    (when (sequential? body) (first body))]
      (if (and (symbol? f) (not (sx/variable? f)))
-       (let [[fan swapped] (tax/signed-closure (reasoning/taxonomy kb) (if neg? :up :down) f vantage)
+       (let [[fan swapped] (fan-closure kb (if neg? :up :down) f vantage)
              ;; a `genlInverse` reading swaps arguments 1 and 2, so only a binary
              ;; literal takes one
              swapped (if (= 3 (count body)) swapped #{})
@@ -1650,9 +1691,9 @@
   sub-predicates has a singleton closure, so this is a no-op for it (the overwhelming
   common case — one cached set lookup, no fan).
 
-  **A negation fans its body's functor the other way**, over `super-predicates`:
-  `(not (dog ?x))` is answered by `(not (animal Muffet))`, since `dog ⊑ animal` entails
-  `¬animal ⊑ ¬dog`.  The `not` itself heads nothing and has no closure of its own, so
+  **A negation fans its body's functor the other way**, over `contrapositive-predicates`:
+  `(not (dog ?x))` is answered by `(not (animal Muffet))`, since a `:monotonic` `dog ⊑
+  animal` entails `¬animal ⊑ ¬dog`.  The `not` itself heads nothing and has no closure of its own, so
   the fan reads inside it and rebuilds the negation around each member; each rebuilt
   pattern is retrieved by the negative key it names, exactly as the written one is.
 
@@ -2449,24 +2490,6 @@
                         (let [sen (:sentence s)]
                           (when (and (= 1 (nm/arity sen)) (= x (first (nm/args sen))))
                             s)))))))))))
-
-(defn holding-class
-  "`handle → class` for a separation's denial (`tax/monotonic-route-witness`): the live
-  JTMS defeat class of the handle, nil while it is OUT, and `:monotonic` for a believed
-  literal on the forced-monotonic roster (`decide/roster-literal?`) whatever strength it
-  was written at.  A roster literal goes OUT only by retraction (docs/nmtms.md, \"The
-  forced-monotonic roster\"), so a declaration and the part edges a `covering` installs
-  hold for every term as a `:monotonic` edge does."
-  [kb]
-  (let [tms  (reasoning/tms kb)
-        recs (:records kb)
-        tax  (reasoning/taxonomy kb)]
-    (fn [h]
-      (when-let [c (jtms/defeat-class tms h)]
-        (if (and (not= :monotonic c)
-                 (some->> (p/get-sentex recs h) :sentence (decide/roster-literal? tax)))
-          :monotonic
-          c)))))
 
 (def ^:dynamic *membership-memo*
   "A volatile `{[x context] memberships}` the separation's denial reads a term's

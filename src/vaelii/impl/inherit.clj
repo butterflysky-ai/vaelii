@@ -558,7 +558,8 @@
   "How many stored sentexes one open probe would walk: the predicate extents of every
   predicate the matcher fans the probe over, capped by whichever pinned argument position
   is most selective.  The fan is `pred`'s sub-predicates for a positive probe and its
-  super-predicates for a negated one (`res/sub-predicates`, `res/super-predicates`), so a
+  contrapositive ones for a negated one (`res/sub-predicates`,
+  `res/contrapositive-predicates`), so a
   sub-predicate holding the facts is counted where the walk reads them.  The sum stops once
   it passes `limit`, the product's size, since the caller asks only which is smaller.
 
@@ -569,7 +570,7 @@
   [kb pred slots order negated? context limit]
   (let [idx  (:index kb)
         fan  (if negated?
-               (res/super-predicates kb pred context)
+               (first (res/contrapositive-predicates kb pred context))
                (res/sub-predicates kb pred context))
         rows (reduce (fn [n f]
                        (let [n (+ n (reads/stored-count-with-functor idx f))]

@@ -255,7 +255,7 @@ The tables are generated from the register by `lein regen-goldens`, and
 | T3 | Equality partition | `taxonomy` | term | records M1 | E8 K, E11 K, E17 R, E18 R | write | index | taxonomy |  |  |
 | T4 | Rewrite rules | `taxonomy` | handle | records M1 | E2 K, E3 K, E8 K, E17 R, E18 R | write | index | taxonomy |  |  |
 | T5 | Taxonomy closures | `taxonomy` | node | T1 M1 | E7 G, E8 G, E17 W, E21 W, every other event G* | read | cache | no | `:taxonomy-closures` |  |
-| T7 | Closure filter memo | `taxonomy` | context | T1 M1 index | E17 W, every other event G* | read | cache | no |  |  |
+| T7 | Closure filter memo | `taxonomy` | context | T1 M1 index records | E17 W, every other event G* | read | cache | no |  |  |
 | T10 | Taxonomy pass caches | `taxonomy` | node | T1 M1 | P | pass | pass | no |  |  |
 | T11 | Taxonomy supporters | `taxonomy` | value | index | E7 K, E8 K, E9 K, E17 W, E21 W | read | cache | no | `:taxonomy-supporters` |  |
 | M1 | Labels | `jtms` | handle | justifications | E5 K, E10 K, E17 R, E18 R | write | index | network |  |  |

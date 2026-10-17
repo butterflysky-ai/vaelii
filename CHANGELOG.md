@@ -13,6 +13,22 @@ it — `git show v0.16.0:CHANGELOG.md`.
 
 ## Unreleased
 
+### Breaking
+
+- **A `:default` `genl` edge no longer contraposes.** With `(genl pa pb)` at `:default` and
+  `(not (pb Zz))` stored or derived, `query (not (pa Zz))` answers nothing and `argue (pa
+  Zz)` answers `:unknown`, where they answered `[{}]` and `:false`. A forward rule on `(not
+  (pa ?x))` does not fire on `(not (pb A))` in a context that holds the edge at `:default`
+  only, and `(pa Rex)` beside `(not (pb Rex))` is no `:supertype` nogood there. An edge
+  the reader holds at `:monotonic`, or one a roster installs, contraposes as before, the
+  rule a separation's denial already follows. The two time intersections in `core.txt`
+  are `:monotonic`. Closes #188.
+  [inference.md](docs/inference.md#predicate-subsumption-in-matching).
+
+  *Migration:* assert a `genl` or `genlInverse` edge with `{:strength :monotonic}` where a
+  denial of its upper end should deny its lower end.
+  *Breaks:* `query`, `argue`, `conflicts`, `contradictions`
+
 ### Additive
 
 - **`+with-postgres`, `+with-sqlite` and `+with-foreign` add the published siblings to any

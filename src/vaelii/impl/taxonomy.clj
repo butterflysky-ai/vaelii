@@ -6389,6 +6389,42 @@
                           context))
             xs))))
 
+(defn- signed-walk
+  "`[straight swapped]` from `p` over `[predicate parity]` states: `close` takes a
+  predicate's `genl` closure, and `hop` the predicates one `genlInverse` edge from a
+  member of it, reached with the parity flipped."
+  [p close hop]
+  (loop [todo [[p false]] seen #{[p false]} straight #{} swapped #{}]
+    (if-let [[n odd] (peek todo)]
+      (let [cl  (close n)
+            nxt (into [] (comp (mapcat hop)
+                               (distinct)
+                               (map (fn [x] [x (not odd)]))
+                               (remove seen))
+                      cl)]
+        (recur (into (pop todo) nxt)
+               (into seen nxt)
+               (if odd straight (into straight cl))
+               (if odd (into swapped cl) swapped)))
+      [straight swapped])))
+
+(defn- clock-held
+  "`(read)`, held in the closure memo's `slot` under `k` for one stretch of the change
+  clock: a new stamp drops the slot's entries of the old one.  Read afresh when the
+  taxonomy holds no memo."
+  [tax slot k read]
+  (if-let [memo (:closure-memo @tax)]
+    (let [stamp (observe/change-clock)
+          held  (get @memo slot)]
+      (or (when (= stamp (:stamp held)) (get (:closures held) k))
+          (let [v (read)]
+            (swap! memo update slot
+                   (fn [h] (if (= stamp (:stamp h))
+                             (assoc-in h [:closures k] v)
+                             {:stamp stamp :closures {k v}})))
+            v)))
+    (read)))
+
 (defn signed-closure
   "`[straight swapped]`: the predicates `p`'s matching fan reaches through the `genl` and
   `genlInverse` edges visible from `context` — `dir` `:down` the specs, `:up` the
@@ -6411,35 +6447,54 @@
   clock (`observe/note-change`).  The memo holds one clock stretch: a new stamp drops the
   entries of the old one, so it never grows past the fans one stretch asks about."
   [tax dir p context]
-  (let [close (if (= dir :down) #(specs tax % context) #(genls tax % context))
-        walk  (fn []
-                (loop [todo [[p false]] seen #{[p false]} straight #{} swapped #{}]
-                  (if-let [[n odd] (peek todo)]
-                    (let [cl   (close n)
-                          nxt  (into [] (comp (mapcat (fn [s] (genl-inverse-hop tax dir s context)))
-                                              (distinct)
-                                              (map (fn [x] [x (not odd)]))
-                                              (remove seen))
-                                     cl)]
-                      (recur (into (pop todo) nxt)
-                             (into seen nxt)
-                             (if odd straight (into straight cl))
-                             (if odd (into swapped cl) swapped)))
-                    [straight swapped])))]
+  (let [close (if (= dir :down) #(specs tax % context) #(genls tax % context))]
     (if (genl-inverse-free? tax)
       [(close p) #{}]
-      (if-let [memo (:closure-memo @tax)]
-        (let [stamp (observe/change-clock)
-              k     [dir p context]
-              held  (get @memo ::signed)]
-          (or (when (= stamp (:stamp held)) (get (:closures held) k))
-              (let [v (walk)]
-                (swap! memo update ::signed
-                       (fn [h] (if (= stamp (:stamp h))
-                                 (assoc-in h [:closures k] v)
-                                 {:stamp stamp :closures {k v}})))
-                v)))
-        (walk)))))
+      (clock-held tax ::signed [dir p context]
+                  #(signed-walk p close (fn [s] (genl-inverse-hop tax dir s context)))))))
+
+(defn- monotonic-genls
+  "The supertypes of `p`, incl `p`, through the `genl` edges visible from `context` whose
+  strongest visible supporter `supporter-class` reads `:monotonic` (`edge-class`)."
+  [tax p context supporter-class]
+  (let [t     @tax
+        scope (relation-scope tax :genl context)
+        adj   (if (nil? scope) #(get-in t [:genl :fwd %]) #(visible-neighbours t :genl :fwd scope %))]
+    (loop [todo [p] seen #{p}]
+      (if-let [n (peek todo)]
+        (let [nxt (into [] (comp (remove seen)
+                                 (distinct)
+                                 (filter #(= :monotonic (edge-class t :genl [n %] scope supporter-class))))
+                        (adj n))]
+          (recur (into (pop todo) nxt) (into seen nxt)))
+        seen))))
+
+(defn contrapositive-closure
+  "`[straight swapped]`: `signed-closure` `:up` of `p` from `context`, over only the
+  `genl` and `genlInverse` edges a reader holds at `:monotonic`.  These are the predicates
+  a negated pattern on `p` fans over.  A `genl` edge's class is its strongest visible
+  supporter's (`edge-class`), and a `genlInverse` hop needs one visible supporter that
+  `supporter-class` reads `:monotonic`.  `supporter-class` is `handle → class`, nil for a
+  handle that is OUT (`res/holding-class`).
+
+  `p`'s fan through `(genl p q)` reads a stored `(not (q x))` as `(not (p x))`, which is
+  modus tollens over the edge.  A `:default` edge applies forward and does not
+  contrapose, so the fan does not cross one (docs/inference.md, \"Under a negation the
+  fan reverses\").  A `p` with no supertype answers `signed-closure`'s set and reads no
+  class.  Otherwise the walk is held in the closure memo for one stretch of the change
+  clock, which every label move advances."
+  [tax p context supporter-class]
+  (let [full (signed-closure tax :up p context)]
+    (if (and (nil? (next (first full))) (empty? (second full)))
+      full
+      (clock-held tax ::contrapositive [p context]
+                  #(signed-walk p
+                                (fn [n] (monotonic-genls tax n context supporter-class))
+                                (fn [s]
+                                  (filter (fn [y]
+                                            (some (fn [h] (= :monotonic (supporter-class h)))
+                                                  (visible-supporters tax (genl-inverse-key s y) context)))
+                                          (genl-inverse-hop tax :up s context))))))))
 
 (defn- visible-flat-supporters
   "The supporters of flat-cache key `k` a reader at `context` can use, as `[handle ctx]`
@@ -6642,12 +6697,12 @@
   :note "reach sets, needs-sets, `:asserted-in`, `:reaches`, `:path` and separable entries keyed `[rel gen …]`: a generation bump orphans the keys, and the LRU ages them out; a scope that reads supporter belief carries the change clock, so any write orphans its entries"})
 
 (caches/register-derived
- {:id :T7 :label "Closure filter memo" :kind :cache :keyed-by :context :reads [:T1 :M1 :index]
+ {:id :T7 :label "Closure filter memo" :kind :cache :keyed-by :context :reads [:T1 :M1 :index :records]
   :holds-content? false
   :retired-by (assoc (caches/on-every :G*) :recover :W)
   :computed :read :imaged? false :at [[:taxonomy :closure-memo]]
   :value (fn [kb] (some-> (caches/value-at kb [:taxonomy :closure-memo]) deref))
-  :note "per relation, whether the supporter filter is active and the down-closure by context and reading, under the relation generation and stamped by the change clock"})
+  :note "per relation, whether the supporter filter is active and the down-closure by context and reading, under the relation generation and stamped by the change clock; the signed closure (`::signed`) and the `:monotonic` one a negated pattern fans over (`::contrapositive`, `contrapositive-chain`), each held for one stretch of the change clock"})
 
 (caches/register-derived
  {:id :T10 :label "Taxonomy pass caches" :kind :pass :keyed-by :node :reads [:T1 :M1]

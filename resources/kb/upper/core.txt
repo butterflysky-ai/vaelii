@@ -308,8 +308,8 @@
 (genl time temporal)
 (genl time aspatial)
 (set/monotonic (partition time uninterrupted_time intermittent_time))
-(intersection uninterrupted_time uninterrupted time)
-(intersection intermittent_time intermittent time)
+(set/monotonic (intersection uninterrupted_time uninterrupted time))
+(set/monotonic (intersection intermittent_time intermittent time))
 (set/monotonic (partition uninterrupted_time time_point time_interval))
 ;; A situation holds or happens, over any extent, never both and never neither: it is a
 ;; fluent or a happening.  An uninterrupted_situation is a situation that is uninterrupted.

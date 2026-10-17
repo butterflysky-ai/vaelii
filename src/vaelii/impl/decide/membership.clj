@@ -572,7 +572,8 @@
   A `:disjoint` one takes each cover route of its two memberships besides, since
   `term-nogoods` keeps a cover refuted by the same two memberships as the one nogood.
   For a `:supertype` one, the subsumption from the held type to the denied type with no
-  key, and each cover route besides.  Empty when the members are not one term's.
+  key, as a `:strict-links` too, since the nogood reads the edge's contrapositive and a
+  `:default` edge does not contrapose (docs/inference.md), and each cover route besides.  Empty when the members are not one term's.
   Read over the write view `w` (`decide/write-view`): a route is a superset over every
   reader, and the placement decides which contexts see it."
   [w recs {:keys [members kind]}]
@@ -586,7 +587,7 @@
       (when (= 1 (count pos) (count neg))
         (let [s (first pos) q (first neg)]
           (cond->> (cover-routes w pos neg)
-            ((:genl?-global w) s q) (cons {:keys #{} :links [[s q]]}))))
+            ((:genl?-global w) s q) (cons {:keys #{} :links [[s q]] :strict-links [[s q]]}))))
       :cover
       (when (seq pos)
         (cover-routes w pos neg))

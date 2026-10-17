@@ -1707,7 +1707,9 @@ memberships under a stored cover, keeps its nogoods through that taxonomy (`::ng
 of what any reader reads, and its members are candidates. Each is placed as a nogood with
 its separating declarations and the `genl` edges its reading climbs as grounds; a
 `supertype` nogood has the edges alone
-([A nogood placed as a conclusion](#a-nogood-placed-as-a-conclusion)).
+([A nogood placed as a conclusion](#a-nogood-placed-as-a-conclusion)). A `supertype`
+nogood reads the edges' contrapositive, so it is placed only where the held type reaches
+the denied type at `:monotonic` ([inference.md](inference.md#predicate-subsumption-in-matching)).
 
 **The reports.** `conflicts` and `contradictions` read the placed `contradicts` at the
 read ([The clash reports](#the-clash-reports)): each placed nogood reports its verdict at

@@ -430,10 +430,29 @@ forward chaining and `ask` reaching through it, belief-following on retract, and
 one: `dog ⊑ animal` puts a stored `(dog Muffet)` under the pattern `(animal ?x)`, and
 puts a stored `(not (animal Muffet))` under the pattern `(not (dog ?x))`, because
 `¬animal ⊑ ¬dog` is the contrapositive of the same edge. So a negative literal fans its
-**body's** functor over `genls` where a positive one fans over `specs` — `res/super-predicates`
-beside `res/sub-predicates`, one definition each so the reference matcher and the rete
-alpha matcher cannot drift. The `not` itself heads nothing and has no closure, so the fan
-reads inside it and rebuilds the negation around each member.
+**body's** functor over `genls` where a positive one fans over `specs` —
+`res/contrapositive-predicates` beside `res/sub-predicates`, one definition each so the
+reference matcher and the rete alpha matcher cannot drift. The `not` itself heads nothing
+and has no closure, so the fan reads inside it and rebuilds the negation around each
+member.
+
+**Only a `:monotonic` edge contraposes.** The negative fan climbs the `genl` and
+`genlInverse` edges the reader holds at `:monotonic`: an edge's class is its strongest
+visible supporter's, read with `res/holding-class`, so a roster that installs the edge
+counts as `:monotonic` (`tax/contrapositive-closure`). "A `pa` is typically a `pb`"
+leaves room for an atypical `pa` outside `pb`, so with `(genl pa pb)` at `:default` and
+`(not (pb Zz))` stored, `query (not (pa Zz))` answers nothing and `argue (pa Zz)` answers
+`:unknown`. A separation's denial takes the same rule ([taxonomy.md](taxonomy.md), *A
+separation answers a denial*). `match1`, `subsuming-unify` and `fanned-match` read the
+one closure, so a stored denial, a backward rule's denial and a forward firing on a
+negated antecedent stop at the same edges. A firing's negated links, and a `supertype`
+nogood's link ([nmtms.md](nmtms.md#the-nogood-families)), are placed only where a path of
+`:monotonic` edges is seen: with the edge at `:default` in CxUniverse and at `:monotonic`
+in a context below it, a rule in CxUniverse places its conclusion in that context and not
+in CxUniverse (`chain/placements-over`'s `strict`). A `:monotonic` supporter arriving for
+an edge already installed re-seeds the negations above it as a new edge does
+(`special/subsumption-seeds`). `rules/trigger-keys` keys a negated antecedent over every
+visible edge, a superset the matcher filters.
 
 The two directions are exclusive, and the wrong one is what `negative_subsumption_test`
 pins hardest: `(not (dog Muffet))` does **not** satisfy `(not (animal ?x))`, since a
@@ -520,7 +539,8 @@ Every reader of the fan takes the swap from those two sets:
 - `res/fanned-match`, and through it `match-pattern` and the rete alpha matcher, reads a
   swapped member with its arguments exchanged. Only a binary literal takes one.
 - `res/match1` and `res/subsuming-unify` unify a swapped fact or consequent with its
-  arguments exchanged, positive against the spec set and negated against the genl set.
+  arguments exchanged, positive against the spec set and negated against the
+  contrapositive set.
   The contrapositive is the same as `genl`'s: a stored `(not (parentOf Tom Bob))` answers
   `(not (childOf Bob Tom))`.
 - `rules/trigger-keys` and `res/concluding-rule-handles` read both sets.

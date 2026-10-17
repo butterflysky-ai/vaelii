@@ -587,6 +587,26 @@
                                  (symbol (str "pt" (dec i) "_t")))
                         'CxPerf {:strength :monotonic}))))))
 
+(defn- contrapositive-chain
+  "`argue (pcf0 PCX)` over a `:monotonic` chain `pcf0 ⊑ … ⊑ pcfn` with a backward rule
+  `(implies (pcg_i ?x) (not (pcf_i+1 ?x)))` per level and `(pcg_n-1 PCX)` stored.  The
+  denial's search tries every level's rule, and each try asks whether the negated goal on
+  `pcf0` fans to the rule's consequent (`res/contrapositive-predicates`).  The read holds
+  `tax/contrapositive-closure`'s walk for the change clock's stretch, so the n tries walk
+  the n-edge closure once; walking it per try is quadratic in n."
+  [n]
+  (let [kb (fresh-kb)
+        x  (symbol "?x")]
+    (dotimes [i n]
+      (let [lo (symbol (str "pcf" i))
+            hi (symbol (str "pcf" (inc i)))]
+        (v/assert kb (list 'genl lo hi) 'CxPerf {:strength :monotonic})
+        (v/assert-rule kb [(list (symbol (str "pcg" i)) x)] (list 'not (list hi x)) 'CxPerf
+                       {:direction :backward})))
+    (v/assert kb (list (symbol (str "pcg" (dec n))) 'PCX) 'CxPerf {:strength :monotonic})
+    (doall (for [_ (range 60)]
+             (nanos (v/argue kb '(pcf0 PCX) 'CxPerf {:max-depth 3}))))))
+
 (defn- taxonomy-belief-flip
   "One `genl` edge defeated and revived over and over, in a taxonomy of n edges.
 
@@ -5620,6 +5640,15 @@
     :sizes     [250 2000]
     :max-ratio 2.0
     :run       taxonomy-depth}
+
+   ;; 2026-10-16, `--only` at load 20-40: 6.50x and 6.85x with `tax/contrapositive-closure`
+   ;; held in the closure memo, 37.73x and 32.37x with the walk read per call.
+   {:name      :contrapositive-chain
+    :group     :taxonomy
+    :claim     "16x the depth of a monotonic chain with a backward denial per level costs under 14x per argue: a read walks the contrapositive closure once"
+    :sizes     [8 128]
+    :max-ratio 14.0
+    :run       contrapositive-chain}
 
    {:name      :taxonomy-belief-flip
     :group     :taxonomy

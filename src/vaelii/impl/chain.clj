@@ -2343,6 +2343,24 @@
                   (distinct))
             matched))))
 
+(defn- link-witness
+  "The `[handle ctx]` supporters of one path for the subsumption `link`, `[sub super]`
+  through `genl` edges or `[sub super swapped?]` through the signed closure, that
+  `vantage` sees, widest-bottleneck under `supporter-class`; nil when it sees none."
+  [tax [sub super :as link] vantage supporter-class]
+  (if (= 2 (count link))
+    (tax/reach-support tax :genl sub super vantage supporter-class)
+    (tax/signed-reach-support tax sub super (nth link 2) vantage supporter-class)))
+
+(defn- strict-witness
+  "`link-witness` under `holding`, `res/holding-class`, kept only when `holding` reads
+  every supporter on it `:monotonic`.  The witness of a contrapositive link: a negated
+  match and a membership beside a denial of a supertype read an edge's contrapositive, and
+  a `:default` edge does not contrapose (docs/inference.md)."
+  [tax link vantage holding]
+  (when-let [hs (link-witness tax link vantage holding)]
+    (when (every? #(= :monotonic (holding (first %))) hs) hs)))
+
 (defn- subsumption-support
   "A witness for each of a firing's subsumptions, as `[handle ctx]` supporter pairs
   (`tax/reach-support`) — or nil when `vantage` sees no path for one of them.  A nil
@@ -2361,8 +2379,11 @@
 
   The join itself stays global (`complete-antecedents`, any context on purpose): which
   facts *exist* is not the placement's question, and narrowing the join would drop
-  firings placement accepts."
-  [kb links vantage]
+  firings placement accepts.
+
+  A link in the set `strict` is a contrapositive one: its witness is a path every edge of
+  which `res/holding-class` reads `:monotonic`, else nil (`strict-witness`)."
+  [kb links vantage strict]
   ;; the widest-bottleneck route: a firing that climbed the genl closure
   ;; rests on the *strongest* path relating the two functors, not the shortest, so its
   ;; conclusion is capped at that path's floor.  `supporter-class` is the live JTMS
@@ -2372,18 +2393,19 @@
         supporter-class (if memo
                           (fn [h] (held memo [:class h] #(jtms/defeat-class tms h)))
                           #(jtms/defeat-class tms %))
-        walk  (fn [[sub super :as link]]
-                (if (= 2 (count link))
-                  (tax/reach-support (reasoning/taxonomy kb) :genl sub super
-                                     vantage supporter-class)
-                  (tax/signed-reach-support (reasoning/taxonomy kb) sub super (nth link 2)
-                                            vantage supporter-class)))
+        strict-class (when (seq strict) (res/holding-class kb))
+        walk  (fn [link]
+                (if (contains? strict link)
+                  (strict-witness (reasoning/taxonomy kb) link vantage strict-class)
+                  (link-witness (reasoning/taxonomy kb) link vantage supporter-class)))
         ;; a `genlInverse` link's witness also reads the flat cache, which the `genl`
         ;; read scope does not key, so only a `genl` link is held
         read  (if memo
                 (let [scope (tax/read-scope (reasoning/taxonomy kb) :genl vantage)]
                   (fn [link] (if (= 2 (count link))
-                               (held memo [:genl link scope (reading)] #(walk link))
+                               (held memo [(if (contains? strict link) :genl-strict :genl)
+                                           link scope (reading)]
+                                     #(walk link))
                                (walk link))))
                 walk)]
     (reduce (fn [acc link]
@@ -2406,8 +2428,10 @@
   no placement depends on which route arrived first.  A placement two combinations
   decide names the first in content order.  nil when some subsumption has no route the
   view sees.  Given the context set `within`, only the placements in it.  Each link's
-  routes, and each supporter's class, are held in `*witnesses*` while it is bound."
-  [kb links ingredients within]
+  routes, and each supporter's class, are held in `*witnesses*` while it is bound.  A
+  link in the set `strict` takes only the routes `res/holding-class` reads `:monotonic`
+  on every edge."
+  [kb links ingredients within strict]
   (let [tax      (reasoning/taxonomy kb)
         tms      (reasoning/tms kb)
         memo     *witnesses*
@@ -2415,15 +2439,23 @@
                    (fn [h] (held memo [:class h] #(jtms/defeat-class tms h)))
                    #(jtms/defeat-class tms %))
         rank     #(strength/rank-of (or (class-of %) :default))
+        holding  (when (seq strict) (res/holding-class kb))
         walk     (fn [[sub super :as link]]
-                   (if (= 2 (count link))
-                     (tax/reach-supports tax :genl sub super nil class-of)
-                     ;; one route across `genlInverse` edges: the fewest of them
-                     (when-let [r (tax/signed-reach-support tax sub super (nth link 2) nil class-of)]
-                       [r])))
+                   (let [s?  (contains? strict link)
+                         cls (if s? holding class-of)
+                         rs  (if (= 2 (count link))
+                               (tax/reach-supports tax :genl sub super nil cls)
+                               ;; one route across `genlInverse` edges: the fewest of them
+                               (when-let [r (tax/signed-reach-support tax sub super (nth link 2) nil cls)]
+                                 [r]))]
+                     (if s?
+                       (filterv (fn [r] (every? #(= :monotonic (holding (first %))) r)) rs)
+                       rs)))
         per-link (mapv (if memo
                          (fn [link] (if (= 2 (count link))
-                                      (held memo [:genl-routes link (reading)] #(walk link))
+                                      (held memo [(if (contains? strict link) :genl-strict-routes :genl-routes)
+                                                  link (reading)]
+                                            #(walk link))
                                       (walk link)))
                          walk)
                        links)]
@@ -2450,7 +2482,7 @@
 
 (defn- placements-over*
   "`placements-over` under the network reading it binds."
-  [kb links supporters ingredients within]
+  [kb links supporters ingredients within strict]
   (let [tax  (reasoning/taxonomy kb)
         ;; with `links`, a descent placement reads every candidate's path, so
         ;; `placements-over` filters the candidates' answer instead
@@ -2465,7 +2497,7 @@
                         (if (seq vs) (assoc m b vs) m)))
                     {} base)]
       (let [seeing (reduce (fn [m b]
-                             (if-let [hs (subsumption-support kb links b)]
+                             (if-let [hs (subsumption-support kb links b strict)]
                                (assoc m b (into (mapv first hs)
                                                 (visibility-support
                                                  tax b (concat ingredients (keep second hs)))))
@@ -2480,7 +2512,7 @@
                 ;; own reads that candidate's conclusion already
                 descent (into {}
                               (remove (fn [[p _]] (some #(tax/sees? tax p %) (keys seeing))))
-                              (descent-placements kb links ingredients within))]
+                              (descent-placements kb links ingredients within strict))]
             (when (or (seq seeing) (seq descent))
               [(into (filterv seeing base)
                      (nm/sort-by-content-key nm/print-key compare (keys descent)))
@@ -2498,11 +2530,13 @@
   witness search here reads the network and the `except` roster, and no placed `defeat`
   (`tax/*network-belief*`), so a defeat of a `genl` supporter moves no placement.  Given
   the context set `within`, only the placements in it, and with no `links` the support of
-  only those is read."
-  ([kb links supporters ingredients] (placements-over kb links supporters ingredients nil))
-  ([kb links supporters ingredients within]
+  only those is read.  A link in the set `strict` is witnessed only by a path the reader
+  holds at `:monotonic` (`strict-witness`)."
+  ([kb links supporters ingredients] (placements-over kb links supporters ingredients nil nil))
+  ([kb links supporters ingredients within] (placements-over kb links supporters ingredients within nil))
+  ([kb links supporters ingredients within strict]
    (binding [tax/*network-belief* true]
-     (cond-> (placements-over* kb links supporters ingredients within)
+     (cond-> (placements-over* kb links supporters ingredients within strict)
        (and within (seq links)) (some-> (update 0 #(filterv within %)))))))
 
 ;; ---- a guard that holds below the placement places a defeat ---------------
@@ -3413,8 +3447,9 @@
   their own context.  Where *some* candidates see a path and others do not, the ones that
   see keep their placement, and the descent adds the placements that are not at or below
   one of them."
-  [kb rule links fact-handles fact-ctxs]
-  (placements-over kb links (cons (:rule-handle rule) fact-handles) (cons (:context rule) fact-ctxs)))
+  [kb rule links fact-handles fact-ctxs strict]
+  (placements-over kb links (cons (:rule-handle rule) fact-handles) (cons (:context rule) fact-ctxs)
+                   nil strict))
 
 ;; ---- the families that place their nogoods -----------------------------
 
@@ -3431,8 +3466,8 @@
   holds its separation to the soundness rule of `res/separation-denials`: each of its
   `:strict-links` reaches at `:monotonic` from the placement (`tax/reach-strength`), and
   each supporter chosen for one of its `:strict-keys` holds at `:monotonic`
-  (`res/holding-class`).  Given the
-  context set `within`, only the placements in it (`placements-over`)."
+  (`res/holding-class`), and a placement descends to where one does (`placements-over`'s
+  `strict`).  Given the context set `within`, only the placements in it."
   [kb members routes within]
   (let [tax   (reasoning/taxonomy kb)
         recs  (:records kb)
@@ -3448,7 +3483,8 @@
                                                            (= :monotonic (@cls h))))
                                          (map vector (seq keys) sups)))))
                 :let [[ps m] (placements-over kb links (into (vec members) (map first) sups)
-                                              (into mctxs (map second) sups) within)]
+                                              (into mctxs (map second) sups) within
+                                              (when (seq strict-links) (set strict-links)))]
                 pctx ps
                 :when (not (and exc? (tax/route-exempted? tax route pctx)))
                 :when (not (and exc? (seq pairs)
@@ -4010,16 +4046,18 @@
   witnessing them are an **ingredient of the placement** (`placement-ingredients`), not
   a filter on it, and they join the antecedent list.  So do the `genlCx` supporters
   the placement sees its ingredients over: a placement is a claim about the ancestor set, and
-  the conclusion may not outlive the edges that claim rests on.
+  the conclusion may not outlive the edges that claim rests on.  `strict` is the links a
+  negated antecedent climbed, each witnessed only by a path held at `:monotonic`
+  (`placements-over`).
 
   `placed` is `[handles records]` of the antecedents the placement reads
   (`placement-antecedents`); `handles` is all of them, which a refusal records so its
   release computes the depth a fresh firing would."
-  [kb rule conseq handles placed all-antes links depth max-depth bindings]
+  [kb rule conseq handles placed all-antes links strict depth max-depth bindings]
   (let [[phs facts]          placed
         subs                 (when (seq links) (set links))
         fact-ctxs            (map :context facts)
-        [placements support] (placement-ingredients kb rule links phs fact-ctxs)]
+        [placements support] (placement-ingredients kb rule links phs fact-ctxs strict)]
     (if (empty? placements)
       ;; The join completed — every antecedent matched — and then the conclusion
       ;; evaporated: no context sees everything the firing rests on (sibling
@@ -4181,9 +4219,13 @@
                                                   (when (< i (count facts))
                                                     (if (= h (nth handles i)) (nth facts i) (recur (inc i))))))
                               links     (subsumption-links kb matched record-of)
+                              ;; a negated antecedent's links read an edge's contrapositive
+                              strict    (when (seq links)
+                                          (not-empty (set (subsumption-links kb (filterv #(vector? (first %)) matched)
+                                                                             record-of))))
                               rule      (cond-> rule (some declaration-record? facts) (assoc :inherited? true))]
                           (reduce (fn [acc c]
-                                    (into acc (place-conseq kb rule c handles placed all-antes links
+                                    (into acc (place-conseq kb rule c handles placed all-antes links strict
                                                             depth max-depth bindings)))
                                   [] conjuncts)))]
         ;; a firing is the finest unit of work the fixpoint has, so it is where a long
