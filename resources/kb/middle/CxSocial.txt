@@ -97,7 +97,12 @@
 ;; people who dwell in the same one are roommates by the rule below.
 
 (comment dwelling
-         "A residential unit: a house, an apartment, a room. Not a city or a country.")
+         "A residential unit.")
+(positiveExampleComment dwelling "a house")
+(positiveExampleComment dwelling "an apartment")
+(positiveExampleComment dwelling "a room")
+(negativeExampleComment dwelling "a city")
+(negativeExampleComment dwelling "a country")
 (genl dwelling container)
 (disjoint dwelling clothing)
 (disjoint dwelling furniture)

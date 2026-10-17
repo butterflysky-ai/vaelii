@@ -19,63 +19,104 @@
 ;; ---- the computing kinds: the types the relations below are typed over ----
 ;; A software_tool is software that performs one bounded operation per invocation. It
 ;; has no mass, so it is placed under computational_system, which is intangible.
-(comment computational_system "Software that computes when it runs, e.g. an interpreter, a database server, a running web service. The hardware that runs a computational system is a separate thing and is not a computational system.")
+(comment computational_system "Software that computes when it runs.")
+(positiveExampleComment computational_system "a running Python interpreter")
+(positiveExampleComment computational_system "a running database server process")
+(positiveExampleComment computational_system "a running web service")
+(negativeExampleComment computational_system "the hardware that runs a computational system, which is a separate thing")
 (genl computational_system intangible)
 ;; A computational system is not something that happens, and is not a form the KB
 ;; represents.
 (disjoint computational_system event)
 (disjoint computational_system expression)
 
-(comment software_tool "A computational system that performs one bounded operation each time an agent invokes it, e.g. a command-line program, a Model Context Protocol tool, a web API endpoint.")
+(comment software_tool "A computational system that performs one bounded operation each time an agent invokes it.")
+(positiveExampleComment software_tool "a command-line program")
+(positiveExampleComment software_tool "a Model Context Protocol tool")
+(positiveExampleComment software_tool "a web API endpoint")
 (genl software_tool computational_system)
 
-(comment command_line_tool "A software tool invoked by a command line that a shell runs, e.g. a text-search program, a file-copy program.")
+(comment command_line_tool "A software tool invoked by a command line that a shell runs.")
+(positiveExampleComment command_line_tool "a text-search program")
+(positiveExampleComment command_line_tool "a file-copy program")
 (genl command_line_tool software_tool)
 
-(comment mcp_tool "A software tool that a Model Context Protocol server lists and runs on request, e.g. a file-reading tool, a calendar-lookup tool.")
+(comment mcp_tool "A software tool that a Model Context Protocol server lists and runs on request.")
+(positiveExampleComment mcp_tool "a file-reading MCP tool")
+(positiveExampleComment mcp_tool "a calendar-lookup MCP tool")
 (genl mcp_tool software_tool)
 
 ;; The edges to acausal and causal separate the two kinds below, through core.txt's
 ;; (partition thing causal acausal), so no disjoint is stated between them.
-(comment read_only_software_tool "A software tool whose invocation reads state and changes none, e.g. a text search, a directory listing, a DNS lookup.")
+(comment read_only_software_tool "A software tool whose invocation reads state and changes none.")
+(positiveExampleComment read_only_software_tool "a text-search tool")
+(positiveExampleComment read_only_software_tool "a directory-listing tool")
+(positiveExampleComment read_only_software_tool "a DNS-lookup tool")
 (genl read_only_software_tool software_tool)
 (genl read_only_software_tool acausal)
 
-(comment write_capable_software_tool "A software tool whose invocation can change state outside the invocation, e.g. a file deletion, a message send, a database update.")
+(comment write_capable_software_tool "A software tool whose invocation can change state outside the invocation.")
+(positiveExampleComment write_capable_software_tool "a file-deletion tool")
+(positiveExampleComment write_capable_software_tool "a message-sending tool")
+(positiveExampleComment write_capable_software_tool "a database-update tool")
 (genl write_capable_software_tool software_tool)
 (genl write_capable_software_tool causal)
 
-(comment information_bearing_thing "Information as carried, apart from the medium that holds it, e.g. the text of a document, a recording, the content of a file. The paper or the disk is a separate thing and is not an information-bearing thing. A reading of the information can be a cause where the information is not.")
+(comment information_bearing_thing "Information as carried, apart from the medium that holds it. A reading of the information can be a cause where the information is not.")
+(positiveExampleComment information_bearing_thing "the text of a document")
+(positiveExampleComment information_bearing_thing "a recording")
+(positiveExampleComment information_bearing_thing "the content of a file")
+(negativeExampleComment information_bearing_thing "the paper or the disk that holds the information, which is a separate thing")
 (genl information_bearing_thing intangible)
 (genl information_bearing_thing acausal)
 
-(comment digital_artifact "An information-bearing thing encoded as bits, e.g. a file, a byte stream, a web page.")
+(comment digital_artifact "An information-bearing thing encoded as bits.")
+(positiveExampleComment digital_artifact "a file")
+(positiveExampleComment digital_artifact "a byte stream")
+(positiveExampleComment digital_artifact "a web page")
 (genl digital_artifact information_bearing_thing)
 
-(comment media_resource "A digital artifact retrievable over a network at a URL, e.g. a hosted photograph, a streamed film, the audio file of a podcast episode.")
+(comment media_resource "A digital artifact retrievable over a network at a URL.")
+(positiveExampleComment media_resource "a hosted photograph")
+(positiveExampleComment media_resource "a streamed film")
+(positiveExampleComment media_resource "the audio file of a podcast episode")
 (genl media_resource digital_artifact)
 
-(comment image "A media resource holding a static visual representation, e.g. a photograph, a diagram, a scanned page.")
+(comment image "A media resource holding a static visual representation.")
+(positiveExampleComment image "a photograph")
+(positiveExampleComment image "a diagram")
+(positiveExampleComment image "a scanned page")
 (genl image media_resource)
 
-(comment video "A media resource holding moving images, with or without audio, e.g. a film clip, a screen recording.")
+(comment video "A media resource holding moving images, with or without audio.")
+(positiveExampleComment video "a film clip")
+(positiveExampleComment video "a screen recording")
 (genl video media_resource)
 ;; A media resource can be neither an image nor a video, so the pair is a disjoint and
 ;; not a partition of media_resource.
 (disjoint image video)
 
-(comment tool_invocation "An event in which an agent calls a software tool with arguments and receives a result, e.g. one run of a text-search command, one request to a web API endpoint.")
+(comment tool_invocation "An event in which an agent calls a software tool with arguments and receives a result.")
+(positiveExampleComment tool_invocation "one run of a text-search command")
+(positiveExampleComment tool_invocation "one request to a web API endpoint")
 (genl tool_invocation event)
 
-(comment tool_receipt "An attributed record that a tool invocation produced: what the tool returned, as evidence of the call, e.g. the captured output of one command run, the response to one web API request. A sentence a receipt reports holds in the KB only where a separate assertion states it.")
+(comment tool_receipt "An attributed record that a tool invocation produced: what the tool returned, as evidence of the call. A sentence a receipt reports holds in the KB only where a separate assertion states it.")
+(positiveExampleComment tool_receipt "the captured output of one command run")
+(positiveExampleComment tool_receipt "the response to one web API request")
 (genl tool_receipt acausal_event)
 (disjoint tool_receipt tool_invocation)
 
-(comment ip_address "A string denoting an Internet Protocol network address, e.g. 192.0.2.1, 2001:db8::1. A host name is not an IP address.")
+(comment ip_address "A string denoting an Internet Protocol network address.")
+(positiveExampleComment ip_address "192.0.2.1")
+(positiveExampleComment ip_address "2001:db8::1")
+(negativeExample ip_address (Quote (ip_address "example.org")))
 (genl ip_address string)
 
-(comment ipv4_address "A string denoting a 32-bit Internet Protocol version 4 address, e.g. 192.0.2.1.")
-(comment ipv6_address "A string denoting a 128-bit Internet Protocol version 6 address, e.g. 2001:db8::1.")
+(comment ipv4_address "A string denoting a 32-bit Internet Protocol version 4 address.")
+(positiveExampleComment ipv4_address "192.0.2.1")
+(comment ipv6_address "A string denoting a 128-bit Internet Protocol version 6 address.")
+(positiveExampleComment ipv6_address "2001:db8::1")
 ;; Every IP address is of one version or the other. The partition installs both genl
 ;; edges to ip_address and separates the two parts.
 (partition ip_address ipv4_address ipv6_address)
@@ -137,7 +178,8 @@
 (arg receipt 2 tool_receipt)
 
 ;; ---- name resolution -----------------------------------------------------
-(comment dnsResolvesTo "(dnsResolvesTo ?name ?address) means that DNS resolves the host name ?name to the address ?address, under the resolver in effect where the fact is stated, e.g. example.org resolved to 192.0.2.1. One name can resolve to several addresses.")
+(comment dnsResolvesTo "(dnsResolvesTo ?name ?address) means that DNS resolves the host name ?name to the address ?address, under the resolver in effect where the fact is stated. One name can resolve to several addresses.")
+(positiveExampleComment dnsResolvesTo "example.org resolved to 192.0.2.1")
 (binary_predicate dnsResolvesTo)
 (set/monotonic (instance_relation_predicate dnsResolvesTo))
 (quotedArg dnsResolvesTo 1 string)

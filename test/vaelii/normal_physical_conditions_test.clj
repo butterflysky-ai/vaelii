@@ -6,12 +6,12 @@
   theory, so the everyday contexts below CxWell assume no temperature, and a user's own
   context opts in by placing itself under CxNormalPhysicalConditions.
 
-  Stone, wood and glass are solid there through `genl` edges.  A metal is solid there by
-  default, through a `set/defaultRule` whose `exceptWhen` names mercury, so a metal the KB
-  says nothing more about comes out solid and a portion of mercury comes out liquid and
-  not solid.  None of these states holds in a context that does not see the theory: a
-  stone is solid at room temperature, and the upper ontology says nothing about the
-  temperature."
+  Stone, wood and glass are solid there through `genl` edges.  `metal_stuff` is solid
+  there by default, through a `set/defaultRule` whose `exceptWhen` names mercury, so a
+  metal the KB says nothing more about comes out solid and a portion of mercury comes
+  out liquid and not solid.  None of these states holds in a context that does not see
+  the theory: a stone is solid at room temperature, and the upper ontology says nothing
+  about the temperature."
   (:require [clojure.test :refer [is testing use-fixtures]]
             [vaelii.core :as v]
             [vaelii.test-util :as tu]))
@@ -46,13 +46,13 @@
   ;; there are not solid there.
   (tu/with-terms [Boulder Ingot]
     (v/assert kb (list 'stone Boulder) 'CxWell)
-    (v/assert kb (list 'metal Ingot) 'CxWell)
+    (v/assert kb (list 'metal_stuff Ingot) 'CxWell)
     (is (not (holds-isa Boulder 'solid 'CxWell)))
     (is (not (holds-ask (list 'solid Ingot) 'CxWell)))
     (is (not (holds-isa Ingot 'solid 'CxWell)))))
 
-(tu/deftest-kb mercury-is-a-first-order-kind-of-metal
-  (is (holds-genl 'mercury 'metal 'CxUniverse))
+(tu/deftest-kb mercury-is-a-first-order-kind-of-metal-stuff
+  (is (holds-genl 'mercury 'metal_stuff 'CxUniverse))
   (is (holds-ask '(type mercury) 'CxUniverse))
   (is (seq (v/sentexes-matching kb '(comment mercury ?c) 'CxUniverse))))
 
@@ -80,7 +80,7 @@
         (is (holds-genl t 'solid NPC))
         (is (not (holds-genl t 'solid 'CxUniverse)))))))
 
-(tu/deftest-kb a-metal-is-solid-by-default-and-mercury-is-the-exception
+(tu/deftest-kb metal-stuff-is-solid-by-default-and-mercury-is-the-exception
   (tu/with-terms [CxStuff CxRoom CxElsewhere Nail Droplet]
     (v/assert kb (list 'genlCx CxStuff 'CxUniverse) 'CxUniverse)
     (v/assert kb (list 'genlCx CxRoom CxStuff) 'CxUniverse)
@@ -88,7 +88,7 @@
     (v/assert kb (list 'genlCx CxRoom NPC) 'CxUniverse)
     (v/assert kb (list 'genlCx CxElsewhere CxStuff) 'CxUniverse)
     (v/assert kb (list 'genlCx CxElsewhere 'CxWell) 'CxUniverse)
-    (v/assert kb (list 'metal Nail) CxStuff)
+    (v/assert kb (list 'metal_stuff Nail) CxStuff)
     (v/assert kb (list 'mercury Droplet) CxStuff)
     (testing "a metal the KB says nothing more about is solid in a user context under the theory"
       (is (holds-ask (list 'solid Nail) CxRoom))
@@ -99,14 +99,14 @@
         (is (= :default (v/defeat-class kb h)))))
     (testing "mercury is liquid and is not concluded solid"
       (is (holds-isa Droplet 'liquid CxRoom))
-      (is (holds-isa Droplet 'metal CxRoom))
+      (is (holds-isa Droplet 'metal_stuff CxRoom))
       (is (not (holds-ask (list 'solid Droplet) CxRoom)))
       (is (not (holds-isa Droplet 'solid CxRoom)))
       (is (= :excepted (:reason (v/why-not kb (list 'solid Droplet) CxRoom)))
           "the rule applied and its exception held"))
     (testing "no clash is reported"
       (is (not (in-clash? kb (list 'mercury Droplet) CxStuff)))
-      (is (not (in-clash? kb (list 'metal Nail) CxStuff)))
+      (is (not (in-clash? kb (list 'metal_stuff Nail) CxStuff)))
       (is (empty? (filter #(some #{Droplet Nail} (flatten (map :sentence (:sides %))))
                           (concat (v/contradictions kb) (v/conflicts kb))))))
     (testing "a context that does not see the theory concludes no state"

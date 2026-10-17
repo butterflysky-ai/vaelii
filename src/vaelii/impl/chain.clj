@@ -4160,7 +4160,7 @@
             ;; a ground `(Quasiquote T)` in the fired head constructs its `(Quote E)`
             ;; mention here, and the placement's reify pass (`reify-conclusion`) mints
             ;; it — a no-op unless quasiquotation is declared
-            ;; (`quasiquote/any-quasiquote?`, the `(quoting_function Quasiquote)` gate)
+            ;; (`quasiquote/any-quasiquote?`, the `(unreifiable_function Quasiquote)` gate)
             raw       (quasiquote/maybe-reduce kb raw)
             ;; the matched records, fetched once: placement reads their contexts, and
             ;; the subsumption links read their antecedent keys

@@ -538,7 +538,7 @@ The flat-cache reads (`has-prop?`, `inverse-of`, `inverses-under`, `props-over`,
 of their name. With a concrete context they read the declarations that context believes;
 with none, nil or a `?var` they read every declaration the cache holds, including one a
 `defeat` or an `except` hides from every reader.
-`props`, `commuting-groups`, `quoting-function?` and `mention-marks` have no scoped arity,
+`props`, `commuting-groups` and `mention-marks` have no scoped arity,
 and a call to one is unscoped unless it is the argument of `seq`, `empty?` or `not-empty`,
 a test of whether the KB declares the mark anywhere.
 

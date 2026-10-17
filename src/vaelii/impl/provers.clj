@@ -1158,53 +1158,49 @@
      wff_expression ill_formed_expression open_expression closed_expression})
 
 (defn- quoted-form
-  "`[F x handles]` when the term `q` is a quoted form: `(F x)` with `F` a
-  `quoting_function`, handles empty, or a reified constant whose `termOfUnit`, visible
-  from `context`, is one, handles that statement.  Else nil.  The mark is read unscoped,
-  as `checks` reads it: whether an argument is a mention is a fact about the sentence
-  (`tax/mention-marks`).  A reified constant is a symbol in the `nat` namespace
-  (`nat/reified-nat-symbol?`, which this namespace sits below)."
+  "`[F x handles]` when the term `q` is a quoted form: `(F x)` with `F` a quoting function
+  (`sx/quoting-functors`), handles empty, or a reified constant whose `termOfUnit`,
+  visible from `context`, is one, handles that statement.  Else nil.  A reified constant
+  is a symbol in the `nat` namespace (`nat/reified-nat-symbol?`, which this namespace sits
+  below)."
   [kb q context]
-  (let [quoting? #(tax/quoting-function? (reasoning/taxonomy kb) %)]
-    (cond
-      (and (sequential? q) (= 2 (count q)) (quoting? (first q)))
-      [(first q) (second q) []]
+  (cond
+    (and (sequential? q) (= 2 (count q)) (sx/quoting-functor? (first q)))
+    [(first q) (second q) []]
 
-      (and (symbol? q) (= "nat" (namespace q)))
-      (some->> (res/matches-visible kb (list 'termOfUnit q '?e) context)
-               (keep (fn [[h b]]
-                       (let [e (get b '?e)]
-                         (when (and (sequential? e) (= 2 (count e)) (quoting? (first e)))
-                           [(first e) (second e) [h]]))))
-               seq
-               (nm/min-by-content-key #(nth % 1))))))
+    (and (symbol? q) (= "nat" (namespace q)))
+    (some->> (res/matches-visible kb (list 'termOfUnit q '?e) context)
+             (keep (fn [[h b]]
+                     (let [e (get b '?e)]
+                       (when (and (sequential? e) (= 2 (count e)) (sx/quoting-functor? (first e)))
+                         [(first e) (second e) [h]]))))
+             seq
+             (nm/min-by-content-key #(nth % 1)))))
 
 (defn- expression-kind-goal?
   "Is `goal` `(k q)`, `k` a ground type below `expression` from `context` and `q` a
-  quoted form (`quoted-form`)?  The mark is read unscoped, as `quoted-form` reads it."
+  quoted form (`quoted-form`)?"
   [kb goal context]
   (let [tax (reasoning/taxonomy kb)
         q   (when (and (sequential? goal) (= 2 (count goal))) (second goal))]
     ;; the spelling tests run first: every membership goal reaches this
     (and (some? q) (symbol? (first goal)) (not (sx/variable? (first goal)))
-         (or (and (sequential? q) (= 2 (count q)) (tax/quoting-function? tax (first q)))
+         (or (and (sequential? q) (= 2 (count q)) (sx/quoting-functor? (first q)))
              (and (symbol? q) (= "nat" (namespace q))))
          (tax/genl? tax (first goal) 'expression context)
          (some? (quoted-form kb q context)))))
 
 (defn- expression-kind-support
   "The handles `(k q)` rests on, as a vector, or nil when no kind of the form `q` quotes
-  reaches `k` from `context`: every `(quoting_function F)` statement, the `termOfUnit`
-  statement when `q` is a reified constant, then one `genl` path from the first kind of
-  the form, in name order, that reaches `k`."
+  reaches `k` from `context`: the `termOfUnit` statement when `q` is a reified constant,
+  then one `genl` path from the first kind of the form, in name order, that reaches `k`.
+  The quoting function itself is fixed by the engine and rests on no statement."
   [kb [k q] context]
   (let [tax (reasoning/taxonomy kb)]
-    (when-let [[f x hs] (quoted-form kb q context)]
+    (when-let [[_ x hs] (quoted-form kb q context)]
       (some (fn [s]
               (when-let [path (tax/reach-support tax :genl s k context)]
-                (-> (vec (sort (tax/prop-supporters tax :quoting f)))
-                    (into hs)
-                    (into (map first) path))))
+                (into hs (map first) path)))
             (sort-by nm/name-key (shape-kinds x))))))
 
 (defrecord EvaluableProver []                    ; arithmetic comparison, EDN-kind + string-shape check
@@ -1573,9 +1569,8 @@
     (if (expression-kind-support kb goal context) [{}] []))
   SupportingProver
   (support-functors [_] expression-kind-predicates)
-  ;; the lattice reaches a kind through `genl` edges and the rosters that install them,
-  ;; and the quoted form is one only through its function's `quoting_function` mark
-  (support-sources  [_] (conj tax/edge-installing-functors 'quoting_function))
+  ;; the lattice reaches a kind through `genl` edges and the rosters that install them
+  (support-sources  [_] tax/edge-installing-functors)
   (solve-with-support [_ kb goal context]
     (if-let [sup (expression-kind-support kb goal context)] [[{} sup]] [])))
 

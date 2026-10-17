@@ -7470,13 +7470,6 @@
     ;; replaced by `function-decl-problems`.
     'reifiable_function   (assoc (reifiable-entry) :wff wff/function-decl-problems)
     'unreifiable_function (assoc (prop-entry 'unreifiable_function) :wff wff/function-decl-problems)
-    ;; `(quoting_function F)` marks `:quoting`: F's arguments are a **mention**, held
-    ;; opaque to *identity* congruence — `res/representative-term` rewrites them by
-    ;; spelling (`rewriteOf`) only, never by a `sameAs`/`equals` merge — so a quoted term
-    ;; does not fold onto its referent's class.  Orthogonal to `:reifiable` /
-    ;; `:unreifiable` (it governs argument opacity, not whether the application is
-    ;; minted): `Quote` is reifiable + quoting, `Quasiquote` is unreifiable + quoting.
-    'quoting_function     (assoc (prop-entry 'quoting_function)     :wff wff/function-decl-problems)
     ;; `(contextArgSubrelation F pos R)` declares the structural genlCx ordering: two
     ;; `F`-contexts identical except at argument `pos` are ordered by sub-relation `R` on
     ;; that arg, so the producer materializes `(genlCx sub super)` when `R` holds

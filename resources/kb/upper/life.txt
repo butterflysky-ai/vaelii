@@ -147,7 +147,8 @@
 (set/monotonic (transitive olderThan))
 
 (comment parentOf
-         "(parentOf ?parent ?child) means that ?parent is a biological parent of ?child. Both arguments are individual organisms — a plant or a bacterium has a parent as an animal does — and step- or adoptive parenthood is not this predicate. The primitive of the kinship theory: childOf, siblingOf, grandparentOf and ancestorOf are all read off it rather than asserted beside it.")
+         "(parentOf ?parent ?child) means that ?parent is a biological parent of ?child. Both arguments are individual organisms: a plant or a bacterium has a parent as an animal does. The primitive of the kinship theory: childOf, siblingOf, grandparentOf and ancestorOf are all read off it rather than asserted beside it.")
+(negativeExampleComment parentOf "a step-parent or an adoptive parent of ?child")
 (binary_predicate parentOf)
 (set/monotonic (instance_relation_predicate parentOf))
 (arg parentOf 1 organism)

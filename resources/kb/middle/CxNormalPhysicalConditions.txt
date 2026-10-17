@@ -23,11 +23,11 @@
 ;; ---- the liquid metal ---------------------------------------------------
 (genl mercury liquid)
 
-;; ---- a metal is solid, by default ---------------------------------------
+;; ---- metal_stuff is solid, by default -----------------------------------
 ;; A default rule with its exception rather than a genl edge per known metal: a metal
 ;; newly found, hypothesized or made up comes out solid unless the KB says otherwise.
 ;; Mercury is the stated exception. The rule concludes no solid membership for a portion
 ;; of mercury, so the portion's liquid membership meets no solid one and nothing clashes.
 ;; See docs/exceptions.md.
 (exceptWhen (mercury ?x)
-  (set/defaultRule (set/forwardRule (implies (and (metal ?x)) (solid ?x)))))
+  (set/defaultRule (set/forwardRule (implies (and (metal_stuff ?x)) (solid ?x)))))

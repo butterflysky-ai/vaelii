@@ -1147,7 +1147,7 @@
             "and believed again once nothing normalizes it")))))
 
 ;; DECISION (regression): the equality relations relate NAMES — their arguments are
-;; mentions, like a quoting_function's — so a merge must not rewrite a denial OF the merge
+;; mentions, like a quoting function's — so a merge must not rewrite a denial OF the merge
 ;; into the vacuous `(not (sameAs A A))`.  Without that, a monotonic denial of a default
 ;; merge was silently superseded and the merge stood (docs/equality.md, the flagged case).
 

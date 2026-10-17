@@ -2775,8 +2775,28 @@
 
 (def quote-functor
   "The quoting function whose argument is a form taken as syntax: `(Quote X)` mentions X.
-  The same symbol as `quasiquote/quote-function`, which this namespace cannot require."
+  `quasiquote/quote-function` is this symbol."
   'Quote)
+
+(def quasiquote-functor
+  "The template-constructing quoting function: `(Quasiquote T)` mentions T with its
+  `(Unquote v)` holes spliced.  `quasiquote/quasiquote-function` is this symbol."
+  'Quasiquote)
+
+(def quoting-functors
+  "The quoting functions — `Quote` and `Quasiquote`, fixed by the engine.  A quoting
+  function's arguments are a **mention**, a term named as syntax rather than used: they are
+  held opaque to identity congruence (`res/representative-term` rewrites them by a
+  `rewriteOf` spelling rename only, never by a `sameAs` / `equals` merge), not reified on
+  their own when the application is (`nat/reify-or-mint-nat`), and not typed by what they
+  denote (`checks`).  The set is not declared in the KB and no assertion changes it, so
+  whether an argument is a mention is a fact about the sentence alone."
+  #{quote-functor quasiquote-functor})
+
+(defn quoting-functor?
+  "Is `head` one of the `quoting-functors`?"
+  [head]
+  (contains? quoting-functors head))
 
 (defn quote-form?
   "Is `form` a `(Quote X)` mention?  `unquoted-free-vars`, `res/unify`, `res/substitute`

@@ -4,7 +4,10 @@
 ;; doneBy/performedBy and input/output, and the two type-level relations
 ;; largerThan/partType. Loaded into CxUniverse with the rest of kb/upper/.
 
-(comment body_part "A part an organism grew — a wing, a heart, a leaf. It stays a body part once transplanted into another organism or shed from its own.")
+(comment body_part "A part an organism grew. It stays a body part once transplanted into another organism or shed from its own.")
+(positiveExampleComment body_part "a wing")
+(positiveExampleComment body_part "a heart")
+(positiveExampleComment body_part "a leaf")
 ;; An organism and a part it grew are both biological and never the same thing; nothing
 ;; says every biological thing is one of the two.  The roster installs each part's genl
 ;; edge to biological; core.txt states organism's as a sentence too.
@@ -39,11 +42,27 @@
 (comment clothing "An artifact worn on the body.")
 (genl clothing made)
 
-(comment container "A made thing whose function is to hold other objects in its interior: a cup, a box, a bag, a building. Every container is made and hollow.")
+(comment container "A made thing whose function is to hold other objects in its interior. Every container is made and hollow.")
+(positiveExampleComment container "a cup")
+(positiveExampleComment container "a box")
+(positiveExampleComment container "a bag")
+(positiveExampleComment container "a building")
 (genl container made)
 (genl container hollow)
 
 (comment context "A context: the second half of a sentex, and what a sentence holds in.")
+
+(comment electronic_device "A mechanism built around an electronic circuit: the circuit and the parts that carry it make up the whole object. An organism with an implanted circuit contains an electronic device but is not one. Defined by how it is built, not by what it does, so it is rigid: a dead phone or an unplugged board is still one.")
+(positiveExampleComment electronic_device "a phone")
+(positiveExampleComment electronic_device "a router")
+(positiveExampleComment electronic_device "a computer")
+(positiveExampleComment electronic_device "a bare circuit board")
+(positiveExampleComment electronic_device "a dead phone")
+(positiveExampleComment electronic_device "an unplugged board")
+(genl electronic_device made)
+(genl electronic_device mechanism)
+(set/monotonic (orthogonal electronic_device machine))
+(comment (orthogonal electronic_device machine) "A fan-cooled desktop computer is both, a wind-up clock is a machine but not electronic, and a single-board computer is electronic but not a machine.")
 
 (comment feather "A light keratin body part covering a bird.")
 (genl feather body_part)
@@ -53,7 +72,12 @@
 
 (comment food "A physical object eaten by an animal for nourishment.")
 
-(comment formation "A natural tangible whose form came from physical processes, neither grown nor made: a rock, a crystal, a river, a star, a dune.")
+(comment formation "A natural tangible whose form came from physical processes, neither grown nor made.")
+(positiveExampleComment formation "a rock")
+(positiveExampleComment formation "a crystal")
+(positiveExampleComment formation "a river")
+(positiveExampleComment formation "a star")
+(positiveExampleComment formation "a dune")
 (genl formation natural)
 ;; Nothing grown is a formation.  The roster also installs (genl formation tangible), and
 ;; formation's edge to natural derives the same edge.
@@ -62,13 +86,25 @@
 (comment fur "The hair covering a mammal.")
 (genl fur body_part)
 
-(comment furniture "An artifact for use in a room — a chair, a table, a bed.")
+(comment furniture "An artifact for use in a room.")
+(positiveExampleComment furniture "a chair")
+(positiveExampleComment furniture "a table")
+(positiveExampleComment furniture "a bed")
 (genl furniture made)
 
 (comment glass_stuff "A hard, brittle, transparent substance.")
 (genl glass_stuff substance)
 
-(comment hollow "Has, at that time, an interior space that other things can occupy: a cup, a box, a building, a cave, a pitcher plant, a cupped hand. A solid Rubik's cube or an empty clenched fist is not hollow. A thing can stop being hollow and still exist: a box crushed flat stops being hollow, and a hand is hollow only while it is cupped. What a thing is shaped like, not what it is for, and a container is one kind of made hollow thing. Spatiotemporal rather than tangible, since a cave is a space in rock and is made of nothing.")
+(comment hollow "Has, at that time, an interior space that other things can occupy. A thing can stop being hollow and still exist: a box crushed flat stops being hollow, and a hand is hollow only while it is cupped. What a thing is shaped like, not what it is for, and a container is one kind of made hollow thing. Spatiotemporal rather than tangible, since a cave is a space in rock and is made of nothing.")
+(positiveExampleComment hollow "a cup")
+(positiveExampleComment hollow "a box")
+(positiveExampleComment hollow "a building")
+(positiveExampleComment hollow "a cave")
+(positiveExampleComment hollow "a pitcher plant")
+(positiveExampleComment hollow "a cupped hand")
+(negativeExampleComment hollow "a solid Rubik's cube")
+(negativeExampleComment hollow "an empty clenched fist")
+(negativeExampleComment hollow "a box crushed flat")
 (genl hollow spatiotemporal)
 ;; A cup is hollow and made, a pitcher plant hollow and alive, a cupped hand hollow and a
 ;; part an organism grew; a bread bowl is hollow and food.  Stuff has no interior of its own.
@@ -111,14 +147,36 @@
 (arg locatedIn 2 tangible)
 (set/monotonic (transitive locatedIn))
 
-(comment machine "An artifact with moving parts that does work under power.")
+(comment machine "A mechanism with parts that move relative to each other, driven by an energy source. Defined by its parts, not its use, so a stopped clock is still one.")
+(positiveExampleComment machine "a wind-up clock")
+(positiveExampleComment machine "a car engine")
+(positiveExampleComment machine "a hand-cranked pencil sharpener")
+(positiveExampleComment machine "a stopped clock")
 (genl machine made)
+(genl machine mechanism)
 
-(comment made "A tangible shaped by an agent's action, or by something made: a chair, a widget from a factory machine, steel, sawdust, a footprint, a beaver's dam, a cloned sheep. Contrast natural.")
+(comment made "A tangible shaped by an agent's action, or by something made. Contrast natural.")
+(positiveExampleComment made "a chair")
+(positiveExampleComment made "a widget from a factory machine")
+(positiveExampleComment made "steel")
+(positiveExampleComment made "sawdust")
+(positiveExampleComment made "a footprint")
+(positiveExampleComment made "a beaver's dam")
+(positiveExampleComment made "a cloned sheep")
 ;; Every tangible is made or natural, and no tangible is both.  The partition installs
 ;; the genl edges from made and from natural to tangible, so neither edge is stated.  A
 ;; tangible denied made is concluded natural.
 (partition tangible made natural)
+
+(comment mechanism "A physical object whose parts, in their arrangement, set up a characteristic causal operation: mechanical coupling, electronic circuitry, or both. Defined by its construction, not its use or whether it is running, so a stopped clock or an unplugged board is still one. Most mechanisms are made, but not all: a juvenile Issus planthopper grows interlocking gears on its hind legs.")
+(positiveExampleComment mechanism "a wind-up clock")
+(positiveExampleComment mechanism "a phone")
+(positiveExampleComment mechanism "a fan-cooled desktop computer")
+(positiveExampleComment mechanism "a stopped clock")
+(positiveExampleComment mechanism "the hind-leg gears of a juvenile Issus planthopper")
+(negativeExampleComment mechanism "a cloned sheep")
+(negativeExampleComment mechanism "steel")
+(genl mechanism tangible)
 
 (comment madeOf
          "(madeOf ?object ?substance) means that ?object is made of ?substance. About one particular object and the stuff it is made of, so it is instance-level; what a whole kind is made of is a claim about that kind. Partial rather than exhaustive — a thing may be made of several substances, and saying it is made of one does not deny the others.")
@@ -127,22 +185,30 @@
 (arg madeOf 1 tangible)
 (arg madeOf 2 substance)
 
-(comment metal "A hard, dense, conducting substance — iron, copper, gold.")
-(genl metal substance)
+(comment metal_stuff "A hard, dense, conducting substance — iron, copper, gold.")
+(genl metal_stuff substance)
 
 (comment mercury "The metallic element quicksilver, as stuff: the metal in an old thermometer, a barometer or a dental amalgam. Mercury is liquid at ordinary room temperature and pressure. Mercury freezes at about -39 °C, so its state of matter depends on the temperature a context assumes.")
-(genl mercury metal)
+(genl mercury metal_stuff)
 ;; A portion of mercury is an individual, so mercury is a first-order `type`.  Mercury is
 ;; not a stuff_type_by_substance: that metatype separates its members, and mercury is
-;; below metal, one of them.
+;; below metal_stuff, one of them.
 (type mercury)
 
-(comment natural "A tangible whose form no living thing's action gave it: a wild sheep, a coral reef, a rock, a river, a star. Contrast made.")
+(comment natural "A tangible whose form no living thing's action gave it. Contrast made.")
+(positiveExampleComment natural "a wild sheep")
+(positiveExampleComment natural "a coral reef")
+(positiveExampleComment natural "a rock")
+(positiveExampleComment natural "a river")
+(positiveExampleComment natural "a star")
 ;; A wild sheep is natural and biological.  A cloned sheep is made and biological.  So
 ;; biological is orthogonal to made and to natural.
 (orthogonal biological natural)
 
-(comment organization "A group of people acting as one body — a company, a school, a team.")
+(comment organization "A group of people acting as one body.")
+(positiveExampleComment organization "a company")
+(positiveExampleComment organization "a school")
+(positiveExampleComment organization "a team")
 
 (comment partOf
          "(partOf ?part ?whole) means that ?part is a component of ?whole. Declared transitive, so a part of a part is a part and the chain is answered by the closure prover rather than stored. Structural parthood between physical objects — not membership in a collection, and not the spatial containment partOfRegion states of regions.")
@@ -189,24 +255,34 @@
 
 (comment time_point "A moment rather than a stretch — one of the two instants bounding an interval. What the point algebra relates, and what startOf and endOf reach from an interval.")
 
-(comment time_interval "A stretch of time as such, e.g. a year, a day, an hour — not something that happens in it. What the calendar constructors YearFn, MonthFn and DayFn name.")
+(comment time_interval "A stretch of time as such, not something that happens in it. What the calendar constructors YearFn, MonthFn and DayFn name.")
+(positiveExampleComment time_interval "the year 2024")
+(positiveExampleComment time_interval "Monday 14 October 2024")
+(positiveExampleComment time_interval "9–10 AM on 14 October 2024")
 
 ;; A time is not a state of affairs in it.
 (set/monotonic (disjoint time situation))
 
 ;; --- situation / uninterrupted_situation / static_situation / event ------------
 (comment situation "A state of affairs: objects bearing properties or relations over some time, with or without gaps. Parent of fluent (it holds) and happening (it happens), and of uninterrupted_situation (it has no gap). A situation is located in its region, not made of the matter in it, e.g. a boulder is an input to its rolling and not a part of it.")
+(positiveExampleComment situation "a boulder rolling, which the boulder is an input to and not a part of")
 
 (comment uninterrupted_situation "A situation with no gap in its time: the intersection of uninterrupted and situation. Parent of static_situation (the state holds unchanged) and event (the world's state changes); change is the specialization axis.")
 
-(comment static_situation "A situation extended in time but unchanged, a held state, e.g. a file existing: the intersection of uninterrupted and fluent. Contrast event, the kind whose state changes.")
+(comment static_situation "A situation extended in time but unchanged, a held state: the intersection of uninterrupted and fluent. Contrast event, the kind whose state changes.")
+(positiveExampleComment static_situation "a file existing")
 
 (comment event "Something that happens: an occurrence located in time, with no gap, whose state changes. The intersection of uninterrupted and happening. The event-calculus slots do not name it: happens takes a temporal thing, and initiates and terminates take a causal one.")
 ;; core.txt states (genl situation temporal), the partition of situation into fluent and
 ;; happening, and the intersections defining uninterrupted_situation, static_situation and
 ;; event.
 
-(comment spatial_event "An event located in some space: a battle, a smelting, a sawing, a footprint's step. An institutional change, such as a contract expiring, is an event located nowhere and is not a spatial event.")
+(comment spatial_event "An event located in some space.")
+(positiveExampleComment spatial_event "a battle")
+(positiveExampleComment spatial_event "a smelting")
+(positiveExampleComment spatial_event "a sawing")
+(positiveExampleComment spatial_event "a footprint's step")
+(negativeExampleComment spatial_event "a contract expiring, an institutional change located nowhere")
 (intersection spatial_event event spatial)
 ;; A spatial event is in some space and, as an event, in time, so it is spatiotemporal.
 ;; spatiotemporal is below spatial and temporal by genl edges and is no intersection, so
@@ -216,7 +292,11 @@
 ;; --- causal / acausal: whether a thing can occupy a cause slot -----------------
 (comment causal "A thing that can be a cause, i.e. can occupy the cause slot of a causal relation. A cause is in time, so causal is below temporal. One side of the causal/acausal division of thing.")
 
-(comment acausal "A thing that cannot be a cause: a time, a property line, an attribute, the information a record or piece of evidence carries (a reading of it can cause; the information itself causes nothing). The other side of the causal/acausal division of thing.")
+(comment acausal "A thing that cannot be a cause. The other side of the causal/acausal division of thing.")
+(positiveExampleComment acausal "the time 3 PM on 14 October 2024")
+(positiveExampleComment acausal "a property line")
+(positiveExampleComment acausal "an attribute")
+(positiveExampleComment acausal "the information a record or piece of evidence carries: a reading of it can cause, and the information itself causes nothing")
 
 ;; core.txt states (partition thing causal acausal), (genl causal temporal) and (genl
 ;; atemporal acausal).  The partition also makes causal_event and acausal_event disjoint,
@@ -236,7 +316,9 @@
 (comment causal_event "An event that is a cause: the intersection of causal and event.")
 (intersection causal_event causal event)
 
-(comment acausal_event "An event that is not a cause (an observation or receipt is one): the intersection of acausal and event.")
+(comment acausal_event "An event that is not a cause: the intersection of acausal and event.")
+(positiveExampleComment acausal_event "the act of observing")
+(positiveExampleComment acausal_event "the receiving of a message")
 (intersection acausal_event acausal event)
 
 ;; --- travelling / flying: event kinds an ability names ------------------------
@@ -250,7 +332,10 @@
 
 ;; --- causes: a causal thing brings a situation about ---------------------------
 (comment causes
-         "(causes ?cause ?effect) means that ?cause brings ?effect about: the flattery made the crow sing, the rock dented the car, the drought ruined the harvest. The cause is a causal thing: a causal event, a tangible or an organization. The effect is a situation: something that holds or happens, over any extent. Declared transitive, so a chain of causes is itself a cause and the chain is answered by the closure prover rather than stored.")
+         "(causes ?cause ?effect) means that ?cause brings ?effect about. The cause is a causal thing: a causal event, a tangible or an organization. The effect is a situation: something that holds or happens, over any extent. Declared transitive, so a chain of causes is itself a cause and the chain is answered by the closure prover rather than stored.")
+(positiveExampleComment causes "the flattery made the crow sing")
+(positiveExampleComment causes "the rock dented the car")
+(positiveExampleComment causes "the drought ruined the harvest")
 (set/monotonic (instance_relation_predicate causes))
 (arg causes 1 causal)
 (arg causes 2 situation)
@@ -283,13 +368,21 @@
 ;; of the wrong length only where binary_predicate is stated, and the genl edge from
 ;; instance_relation_predicate does not reach that check.  CxChange states when an input
 ;; and an output exist relative to their event, in time.txt's point relations.
-(comment input "(input ?event ?thing) means that ?thing went into ?event: the lettuce in a salad, the ore in smelting, the plank in sawing. An instrument the event used and left unchanged, like the knife or the saw, is not an input. Contrast output.")
+(comment input "(input ?event ?thing) means that ?thing went into ?event. An instrument the event used and left unchanged is not an input. Contrast output.")
+(positiveExampleComment input "the lettuce in a salad")
+(positiveExampleComment input "the ore in smelting")
+(positiveExampleComment input "the plank in sawing")
+(negativeExampleComment input "the knife or the saw, an instrument the event used and left unchanged")
 (binary_predicate input)
 (set/monotonic (instance_relation_predicate input))
 (arg input 1 event)
 (termsRelated input output)
 
-(comment destroyedInput "(destroyedInput ?event ?thing) means that ?thing went into ?event and ceased to exist there: the ore in smelting, the plank in sawing, the egg in an omelet. The lettuce in a salad is an input but not a destroyed one.")
+(comment destroyedInput "(destroyedInput ?event ?thing) means that ?thing went into ?event and ceased to exist there.")
+(positiveExampleComment destroyedInput "the ore in smelting")
+(positiveExampleComment destroyedInput "the plank in sawing")
+(positiveExampleComment destroyedInput "the egg in an omelet")
+(negativeExampleComment destroyedInput "the lettuce in a salad, an input but not a destroyed one")
 (binary_predicate destroyedInput)
 (set/monotonic (instance_relation_predicate destroyedInput))
 (arg destroyedInput 1 event)
@@ -304,13 +397,21 @@
 ;; state the disjointness, because a separation over two relations constrains no tuple.
 
 (comment output
-         "(output ?event ?thing) means that ?event gave ?thing the form or content it has, as something it left behind: a chair from its making, sawdust from sawing, a footprint from a step, a file from a program run. Whether that was the point of the event does not matter.")
+         "(output ?event ?thing) means that ?event gave ?thing the form or content it has, as something it left behind. Whether that was the point of the event does not matter.")
+(positiveExampleComment output "a chair from its making")
+(positiveExampleComment output "sawdust from sawing")
+(positiveExampleComment output "a footprint from a step")
+(positiveExampleComment output "a file from a program run")
 (binary_predicate output)
 (set/monotonic (instance_relation_predicate output))
 (arg output 1 event)
 
 (comment tangibleOutput
-         "(tangibleOutput ?event ?thing) means that ?thing is a tangible output of ?event: a chair from its making, steel from smelting, sawdust from sawing, a footprint from a step.")
+         "(tangibleOutput ?event ?thing) means that ?thing is a tangible output of ?event.")
+(positiveExampleComment tangibleOutput "a chair from its making")
+(positiveExampleComment tangibleOutput "steel from smelting")
+(positiveExampleComment tangibleOutput "sawdust from sawing")
+(positiveExampleComment tangibleOutput "a footprint from a step")
 (binary_predicate tangibleOutput)
 (set/monotonic (instance_relation_predicate tangibleOutput))
 (arg tangibleOutput 1 event)
@@ -318,7 +419,10 @@
 (genl tangibleOutput output)
 
 (comment intangibleOutput
-         "(intangibleOutput ?event ?thing) means that ?thing is an intangible output of ?event: a file from a program run, a receipt from a tool call, a recorded measurement from an observation.")
+         "(intangibleOutput ?event ?thing) means that ?thing is an intangible output of ?event.")
+(positiveExampleComment intangibleOutput "a file from a program run")
+(positiveExampleComment intangibleOutput "a receipt from a tool call")
+(positiveExampleComment intangibleOutput "a recorded measurement from an observation")
 (binary_predicate intangibleOutput)
 (set/monotonic (instance_relation_predicate intangibleOutput))
 (arg intangibleOutput 1 event)
@@ -335,8 +439,10 @@
 (comment vehicle "An artifact for transporting people or goods.")
 (genl vehicle made)
 
-(comment wing "A body part a bird or an insect flies with.")
+(comment wing "A body part an animal flies with, such as a bird's, a bat's or an insect's.")
 (genl wing body_part)
+(set/monotonic (disjoint wing fur))
+(comment (disjoint wing fur) "A bat's wing has fur on it: the fur is part of the wing, and nothing is both a wing and fur.")
 
 (comment wood "The fibrous substance a tree is made of.")
 (genl wood substance)
@@ -350,7 +456,7 @@
 (comment plasma "A substance in the plasma state of matter — an ionized gas.")
 (comment solid "A substance in the solid state of matter.")
 (comment stuff_type_by_state_of_matter "A disjoint_metatype classifying substances by physical state — solid, liquid, gas, plasma.")
-(comment stuff_type_by_substance "A disjoint_metatype classifying substances by material — wood, metal, glass_stuff, stone.")
+(comment stuff_type_by_substance "A disjoint_metatype classifying substances by material — wood, metal_stuff, glass_stuff, stone.")
 ;; Neither an organism nor a part it grew is stuff; stated once of biological, it reaches
 ;; both parts and every kind below them.
 (set/monotonic (disjoint biological substance))
@@ -359,11 +465,14 @@
 (set/monotonic (disjoint container organism))
 (set/monotonic (disjoint container person))
 (set/monotonic (disjoint container substance))
-;; An animal is never a building, a piece of clothing, a furniture or a machine.
+;; An animal is never a building, a piece of clothing or a furniture.
 (set/monotonic (disjoint animal building))
 (set/monotonic (disjoint animal clothing))
 (set/monotonic (disjoint animal furniture))
-(set/monotonic (disjoint animal machine))
+;; A mechanism is never an organism and never stuff. Stated once of mechanism, each
+;; reaches machine, electronic_device and every kind below them.
+(set/monotonic (disjoint mechanism organism))
+(set/monotonic (disjoint mechanism substance))
 ;; animal and vehicle are disjoint at the default strength rather than monotonic: a
 ;; fiction below CxWell may except the default and hold a term that is both. CxRealWorld
 ;; restates the same separation monotonic, so the real world can never hold the overlap.
@@ -388,7 +497,7 @@
 (stuff_type_by_state_of_matter plasma)
 (stuff_type_by_state_of_matter solid)
 (stuff_type_by_substance glass_stuff)
-(stuff_type_by_substance metal)
+(stuff_type_by_substance metal_stuff)
 (stuff_type_by_substance stone)
 (stuff_type_by_substance wood)
 

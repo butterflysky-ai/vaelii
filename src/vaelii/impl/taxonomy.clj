@@ -2666,7 +2666,7 @@
   "`term`'s representative considering only `rewriteOf` (spelling) edges — a `sameAs` /
   `equals` identity merge is **not** followed.  This is the mention read: a quoted term
   tracks a *spelling* rename of its symbol but not a *coreference* merge of its referent,
-  so `res/representative-term` uses it inside a `quoting_function`'s arguments.
+  so `res/representative-term` uses it inside a quoting function's arguments.
 
   The rewriteOf edges form their own sub-partition; the answer is the representative of
   `term`'s rewriteOf-connected component, elected by the same rule `class-rep` uses — a
@@ -5960,36 +5960,25 @@
                 (cache-entry-visible? tax [:prop kind pred] context)))))))
 (defn props "The set of predicates carrying property `kind`." [tax kind] (get (:props @tax) kind #{}))
 
-(defn quoting-function?
-  "Is `head` declared a `quoting_function`?  Its arguments are a **mention**, held opaque
-  to identity congruence (`res/representative-term` spelling mode)."
-  [tax head]
-  (and (symbol? head) (has-prop? tax :quoting head)))
-
 (defn mention-marks
-  "The two declarations that make a position a **mention** — a term named as syntax rather
-  than one the sentence refers with — as `{:quoting #{…} :modal #{…}}`, or **nil** when the
-  KB declares
-  neither.  Nil is the gate: `res/representative-term` then takes the ordinary
-  full-representative walk with no per-node check, and the sets are read once per walk
+  "The two kinds of head that make a position a **mention** — a term named as syntax rather
+  than one the sentence refers with — as `{:quoting #{…} :modal #{…}}`, read once per walk
   rather than a taxonomy deref per compound node.
 
-  A `quoting_function` quotes its arguments (`Quote`, `Quasiquote`).  A `modal_predicate`
-  quotes the **proposition** it attributes to its agent: an attitude is opaque, so the
-  merges the asker believes may not rewrite a term inside what somebody else holds true
-  (docs/belief.md).  Both are opaque to *identity* congruence and both follow a `rewriteOf`
-  *spelling* rename.
+  A quoting function quotes its arguments: `:quoting` is `sx/quoting-functors` (`Quote`,
+  `Quasiquote`), fixed by the engine.  A `modal_predicate` quotes the **proposition** it
+  attributes to its agent: an attitude is opaque, so the merges the asker believes may not
+  rewrite a term inside what somebody else holds true (docs/belief.md).  Both are opaque to
+  *identity* congruence and both follow a `rewriteOf` *spelling* rename.
 
-  Read **globally**, where `BeliefProjectionProver` reads the same `:modal` mark scoped
+  The `:modal` mark is read **globally**, where `BeliefProjectionProver` reads it scoped
   from the asking context.  The two questions differ: whether a belief *projects* is a
   policy of the context granting the marker, while whether an argument is a quotation is a
   fact about the sentence — and a reader-scoped answer to the second would migrate a stored
   belief for one context while holding it for another, after which neither could retrieve
   what the other had renamed.  Same reasoning as `kb-sentex`'s global symmetry read."
   [tax]
-  (let [q (props tax :quoting)
-        m (props tax :modal)]
-    (when (or (seq q) (seq m)) {:quoting q :modal m})))
+  {:quoting sx/quoting-functors :modal (props tax :modal)})
 
 (defn props-over
   "`p` and every **super-predicate** of it carrying property `kind` — anywhere, or (with

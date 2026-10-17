@@ -86,9 +86,9 @@ An entry names the alternative, says what the KB states instead, and gives the r
 
 ### Metal is solid by default, and mercury is the stated exception
 
-**Alternative:** state that every metal is solid, or leave metal's state of matter unstated.
+**Alternative:** state that every metal is solid, or leave `metal_stuff`'s state of matter unstated.
 
-**Instead:** in CxNormalPhysicalConditions, the states of matter at room temperature, metal is a `solid` by default, and mercury is the stated exception.
+**Instead:** in CxNormalPhysicalConditions, the states of matter at room temperature, `metal_stuff` is a `solid` by default, and mercury is the stated exception.
 
 **Why:** a monotonic "every metal is solid" is false, because mercury is liquid at room temperature. Leaving the state unstated gives up a conclusion that is right for almost every metal anyone will mention. A default states the common case, and the exception keeps the one known counterexample from contradicting it. The choice between a default and a list of the known solid metals turns on new cases: a newly discovered metal, a hypothesized one, or one in a fictional or counterfactual context should come out solid unless something says otherwise. A list would conclude nothing about any of them, so the default is the right form (**default or enumerate** in the principles).
 

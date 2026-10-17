@@ -669,13 +669,16 @@
   ;; ascending; then what a rule concludes about the term; then what a rule requires of
   ;; it; then the deeper nestings; then the extents, however small they happen to be here.
   (let [labels (group-labels (:body (GET "/term" "q=dog")))]
-    (is (= ["Argument position 1" "Argument position 2" "Predicate extent"] labels))
+    ;; `dog` is also mentioned inside a quoted example, (positiveExample folk_species
+    ;; (Quote (folk_species dog))), which the page lists among the deeper nestings
+    (is (= ["Argument position 1" "Argument position 2" "Nested elsewhere" "Predicate extent"]
+           labels))
     (is (= (count labels) (count (distinct labels))) "one heading per group"))
   (testing "a rule's two halves are two groups, the conclusion first"
     ;; `parentOf` is concluded about by one rule and read by others — what a rule *says*
     ;; about a term outranks what it needs of it
     (is (= ["Argument position 1" "Rule conclusion" "Rule condition"
-            "Predicate extent"]
+            "Nested elsewhere" "Predicate extent"]
            (group-labels (:body (GET "/term" "q=parentOf"))))))
   (testing "a term only ever read by a rule gets the condition group and not the other"
     (let [labels (group-labels (:body (GET "/term" "q=weightOf")))]

@@ -92,7 +92,9 @@
 ;; with (during B C) answers (during A C) and the weaker (subintervalOf A C) with it. The
 ;; prover is opt-in; the vocabulary is not. See docs/time.md.
 
-(comment fluent "A state of affairs that holds, over any extent: over some stretches of time and not others — a cat being asleep, a light being on. What an event starts and stops, and what holdsAt asks about at a moment. One of the two kinds of situation, with happening. See docs/time.md.")
+(comment fluent "A state of affairs that holds, over any extent: over some stretches of time and not others. What an event starts and stops, and what holdsAt asks about at a moment. One of the two kinds of situation, with happening. See docs/time.md.")
+(positiveExampleComment fluent "a cat being asleep")
+(positiveExampleComment fluent "a light being on")
 
 (comment happening "A situation that happens rather than holds, over any extent: the writing of a novel, a trial, a course of bedbug treatment, the Ramadan fast, a World Series. An uninterrupted happening is an event. One of the two kinds of situation, with fluent.")
 

@@ -1,13 +1,15 @@
 ;; SPDX-License-Identifier: SSPL-1.0
 ;; Copyright © 2026 Vaelii LLC and the Vaelii contributors.
 (ns vaelii.quote-test
-  "Mention opacity for a `quoting_function` (`Quote`) — docs/nat.md, docs/equality.md.
+  "Mention opacity for the quoting functions (`Quote`, `Quasiquote`) — docs/nat.md,
+  docs/equality.md.
 
   A `Quote` reified NAT names a term *as syntax*: `(cycl_constant (Quote Muffet))` reifies
   to `(cycl_constant K)`, an ordinary unary type membership on an opaque constant, reusing
-  the NAT machinery with no new engine support.  What `quoting_function` adds is opacity in
-  the equality congruence: a `rewriteOf` **spelling** rename reaches into the mention, but a
-  `sameAs` / `equals` **identity** merge of the referent does not fold the quoted term."
+  the NAT machinery.  Being a quoting function — fixed by the engine, never declared — adds
+  opacity in the equality congruence: a `rewriteOf` **spelling** rename reaches into the
+  mention, but a `sameAs` / `equals` **identity** merge of the referent does not fold the
+  quoted term."
   (:require [clojure.test :refer [deftest is testing use-fixtures]]
             [vaelii.core :as v]
             [vaelii.host.core-context :as core-context]
@@ -24,20 +26,28 @@
                                   (core-context/load-into))))
 (use-fixtures :each (tu/neutral))
 
+(def ^:private Quote
+  "The engine's `Quote`, a quoting function fixed by the engine — a stand-in term would
+  quote nothing."
+  sx/quote-functor)
+
+(def ^:private Quasiquote
+  "The engine's `Quasiquote`, the other quoting function."
+  sx/quasiquote-functor)
+
 (defn- declare-quote!
-  "Declare `Quote` a reifiable quoting function whose reified constants are `cycl_expression`
-  instances by default, with `cycl_constant` a subtype."
+  "Declare `Quote` reifiable, its reified constants `cycl_expression` instances by default,
+  with `cycl_constant` a subtype.  It quotes without any declaration."
   [kb Quote cycl_expression cycl_constant]
   (v/assert kb (list 'genl cycl_expression 'thing)        'CxUniverse)
   (v/assert kb (list 'genl cycl_constant cycl_expression) 'CxUniverse)
   (v/assert kb (list 'reifiable_function Quote)            'CxUniverse)
-  (v/assert kb (list 'quoting_function Quote)              'CxUniverse)
   (v/assert kb (list 'result Quote cycl_expression)    'CxUniverse))
 
 (defn- k-of [kb h] (second (:sentence (v/sentex kb h))))
 
 (tu/deftest-kb a-quoted-term-reifies-and-is-typed-as-syntax
-  (tu/with-terms [Quote Muffet cycl_expression cycl_constant]
+  (tu/with-terms [Muffet cycl_expression cycl_constant]
     (declare-quote! kb Quote cycl_expression cycl_constant)
     (let [h (v/assert kb (list cycl_constant (list Quote Muffet)) 'CxUniverse)
           k (k-of kb h)]
@@ -52,9 +62,8 @@
 ;; and expression is disjoint from relation, so no term is both a symbol and a predicate.
 
 (tu/deftest-kb a-symbol-is-a-mention-and-no-predicate
-  (tu/with-terms [Quote dog holds]
+  (tu/with-terms [dog holds]
     (v/assert kb (list 'reifiable_function Quote) 'CxUniverse)
-    (v/assert kb (list 'quoting_function Quote)   'CxUniverse)
     (v/assert kb (list 'unary_predicate dog)      'CxUniverse)
     (v/assert kb (list 'unary_predicate holds)    'CxUniverse)
     (v/assert kb (list holds (list Quote dog))    'CxUniverse)   ; mints (Quote dog) -> K
@@ -71,9 +80,8 @@
 ;; `Quote` is unreifiable here, so a ground quoted form reaches the prover as written; a
 ;; reifiable one is read back through its constant's `termOfUnit` (the next test).
 (tu/deftest-kb quoted-forms-are-classified-by-shape
-  (tu/with-terms [Quote dog]
+  (tu/with-terms [dog]
     (v/assert kb (list 'unreifiable_function Quote) 'CxUniverse)
-    (v/assert kb (list 'quoting_function Quote)     'CxUniverse)
     (v/assert kb (list 'unary_predicate dog)         'CxUniverse)
     (doseq [[kind x holds? why]
             [['symbol dog true "dog's shape being an atomic_term"]
@@ -96,7 +104,7 @@
         (is (= holds? (v/ask? kb (list kind (list Quote x)) 'CxUniverse)))))))
 
 (tu/deftest-kb a-reified-quoted-form-is-classified-through-its-term-of-unit
-  (tu/with-terms [Quote dog cycl_expression cycl_constant said Tom]
+  (tu/with-terms [dog cycl_expression cycl_constant said Tom]
     (declare-quote! kb Quote cycl_expression cycl_constant)
     (v/assert kb (list 'unary_predicate dog) 'CxUniverse)
     (let [h (v/assert kb (list said Tom (list Quote (list 'not (list dog 'Muffet)))) 'CxUniverse)
@@ -108,24 +116,23 @@
       (is (not (v/ask? kb (list 'symbol k) 'CxUniverse))
           "a formula's shape is not atomic"))))
 
-(tu/deftest-kb a-firing-over-a-quoted-form-rests-on-the-quoting-mark
-  ;; `ExpressionKindProver` is a SupportingProver: the firing names the
-  ;; `quoting_function` statement, and the mark arriving last still fires the rule.  A
-  ;; `not` head makes the quoted form a sentence by its spelling alone.
-  (tu/with-terms [Quote dog said asserter Tom]
+(tu/deftest-kb a-firing-over-a-quoted-form-needs-no-quoting-declaration
+  ;; `ExpressionKindProver` is a SupportingProver: `Quote` is a quoting function with no
+  ;; statement behind it, so the firing over a quoted form rests on the fact it read and
+  ;; the `genl` path from the form's shape kind, and withdrawing the fact withdraws the
+  ;; conclusion.  A `not` head makes the quoted form a sentence by its spelling alone, and
+  ;; `formula` is one `genl` edge above `sentence`.
+  (tu/with-terms [dog said asserter Tom]
     (v/assert kb (list 'unreifiable_function Quote) 'CxUniverse)
     (v/assert kb (list 'unary_predicate dog) 'CxUniverse)
-    (v/assert kb (list 'implies (list 'and (list said '?a '?q) (list 'sentence '?q))
+    (v/assert kb (list 'implies (list 'and (list said '?a '?q) (list 'formula '?q))
                        (list asserter '?a))
               'CxUniverse {:direction :forward})
-    (v/assert kb (list said Tom (list Quote (list 'not (list dog 'Muffet)))) 'CxUniverse)
-    (is (not (v/ask? kb (list asserter Tom) 'CxUniverse))
-        "no quoted form until Quote is a quoting_function")
-    (let [m (v/assert kb (list 'quoting_function Quote) 'CxUniverse)]
-      (is (v/ask? kb (list asserter Tom) 'CxUniverse) "the mark re-joins the rule")
+    (let [m (v/assert kb (list said Tom (list Quote (list 'not (list dog 'Muffet)))) 'CxUniverse)]
+      (is (v/ask? kb (list asserter Tom) 'CxUniverse) "the quoted form joins the rule")
       (v/retract! kb m)
       (is (not (v/ask? kb (list asserter Tom) 'CxUniverse))
-          "and retracting it withdraws the conclusion"))))
+          "and retracting the fact withdraws the conclusion"))))
 
 ;; ---- closedness: a variable inside (Quote …) is not free around it ----------------
 ;; `sx/ground?` answers whether a sentence holds any variable at all.  `sx/closed?` answers
@@ -168,7 +175,6 @@
   ;; quoting form is spelled (Quote …).
   (tu/with-terms [awesome_rule]
     (v/assert kb (list 'reifiable_function 'Quote) 'CxUniverse)
-    (v/assert kb (list 'quoting_function 'Quote)   'CxUniverse)
     (v/assert kb (list 'unary_predicate awesome_rule) 'CxUniverse)
     (v/assert kb (list 'arg awesome_rule 1 'formula)  'CxUniverse)
     (let [quoted-rule (list 'Quote (list 'implies (list 'poodle '?x) (list 'dog '?x)))
@@ -197,7 +203,7 @@
   ;; The opacity: merging the *referents* Muffet and Fluffet leaves the two *terms* — and
   ;; so the two reified quoted constants — distinct, because a mention tracks identity of
   ;; the symbol, not of what it denotes.
-  (tu/with-terms [Quote Muffet Fluffet cycl_expression cycl_constant]
+  (tu/with-terms [Muffet Fluffet cycl_expression cycl_constant]
     (declare-quote! kb Quote cycl_expression cycl_constant)
     (let [k1 (k-of kb (v/assert kb (list cycl_constant (list Quote Muffet))  'CxUniverse))
           k2 (k-of kb (v/assert kb (list cycl_constant (list Quote Fluffet)) 'CxUniverse))]
@@ -213,7 +219,7 @@
   ;; The spelling half: `(rewriteOf Fluffet Muffet)` retires the *spelling* Muffet, so
   ;; `(Quote Muffet)` migrates to `(Quote Fluffet)` and the two constants collide and merge
   ;; — the existing NAT-rename behaviour, reaching into the mention because it is a rename.
-  (tu/with-terms [Quote Muffet Fluffet cycl_expression cycl_constant]
+  (tu/with-terms [Muffet Fluffet cycl_expression cycl_constant]
     (declare-quote! kb Quote cycl_expression cycl_constant)
     (let [k1 (k-of kb (v/assert kb (list cycl_constant (list Quote Muffet))  'CxUniverse))
           k2 (k-of kb (v/assert kb (list cycl_constant (list Quote Fluffet)) 'CxUniverse))]
@@ -227,7 +233,7 @@
             "the retired spelling still resolves to the merged constant")))))
 
 (tu/deftest-kb a-non-quoting-reifiable-nat-still-folds-on-a-spelling-merge
-  ;; Control: mention opacity is specific to a quoting_function.  A plain reifiable NAT's
+  ;; Control: mention opacity is specific to the quoting functions.  A plain reifiable NAT's
   ;; expression is rewritten by the ordinary full-representative walk, unchanged by this work.
   (tu/with-terms [FruitFn AppleTree MalusTree]
     (v/assert kb (list 'reifiable_function FruitFn) 'CxUniverse)
@@ -244,7 +250,7 @@
 ;; the recursion.
 
 (tu/deftest-kb sameas-does-not-fold-a-referent-nested-in-a-quoted-compound
-  (tu/with-terms [Quote foo Muffet Fluffet cycl_expression cycl_constant]
+  (tu/with-terms [foo Muffet Fluffet cycl_expression cycl_constant]
     (declare-quote! kb Quote cycl_expression cycl_constant)
     (let [k1 (k-of kb (v/assert kb (list cycl_constant (list Quote (list foo Muffet)))  'CxUniverse))
           k2 (k-of kb (v/assert kb (list cycl_constant (list Quote (list foo Fluffet))) 'CxUniverse))]
@@ -257,7 +263,7 @@
         (is (not (v/same-class? kb k1 k2)))))))
 
 (tu/deftest-kb rewriteof-folds-a-spelling-nested-in-a-quoted-compound
-  (tu/with-terms [Quote foo Muffet Fluffet cycl_expression cycl_constant]
+  (tu/with-terms [foo Muffet Fluffet cycl_expression cycl_constant]
     (declare-quote! kb Quote cycl_expression cycl_constant)
     (let [k1 (k-of kb (v/assert kb (list cycl_constant (list Quote (list foo Muffet)))  'CxUniverse))
           k2 (k-of kb (v/assert kb (list cycl_constant (list Quote (list foo Fluffet))) 'CxUniverse))]
@@ -272,7 +278,7 @@
   ;; `spelling-representative` walks the whole rewriteOf-connected component, so a two-hop
   ;; rename `A -> B -> C` resolves `(Quote A)` to `(Quote C)` — the single-hop test above
   ;; leaves the loop unexercised.
-  (tu/with-terms [Quote A B C cycl_expression cycl_constant]
+  (tu/with-terms [A B C cycl_expression cycl_constant]
     (declare-quote! kb Quote cycl_expression cycl_constant)
     (let [ka (k-of kb (v/assert kb (list cycl_constant (list Quote A)) 'CxUniverse))
           kc (k-of kb (v/assert kb (list cycl_constant (list Quote C)) 'CxUniverse))]
@@ -286,42 +292,42 @@
             "the head of the chain still resolves the retired spelling")))))
 
 ;; ---- orthogonality: quoting is not reifiability --------------------------
-;; The comment on the prop and CxUniverse both say quoting governs argument opacity, not
-;; whether the application is minted: `Quasiquote` is unreifiable AND quoting.  So the
-;; combination the reifiable `Quote` tests never reach is a mention that stays structural
-;; — never minted — yet whose referents an identity merge still may not fold.
+;; Quoting governs argument opacity, not whether the application is minted: `Quote`
+;; declared unreifiable is still quoting, and `Quasiquote`, declared nothing, is too.  So
+;; the combination the reifiable `Quote` tests never reach is a mention that stays
+;; structural — never minted — yet whose referents an identity merge still may not fold.
 
-(tu/deftest-kb an-unreifiable-quoting-function-keeps-a-structural-mention-opaque
-  (tu/with-terms [Quasiquote PlainFn Muffet Fluffet Obj p]
-    (v/assert kb (list 'unreifiable_function Quasiquote) 'CxUniverse)
-    (v/assert kb (list 'quoting_function Quasiquote)     'CxUniverse)
-    (v/assert kb (list 'unreifiable_function PlainFn)    'CxUniverse)
-    (v/assert kb (list 'sameAs Muffet Fluffet)          'CxUniverse)
+(tu/deftest-kb an-unreifiable-quoter-keeps-a-structural-mention-opaque
+  (tu/with-terms [PlainFn Muffet Fluffet Obj p]
+    (v/assert kb (list 'unreifiable_function Quote)   'CxUniverse)
+    (v/assert kb (list 'unreifiable_function PlainFn) 'CxUniverse)
+    (v/assert kb (list 'sameAs Muffet Fluffet)        'CxUniverse)
     (testing "the quoting mention stays structural — never minted"
-      (let [h (v/assert kb (list p Obj (list Quasiquote Muffet)) 'CxUniverse)]
-        (is (= (list p Obj (list Quasiquote Muffet)) (:sentence (v/sentex kb h))))
-        (is (nil? (nat/dedup-constant kb (list Quasiquote Muffet))))))
+      (let [h (v/assert kb (list p Obj (list Quote Muffet)) 'CxUniverse)]
+        (is (= (list p Obj (list Quote Muffet)) (:sentence (v/sentex kb h))))
+        (is (nil? (nat/dedup-constant kb (list Quote Muffet))))))
     (testing "and a sameAs merge does not make two quoted mentions congruent"
+      (is (v/ask? kb (list 'different (list Quote Muffet) (list Quote Fluffet))
+                  'CxUniverse)))
+    (testing "nor two Quasiquote mentions, which no statement declares anything of"
       (is (v/ask? kb (list 'different (list Quasiquote Muffet) (list Quasiquote Fluffet))
                   'CxUniverse)))
     (testing "while a non-quoting unreifiable function's arguments still fold"
       (is (not (v/ask? kb (list 'different (list PlainFn Muffet) (list PlainFn Fluffet))
                        'CxUniverse))))))
 
-;; ---- the gate does not disturb ordinary congruence -----------------------
+;; ---- the mention walk does not disturb ordinary congruence ----------------
 
-(tu/deftest-kb a-quoting-declaration-does-not-block-ordinary-congruence
-  ;; The gate turns the mention walk ON for the whole KB, but a NON-quoting compound must
+(tu/deftest-kb quoting-does-not-block-ordinary-congruence
+  ;; The mention walk is the congruence walk in every KB, but a NON-quoting compound must
   ;; still fold under a sameAs identity merge — the mention only spelling-restricts a
   ;; quoting head's own arguments.  A regression defaulting the walk to spelling would
-  ;; break `(F 5 Kilogram) = (F 5 Kg)` congruence, but only once some quoting function is
-  ;; also declared — a hole no gate-off test can see.
-  (tu/with-terms [Quote Kilogram Kg QuantityFn cycl_expression cycl_constant]
-    (declare-quote! kb Quote cycl_expression cycl_constant)      ; gate ON
-    (is (seq (tax/props (reasoning/taxonomy kb) :quoting)))
+  ;; break `(F 5 Kilogram) = (F 5 Kg)` congruence.
+  (tu/with-terms [Kilogram Kg QuantityFn cycl_expression cycl_constant]
+    (declare-quote! kb Quote cycl_expression cycl_constant)
     (v/assert kb (list 'sameAs Kilogram Kg) 'CxUniverse)
     (let [q (fn [u] (list QuantityFn 5 u))]
-      (testing "a non-quoting compound still folds under congruence with the gate on"
+      (testing "a non-quoting compound still folds under congruence"
         (is (not (v/ask? kb (list 'different (q Kilogram) (q Kg)) 'CxUniverse))))
       (testing "and an unmerged magnitude still tells two compounds apart"
         (is (v/ask? kb (list 'different (q Kilogram) (list QuantityFn 6 Kg)) 'CxUniverse))))))
@@ -329,16 +335,16 @@
 ;; ---- recover -------------------------------------------------------------
 
 (tu/deftest-kb mention-opacity-survives-recover
-  ;; the `:quoting` prop is a taxonomy mark rebuilt from the stored `(quoting_function Q)`
-  ;; fact, so a rebuild must reconstruct the gate — else a recovered KB would start
-  ;; folding a mention the running one held opaque, a restart changing an answer.
-  (tu/with-terms [Quote Muffet Fluffet cycl_expression cycl_constant]
+  ;; the quoting functions are the engine's, not a stored mark, so a rebuild has nothing to
+  ;; reconstruct for them — a recovered KB holds a mention opaque exactly as the running
+  ;; one did, and a restart changes no answer.
+  (tu/with-terms [Muffet Fluffet cycl_expression cycl_constant]
     (declare-quote! kb Quote cycl_expression cycl_constant)
     (let [k1 (k-of kb (v/assert kb (list cycl_constant (list Quote Muffet))  'CxUniverse))
           k2 (k-of kb (v/assert kb (list cycl_constant (list Quote Fluffet)) 'CxUniverse))]
       (v/recover kb)
-      (testing "the gate rebuilds"
-        (is (seq (tax/props (reasoning/taxonomy kb) :quoting))))
+      (testing "Quote is still a quoting function"
+        (is (contains? (:quoting (tax/mention-marks (reasoning/taxonomy kb))) Quote)))
       (testing "so the mention is still opaque to an identity merge after recovery"
         (v/assert kb (list 'sameAs Muffet Fluffet) 'CxUniverse)
         (is (empty? (nat/colliding-constant-groups kb)))
@@ -350,7 +356,7 @@
 ;; whose payloads' referents merged onto one constant, before congruence could protect them.
 
 (tu/deftest-kb a-reifiable-payload-inside-a-quote-is-not-folded-by-a-sameas
-  (tu/with-terms [Quote foo Muffet Fluffet cycl_expression cycl_constant]
+  (tu/with-terms [foo Muffet Fluffet cycl_expression cycl_constant]
     (declare-quote! kb Quote cycl_expression cycl_constant)
     (v/assert kb (list 'reifiable_function foo) 'CxUniverse)   ; the payload's inner functor reifies
     (v/assert kb (list 'sameAs Muffet Fluffet) 'CxUniverse)   ; referents merged FIRST
@@ -366,7 +372,7 @@
   ;; payload with a reifiable inner functor is stored against its LITERAL form; if the read
   ;; goal reified that inner NAT it would probe for `(Quote <constant>)`, never stored, and
   ;; the fact would read back as no-match — stored-but-unretrievable.
-  (tu/with-terms [Quote foo bar Muffet cycl_expression cycl_constant]
+  (tu/with-terms [foo bar Muffet cycl_expression cycl_constant]
     (declare-quote! kb Quote cycl_expression cycl_constant)
     (v/assert kb (list 'reifiable_function foo) 'CxUniverse)   ; the quoted payload's functor reifies
     (v/assert kb (list cycl_constant (list Quote (list foo Muffet))) 'CxUniverse)
@@ -386,7 +392,7 @@
   ;; a mention, whose referent merged under a `sameAs`, is held opaque by the rewrite and must
   ;; NOT be reported displaced — else why-not cites a merge that never touched the sentence.
   ;; The flat walk over-reported it; the mention-aware collector does not.
-  (tu/with-terms [Quote knows Bob Rob Ann Zed cycl_expression cycl_constant]
+  (tu/with-terms [knows Bob Rob Ann Zed cycl_expression cycl_constant]
     (declare-quote! kb Quote cycl_expression cycl_constant)
     (v/assert kb (list 'rewriteOf Rob Bob) 'CxUniverse)   ; used term Bob -> Rob (a spelling rename)
     (v/assert kb (list 'sameAs Ann Zed) 'CxUniverse)      ; quoted term Zed's referent merges (identity)
@@ -394,3 +400,39 @@
       (is (= Rob (get d Bob)) "the used term is reported displaced by its spelling rename")
       (is (not (contains? d Zed))
           "the quoted mention is held opaque to the sameAs and is not reported displaced"))))
+
+;; ---- quoting is fixed by the engine, not declared --------------------------
+
+;; ---- quoting is fixed by the engine, not declared --------------------------
+;; `Quote` and `Quasiquote` are the quoting functions (`sx/quoting-functors`).  No KB
+;; predicate declares a function quoting: `quoting_function` is not vocabulary, so a
+;; sentence on it is an ordinary fact on an undeclared predicate and marks nothing.
+
+(tu/deftest-kb quoting-function-is-not-vocabulary
+  (tu/with-terms [PlainFn Muffet Fluffet]
+    (testing "the predicate is not declared"
+      (is (empty? (v/sentexes-matching kb '(unary_predicate quoting_function) '?ctx)))
+      (is (empty? (v/sentexes-matching kb '(comment quoting_function ?c) '?ctx))))
+    (testing "a sentence on it is stored as an ordinary fact that marks nothing"
+      (v/assert kb (list 'quoting_function PlainFn) 'CxUniverse)
+      (is (= #{Quote Quasiquote} (:quoting (tax/mention-marks (reasoning/taxonomy kb)))))
+      (v/assert kb (list 'unreifiable_function PlainFn) 'CxUniverse)
+      (v/assert kb (list 'sameAs Muffet Fluffet) 'CxUniverse)
+      (is (not (v/ask? kb (list 'different (list PlainFn Muffet) (list PlainFn Fluffet))
+                       'CxUniverse))
+          "so the function it names folds under an identity merge like any other"))))
+
+(deftest a-fresh-kb-holds-a-quote-mention-opaque-with-no-declaration
+  ;; An empty KB states nothing about `Quote`, and the mention is still opaque from the
+  ;; first assert: the merge of the referents leaves the two quoted terms apart.
+  (tu/with-cleared-kb [kb tu/isolated-fresh]
+    (v/assert kb '(mentions Obj (Quote Muffet)) 'CxUniverse)
+    (v/assert kb '(mentions Obj (Quote Fluffet)) 'CxUniverse)
+    (v/assert kb '(sameAs Muffet Fluffet) 'CxUniverse)
+    (testing "the referents merge"
+      (is (v/same-class? kb 'Muffet 'Fluffet)))
+    (testing "the quoted terms do not"
+      (is (v/ask? kb '(different (Quote Muffet) (Quote Fluffet)) 'CxUniverse))
+      (is (= #{'(mentions Obj (Quote Muffet)) '(mentions Obj (Quote Fluffet))}
+             (into #{} (map :sentence) (v/sentexes-matching kb '(mentions Obj ?q) 'CxUniverse)))
+          "both spellings are still stored as written"))))

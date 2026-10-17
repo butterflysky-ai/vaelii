@@ -680,16 +680,14 @@
   EXISTING term in reify namespace `ns` (`existing-term`, default `nat/`) — or the
   `no-match` sentinel when it was never minted.  Never mints.
 
-  A **`quoting_function`'s argument is a mention**, held opaque here exactly as the write
-  leaf `reify-or-mint-nat` holds it: `(Quote (FruitFn Apple))` was minted against the
-  literal payload, so a query must resolve against that literal too — reifying the inner
+  A **quoting function's argument is a mention** (`sx/quoting-functors`), held opaque here
+  exactly as the write leaf `reify-or-mint-nat` holds it: `(Quote (FruitFn Apple))` was
+  minted against the literal payload, so a query must resolve against that literal too — reifying the inner
   NAT here would probe for `(Quote <constant>)`, which was never stored, and the fact
-  would read back as no-match.
-
-  The `quoting_function` mark is read unscoped, as `reify-or-mint-nat` reads it."
+  would read back as no-match."
   ([kb form] (reify-nat-for-read kb form nat-namespace))
   ([kb form ns]
-   (let [E (if (tax/quoting-function? (reasoning/taxonomy kb) (first form))
+   (let [E (if (sx/quoting-functor? (first form))
              (apply list form)
              (apply list (first form)
                     (map #(if (reifiable-ground-nat? kb %) (reify-nat-for-read kb %) %)
@@ -1098,19 +1096,16 @@
   exist the two answers agree — and until the merge lands, resolving to the name a
   reader wrote beats resolving to an opaque one.
 
-  A **`quoting_function`'s argument is a mention** — the term named as syntax — so its
-  nested NATs are **not** reified: `(Quote (FruitFn Apple))` mints against the literal
-  `(FruitFn Apple)`, not against that NAT's own constant, or two quoted syntaxes whose
+  A **quoting function's argument is a mention** (`sx/quoting-functors`: `Quote`,
+  `Quasiquote`) — the term named as syntax — so its nested NATs are **not** reified:
+  `(Quote (FruitFn Apple))` mints against the literal `(FruitFn Apple)`, not against that NAT's own constant, or two quoted syntaxes whose
   payloads' referents merged would collapse to one mention.  The whole quoted expression
   is the identity, held opaque here the same way `res/representative-term` holds it opaque
-  to a `sameAs` merge.
-
-  The `quoting_function` mark is read unscoped: whether an argument is a mention is a
-  fact about the sentence (`tax/mention-marks`)."
+  to a `sameAs` merge."
   ([kb form] (reify-or-mint-nat kb form true))
   ([kb form chain?] (reify-or-mint-nat kb form nat-namespace chain?))
   ([kb form ns chain?]
-   (let [E (if (tax/quoting-function? (reasoning/taxonomy kb) (first form))
+   (let [E (if (sx/quoting-functor? (first form))
              (apply list form)
              (apply list (first form)
                     (map #(if (reifiable-ground-nat? kb %) (reify-or-mint-nat kb % chain?) %)

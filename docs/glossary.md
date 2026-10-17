@@ -871,12 +871,17 @@ returns the vector of handles whenever a rule expanded. See
 [canonicalization.md](canonicalization.md).
 
 **`positiveExample` / `negativeExample` / `borderlineExample`** ![kb](../.github/badges/cat-kb.svg):
-The example vocabulary of `core.txt`. `(positiveExample <term> (sentexHandle H))` names a stored
-sentex as an example of a term's usage — a true one, a false one, or one deliberately on
-the edge — reusing the `sentexHandle` plus `target_following_predicate` pointing shape, so
-retracting the example sentex tears the annotation down with it. The engine reads none of
-them; the obligation the first two carry — that the target holds, or holds as its negation
-— is held by `curation_test`. See [predicates.md](predicates.md).
+The example vocabulary of `core.txt`. The second argument is the example as a quoted
+sentence: `(positiveExample ip_address (Quote (ip_address "192.0.2.1")))` states a true
+example of a term's usage, `negativeExample` a false one, and `borderlineExample` one
+deliberately on the edge. The engine reads none of them. `curation_test` asks the quoted
+sentence in the example's own context: a `positiveExample`'s must be provable there, a
+`negativeExample`'s must not be (unknown is enough), and a `borderlineExample`'s is not
+checked. The example names no sentex, so none of the three is
+`target_following_predicate`. Each has a string sibling, `positiveExampleComment`,
+`negativeExampleComment` and `borderlineExampleComment`, whose second argument carries
+the example as text, for an example that is not a sentence the KB can state or prove.
+See [predicates.md](predicates.md).
 
 **`predAll` family** ![kb](../.github/badges/cat-kb.svg): The eight relations that
 quantify one argument position of a binary predicate and fix the other, in three

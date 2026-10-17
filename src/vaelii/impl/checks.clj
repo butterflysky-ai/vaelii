@@ -485,22 +485,19 @@
   would type a quotation by its referent.  It is also the one place a mint would pay for
   this: `mint-nat!` writes a `termOfUnit` per constant, and that write is where a KB
   declaring result types would otherwise buy a scoped retrieval it can never be convicted
-  by.  A `quoting_function`'s argument is the same mention one level in, reached when
-  `nested-input-problem` reads the quoting function's own declarations.
+  by.  A quoting function's argument (`sx/quoting-functors`) is the same mention one level
+  in, reached when `nested-input-problem` reads the quoting function's own declarations.
 
   Behind `nat/any-result-declarations?` — two O(1) functor counts, reached only for a
   compound sitting at a position some declaration constrains, so a KB that has written no
-  result declaration pays nothing for this and one that has pays two integer reads.
-
-  The `quoting_function` mark is read unscoped: whether an argument is a mention is a
-  fact about the sentence (`tax/mention-marks`)."
+  result declaration pays nothing for this and one that has pays two integer reads."
   [kb declared pred x t context]
   (when (and (symbol? t) (application-term? x)
              (not (contains? nat/nat-quoting-predicates pred))
              (nat/any-result-declarations? kb))
     (let [tax (reasoning/taxonomy kb)
           rs  (vec (declared kb x context))]
-      (when (and (not (tax/quoting-function? tax pred))
+      (when (and (not (sx/quoting-functor? pred))
                  (not-any? #(tax/genl? tax % t context) rs))
         (nm/min-by-content-key identity (filterv #(tax/genl? tax % 'thing context) rs))))))
 
@@ -537,15 +534,12 @@
   argument, one the taxonomy separates from `t` is the clash, and any other admits it,
   since the entailment would mint `t` there.  The consequences of minting `(t K)` past that
   one membership are not read.  A quoting predicate's or quoting function's argument is a
-  mention, which `convicting-result-type` leaves alone for the same reason, so nil.
-
-  The `quoting_function` mark is read unscoped: whether an argument is a mention is a
-  fact about the sentence (`tax/mention-marks`)."
+  mention, which `convicting-result-type` leaves alone for the same reason, so nil."
   [kb tax pred x t context]
   (when (and *entry-mints?*
              *assertive-arg-types?*
              (not (contains? nat/nat-quoting-predicates pred))
-             (not (tax/quoting-function? tax pred))
+             (not (sx/quoting-functor? pred))
              (nat/reifiable-ground-nat? kb x)
              (mintable-type? tax t))
     (let [rs (vec (nat/result-types kb x))]
@@ -1101,15 +1095,13 @@
   the term written there, not a use of it, so an application in it is syntax and its
   function's declarations about what its inputs denote do not reach it; the same holds
   for the argument of a quoting predicate (`nat/nat-quoting-predicates`) and of a
-  `quoting_function`.  A quoting function's own declarations are still read over its
+  quoting function (`sx/quoting-functors`).  A quoting function's own declarations are
+  still read over its
   application — only what it quotes is left alone.
 
   One declaration reader per application, built on reaching it, so a sentence with no
   compound argument reads nothing: `application-term?` over its arguments is the whole
-  cost.
-
-  The `quoting_function` mark is read unscoped: whether an argument is a mention is a
-  fact about the sentence (`tax/mention-marks`)."
+  cost."
   [kb sentence context types decls]
   (let [pred (nm/functor sentence)
         as   (nm/args sentence)]
@@ -1117,7 +1109,7 @@
                (not (contains? provers/formula-heads pred))
                (some application-term? as)
                (not (contains? nat/nat-quoting-predicates pred))
-               (not (tax/quoting-function? (reasoning/taxonomy kb) pred)))
+               (not (sx/quoting-functor? pred)))
       (let [mentioned (mentioned-positions decls)]
         (first
          (for [[n x] (map-indexed (fn [i a] [(inc i) a]) as)

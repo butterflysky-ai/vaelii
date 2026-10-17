@@ -921,7 +921,7 @@
   `:asymmetric`, `:reflexive`, `:functional`, `:irreflexive`, `:anti-symmetric`,
   `:anti-transitive`), the grants (`:decontextualized`, `:forced-decontextualized`,
   `:forced-monotonic`, `:abducible`, `:closed-extent`, `:modal`, `:target-following`),
-  the function kinds (`:reifiable`, `:unreifiable`, `:quoting`) and
+  the function kinds (`:reifiable`, `:unreifiable`) and
   the `:declares-*` kinds naming a predicate as the subject of an argument constraint.
   Declared by the corresponding sentex, e.g. `(symmetric siblingOf)`.  A kind off that
   roster answers false for every term rather than being refused.

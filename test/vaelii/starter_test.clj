@@ -119,7 +119,7 @@
      equivalence_relation variable_arity abducible_predicate closed_extent_predicate
      modal_predicate decontextualized_predicate forced_decontextualized_predicate
      instance_relation_predicate type_relation_predicate target_following_predicate
-     reifiable_function unreifiable_function quoting_function
+     reifiable_function unreifiable_function
      result genlResult transitiveInArgInverse transitiveInArg inverse relation_kind})
 
 (defn- touched-terms

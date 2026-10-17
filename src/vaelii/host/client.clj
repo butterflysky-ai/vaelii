@@ -563,8 +563,8 @@
   `:asymmetric`, `:reflexive`, `:functional`, `:irreflexive`, `:anti-symmetric`,
   `:anti-transitive`), the grants (`:decontextualized`, `:forced-decontextualized`,
   `:forced-monotonic`, `:abducible`, `:closed-extent`, `:modal`, `:target-following`), the
-  function kinds (`:reifiable`, `:unreifiable`, `:quoting`) and the `:declares-*` kinds
-  naming a predicate as the subject of an argument constraint."
+  function kinds (`:reifiable`, `:unreifiable`) and the `:declares-*` kinds naming a
+  predicate as the subject of an argument constraint."
   ([conn kind pred] (call conn :has-prop? [kind pred]))
   ([conn kind pred context] (call conn :has-prop? [kind pred context])))
 

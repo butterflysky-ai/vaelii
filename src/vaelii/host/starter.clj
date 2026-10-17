@@ -55,7 +55,7 @@
                                  entails owning its parts.
         - CxNormalPhysicalConditions.txt — the states of matter at room temperature
                                  and pressure: stone, wood and glass are solid,
-                                 mercury is liquid, a metal is solid by default.
+                                 mercury is liquid, metal_stuff is solid by default.
                                  Opt-in: it sees CxUniverse and CxWell does not
                                  see it.
         - CxPerception.txt — perception relations: perceives, sees, seeImage,

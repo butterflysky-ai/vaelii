@@ -46,6 +46,156 @@ it — `git show v0.16.0:CHANGELOG.md`.
 
   *Class:* **Fix** (the same answers, sooner).
 
+### Breaking
+
+- **`quoting_function` removed; Quote and Quasiquote are the quoting functions,
+  hard-coded.** Which functions quote is fixed by the engine (`sx/quoting-functors`), not
+  declared in the KB. A `Quote` or `Quasiquote` argument is a mention in every KB from the
+  first assert: held opaque to a `sameAs` or `equals` merge, followed by a `rewriteOf`
+  rename, not reified on its own, and not typed by what it denotes. No statement turns
+  that on or off, so a merge processed before a declaration can no longer fold a mention
+  onto its referent. The `:quoting` prop kind goes with the predicate.
+  `ensure-quasiquote-functions` asserts `(reifiable_function Quote)` and
+  `(unreifiable_function Quasiquote)` only, and `(unreifiable_function Quasiquote)` is the
+  gate that turns the quasiquote reducer on. `ExpressionKindProver`'s support no longer
+  cites a quoting statement, so a forward firing reads a quoted form's kind only when a
+  `genl` edge or a `termOfUnit` statement supports it.
+
+  *Class:* **Breaking** (shipped vocabulary).
+  *Migration:* delete any `(quoting_function X)` assertions. A KB that declared another
+  function quoting must quote through `Quote` instead. `has-prop?` and `props` no longer
+  take `:quoting`.
+  *Breaks:* `quoting_function`, `:quoting`
+
+- **`metal` renames to `metal_stuff`.** A stuff type's name is a mass noun, as
+  `glass_stuff` is. "A metal" is a count noun, so a sentence such as `(disjoint metal
+  mechanism)` seemed to be about kinds of metal. `abstract.txt` declares `metal_stuff`
+  with the same comment, `genl` edges and `stuff_type_by_substance` membership,
+  `mercury` sits below it, and CxNormalPhysicalConditions' solid-by-default rule reads
+  `(metal_stuff ?x)`. No pair's disjointness changes.
+
+  *Class:* **Breaking** (shipped ontology content).
+  *Migration:* rename `metal` to `metal_stuff` in any KB text that names it.
+  *Breaks:* `metal`
+
+- **The example predicates quote their example sentence.** The second argument of
+  `positiveExample`, `negativeExample` and `borderlineExample` is a quoted sentence,
+  `(positiveExample ip_address (Quote (ip_address "192.0.2.1")))`, and no longer a
+  `(sentexHandle H)`. A KB text file can now state an example. The three are no longer
+  `target_following_predicate`, since an example names no sentex. `curation_test` asks
+  the quoted sentence in the example's own context. A `positiveExample`'s sentence must
+  be provable there. A `negativeExample`'s must not be provable, and unknown is enough,
+  where the KB used to have to prove its negation. A `borderlineExample` is not checked.
+
+  *Class:* **Breaking** (shipped vocabulary).
+  *Migration:* rewrite `(positiveExample T (sentexHandle H))` as `(positiveExample T
+  (Quote S))`, S being the sentence H holds, and the same for the other two. An example
+  is no longer torn down with the sentence it named. A `negativeExample` whose sentence
+  the KB proves now fails the check.
+  *Breaks:* `positiveExample`, `negativeExample`, `borderlineExample`
+
+### Additions
+
+- **38 shipped string examples become quoted-sentence examples that a test checks.**
+  `core.txt`, `organism.txt`, `measure.txt` and `CxComputing.txt` state 31
+  `positiveExample` and 7 `negativeExample` facts in place of the
+  `positiveExampleComment` and `negativeExampleComment` facts they replace, among them
+  `(positiveExample folk_species (Quote (folk_species cat)))`, `(positiveExample
+  sameQuantity (Quote (sameQuantity (QuantityFn 1000 Gram) (QuantityFn 1 Kilogram))))`
+  and `(negativeExample character (Quote (character "a")))`. An example was converted
+  only where the starter KB proves its sentence (a positive one) or does not prove it (a
+  negative one) in the example's context; `curation_test` now checks every one. The
+  reasons the five `relation_kind` negative examples gave move to a file comment above
+  them.
+
+  *Class:* **Additive** (shipped documentation; no sentence's truth changes).
+  *Migration:* a reader that lists a term's examples by `positiveExampleComment` or
+  `negativeExampleComment` reads `positiveExample` and `negativeExample` as well.
+
+- **String examples that could be misread are reworded.** `CxComputing.txt`'s tool
+  examples name tools, not acts (`"a text-search tool"`, not `"a text search"`), and its
+  MCP tool examples say MCP. A computational system's example is a running database
+  server process, not the hardware. The `time_interval`, `uninterrupted`, `acausal` and
+  `intangible` examples name particular intervals and times (`"the year 2024"`, `"the
+  time 3 PM on 14 October 2024"`), not durations. `acausal_event`'s examples name acts
+  (`"the receiving of a message"`), and `mechanism`'s says desktop computer.
+  `reflection.txt` and `core.txt` mention their expressions as expressions: `"the symbol
+  Muffet"`, `"the term (MotherFn Muffet)"`, `"a KB symbol"`.
+
+  *Class:* **Additive** (shipped documentation; no sentence's truth changes).
+  *Migration:* none.
+
+- **`electronic_device` joins the made kinds, orthogonal to `machine`.**
+  `abstract.txt` declares `electronic_device`, a mechanism built around an electronic
+  circuit, with `(genl electronic_device made)` and `(genl electronic_device
+  mechanism)`. The circuit and the parts that carry it make up the whole object, so an
+  organism with an implanted circuit is not an electronic device. The type is rigid:
+  what defines it is how a thing is built and not what the thing does. `(orthogonal
+  electronic_device machine)`, `:monotonic`, states that the two types overlap and that
+  neither is a genl of the other. A `comment` on that sentence names a witness for each
+  of the three claims.
+
+  *Class:* **Additive** (shipped ontology content).
+  *Migration:* none. A KB that declares its own `electronic_device` term meets the
+  shipped one.
+
+- **`mechanism` is the common genl of `machine` and `electronic_device`.**
+  `abstract.txt` declares `mechanism`, a physical object whose parts, in their
+  arrangement, set up a characteristic causal operation, with `(genl mechanism
+  tangible)`, `(genl machine mechanism)` and `(genl electronic_device mechanism)`. Most
+  mechanisms are made but not all, so `mechanism` is not a genl of `made`: a juvenile
+  Issus planthopper's hind-leg gears are a mechanism. The type is rigid: a stopped clock
+  or an unplugged board is still one. The two kinds' shared separations
+  are stated once on the parent: `(disjoint mechanism organism)` and `(disjoint
+  mechanism substance)`, both `:monotonic`. `(disjoint animal machine)` is no longer
+  stated; `animal` and `machine` stay disjoint through `mechanism` and `organism`.
+  The disjointness coverage ratchet rises to 21,875 disjoint pairs (83.06%) and at most
+  7.02% unknown.
+
+  *Class:* **Additive** (shipped ontology content).
+  *Migration:* a KB that asserts one term as both an `organism` (or a `substance`) and a
+  `machine` or `electronic_device` now records a clash. A KB that reads the stated
+  `(disjoint animal machine)` sentence finds the derived disjointness instead.
+
+- **`wing` and `fur` are disjoint.** `abstract.txt` states `(disjoint wing fur)`,
+  `:monotonic`. A bat's wing has fur on it, but the fur is part of the wing, and nothing
+  is both. `wing`'s comment now names bats along with birds and insects.
+
+  *Class:* **Additive** (shipped ontology content).
+  *Migration:* a KB that asserts one term as both a `wing` and `fur` now records a clash.
+
+- **The shipped comments state their examples as example facts.** 101 comments
+  across `core.txt`, `abstract.txt`, `reflection.txt`, `life.txt`, `measure.txt`,
+  `organism.txt`, `time.txt`, `CxComputing.txt` and `CxSocial.txt` named examples of
+  their own term. Each keeps its definition, and its examples are 227
+  `positiveExampleComment` and 25 `negativeExampleComment` facts beside it, in the
+  comment's own context. Nine comments keep an example that explains the definition and
+  state it as a fact as well. The witness that a region of space is intangible and
+  spatiotemporal is a `comment` on `(orthogonal intangible spatiotemporal)`.
+
+  *Class:* **Additive** (shipped documentation; no sentence's truth changes).
+  *Migration:* none. A reader of a comment's examples reads the example facts.
+
+- **`machine`'s comment defines it by its parts.** A machine is a made thing with
+  parts that move relative to each other, driven by an energy source. The comment names
+  no use, so a stopped clock is still a machine. Its
+  examples are `positiveExampleComment` facts.
+
+  *Class:* **Additive** (shipped documentation; no sentence's truth changes).
+  *Migration:* none.
+
+- **The example predicates gain string siblings.** `core.txt` declares
+  `positiveExampleComment`, `negativeExampleComment` and `borderlineExampleComment`:
+  binary, the first argument the exemplified term and the second a `string` carrying
+  the example as text. They name no sentex, so none is
+  `target_following_predicate` and none carries a provability obligation. A KB text
+  file has no spelling for a sentex handle, so a shipped file states its examples with
+  these. Four `termsRelated` facts relate each sentex predicate to its sibling and the
+  three siblings to each other. The vocabulary roster classifies the three `:inert`.
+
+  *Class:* **Additive** (shipped ontology content).
+  *Migration:* none.
+
 ## 0.27.0 — 2026-10-15 — "Arity clashes held inert and `:monotonic` class memberships stored, `predExistsAll` scoped universal-first, `:pg-snapshot` and `:recover? :trust`, `genlInverse` and `closedExtentForArg`"
 
 | Area | Change |

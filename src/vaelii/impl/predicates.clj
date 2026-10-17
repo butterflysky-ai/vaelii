@@ -762,9 +762,6 @@
                                           "taxonomy prop :reifiable — the gate that turns the nat reify pass on")]
      ['unreifiable_function     (enforced (prop :unreifiable :arg :function)
                                           "taxonomy prop :unreifiable — kept structural for a prover to compute")]
-     ['quoting_function         (enforced (prop :quoting     :arg :function)
-                                          (str "taxonomy prop :quoting — its arguments are a mention, held opaque to"
-                                               " identity congruence (res/representative-term spelling mode)"))]
      ['contextArgSubrelation   (enforced (wff-only [:function :position :predicate])
                                          (str "context-nat producer — sibling F-contexts differing at one arg are"
                                               " ordered by the sub-relation on that arg, materializing genlCx"))]
@@ -1157,8 +1154,9 @@
     [['Quote (enforced (collection
                         :notes (str "quasiquote.clj's quote-function — the literal symbol"
                                     " ensure-quasiquote-functions declares reifiable_function"
-                                    " and quoting_function on, and reduce-term mints a (Quote"
-                                    " E) mention from a reduced ground Quasiquote. Takes no"
+                                    " on, and reduce-term mints a (Quote E) mention from a"
+                                    " reduced ground Quasiquote. A quoting function fixed by"
+                                    " the engine (sx/quoting-functors). Takes no"
                                     " arg, result or metatype declaration of its own: what"
                                     " kind of expression (Quote X) is follows from X's shape,"
                                     " per its core.txt comment."))
@@ -1518,6 +1516,15 @@
      ;; like any fact and read for inference by nothing.  Inert is the decision rather than
      ;; the omission — the grammar documents itself in its own representation, and a
      ;; cross-reference earns a stored sentex whether or not a check ever keys on it.
+     ['diachronicallyDisjoint
+      (inert {:shape {:args [:term :term]} :storage [:none] :checked false
+              :family nil :facets #{}
+              :notes (str "(diachronicallyDisjoint ?type1 ?type2): nothing is an instance of both"
+                          " at the same time, though one thing can be each in turn. disjoint is a"
+                          " genl of it. Stated and queryable; memberships are checked without time,"
+                          " so no clash check can read it yet.")}
+             (str "aspirational: enforcing it needs time-indexed membership, which the engine"
+                  " does not have. No inference path beyond the genl from disjoint."))]
      ['typeGenl
       (inert {:shape {:args [:term :term]} :storage [:none] :checked false
               :family nil :facets #{}
@@ -1574,38 +1581,57 @@
                 (str "integrity/rule-macro-findings — a rule-macro suggestion the rule's"
                      " context declines is not reported"))]
 
-     ;; The three worked-example annotations name their example sentex by handle.  Each is
-     ;; a `target_following_predicate` in core.txt, so retracting the example tears the
-     ;; annotation down with it — that mark's enforcement, reached through a declaration
-     ;; rather than through an arm keyed on these functors, which is why they stay inert
-     ;; while participating in a teardown.
+     ;; The three worked-example annotations quote their example sentence, (Quote S), and
+     ;; name no sentex, so they carry no target_following_predicate mark and nothing tears
+     ;; them down.  Their obligation is a test's: curation_test asks S in the example's
+     ;; context.
      ['positiveExample
       (inert {:shape {:args [:term :term]} :storage [:none] :checked false
               :family nil :facets #{}
-              :notes (str "belief-following through target_following_predicate, and an"
-                          " integrity obligation — the named sentex is provable — held"
-                          " by curation_test rather than by any engine path.")}
-             (str "a curation meta-sentex naming, by handle, a sentex that is a true example"
+              :notes (str "an integrity obligation — the quoted sentence is provable in the"
+                          " example's context — held by curation_test rather than by any"
+                          " engine path.")}
+             (str "a curation fact quoting, as (Quote S), a sentence that is a true example"
                   " of a term's usage. Nothing reads the annotation for inference; its"
-                  " integrity (the named sentex is provable) is held by curation_test."
-                  " Belief-following via the target_following_predicate mark, so it does not"
-                  " outlive the example it names."))]
+                  " integrity (S is provable) is held by curation_test."))]
      ['negativeExample
       (inert {:shape {:args [:term :term]} :storage [:none] :checked false
               :family nil :facets #{}
-              :notes (str "the same teardown and the mirror obligation: the named sentex is"
-                          " provable as its negation, which curation_test holds.")}
-             (str "the same, for a sentex whose negation is provable — a false example of"
-                  " a term's usage. Read by no check; its integrity is a test's, and it"
-                  " cascades with its target like positiveExample."))]
+              :notes (str "the mirror obligation: the quoted sentence is not provable in the"
+                          " example's context (unknown is enough), which curation_test holds.")}
+             (str "the same, quoting a sentence that is a false example of a term's usage."
+                  " Read by no check; its integrity (S is not provable) is a test's."))]
      ['borderlineExample
       (inert {:shape {:args [:term :term]} :storage [:none] :checked false
               :family nil :facets #{}
-              :notes (str "the same teardown, and no obligation at all: truth-agnostic by"
-                          " design, so no regression reads its target.")}
-             (str "the same pointing shape, truth-agnostic: it names a sentex neither"
-                  " asserted true nor false, so it carries no provability obligation and no"
-                  " regression reads its target. Documentation only."))]
+              :notes (str "no obligation at all: truth-agnostic by design, so curation_test"
+                          " does not ask its sentence.")}
+             (str "the same shape, truth-agnostic: it quotes a sentence whose truth is"
+                  " arguable, so it carries no provability obligation and no test asks it."
+                  " Documentation only."))]
+
+     ;; The string siblings carry the example as text, so no test reads it and they carry
+     ;; no provability obligation.
+     ['positiveExampleComment
+      (inert {:shape {:args [:term :term]} :storage [:none] :checked false
+              :family nil :facets #{}
+              :notes (str "documentation the engine stores and never reads: a string, so no"
+                          " obligation for a test to hold.")}
+             (str "a curation annotation carrying a true example of a term's usage as a"
+                  " string, for an example that is not a sentence the KB can state or prove."
+                  " Read like comment and by nobody for inference."))]
+     ['negativeExampleComment
+      (inert {:shape {:args [:term :term]} :storage [:none] :checked false
+              :family nil :facets #{}
+              :notes "the same, for a false example; nothing checks the text."}
+             (str "the same, carrying a false example of a term's usage as a string. Read"
+                  " like comment and by nobody for inference."))]
+     ['borderlineExampleComment
+      (inert {:shape {:args [:term :term]} :storage [:none] :checked false
+              :family nil :facets #{}
+              :notes "the same, for a borderline example; truth-agnostic as borderlineExample is."}
+             (str "the same, carrying a borderline example of a term's usage as a string."
+                  " Documentation only."))]
 
      ;; ---- the predAll / predExists / predSpecified matrix ------------------
      ;;

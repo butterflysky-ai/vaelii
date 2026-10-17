@@ -137,8 +137,8 @@ Data hangs below CxWell.
     rule runs one way only, because `knows` is deliberately not symmetric.
 - **CxNormalPhysicalConditions** — an **opt-in** theory in `kb/middle/` that sees
   CxUniverse and that CxWell does **not** see: the states of matter of stuff at ordinary
-  room temperature and pressure. Stone, wood and glass are solid, mercury is liquid, and a
-  metal is solid by default, with mercury the stated exception. CxWell stays free of any
+  room temperature and pressure. Stone, wood and glass are solid, mercury is liquid, and
+  any `metal_stuff` is solid by default, with mercury the stated exception. CxWell stays free of any
   temperature, so a context below CxWell serves a story set on Mars as well as one set in a
   kitchen. A context opts in by placing itself under CxNormalPhysicalConditions, and a
   context under both CxWell and CxNormalPhysicalConditions reads the everyday theories at

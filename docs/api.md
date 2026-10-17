@@ -455,7 +455,7 @@ default-chain-opts                              ; the bounds a chain run takes w
                                                         ; :forced-decontextualized
                                                         ; :forced-monotonic :abducible
                                                         ; :closed-extent :modal :target-following
-                                                        ; :reifiable :unreifiable :quoting,
+                                                        ; :reifiable :unreifiable,
                                                         ; and the six :declares-*
                                                         ; that name a predicate as the SUBJECT of an
                                                         ; argument constraint (:declares-arg-isa
@@ -1351,8 +1351,8 @@ KB holds the upper layer alone, and a user adds a context of their own above CxU
 or below it.
 The middle theories are the defeasible defaults that state their own exception with
 `exceptWhen` (birds fly except penguins; animals breathe air except fish; organisms
-are alive until they are dead and awake until they are asleep; a metal is solid at room
-temperature except mercury — five rules of one shape, differing in whether the exception
+are alive until they are dead and awake until they are asleep; a `metal_stuff` is solid
+at room temperature except mercury — five rules of one shape, differing in whether the exception
 names a species, a whole class, a kind of stuff, or a state that changes) and the rules with **connected conjunctive antecedents** (antecedents sharing
 a variable so they join — grandparentOf, part-location, owns-parts).
 

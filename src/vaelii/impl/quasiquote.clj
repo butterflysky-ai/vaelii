@@ -20,18 +20,16 @@
   `Quasiquote` is an `unreifiable_function`, so an *open* template — the one that lives in a
   rule consequent until the antecedent binds its `Unquote` holes — stays structural and is
   never minted; range restriction (`rules/check-range-restricted`) already refuses a hole no
-  antecedent binds, so an open template never reaches storage.  It is a `quoting_function`
-  too, so while it waits in the rule its `Unquote`-marked spellings are held opaque to an
-  identity merge exactly as a `Quote` payload is.
+  antecedent binds, so an open template never reaches storage.  `Quote` and `Quasiquote` are
+  the engine's quoting functions (`sx/quoting-functors`), fixed rather than declared, so
+  while a template waits in the rule its `Unquote`-marked spellings are held opaque to an
+  identity merge exactly as a `Quote` payload is, in every KB and from the first assert.
 
-  Turned on by declaration, like `reifiable_function` turns the reify pass on: a KB that has
-  not declared `(quoting_function Quasiquote)` pays one taxonomy-prop read per firing/assert
-  and the reducer is a no-op.  And like reification, it is **declared before use**: opacity is
-  applied when a mention is reified and again in the equality congruence, each gated on the
-  mark being present then, so `ensure-quasiquote-functions` (or the four marks) must precede
-  the constructions it governs and any identity merge over the referents inside them.  A reify
-  or merge processed while the mark is absent — before it is declared, or after it is retracted
-  — is not held opaque and folds the mention onto its referent's class."
+  The reducer is turned on by declaration, like `reifiable_function` turns the reify pass
+  on: a KB that has not declared `(unreifiable_function Quasiquote)` pays one taxonomy-prop
+  read per firing/assert and the reducer is a no-op.  Reduction mints through the reify
+  pass, so `ensure-quasiquote-functions` (or the marks it asserts) precedes the
+  constructions it reduces."
   (:require [vaelii.impl.kb :as kb]
             [vaelii.impl.nat :as nat]
             [vaelii.impl.provers :as provers]
@@ -41,8 +39,9 @@
             [vaelii.impl.wiring :as wiring]))
 
 (def quasiquote-function
-  "The reserved template-constructor functor, keyed on by name like `SkolemFn`."
-  'Quasiquote)
+  "The reserved template-constructor functor, keyed on by name like `SkolemFn` — one of the
+  engine's quoting functions (`sx/quoting-functors`)."
+  sx/quasiquote-functor)
 
 (def unquote-marker
   "The reserved hole marker: `(Unquote v)` inside a template splices `v` into the
@@ -50,24 +49,26 @@
   'Unquote)
 
 (def quote-function
-  "The reifiable quoting function a reduced template mentions its result through."
-  'Quote)
+  "The reifiable quoting function a reduced template mentions its result through — one of
+  the engine's quoting functions (`sx/quoting-functors`)."
+  sx/quote-functor)
 
 (defn any-quasiquote?
-  "Gate: is quasiquotation enabled — `(quoting_function Quasiquote)` declared?  False ⇒ the
-  reducer short-circuits, one prop read.  Mirrors `nat/any-reifiable-functions?`.
+  "Gate: is quasiquotation enabled — `(unreifiable_function Quasiquote)` declared?  False ⇒
+  the reducer short-circuits, one prop read.  Mirrors `nat/any-reifiable-functions?`.
 
   The mark is read unscoped: the gate asks whether the KB stores it."
   [kb]
-  (tax/quoting-function? (reasoning/taxonomy kb) quasiquote-function))
+  (tax/has-prop? (reasoning/taxonomy kb) :unreifiable quasiquote-function))
 
 (defn ensure-quasiquote-functions
-  "Enable quasiquotation as a unit — declare the four marks it needs, each only if absent:
-  `Quote` reifiable + quoting (the constructed expression reifies to a mention constant) and
-  `Quasiquote` unreifiable + quoting (an open template stays structural and is a mention).
-  The last of them, `(quoting_function Quasiquote)`, is the gate `any-quasiquote?` reads, so
-  this call is what turns the reducer on.  Idempotent, asserted without chaining or settling
-  since it is pure metadata — the shape `skolem/ensure-skolem-function` uses.
+  "Enable quasiquotation as a unit — declare the two marks it needs, each only if absent:
+  `Quote` reifiable (the constructed expression reifies to a mention constant) and
+  `Quasiquote` unreifiable (an open template stays structural).  Both are quoting functions
+  without any declaration (`sx/quoting-functors`).  The last mark,
+  `(unreifiable_function Quasiquote)`, is the gate `any-quasiquote?` reads, so this call is
+  what turns the reducer on.  Idempotent, asserted without chaining or settling since it is
+  pure metadata — the shape `skolem/ensure-skolem-function` uses.
 
   The marks are read unscoped: the question is whether the KB stores each one."
   [kb]
@@ -75,12 +76,8 @@
     (doseq [s (cond-> []
                 (not (nat/reifiable-function? kb quote-function))
                 (conj (list 'reifiable_function quote-function))
-                (not (tax/quoting-function? tax quote-function))
-                (conj (list 'quoting_function quote-function))
                 (not (tax/has-prop? tax :unreifiable quasiquote-function))
-                (conj (list 'unreifiable_function quasiquote-function))
-                (not (tax/quoting-function? tax quasiquote-function))
-                (conj (list 'quoting_function quasiquote-function)))]
+                (conj (list 'unreifiable_function quasiquote-function)))]
       (wiring/assert-sentence kb s nat/universal-context {:strength :monotonic :chain? false}))))
 
 (defn- unquote-form? [x]
@@ -107,15 +104,12 @@
   "Every **ground** `(Quasiquote T)` subterm of `term` replaced by `(reify-fn (Quote E))`,
   `E` its constructed expression.  An open template (a hole still unbound) is left
   untouched — in a rule consequent it reduces at firing, once substitution grounds it; a
-  direct open assert is a non-ground fact `wff` already refuses.
-
-  The `quoting_function` mark is read unscoped: whether an argument is a mention is a
-  fact about the sentence (`tax/mention-marks`)."
+  direct open assert is a non-ground fact `wff` already refuses."
   [kb term reify-fn]
   (cond
     (and (quasiquote-form? term) (sx/ground-term? term))
     (reify-fn (list quote-function (strip-unquotes (second term))))
-    ;; a mention is opaque — a `quoting_function` application (`Quote`, or an open/nested
+    ;; a mention is opaque — a quoting function's application (`Quote`, or an open/nested
     ;; `Quasiquote`) or a quoting-predicate payload (`termOfUnit` / `rewriteOf`, the reified
     ;; NAT's own bookkeeping): a `Quasiquote` nested inside is literal syntax, not reduced
     ;; here.  Without this the `(termOfUnit K E)` re-assert `mint-nat!` makes would re-run
@@ -123,7 +117,7 @@
     ;; one way and queried (top level only) another.
     (and (seq? term)
          (or (contains? nat/nat-quoting-predicates (first term))
-             (tax/quoting-function? (reasoning/taxonomy kb) (first term))))
+             (sx/quoting-functor? (first term))))
     term
     (vector? term) (mapv #(reduce-term kb % reify-fn) term)
     (seq? term)    (apply list (map #(reduce-term kb % reify-fn) term))
@@ -157,7 +151,7 @@
   `rewrite-goal` exempts
   `different` and a positive equation, whose arguments must stay un-rewritten to read class
   membership (`res/goal-held-as-spelled?`), and the
-  congruence walk under it exempts a **mention** — a `quoting_function`'s arguments, and the
+  congruence walk under it exempts a **mention** — a quoting function's arguments, and the
   proposition a `modal_predicate` attributes to its agent, which is normalized against the
   *agent's* partition where the projection reads it rather than against the asker's
   (docs/belief.md).  Both exemptions hold on the stored side too, so the goal and the

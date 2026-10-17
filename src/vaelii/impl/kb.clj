@@ -2743,10 +2743,10 @@
 (defn displaced-terms*
   "The `{old-term representative}` rewrites a sentence undergoes, given the visibility
   predicate already built — empty when nothing in it has merged.  Mention-aware: a term
-  quoted inside a `quoting_function` is recorded displaced only by a spelling rename, never
-  by a `sameAs` merge of its referent, matching what `rewrite-term*` actually rewrites (so
-  `why-not` does not over-report a held-opaque mention).  Delegates to `res/displaced-terms-in`,
-  which is the flat walk when no `quoting_function` is declared."
+  quoted inside a quoting function (`Quote`, `Quasiquote`) is recorded displaced only by a
+  spelling rename, never by a `sameAs` merge of its referent, matching what `rewrite-term*`
+  actually rewrites (so `why-not` does not over-report a held-opaque mention).  Delegates
+  to `res/displaced-terms-in`."
   [kb sentence visible?]
   (res/displaced-terms-in kb visible? sentence))
 

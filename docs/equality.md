@@ -440,7 +440,8 @@ merging performs congruence closure eagerly over all ground content. No congruen
 algorithm is written, because the index already answers the question it would ask.
 
 **One position is exempt: a mention.** A term named as *syntax*, rather than one the
-sentence refers with, does not fold onto its referent's class — a `quoting_function`'s arguments, and the
+sentence refers with, does not fold onto its referent's class — the arguments of a quoting
+function (`Quote` and `Quasiquote`, fixed by the engine and declared by nothing), and the
 proposition a `modal_predicate` attributes to its agent. `(believes Oedipus (marriedTo
 Oedipus Jocasta))` is not rewritten by a `sameAs` the *asker* holds, because an attitude is
 opaque and the asker's identities are not the agent's; the agent's own merges do rewrite

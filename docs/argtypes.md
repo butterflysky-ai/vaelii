@@ -57,8 +57,9 @@ failed. The boundary of the inner reading:
 - **A mention is not descended into.** A position a `quotedArg` declaration types holds
   the term written there, so an application in it is syntax, and neither its result nor
   its inputs are read. The same holds for the argument of a quoting predicate
-  (`termOfUnit`, `rewriteOf`) and of a `quoting_function`. A quoting function's own
-  declarations are still read over its application; only what it quotes is left alone.
+  (`termOfUnit`, `rewriteOf`) and of a quoting function (`Quote`, `Quasiquote`). A
+  quoting function's own declarations are still read over its application; only what it
+  quotes is left alone.
   `quotedArg` itself stays open-world about a compound argument's kind: it does not read
   the shape kinds ([what a quoted form is](#what-a-quoted-form-is)), so a compound in a
   `(quotedArg P n string)` position is neither a string nor convicted of not being one.
@@ -949,16 +950,20 @@ A variable inside a nested `(Quote …)`, or bound by a quantifier in X, is not 
 (`sx/unquoted-free-vars`). The expression `?x` is open; the sentence around `(Quote ?x)` is
 closed (`sx/closed?`), which is a different expression.
 
-`ExpressionKindProver` answers `(k (F X))` for `k` below `expression` and `F` a
-`quoting_function`, true when one of X's kinds reaches `k` through `genl`. A reifiable
-quoting function's application arrives minted, and the prover reads the constant's
-`termOfUnit` back to the form; an application never minted names no stored term, so a
-query over it matches nothing, as for any NAT ([nat.md](nat.md)). The answer rests on the
-`quoting_function` statements, the `termOfUnit` statement and one `genl` path, and a
-forward firing names them. A datum on `quoting_function` or on an edge-installing functor
-re-joins the rules over an expression kind, so the mark or the lattice arriving after the
-rule and the fact fires it. Forward chaining discharges an antecedent through the prover
-only for the kinds `provers/expression-kind-predicates` names.
+`ExpressionKindProver` answers `(k (F X))` for `k` below `expression` and `F` a quoting
+function — `Quote` or `Quasiquote`, which the engine fixes and no statement declares —
+true when one of X's kinds reaches `k` through `genl`. A reifiable quoting function's
+application arrives minted, and the prover reads the constant's `termOfUnit` back to the
+form; an application never minted names no stored term, so a query over it matches
+nothing, as for any NAT ([nat.md](nat.md)). The answer rests on the `termOfUnit`
+statement and one `genl` path, and a forward firing names them. A datum on an
+edge-installing functor re-joins the rules over an expression kind, so the lattice
+arriving after the rule and the fact fires it. Forward chaining discharges an antecedent
+through the prover only for the kinds `provers/expression-kind-predicates` names, and
+only for an answer that rests on at least one statement: `(sentence (Quote (not (dog
+Muffet))))` holds by the form's own shape, with no `genl` edge and no `termOfUnit` behind
+it, so a query proves it and a firing does not read it, while `(formula (Quote …))`, one
+edge above, fires.
 
 **The spelling does not say whether `(R a)` is a predication or a `non_atomic_term`**: that
 is R's stored kind, and the prover does not decide it, so `(predication (Quote (dog

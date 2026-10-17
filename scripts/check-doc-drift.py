@@ -1430,8 +1430,8 @@ E17_FLAT = {
     # The reads with no scoped arity: the census of a mark and its wrappers.  Every call
     # is unscoped, except as the argument of `seq`, `empty?` or `not-empty`, a test of
     # whether the KB declares the mark anywhere, which gates work a later read decides.
-    "tax/props": (None, "census"), "tax/quoting-function?": (None, "census"),
-    "tax/mention-marks": (None, "census"), "tax/commuting-groups": (None, "census"),
+    "tax/props": (None, "census"), "tax/mention-marks": (None, "census"),
+    "tax/commuting-groups": (None, "census"),
 }
 E17_GATES = ("seq", "empty?", "not-empty")
 E17_ROSTER = {
@@ -1647,7 +1647,7 @@ E17_ROSTER = {
     ("src/vaelii/impl/special.clj", "anti-symmetric-mark-relevant?"),
     ("src/vaelii/impl/special.clj", "offered-mark-over?"),
     #
-    # Census reads (`tax/props`, `commuting-groups`, `quoting-function?`, `mention-marks`)
+    # Census reads (`tax/props`, `commuting-groups`, `mention-marks`)
     # outside an emptiness test.  The public census is the KB-wide reading.
     ("src/vaelii/core.clj", "props"),
     # A KB-wide property: the stored spelling, the roster, the rebuild of every stored
@@ -1659,12 +1659,6 @@ E17_ROSTER = {
     ("src/vaelii/impl/resolution.clj", "matches-hierarchical-over"),
     ("src/vaelii/impl/special.clj", "permuting-marks"),
     ("src/vaelii/impl/special.clj", "rebuild-pending!"),
-    ("src/vaelii/impl/checks.clj", "nested-input-problem"),
-    ("src/vaelii/impl/checks.clj", "convicting-result-type"),
-    ("src/vaelii/impl/checks.clj", "minted-application-clash"),
-    ("src/vaelii/impl/nat.clj", "reify-or-mint-nat"),
-    ("src/vaelii/impl/nat.clj", "reify-nat-for-read"),
-    ("src/vaelii/impl/quasiquote.clj", "reduce-term"),
     ("src/vaelii/impl/quasiquote.clj", "any-quasiquote?"),
     ("src/vaelii/impl/resolution.clj", "representative-term"),
     ("src/vaelii/impl/resolution.clj", "displaced-terms-in"),
@@ -1688,10 +1682,6 @@ E17_ROSTER = {
     ("src/vaelii/impl/resolution.clj", "constraining-predicates"),
     ("src/vaelii/impl/special.clj", "declaring-predicates"),
     ("src/vaelii/impl/special.clj", "marked-roots"),
-    # The `quoting_function` mark: whether an argument is a mention is a fact about the
-    # sentence, read unscoped as `checks` reads it (`tax/mention-marks`).
-    ("src/vaelii/impl/provers.clj", "quoted-form"),
-    ("src/vaelii/impl/provers.clj", "expression-kind-goal?"),
     # The re-join reads every context, so an edge's upper end is read through every edge.
     ("src/vaelii/impl/provers.clj", "support-answers-reading"),
 }

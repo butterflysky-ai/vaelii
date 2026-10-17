@@ -59,6 +59,11 @@
 (capabilityType bird flying)
 (not (capabilityType penguin flying))
 
+;; A life stage takes the same kind of claim: the adult flies and the larva does not,
+;; though both are the one lineage and the organism lives through the change.
+(capabilityType butterfly flying)
+(not (capabilityType caterpillar flying))
+
 ;; ---- and down to the individuals ----------------------------------------
 ;; The claim about the kind does not reach its members on its own: "birds fly" and "this
 ;; bird flies" are different claims, and which one licenses the other is a quantifier

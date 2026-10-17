@@ -141,7 +141,6 @@
     [modal_predicate                   [:integrate :disintegrate :rebuild :wff]       :modal                     true]
     [reifiable_function                [:integrate :disintegrate :rebuild :wff]       :reifiable                 true]
     [unreifiable_function              [:integrate :disintegrate :rebuild :wff]       :unreifiable               true]
-    [quoting_function                  [:integrate :disintegrate :rebuild :wff]       :quoting                   true]
     [contextArgSubrelation            [:wff]                                         nil                        false]
     [functionCorrespondingPredicate   [:wff]                                         nil                        false]
     [equals                           [:integrate :disintegrate :rebuild :wff]       nil                        false]

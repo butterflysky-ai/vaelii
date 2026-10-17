@@ -117,7 +117,7 @@
 ;; thirty-one values *are* is pinned by `special-table-test/frozen-table`, which states
 ;; each functor's kind in a table written out that nothing derives.
 ;;
-;; `:reifiable` / `:unreifiable` / `:quoting` are a *function*'s kind
+;; `:reifiable` / `:unreifiable` are a *function*'s kind
 ;; rather than a predicate's, which `::term` admits either way; the four `:declares-*` say
 ;; that a predicate is the **subject** of an argument constraint rather than that it
 ;; carries a property, which is what lets the descension ask whose declarations bind a

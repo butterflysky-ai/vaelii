@@ -157,17 +157,16 @@
   ;; a position `quotedArg` types holds the term written there, and a quoting function's
   ;; argument is a mention: in both, an application is syntax, and what its function
   ;; declares about the inputs of the applications it is used in does not reach it.
-  (tu/with-terms [InputGapFn inputGapObserver holds Quote]
+  (tu/with-terms [InputGapFn inputGapObserver holds]
     (declare-gap-fn! kb InputGapFn inputGapObserver)
     (v/assert kb (list 'unary_predicate holds) 'CxUniverse)
     (v/assert kb (list 'quotedArg holds 1 'thing) 'CxUniverse)
-    (v/assert kb (list 'unreifiable_function Quote) 'CxUniverse)
-    (v/assert kb (list 'quoting_function Quote) 'CxUniverse)
-    (v/assert kb (list 'unary_function Quote) 'CxUniverse)
+    (v/assert kb (list 'unreifiable_function 'Quote) 'CxUniverse)
+    (v/assert kb (list 'unary_function 'Quote) 'CxUniverse)
     (testing "a quotedArg position is exempt"
       (is (nil? (problem kb (list holds (list InputGapFn "x"))))))
     (testing "so is a quoting function's argument"
-      (is (nil? (problem kb (list inputGapObserver (list Quote (list InputGapFn "x")))))))
+      (is (nil? (problem kb (list inputGapObserver (list 'Quote (list InputGapFn "x")))))))
     (testing "and so is a quoting predicate's"
       (tu/with-terms [K]
         (is (nil? (problem kb (list 'termOfUnit K (list InputGapFn "x")))))))))

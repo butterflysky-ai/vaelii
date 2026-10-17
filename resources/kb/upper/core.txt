@@ -203,7 +203,8 @@
 (comment non_positive_integer "A whole number less than or equal to zero.")
 (comment keyword "An EDN keyword, :like_this. A term that names itself and carries no denotation the KB reasons about.")
 (comment boolean "True or false, written out.")
-(comment character "A single character, written \\a. Not a one-letter string: the two are separate EDN kinds and neither is below the other.")
+(comment character "A single character, written \\a. A character and a one-letter string are separate EDN kinds and neither is below the other.")
+(negativeExample character (Quote (character "a")))
 (comment symbol  "A name — the term written in an argument position, whatever that term denotes. Mention-only: see the note above its declaration.")
 (genl integer number)
 ;; An integer is positive or not, and negative or not: two partitions of integer, with
@@ -245,12 +246,23 @@
 ;; vaelii.impl.predicates for that reason.  A kind hanging off them is stated in its
 ;; domain file, as (partition tangible made natural) is in abstract.txt.  biological is
 ;; here because organism (organism.txt) and body_part (abstract.txt) both extend it.
-(comment intangible "Something with no mass: a region, a shadow, a number, a relation, a time. It may have a location — a region of space is spatiotemporal and intangible both.")
+(comment intangible "Something with no mass. It may have a location.")
+(positiveExampleComment intangible "a region")
+(positiveExampleComment intangible "a shadow")
+(positiveExampleComment intangible "a number")
+(positiveExampleComment intangible "a relation")
+(positiveExampleComment intangible "the time 3 PM on 14 October 2024")
 (comment spatial "Something with a location in some space, physical or mathematical. The line y=x is located in the Cartesian plane and a square of an abstract chessboard on that board, though neither is located anywhere in the world; a point has a location and no extent, and is spatial too. Time is not one of these spaces; being in time is what temporal says. Everything spatiotemporal is spatial; spatial and aspatial partition thing. The four spatial calculi relate what is spatial, in whichever space a context is about.")
-(comment spatiotemporal "Something with a location in space and time — a physical object, but also a region or a place, which occupy space without being made of anything. Below both spatial and temporal.")
+(comment spatiotemporal "Something with a location in space and time. Below both spatial and temporal.")
+(positiveExampleComment spatiotemporal "a physical object")
+(positiveExampleComment spatiotemporal "a region or a place, which occupies space without being made of anything")
 (comment temporal "Something that happens or exists in time. Physical objects, events, and situations are all temporal.")
 (comment aspatial "Not located in any space: no location in any space, physical or mathematical. None of the spatial calculi relate to it.")
-(comment uninterrupted "Something temporal that is present at every moment between its start and its end: a moment, a year, a meeting, a held state. The complement of intermittent within temporal; the two partition temporal.")
+(comment uninterrupted "Something temporal that is present at every moment between its start and its end. The complement of intermittent within temporal; the two partition temporal.")
+(positiveExampleComment uninterrupted "a moment")
+(positiveExampleComment uninterrupted "the year 2024")
+(positiveExampleComment uninterrupted "a meeting")
+(positiveExampleComment uninterrupted "a held state")
 (comment intermittent "Something temporal with a gap: there is a moment between its start and its end at which it is absent. The writing of a novel, a trial with its recesses, a World Series, a bicycle taken apart and put back together. The complement of uninterrupted within temporal.")
 (comment atemporal "Not located in time. Numbers, relations and the other kinds below nowhere_never are atemporal; a fluent is not atemporal, since it holds over time.")
 (comment tangible "Something with mass. Having mass, it necessarily has a location in space and time too, so it is spatiotemporal.")
@@ -386,8 +398,10 @@
 ;; or a condition (believes, ist, implies, the defn family) convict only a value written
 ;; in the position and derive a membership only for a symbol written there.
 (comment formula "A predication, a logical operator applied to formulas, or a quantifier binding variables in a formula.")
-(comment sentence "A closed formula. Every stored sentex holds one — checks/check-ground refuses an open non-rule sentence, and a rule's variables are implicitly universal. A possibly-open goal is a pattern, not a sentence.")
-(comment non_atomic_term "A function applied to as many closed terms as it takes, e.g. (MotherFn Muffet). The NAT of docs/nat.md, named here as a collection so a declaration can say an argument is one.")
+(comment sentence "A closed formula. Every stored sentex holds one — checks/check-ground refuses an open non-rule sentence, and a rule's variables are implicitly universal.")
+(negativeExampleComment sentence "a possibly-open goal, which is a pattern")
+(comment non_atomic_term "A function applied to as many closed terms as it takes. The NAT of docs/nat.md, named here as a collection so a declaration can say an argument is one.")
+(positiveExampleComment non_atomic_term "the term (MotherFn Muffet)")
 (unary_predicate formula)
 (unary_predicate sentence)
 (unary_predicate non_atomic_term)
@@ -447,7 +461,8 @@
 
 (genl context nowhere_never)
 
-(comment Quote "Syncategorematic: part of vaelii's syntax, like a parenthesis, though written like a function. (Quote X) is X taken as a form, e.g. (Quote Muffet) names the symbol Muffet, not the dog. Quote takes no arg, result or metatype declaration; what kind of expression (Quote X) is follows from X's shape.")
+(comment Quote "Syncategorematic: part of vaelii's syntax, like a parenthesis, though written like a function. (Quote X) is X taken as a form, e.g. (Quote Muffet) names the symbol Muffet, not the dog. Quote takes no arg, result or metatype declaration; what kind of expression (Quote X) is follows from X's shape. X is a mention, held opaque to identity congruence: an equality merge rewrites it by a rewriteOf spelling rename only, never by a sameAs or equals coreference, so a quoted term does not fold onto its referent's class. Quote and Quasiquote are the quoting functions, fixed by the engine rather than declared. See docs/equality.md.")
+(positiveExampleComment Quote "(Quote Muffet), which names the symbol Muffet and not the dog")
 
 (comment interArg
          "(interArg ?relation ?position1 ?type1 ?position2 ?type2) means that whenever argument ?position1 of ?relation is a ?type1, argument ?position2 must be a ?type2. The conditional argument constraint, and it says what arg cannot: (interArg eats 1 carnivore 2 meat) types the second argument only for the eaters that are carnivores, where (arg eats 2 meat) would demand meat of every eater. Silence about the trigger argument's type leaves the constraint dormant rather than firing it. Once the trigger holds, the target is derived a ?type2 under assertive argument types, and under the constraint-only reading it is convicted when the KB places it outside ?type2. Read through genl transitivity from the writing context, like arg. Relation-wide vocabulary; the current function-input enforcement boundary is documented in docs/argtypes.md.")
@@ -561,16 +576,26 @@
 
 (set/monotonic (partition relation fixed_arity variable_arity))
 
-(comment bounded_arity "A relation whose number of arguments has an upper bound: one exact count, or a fixed range, e.g. parentOf takes two, functionCorrespondingPredicate two or three.")
+(comment bounded_arity "A relation whose number of arguments has an upper bound: one exact count, or a fixed range.")
+(positiveExample bounded_arity (Quote (bounded_arity parentOf)))
+(positiveExample bounded_arity (Quote (bounded_arity functionCorrespondingPredicate)))
 (unary_predicate bounded_arity)
 (arg bounded_arity 1 relation)
-(comment unbounded_arity "A relation that takes any number of arguments beyond its required ones, e.g. and, or, partition, different, greaterThan.")
+(comment unbounded_arity "A relation that takes any number of arguments beyond its required ones.")
+(positiveExample unbounded_arity (Quote (unbounded_arity and)))
+(positiveExample unbounded_arity (Quote (unbounded_arity or)))
+(positiveExample unbounded_arity (Quote (unbounded_arity partition)))
+(positiveExample unbounded_arity (Quote (unbounded_arity different)))
+(positiveExample unbounded_arity (Quote (unbounded_arity greaterThan)))
 (unary_predicate unbounded_arity)
 (arg unbounded_arity 1 relation)
 (partition relation bounded_arity unbounded_arity)
 (genl fixed_arity bounded_arity)
 (genl unbounded_arity variable_arity)
-(comment unbounded_arity_predicate "An unbounded_arity relation that is a predicate, e.g. partition, different, greaterThan.")
+(comment unbounded_arity_predicate "An unbounded_arity relation that is a predicate.")
+(positiveExample unbounded_arity_predicate (Quote (unbounded_arity_predicate partition)))
+(positiveExample unbounded_arity_predicate (Quote (unbounded_arity_predicate different)))
+(positiveExample unbounded_arity_predicate (Quote (unbounded_arity_predicate greaterThan)))
 (unary_predicate unbounded_arity_predicate)
 (intersection unbounded_arity_predicate unbounded_arity predicate)
 (genl unbounded_arity_predicate variable_arity_predicate)
@@ -578,7 +603,8 @@
 (unary_predicate unbounded_arity_function)
 (intersection unbounded_arity_function unbounded_arity function)
 (genl unbounded_arity_function variable_arity_function)
-(comment arityMax "(arityMax ?relation ?n) means that the bounded_arity relation ?relation takes at most ?n arguments, e.g. (arityMax functionCorrespondingPredicate 3).")
+(comment arityMax "(arityMax ?relation ?n) means that the bounded_arity relation ?relation takes at most ?n arguments.")
+(positiveExample arityMax (Quote (arityMax functionCorrespondingPredicate 3)))
 (binary_predicate arityMax)
 (arg arityMax 1 bounded_arity)
 (arg arityMax 2 positive_integer)
@@ -773,7 +799,8 @@
 (arg believes 2 sentence)
 (modal_predicate believes)
 
-(comment binary_predicate     "A predicate of two arguments — a relation such as parentOf.")
+(comment binary_predicate     "A predicate of two arguments.")
+(positiveExample binary_predicate (Quote (binary_predicate parentOf)))
 
 (comment comment
          "(comment ?term ?text) means that ?text documents ?term. Ordinary sentexes, so the KB documents itself in its own representation and a comment is queried, retracted and justified like anything else. Written as a signature and a definition, as this one is, so that first clause doubles as the template an English gloss of any (?term …) sentence is composed from; everything after it is prose for a reader and no machine reads it.")
@@ -802,6 +829,15 @@
 (genlArg disjoint 1 thing)
 (genlArg disjoint 2 thing)
 
+(comment diachronicallyDisjoint
+         "(diachronicallyDisjoint ?type1 ?type2) means that nothing is an instance of both types at the same time, though one thing can be an instance of each at different times: caterpillar and butterfly, a child and an adult. disjoint is a genl of it, because never sharing an instance means never sharing one at once. Stated and queryable, not enforced: memberships are checked without time, so the engine cannot yet tell an instance that is both at once from one that is each in turn.")
+(binary_predicate diachronicallyDisjoint)
+(set/monotonic (symmetric diachronicallyDisjoint))
+(set/monotonic (type_relation_predicate diachronicallyDisjoint))
+(genlArg diachronicallyDisjoint 1 thing)
+(genlArg diachronicallyDisjoint 2 thing)
+(genl disjoint diachronicallyDisjoint)
+
 (comment disjoint_metatype
          "(disjoint_metatype ?metatype) means that every pair of ?metatype's member types is disjoint. The clique is consulted rather than stored, so it adds no work quadratic and retraction reaches all of it: dropping ?metatype releases every pair at once, and dropping one member releases exactly that member's pairs.")
 (unary_predicate disjoint_metatype)
@@ -821,7 +857,8 @@
 (termsRelated genl disjoint orthogonal)   ;; the three basic taxonomic relations
 
 (comment siblingDisjointException
-         "(siblingDisjointException ?type1 ?type2) means that the one pair ?type1, ?type2 may overlap although a separation mark would otherwise hold it apart: a sibling_disjoint parent, a disjoint_metatype, or a partition or separating roster naming both (a partition keeps its coverage half). It exempts only that pair: each type stays disjoint from everything else. The exemption is read against the separated pair, so exempting two parts of a roster or two members of a metatype lifts what their separation reached below them as well, while under a sibling_disjoint parent a subtype of either is itself a specialization of the parent and stays separated from the other. A stated disjoint is not a mark: a (disjoint ?type1 ?type2), or a disjoint over a supertype of each, contradicts the exception. Read at the reader: a context that does not see the exception reads the pair separated. A Braille reading, both a reading and a touch perception, is the structure of it. A mark separates only types neither of which is a genl of the other, so an exception states an orthogonal pair, and it is declared a genl of orthogonal: a genl edge between the two, or the one type named twice, contradicts it as it contradicts that orthogonal.")
+         "(siblingDisjointException ?type1 ?type2) means that the one pair ?type1, ?type2 may overlap although a separation mark would otherwise hold it apart: a sibling_disjoint parent, a disjoint_metatype, or a partition or separating roster naming both (a partition keeps its coverage half). It exempts only that pair: each type stays disjoint from everything else. The exemption is read against the separated pair, so exempting two parts of a roster or two members of a metatype lifts what their separation reached below them as well, while under a sibling_disjoint parent a subtype of either is itself a specialization of the parent and stays separated from the other. A stated disjoint is not a mark: a (disjoint ?type1 ?type2), or a disjoint over a supertype of each, contradicts the exception. Read at the reader: a context that does not see the exception reads the pair separated. A mark separates only types neither of which is a genl of the other, so an exception states an orthogonal pair, and it is declared a genl of orthogonal: a genl edge between the two, or the one type named twice, contradicts it as it contradicts that orthogonal.")
+(positiveExampleComment siblingDisjointException "a Braille reading, both a reading and a touch perception")
 (set/monotonic (symmetric siblingDisjointException))
 (set/monotonic (type_relation_predicate siblingDisjointException))
 (genlArg siblingDisjointException 1 thing)
@@ -1260,32 +1297,37 @@
 (forced_monotonic_between_predicates genl)
 
 (comment functional
-         "(functional ?predicate) means that ?predicate maps its first argument to at most one value. A second, different value collides with the first: two symbols both known true (monotonic) derive (equals V1 V2) and merge, so retracting either fact or the declaration un-merges them. Any other collision is a nogood each context reading the pair decides, a default fact losing to a monotonic one and two default facts being a dilemma: two non-symbols such as 1980 and 1990, since no merge can make two numbers one thing, and a pair with a default fact, since a merge rests on monotonic evidence alone. Declared of birthYearOf, for instance. Also a type: (functional P) classifies P as a binary_predicate, so a KB can be queried for the predicates carrying the property.")
+         "(functional ?predicate) means that ?predicate maps its first argument to at most one value. A second, different value collides with the first: two symbols both known true (monotonic) derive (equals V1 V2) and merge, so retracting either fact or the declaration un-merges them. Any other collision is a nogood each context reading the pair decides, a default fact losing to a monotonic one and two default facts being a dilemma: two non-symbols such as 1980 and 1990, since no merge can make two numbers one thing, and a pair with a default fact, since a merge rests on monotonic evidence alone. Also a type: (functional P) classifies P as a binary_predicate, so a KB can be queried for the predicates carrying the property.")
+(positiveExample functional (Quote (functional birthYearOf)))
 (unary_predicate functional)
 (decontextualized_predicate functional)
 (set/monotonic (genl functional binary_predicate))
 
 (comment functionalInArg
-         "(functionalInArg ?predicate ?n) means that the argument of ?predicate at position ?n is determined by the others: two applications agreeing everywhere but at ?n name one thing there. functional read at another position, and enforced the same way: two monotonic symbols derive (equals V1 V2) and merge, and any other collision, such as 1980 and 1990 or a pair with a default fact, is a nogood. Read up the predicate hierarchy, so a mark on a predicate governs its specs. Decontextualized like functional, so a mark stated in one theory merges from every context. Declared of capitalCityOf at position 1, for instance, beside (functional capitalCityOf): one capital per country and one country per capital. See docs/taxonomy.md.")
+         "(functionalInArg ?predicate ?n) means that the argument of ?predicate at position ?n is determined by the others: two applications agreeing everywhere but at ?n name one thing there. functional read at another position, and enforced the same way: two monotonic symbols derive (equals V1 V2) and merge, and any other collision, such as 1980 and 1990 or a pair with a default fact, is a nogood. Read up the predicate hierarchy, so a mark on a predicate governs its specs. Decontextualized like functional, so a mark stated in one theory merges from every context. See docs/taxonomy.md.")
+(positiveExampleComment functionalInArg "capitalCityOf at position 1, beside (functional capitalCityOf): one capital per country and one country per capital")
 (binary_predicate functionalInArg)
 (decontextualized_predicate functionalInArg)
 (arg functionalInArg 1 relation)
 (arg functionalInArg 2 positive_integer)
 
 (comment injection
-         "(injection ?predicate) means that ?predicate is an injective function: single-valued, one-to-one, and total on the type its first argument is declared to be. Declared once, it stands in for four claims the engine already reads. Two forward rules derive (functional ?predicate) and (functionalInArg ?predicate 1), each a real mark the engine enforces in turn: the merge-or-nogood rule over a shared first argument, and the same rule mirrored over a shared second. A second symbol filler on either side, both facts monotonic, derives (equals V1 V2) and merges, while any other collision, such as 1980 and 1990, is a nogood. A third rule reads the domain off (arg ?predicate 1 ?d) and derives the binary integrity requirement (predAllSpecified ?predicate ?d); the required filler type is not restated — the audit derives it from ?predicate's own slot-2 contract at read time. That requirement is audited on demand by vaelii.core/specified-violations, which reports the domain members carrying no determinate filler. Totality is audited rather than enforced because an open world cannot refuse a write for a member whose filler has not arrived. A predicate with no arg 1 declaration gets the two enforced marks and no audit, since nothing states what the domain is; one typed at arg 1 but not at arg 2 concludes the requirement, and the audit reports the missing slot contract as an explicit gap rather than auditing unconstrained. A one-to-one relation that is not total is (functional P) beside (functionalInArg P 1), written directly. Also a type: (genl injection functional) classifies P as functional and so binary_predicate. Declared of a relation such as capitalCityOf, for instance. See docs/taxonomy.md.")
+         "(injection ?predicate) means that ?predicate is an injective function: single-valued, one-to-one, and total on the type its first argument is declared to be. Declared once, it stands in for four claims the engine already reads. Two forward rules derive (functional ?predicate) and (functionalInArg ?predicate 1), each a real mark the engine enforces in turn: the merge-or-nogood rule over a shared first argument, and the same rule mirrored over a shared second. A second symbol filler on either side, both facts monotonic, derives (equals V1 V2) and merges, while any other collision, such as 1980 and 1990, is a nogood. A third rule reads the domain off (arg ?predicate 1 ?d) and derives the binary integrity requirement (predAllSpecified ?predicate ?d); the required filler type is not restated — the audit derives it from ?predicate's own slot-2 contract at read time. That requirement is audited on demand by vaelii.core/specified-violations, which reports the domain members carrying no determinate filler. Totality is audited rather than enforced because an open world cannot refuse a write for a member whose filler has not arrived. A predicate with no arg 1 declaration gets the two enforced marks and no audit, since nothing states what the domain is; one typed at arg 1 but not at arg 2 concludes the requirement, and the audit reports the missing slot contract as an explicit gap rather than auditing unconstrained. A one-to-one relation that is not total is (functional P) beside (functionalInArg P 1), written directly. Also a type: (genl injection functional) classifies P as functional and so binary_predicate. See docs/taxonomy.md.")
+(positiveExampleComment injection "a relation such as capitalCityOf")
 (unary_predicate injection)
 (decontextualized_predicate injection)
 (set/monotonic (genl injection functional))
 
 (comment surjection
-         "(surjection ?predicate) means that ?predicate is a surjective function: single-valued, total on the type its first argument is declared to be, and onto the type its second is. Declared once, it stands in for three claims. One forward rule derives (functional ?predicate), the mark the engine enforces by merging two monotonic symbol fillers for one first argument and deciding any other two as a nogood. Two further rules read the domain off (arg ?predicate 1 ?d) and the range off (arg ?predicate 2 ?r), and derive (predAllSpecified ?predicate ?d) for totality and (predSpecifiedAll ?predicate ?r) for ontoness — each binary, the filler's type derived from the predicate's own slot contract at read time rather than restated. Both are audited on demand by vaelii.core/specified-violations: the first reports the domain members with no determinate filler, the second the range members no determinate domain member reaches. Neither is enforced at a write, an open world having no ground to refuse a fact for a member nothing has reached yet. A predicate whose quantified side is untyped concludes no requirement; an untyped filler side is reported by the audit as an explicit gap. Nothing here says one-to-one, so a surjection may send two domain members to one range member; that is what separates it from bijection. Declared of a relation such as capitalCityOf over capital_city, for instance. See docs/taxonomy.md.")
+         "(surjection ?predicate) means that ?predicate is a surjective function: single-valued, total on the type its first argument is declared to be, and onto the type its second is. Declared once, it stands in for three claims. One forward rule derives (functional ?predicate), the mark the engine enforces by merging two monotonic symbol fillers for one first argument and deciding any other two as a nogood. Two further rules read the domain off (arg ?predicate 1 ?d) and the range off (arg ?predicate 2 ?r), and derive (predAllSpecified ?predicate ?d) for totality and (predSpecifiedAll ?predicate ?r) for ontoness — each binary, the filler's type derived from the predicate's own slot contract at read time rather than restated. Both are audited on demand by vaelii.core/specified-violations: the first reports the domain members with no determinate filler, the second the range members no determinate domain member reaches. Neither is enforced at a write, an open world having no ground to refuse a fact for a member nothing has reached yet. A predicate whose quantified side is untyped concludes no requirement; an untyped filler side is reported by the audit as an explicit gap. Nothing here says one-to-one, so a surjection may send two domain members to one range member; that is what separates it from bijection. See docs/taxonomy.md.")
+(positiveExampleComment surjection "a relation such as capitalCityOf over capital_city")
 (unary_predicate surjection)
 (decontextualized_predicate surjection)
 (set/monotonic (genl surjection functional))
 
 (comment bijection
-         "(bijection ?predicate) means that ?predicate is a bijective function: an injection and a surjection at once, so the two declared types are in one-to-one correspondence. Declared once, it stands in for the pair: two forward rules derive (injection ?predicate) and (surjection ?predicate), and each of those derives its own marks in turn, so the whole family reaches the engine through the two entries above rather than through anything keyed on this name. What lands is (functional ?predicate) and (functionalInArg ?predicate 1), enforced at the assert entry point, beside (predAllSpecified ?predicate ?d) over the arg-declared domain and (predSpecifiedAll ?predicate ?r) over the arg-declared range — binary, the filler types derived from the predicate's own slot contract at read time — audited on demand. The marks are materialized as stored sentexes rather than claimed by subsumption edges, for the reason equivalence_relation's entry gives: the rule's stored conclusion both classifies and enforces, where a genl-inherited membership never reaches the mark ingestion. Also a type: (genl bijection injection) and (genl bijection surjection) state the subsumption outright, and classify P as functional and so binary_predicate. Declared of a relation such as capitalCityOf over capital_city, for instance. See docs/taxonomy.md.")
+         "(bijection ?predicate) means that ?predicate is a bijective function: an injection and a surjection at once, so the two declared types are in one-to-one correspondence. Declared once, it stands in for the pair: two forward rules derive (injection ?predicate) and (surjection ?predicate), and each of those derives its own marks in turn, so the whole family reaches the engine through the two entries above rather than through anything keyed on this name. What lands is (functional ?predicate) and (functionalInArg ?predicate 1), enforced at the assert entry point, beside (predAllSpecified ?predicate ?d) over the arg-declared domain and (predSpecifiedAll ?predicate ?r) over the arg-declared range — binary, the filler types derived from the predicate's own slot contract at read time — audited on demand. The marks are materialized as stored sentexes rather than claimed by subsumption edges, for the reason equivalence_relation's entry gives: the rule's stored conclusion both classifies and enforces, where a genl-inherited membership never reaches the mark ingestion. Also a type: (genl bijection injection) and (genl bijection surjection) state the subsumption outright, and classify P as functional and so binary_predicate. See docs/taxonomy.md.")
+(positiveExampleComment bijection "a relation such as capitalCityOf over capital_city")
 (unary_predicate bijection)
 (decontextualized_predicate bijection)
 (set/monotonic (genl bijection injection))
@@ -1347,19 +1389,14 @@
 
 (comment unreifiable_function
          "(unreifiable_function ?function) means that ?function is evaluated rather than denoting an object. Its application stays structural and is computed by a prover instead of being minted into a constant, so (QuantityFn 5 Meter) keeps its magnitude and its unit readable inside the sentence. The mark to reach for whenever the applications are UNBOUNDED, which is the other half of reifiable_function's criterion: (QuantityFn 5 Meter), (QuantityFn 5.001 Meter) and every magnitude between them run over the reals, and a minted constant apiece is a store nothing bounds. A measure function is the standing example, and is never reifiable however atomic its value reads. Also a type: (unreifiable_function F) classifies F as a function. See docs/nat.md.")
+(positiveExample unreifiable_function (Quote (unreifiable_function QuantityFn)))
 (unary_predicate unreifiable_function)
 (arg unreifiable_function 1 function)
 
 ;; A function is evaluated or denotes an object, never both and never neither: the two
 ;; marks are the two answers to whether an application is minted.  The partition installs
-;; each genl edge to function.  quoting_function is a separate axis and crosses both parts.
+;; each genl edge to function.
 (set/monotonic (partition function reifiable_function unreifiable_function))
-
-(comment quoting_function
-         "(quoting_function ?function) means that ?function's arguments are a mention — a term named as syntax rather than used. They are held opaque to identity congruence: an equality merge rewrites them by a rewriteOf spelling rename only, never by a sameAs or equals coreference, so a quoted term does not fold onto its referent's class. Orthogonal to reifiable_function/unreifiable_function, which decide whether the application is minted: Quote is reifiable and quoting, Quasiquote is unreifiable and quoting. Declared before use, like reifiable_function: opacity is applied when a mention is reified and again in the equality congruence, each gated on the mark being present then. So mark ?function quoting before the mentions it governs are asserted and before any identity merge over their referents: a reify or merge processed while the mark is absent — before it is declared, or after it is retracted — is not held opaque and folds the mention onto its referent's class. See docs/nat.md.")
-(unary_predicate quoting_function)
-(arg quoting_function 1 function)
-(genl quoting_function function)
 
 (comment contextArgSubrelation
          "(contextArgSubrelation ?function ?position ?subrelation) means that two contexts denoted by ?function and identical except at argument ?position are ordered by ?subrelation on that argument: the context whose argument is ?subrelation-below the other's is a spec (sub)context of it, and the producer materializes the genlCx edge. So (contextArgSubrelation CxTimeFn 2 subintervalOf) makes (CxTimeFn CxMonad (DatetimeFn \"2000-01\")) a subcontext of (CxTimeFn CxMonad (DatetimeFn \"2000\")) because January 2000 is a subinterval of 2000 — with nobody asserting that genlCx edge. ?position is 1-based over ?function's arguments. See docs/context-nat.md.")
@@ -1456,7 +1493,8 @@
 (set/monotonic (genl instance_relation_predicate binary_predicate))
 
 (comment inverse
-         "(inverse ?predicate1 ?predicate2) means that ?predicate1 and ?predicate2 are inverse relations, so (?predicate1 a b) holds exactly when (?predicate2 b a) does. Declared of parentOf and childOf, for instance. Answered by a prover that hands the swapped goal back to the engine rather than matching raw facts, so an inverse composes with its partner's transitivity.")
+         "(inverse ?predicate1 ?predicate2) means that ?predicate1 and ?predicate2 are inverse relations, so (?predicate1 a b) holds exactly when (?predicate2 b a) does. Answered by a prover that hands the swapped goal back to the engine rather than matching raw facts, so an inverse composes with its partner's transitivity.")
+(positiveExample inverse (Quote (inverse parentOf childOf)))
 (binary_predicate inverse)
 (set/monotonic (instance_relation_predicate inverse))
 (arg inverse 1 predicate)
@@ -1519,7 +1557,8 @@
 
 (comment truth_valued_relation "The type of all relations whose applications are true or false: the predicates and the logical constants. Cyc's TruthFunction, not logic's truth function: a truth function's value is fixed by the truth values of its arguments, which holds of and, or, not and implies and of no predicate or quantifier.")
 (comment logical_constant    "The type of all quantifiers and logical connectives — the relations whose meaning the logic fixes, where a predicate's meaning is the domain's. A logical constant is a truth_valued_relation and is not a predicate.")
-(comment logical_connective  "The type of all relations that build a formula from formulas: and, or, not and implies. A logical connective holds of nothing: (and P Q) is a formula, not a fact about P and Q. Logical rather than grammatical: a connective of a natural language, such as English and, is not one.")
+(comment logical_connective  "The type of all relations that build a formula from formulas: and, or, not and implies. A logical connective holds of nothing: (and P Q) is a formula, not a fact about P and Q. Logical rather than grammatical.")
+(negativeExampleComment logical_connective "the English word and, a connective of a natural language")
 (comment quantifier          "The type of all relations that bind variables in a formula, the application being a formula in which those variables are no longer free. A quantifier is a logical constant and is not a logical connective.")
 ;; truth_valued_relation holds the predicates, and so binary predicates and types alike:
 ;; a variable_order_type, as predicate is.
@@ -1573,13 +1612,23 @@
 (set/monotonic (genl reflexive binary_predicate))
 
 (comment irreflexive
-         "(irreflexive ?predicate) means that ?predicate never holds of a thing and itself, so (?predicate a a) is contradictory: a one-member nogood that each context reading the mark decides, whichever of the mark and the tuple arrives first. A default self tuple is not believed there, and a monotonic one is a hard clash conflicts reports (docs/nmtms.md). The strict counterpart of reflexive, and stronger than asymmetric — asymmetry needs a believed opposing claim to convict and so admits the lone self tuple. Also a type: (irreflexive P) classifies P as a binary_predicate. Declared of a strict order such as largerThan, for instance.")
+         "(irreflexive ?predicate) means that ?predicate never holds of a thing and itself, so (?predicate a a) is contradictory: a one-member nogood that each context reading the mark decides, whichever of the mark and the tuple arrives first. A default self tuple is not believed there, and a monotonic one is a hard clash conflicts reports (docs/nmtms.md). The strict counterpart of reflexive, and stronger than asymmetric — asymmetry needs a believed opposing claim to convict and so admits the lone self tuple. Also a type: (irreflexive P) classifies P as a binary_predicate.")
+(positiveExample irreflexive (Quote (irreflexive largerThan)))
 (unary_predicate irreflexive)
 (decontextualized_predicate irreflexive)
 (set/monotonic (genl irreflexive binary_predicate))
 
 (comment relation_kind
-         "(relation_kind ?predicate) means that ?predicate is one of the two relation kinds. The disjoint_metatype grouping instance_relation_predicate and type_relation_predicate, so a binary predicate is at most one of the two: it either relates individuals or relates kinds, and letting the readings mix is how a claim about kinds quietly becomes a claim about their members. At most, not exactly — a few predicates are neither, and are left unmarked rather than forced: implies is a connective and relates no things at all, rewriteOf takes either role so long as its two sides agree with each other, result and genlResult relate a function to a type and so are mixed, and functionCorrespondingPredicate relates a function to a predicate. Marking one of those would make the metatype say something false, which costs more than the gap.")
+         "(relation_kind ?predicate) means that ?predicate is one of the two relation kinds. The disjoint_metatype grouping instance_relation_predicate and type_relation_predicate, so a binary predicate is at most one of the two: it either relates individuals or relates kinds, and letting the readings mix is how a claim about kinds quietly becomes a claim about their members. At most, not exactly — a few predicates are neither, and are left unmarked rather than forced. Marking one of those would make the metatype say something false, which costs more than the gap.")
+;; Neither relation kind: implies is a connective that relates no things at all;
+;; rewriteOf takes either role so long as its two sides agree with each other; result and
+;; genlResult relate a function to a type and so are mixed; functionCorrespondingPredicate
+;; relates a function to a predicate.
+(negativeExample relation_kind (Quote (relation_kind implies)))
+(negativeExample relation_kind (Quote (relation_kind rewriteOf)))
+(negativeExample relation_kind (Quote (relation_kind result)))
+(negativeExample relation_kind (Quote (relation_kind genlResult)))
+(negativeExample relation_kind (Quote (relation_kind functionCorrespondingPredicate)))
 (unary_predicate relation_kind)
 (genlArg relation_kind 1 predicate)
 (set/monotonic (disjoint_metatype relation_kind))
@@ -1631,13 +1680,16 @@
 (genlArg sibling_disjoint 1 thing)
 
 (comment symmetric
-         "(symmetric ?predicate) means that ?predicate is symmetric. Whenever (?predicate a b) holds so does (?predicate b a), and the two spellings of a ground fact store as one sentex, since the arguments of a symmetric predicate are sorted into canonical order. Declared of siblingOf and marriedTo, for instance. Also a type: (symmetric P) classifies P as a binary_predicate.")
+         "(symmetric ?predicate) means that ?predicate is symmetric. Whenever (?predicate a b) holds so does (?predicate b a), and the two spellings of a ground fact store as one sentex, since the arguments of a symmetric predicate are sorted into canonical order. Also a type: (symmetric P) classifies P as a binary_predicate.")
+(positiveExample symmetric (Quote (symmetric siblingOf)))
+(positiveExample symmetric (Quote (symmetric marriedTo)))
 (unary_predicate symmetric)
 (decontextualized_predicate symmetric)
 (set/monotonic (genl symmetric binary_predicate))
 
 (comment commutative
-         "(commutative ?relation) means that every argument of ?relation may be permuted without changing the proposition, at each arity the relation is applied at. The generalization of symmetric off its two fixed argument positions: symmetric commutes the two arguments of a binary predicate, this commutes all of them at any arity. Declarative sugar and a queryable classification rather than a second mechanism — a rule below derives (commutativeInArgAndRest ?relation 1), the tail-from-a-position spelling the engine canonicalizes with, so all-argument commutativity and the tail beginning at argument 1 are one licence written two ways. A one-argument relation marked commutative permutes nothing: one position is no permutation, and the mark stays queryable. Declared of a relation such as intersection, for instance. See docs/canonicalization.md.")
+         "(commutative ?relation) means that every argument of ?relation may be permuted without changing the proposition, at each arity the relation is applied at. The generalization of symmetric off its two fixed argument positions: symmetric commutes the two arguments of a binary predicate, this commutes all of them at any arity. Declarative sugar and a queryable classification rather than a second mechanism — a rule below derives (commutativeInArgAndRest ?relation 1), the tail-from-a-position spelling the engine canonicalizes with, so all-argument commutativity and the tail beginning at argument 1 are one licence written two ways. A one-argument relation marked commutative permutes nothing: one position is no permutation, and the mark stays queryable. See docs/canonicalization.md.")
+(positiveExampleComment commutative "a relation such as intersection")
 (unary_predicate commutative)
 (decontextualized_predicate commutative)
 (genl commutative relation)
@@ -1652,7 +1704,8 @@
 (argAndRest commutativeInArgs 2 positive_integer)
 
 (comment commutativeInArgAndRest
-         "(commutativeInArgAndRest ?relation ?position) means that the arguments of ?relation from ?position through the end of an application may be permuted without changing the proposition, while every earlier argument stays where it was written. The canonical runtime spelling of commutativity: the other two marks reduce to it, and the assert entry point sorts the arguments inside the component it names, so every permitted permutation of a ground fact is one sentex and one handle. Variable arity is respected rather than flattened — the component is closed by the application's own arity, so a relation applied at three arguments and at four states two claims and no permutation moves an argument between them. Repeated argument values keep their multiplicity: commutativity changes order, never content. Declared of a whole-and-parts relation at position 2, so the whole stays in position 1 and only the parts commute, for instance. See docs/canonicalization.md.")
+         "(commutativeInArgAndRest ?relation ?position) means that the arguments of ?relation from ?position through the end of an application may be permuted without changing the proposition, while every earlier argument stays where it was written. The canonical runtime spelling of commutativity: the other two marks reduce to it, and the assert entry point sorts the arguments inside the component it names, so every permitted permutation of a ground fact is one sentex and one handle. Variable arity is respected rather than flattened — the component is closed by the application's own arity, so a relation applied at three arguments and at four states two claims and no permutation moves an argument between them. Repeated argument values keep their multiplicity: commutativity changes order, never content. See docs/canonicalization.md.")
+(positiveExampleComment commutativeInArgAndRest "a whole-and-parts relation at position 2, so the whole stays in position 1 and only the parts commute")
 (binary_predicate commutativeInArgAndRest)
 (decontextualized_predicate commutativeInArgAndRest)
 (set/monotonic (instance_relation_predicate commutativeInArgAndRest))
@@ -1706,12 +1759,14 @@
 (set/forwardOnlyRule (implies (and (commutative ?p) (arity ?p 2)) (symmetric ?p)))
 
 (comment asymmetric
-         "(asymmetric ?predicate) means that ?predicate cannot hold both ways. (?predicate a b) and (?predicate b a) are contradictory, and a strict order such as largerThan is the usual case. Read as a nogood: the mirror of a claim denies it, so a strict claim conflicts with its converse instead of silently coexisting with it. The conviction needs a believed opposing claim, so a self tuple (?predicate a a) is admitted rather than refused. Also a type: (asymmetric P) classifies P as a binary_predicate.")
+         "(asymmetric ?predicate) means that ?predicate cannot hold both ways. (?predicate a b) and (?predicate b a) are contradictory. Read as a nogood: the mirror of a claim denies it, so a strict claim conflicts with its converse instead of silently coexisting with it. The conviction needs a believed opposing claim, so a self tuple (?predicate a a) is admitted rather than refused. Also a type: (asymmetric P) classifies P as a binary_predicate.")
+(positiveExample asymmetric (Quote (asymmetric largerThan)))
 (unary_predicate asymmetric)
 (decontextualized_predicate asymmetric)
 
 (comment anti_symmetric
-         "(anti_symmetric ?predicate) means that ?predicate holding both ways forces its two arguments to be one thing. Believing (?predicate a b) and (?predicate b a) of two symbols, both known true (monotonic), derives (equals a b) and merges, mirroring how a functional predicate reconciles two symbol values — the merge is justified by both facts and the declaration, so retracting any one un-merges them. Any other converse pair, two non-symbols such as 1980 and 1990 or a pair with a default member, is a nogood each context reading the pair decides instead: a default member is not believed there when the other is monotonic, and two default members are a dilemma. A self tuple (?predicate a a) is admitted: its converse is itself and (equals a a) is trivial. Also a type: (anti_symmetric P) classifies P as a binary_predicate. Declared of a partial order such as atOrAbove, for instance.")
+         "(anti_symmetric ?predicate) means that ?predicate holding both ways forces its two arguments to be one thing. Believing (?predicate a b) and (?predicate b a) of two symbols, both known true (monotonic), derives (equals a b) and merges, mirroring how a functional predicate reconciles two symbol values — the merge is justified by both facts and the declaration, so retracting any one un-merges them. Any other converse pair, two non-symbols such as 1980 and 1990 or a pair with a default member, is a nogood each context reading the pair decides instead: a default member is not believed there when the other is monotonic, and two default members are a dilemma. A self tuple (?predicate a a) is admitted: its converse is itself and (equals a a) is trivial. Also a type: (anti_symmetric P) classifies P as a binary_predicate.")
+(positiveExampleComment anti_symmetric "a partial order such as atOrAbove")
 (unary_predicate anti_symmetric)
 (decontextualized_predicate anti_symmetric)
 (set/monotonic (genl anti_symmetric binary_predicate))
@@ -1730,7 +1785,8 @@
 (arg transitiveInArg 2 positive_integer)
 (arg transitiveInArg 3 predicate)
 
-(comment ternary_predicate    "A predicate of three arguments, such as arg.")
+(comment ternary_predicate    "A predicate of three arguments.")
+(positiveExample ternary_predicate (Quote (ternary_predicate arg)))
 
 (comment target_following_predicate
          "(target_following_predicate ?predicate) means a (?predicate … (sentexHandle H) …) sentence is a meta-sentex that names sentex H and must not outlive it: retracting H retracts the meta with it (core/retract-following-metas!). Opt-in and belief-following — the engine's own except / exceptWhen deliberately do not carry it, so their orphan-on-retraction behavior is unchanged. koinii's reply acts declare it, so retracting a claim cascades to the replies about it, which a message bus cannot do.")
@@ -1744,7 +1800,9 @@
 (set/monotonic (variable_order_type thing))
 
 (comment transitive
-         "(transitive ?predicate) means that ?predicate is transitive, so (?predicate a b) and (?predicate b c) imply (?predicate a c). Answered by a generic closure prover rather than materialized, since writing the closure out is quadratic in the extent and nobody asserted it. Declared of ancestorOf and partOf, for instance. Also a type: (transitive P) classifies P as a binary_predicate, so a KB can be queried for the transitive predicates.")
+         "(transitive ?predicate) means that ?predicate is transitive, so (?predicate a b) and (?predicate b c) imply (?predicate a c). Answered by a generic closure prover rather than materialized, since writing the closure out is quadratic in the extent and nobody asserted it. Also a type: (transitive P) classifies P as a binary_predicate, so a KB can be queried for the transitive predicates.")
+(positiveExample transitive (Quote (transitive ancestorOf)))
+(positiveExample transitive (Quote (transitive partOf)))
 (unary_predicate transitive)
 (decontextualized_predicate transitive)
 (set/monotonic (genl transitive binary_predicate))
@@ -1768,13 +1826,15 @@
 (set/monotonic (transitive genlCx))
 
 (comment anti_transitive
-         "(anti_transitive ?predicate) means that a two-step chain forbids the direct step, the dual of transitive: believing (?predicate a b) and (?predicate b c) makes (?predicate a c) contradictory. The three are one nogood — a set that must not hold in full — rather than a pair, so the engine weighs them together the way it weighs any contradiction (docs/nmtms.md): a chain that is known true refuses the direct step at the entry point, a chain with one defeasible step has that step defeated instead, and three equal defaults are a dilemma the engine reports and declines to decide. The mark is read up the predicate hierarchy, so (anti_transitive parentOf) convicts a fatherOf chain. It does not imply irreflexive: a self tuple (P a a) is its own whole chain, names no second sentex to weigh, and is admitted exactly as an asymmetric predicate's is. Its disjointness with transitive holds too: no predicate is declared both. Also a type: (anti_transitive P) classifies P as a binary_predicate. Declared of a relation such as parentOf (a grandparent is not a parent), for instance.")
+         "(anti_transitive ?predicate) means that a two-step chain forbids the direct step, the dual of transitive: believing (?predicate a b) and (?predicate b c) makes (?predicate a c) contradictory. The three are one nogood — a set that must not hold in full — rather than a pair, so the engine weighs them together the way it weighs any contradiction (docs/nmtms.md): a chain that is known true refuses the direct step at the entry point, a chain with one defeasible step has that step defeated instead, and three equal defaults are a dilemma the engine reports and declines to decide. The mark is read up the predicate hierarchy, so (anti_transitive parentOf) convicts a fatherOf chain. It does not imply irreflexive: a self tuple (P a a) is its own whole chain, names no second sentex to weigh, and is admitted exactly as an asymmetric predicate's is. Its disjointness with transitive holds too: no predicate is declared both. Also a type: (anti_transitive P) classifies P as a binary_predicate.")
+(positiveExampleComment anti_transitive "a relation such as parentOf: a grandparent is not a parent")
 (unary_predicate anti_transitive)
 (decontextualized_predicate anti_transitive)
 (set/monotonic (genl anti_transitive binary_predicate))
 
 (comment equivalence_relation
-         "(equivalence_relation ?predicate) means that ?predicate is reflexive, symmetric and transitive at once — an equivalence. Declared once, it stands in for the three: forward rules derive (symmetric ?p), (transitive ?p) and (reflexive ?p), each a real mark the engine enforces in turn — the symmetric canonical-order fold, the transitive closure prover, the reflexive prover. It is also definitionally the intersection of the three, stated below: the intersection installs (genl equivalence_relation symmetric) and the other two edges, and concludes (equivalence_relation P) of a predicate that carries all three marks. The edges classify and do not enforce: a genl-inherited membership is not a stored (symmetric P) sentex and never reaches the mark ingestion, so the forward rules stay and materialize each mark as a sentex, which both classifies and enforces. Also a type: (equivalence_relation P) classifies P as a binary_predicate, through any one of the three marks. Declared of a relation such as sameAgeAs, for instance.")
+         "(equivalence_relation ?predicate) means that ?predicate is reflexive, symmetric and transitive at once — an equivalence. Declared once, it stands in for the three: forward rules derive (symmetric ?p), (transitive ?p) and (reflexive ?p), each a real mark the engine enforces in turn — the symmetric canonical-order fold, the transitive closure prover, the reflexive prover. It is also definitionally the intersection of the three, stated below: the intersection installs (genl equivalence_relation symmetric) and the other two edges, and concludes (equivalence_relation P) of a predicate that carries all three marks. The edges classify and do not enforce: a genl-inherited membership is not a stored (symmetric P) sentex and never reaches the mark ingestion, so the forward rules stay and materialize each mark as a sentex, which both classifies and enforces. Also a type: (equivalence_relation P) classifies P as a binary_predicate, through any one of the three marks.")
+(positiveExampleComment equivalence_relation "a relation such as sameAgeAs")
 (unary_predicate equivalence_relation)
 (decontextualized_predicate equivalence_relation)
 ;; The definition read in the other direction: a predicate reflexive, symmetric and
@@ -1812,13 +1872,15 @@
 (set/monotonic (genl type_relation_predicate binary_predicate))
 
 (comment typeToInstancePred
-         "(typeToInstancePred ?typePredicate ?instancePredicate) means that ?typePredicate and ?instancePredicate are the type-level and instance-level readings of one underlying relation. Declared of partType and partOf, for instance. A link rather than a rule: moving a claim from one level to the other needs a quantifier reading that nothing here fixes.")
+         "(typeToInstancePred ?typePredicate ?instancePredicate) means that ?typePredicate and ?instancePredicate are the type-level and instance-level readings of one underlying relation. A link rather than a rule: moving a claim from one level to the other needs a quantifier reading that nothing here fixes.")
+(positiveExample typeToInstancePred (Quote (typeToInstancePred partType partOf)))
 (binary_predicate typeToInstancePred)
 (set/monotonic (instance_relation_predicate typeToInstancePred))
 (arg typeToInstancePred 1 type_relation_predicate)
 (arg typeToInstancePred 2 instance_relation_predicate)
 
-(comment unary_predicate      "A predicate of one argument: every type (a snake_case unary predicate) and every one-place property such as flies.")
+(comment unary_predicate      "A predicate of one argument: every type (a snake_case unary predicate) and every one-place property.")
+(positiveExampleComment unary_predicate "flies, a one-place property")
 (set/monotonic (genl unary_predicate unary))
 (genl unary_predicate fixed_arity_predicate)
 ;; unary_predicate holds first-order types such as dog and metatypes such as type: a
@@ -1868,45 +1930,71 @@
 (set/monotonic (instance_relation_predicate seeAlso))
 
 ;; ---- in-KB worked examples -----------------------------------------------
-;; Meta-sentexes that name an example sentex by handle (sentexHandle), annotating a term
-;; with a true / false / borderline example of its usage — the (sentexHandle H) +
-;; target_following_predicate pointing pattern koinii's reply acts use (kb/koinii/
-;; CxSpeechActs.txt).  Documentation (`:inert`): no engine path reads them.
-;; positiveExample / negativeExample carry an integrity obligation held by a TEST rather
-;; than the engine — the named sentex is provable, or provable as its negation — while
-;; borderlineExample is truth-agnostic and carries none.
+;; Facts annotating a term with a true / false / borderline example of its usage.  The
+;; second argument is the example as a quoted sentence, (Quote S), so a KB text file can
+;; state one: (positiveExample ip_address (Quote (ip_address "192.0.2.1"))).  The example
+;; names no sentex, so none of the three is target_following_predicate.  Documentation
+;; (`:inert`): no engine path reads them.  positiveExample / negativeExample carry an
+;; obligation held by a TEST rather than the engine: curation_test asks S in the
+;; example's own context and requires a positiveExample's S to be provable and a
+;; negativeExample's S not to be (unknown is enough).  borderlineExample is
+;; truth-agnostic and is not checked.
 ;;
-;; @todo once we have `termMentioned`, enforce `(termMentioned ?term ?sentex)`: that the
-;;   ?term an example annotates is actually mentioned in the ?sentex it names.  A
+;; @todo once we have `termMentioned`, enforce `(termMentioned ?term ?sentence)`: that
+;;   the ?term an example annotates is actually mentioned in the sentence it quotes.  A
 ;;   cyclistNotes analogue — recorded here for the reader, implemented by nobody yet, and
 ;;   NOT to be invented in passing.
 
 (comment positiveExample
-         "(positiveExample ?term (sentexHandle ?sentex)) means that ?sentex is a TRUE example of ?term's usage — a meta-sentex naming ?sentex by handle. Declared target_following_predicate, so retracting the example sentex tears this annotation down with it; and the named sentex must be provable, an obligation curation_test holds over every believed positiveExample. ?term is the term being exemplified; the handle arg is typed `thing` via quotedArg — a quoted mention, with no narrower sentex type yet — the target being any sentex.")
+         "(positiveExample ?term (Quote ?sentence)) means that ?sentence is a TRUE example of ?term's usage. The second argument is only a quoted sentence, closed and written in full: (positiveExample ip_address (Quote (ip_address \"192.0.2.1\"))). Tested by curation_test, which asks ?sentence in the context this fact is stated in and requires it to be provable there. Names no sentex, so it is not target_following_predicate: retracting what made ?sentence provable leaves the example standing and turns that test red. ?term is the term being exemplified.")
 (binary_predicate positiveExample)
 (set/monotonic (instance_relation_predicate positiveExample))
-(target_following_predicate positiveExample)
 
 (comment negativeExample
-         "(negativeExample ?term (sentexHandle ?sentex)) means that ?sentex is a FALSE example of ?term's usage — a meta-sentex naming ?sentex by handle. Same pointing shape and target_following_predicate mark as positiveExample; the obligation is the mirror, that the named sentex is provable AS ITS NEGATION — the example genuinely does not hold as stated — which curation_test holds. ?term is the term being exemplified; the handle arg is typed `thing` via quotedArg — a quoted mention, no narrower sentex type yet.")
+         "(negativeExample ?term (Quote ?sentence)) means that ?sentence is a FALSE example of ?term's usage — a use of ?term that does not hold. The second argument is only a quoted sentence, closed and written in full, as for positiveExample. Tested by curation_test, which asks ?sentence in the context this fact is stated in and requires it NOT to be provable there; unknown is enough, so the KB need not prove the negation. Names no sentex, so it is not target_following_predicate. ?term is the term being exemplified.")
 (binary_predicate negativeExample)
 (set/monotonic (instance_relation_predicate negativeExample))
-(target_following_predicate negativeExample)
 
 (comment borderlineExample
-         "(borderlineExample ?term (sentexHandle ?sentex)) means that ?sentex is a BORDERLINE example of ?term's usage — a meta-sentex naming ?sentex by handle. Truth-agnostic by design: the named sentex is neither asserted true nor false, so it carries no provability obligation and NO regression reads its target. Same pointing shape, quotedArg mark, and target_following_predicate mark as the other two.")
+         "(borderlineExample ?term (Quote ?sentence)) means that ?sentence is a BORDERLINE example of ?term's usage — a case where whether it holds is arguable. The second argument is only a quoted sentence, closed and written in full, as for positiveExample. Truth-agnostic by design: curation_test does not check whether ?sentence is provable. Names no sentex, so it is not target_following_predicate.")
 (binary_predicate borderlineExample)
 (set/monotonic (instance_relation_predicate borderlineExample))
-(target_following_predicate borderlineExample)
 
 (termsRelated positiveExample negativeExample borderlineExample)
+
+;; The string siblings carry an example as text, for an example that is not a sentence
+;; the KB can state, or whose sentence the KB does not prove.  No test reads the text.
+
+(comment positiveExampleComment
+         "(positiveExampleComment ?term ?text) means that ?text describes, as a string, a TRUE example of ?term: something ?term holds of, or a use of ?term that is true. The string sibling of positiveExample, for an example that is not a sentence the KB can state, or whose sentence the KB does not prove. Documentation only, like comment: nothing in the engine reads it, it draws no inference, and no test checks ?text against the KB.")
+(binary_predicate positiveExampleComment)
+(set/monotonic (instance_relation_predicate positiveExampleComment))
+(arg positiveExampleComment 2 string)
+
+(comment negativeExampleComment
+         "(negativeExampleComment ?term ?text) means that ?text describes, as a string, a FALSE example of ?term: something ?term does not hold of, or a use of ?term that is false. The string sibling of negativeExample, for an example that is not a sentence the KB can state. Documentation only, like comment: nothing in the engine reads it, it draws no inference, and no test checks ?text against the KB.")
+(binary_predicate negativeExampleComment)
+(set/monotonic (instance_relation_predicate negativeExampleComment))
+(arg negativeExampleComment 2 string)
+
+(comment borderlineExampleComment
+         "(borderlineExampleComment ?term ?text) means that ?text describes, as a string, a BORDERLINE example of ?term: a case where whether ?term holds is arguable. The string sibling of borderlineExample, for an example that is not a sentence the KB can state. Documentation only, like comment: nothing in the engine reads it, it draws no inference, and no test checks ?text against the KB.")
+(binary_predicate borderlineExampleComment)
+(set/monotonic (instance_relation_predicate borderlineExampleComment))
+(arg borderlineExampleComment 2 string)
+
+(termsRelated positiveExample positiveExampleComment)
+(termsRelated negativeExample negativeExampleComment)
+(termsRelated borderlineExample borderlineExampleComment)
+(termsRelated positiveExampleComment negativeExampleComment borderlineExampleComment)
 
 ;; A reviewer's record on a kb-integrity rule-macro suggestion.  It quotes the suggested
 ;; declaration rather than naming the rule by (sentexHandle H): a handle is one store's,
 ;; and a text export skips a sentence that names one, so the record would not survive a
 ;; reload.  The suggestion is a function of the rule's sentence, so it names the rule.
 (comment declined_rule_macro
-         "(declined_rule_macro ?declaration) means that a reviewer read the kb-integrity rule-macro suggestion ?declaration and keeps the rule it was suggested for as written — most often a set/defaultRule that is meant to be a default. ?declaration is the suggested declaration as the sweep reports it, written as a quoted argument, for example (declined_rule_macro (genl livesIn locatedIn)). The rule-macro pass reads the record from the rule's context and does not report that suggestion; nothing else reads it and it draws no inference. See docs/integrity.md.")
+         "(declined_rule_macro ?declaration) means that a reviewer read the kb-integrity rule-macro suggestion ?declaration and keeps the rule it was suggested for as written — most often a set/defaultRule that is meant to be a default. ?declaration is the suggested declaration as the sweep reports it, written as a quoted argument. The rule-macro pass reads the record from the rule's context and does not report that suggestion; nothing else reads it and it draws no inference. See docs/integrity.md.")
+(positiveExampleComment declined_rule_macro "(declined_rule_macro (genl livesIn locatedIn))")
 (unary_predicate declined_rule_macro)
 
 ;; genlInverse is binary genl with arguments 1 and 2 swapped. The engine reads it in
@@ -2028,8 +2116,8 @@
 (set/monotonic (orthogonal intangible spatial))
 ;; a time is intangible and temporal.
 (set/monotonic (orthogonal intangible temporal))
-;; a region of space is intangible and spatiotemporal, occupying space without mass.
 (set/monotonic (orthogonal intangible spatiotemporal))
+(comment (orthogonal intangible spatiotemporal) "A region of space is intangible and spatiotemporal, occupying space without mass.")
 ;; A temporal thing is present at every moment between its start and its end, or it has a
 ;; gap.  The partition installs both parts' edges to temporal.
 (set/monotonic (partition temporal uninterrupted intermittent))

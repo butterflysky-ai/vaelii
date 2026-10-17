@@ -24,6 +24,9 @@
             [vaelii.host.core-context :as core-context]
             [vaelii.impl.kb :as kb]
             [vaelii.impl.modal :as modal]
+            [vaelii.impl.resolution :as res]
+            [vaelii.impl.taxonomy :as tax]
+            [vaelii.impl.types.reasoning :as reasoning]
             [vaelii.test-util :as tu]))
 
 (use-fixtures :once (tu/loaded core-context/load-into))
@@ -126,7 +129,7 @@
           "while the proposition keeps every spelling it was written with"))))
 
 (tu/deftest-kb a-spelling-rename-does-reach-inside-the-quotation
-  ;; The `spelling?` half, exactly as a `quoting_function`'s arguments take it: `rewriteOf`
+  ;; The `spelling?` half, exactly as a quoting function's arguments take it: `rewriteOf`
   ;; retires a *name*, so the mention follows it; `sameAs` merges *referents*, so it does
   ;; not.  Both sides of a rename move, which is why the belief stays retrievable.
   (tu/with-terms [Oedipus Preferred Deprecated marriedTo]
@@ -188,3 +191,32 @@
           "the sentence alone reports the merge that moved it")
       (is (empty? (kb/displaced-terms kb (list 'believes Oedipus prop) ask-ctx))
           "and as a quotation it reports nothing, because nothing moved"))))
+
+(tu/deftest-kb retired-for-agrees-with-the-congruence-walk-on-quoted-and-unquoted-mentions
+  ;; `res/retired-for?` answers a sentence the flat read finds no displaced symbol in
+  ;; false without asking whether it quotes, and reads every other one through the flat
+  ;; or the mention-aware path.  All of them must answer what the congruence walk itself does: a sentence is
+  ;; retired exactly when `representative-term` moves it.
+  (tu/with-terms [Oedipus Creon Jocasta MotherOf Preferred Deprecated marriedTo says]
+    (let [dead (loser kb Jocasta MotherOf)]
+      (v/assert kb (list 'sameAs Jocasta MotherOf) ask-ctx)
+      (v/assert kb (list 'rewriteOf Preferred Deprecated) ask-ctx)
+      (let [vis      (res/visible-supporter-fn kb ask-ctx)
+            merged?  (tax/merged-term-pred (reasoning/taxonomy kb))
+            retired? #(res/retired-for? kb (delay vis) merged? %)
+            moved?   #(not= % (res/representative-term kb vis %))
+            plain    (list marriedTo Oedipus dead)
+            cases    {plain                                                  true
+                      (list marriedTo Oedipus Creon)                         false
+                      (list says Creon (list 'Quote plain))                  false
+                      (list says Creon (list 'Quasiquote plain))             false
+                      (list 'believes Oedipus plain)                         false
+                      (list says Creon (list 'Quote (list marriedTo Oedipus Deprecated))) true
+                      (list 'believes Oedipus (list marriedTo Oedipus Deprecated))        true
+                      (list 'and plain (list says Creon (list 'Quote plain)))             true
+                      (list 'not (list 'sameAs Jocasta MotherOf))            false}]
+        (doseq [[s expected] cases]
+          (testing (pr-str s)
+            (is (= expected (retired? s)))
+            (is (= (moved? s) (retired? s))
+                "the gated read agrees with the walk")))))))

@@ -287,6 +287,14 @@ rather than as a term used in that position, so typing it by what the function y
 would type a quotation by its referent. That is also where the reading would otherwise
 cost a mint something — `mint-nat!` writes one `termOfUnit` per constant.
 
+A **quoting function's** argument is a mention as well. `Quote` and `Quasiquote` are the
+quoting functions, fixed by the engine (`sx/quoting-functors`) rather than declared, so
+no KB can add one or take one away. The reify pass does not reify a NAT nested in their
+argument: `(Quote (FruitFn Apple))` mints against the literal `(FruitFn Apple)`, not
+against that NAT's own constant, and a read resolves against the same literal. The
+argument is held opaque to an identity merge in the congruence walk too
+([equality.md](equality.md)).
+
 `disjoint-problem` is the check that still skips a compound. Its `:opposing-handle` is
 the conflicting *membership's* handle — what `settle` weighs the pair by — and a result
 declaration is not a membership of this application: pairing them in a nogood would let

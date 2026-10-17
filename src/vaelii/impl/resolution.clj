@@ -839,9 +839,9 @@
 
 (defn- representative-term-plain
   "The ordinary congruence walk — every non-variable symbol to its class representative,
-  recursively.  The path every KB with no `quoting_function` takes.  An equality relation's
-  arguments are a mention: rewritten by spelling only, never folded onto a `sameAs`
-  referent (`equality-mention-heads`)."
+  recursively, for a sentence with no quoted position (`any-mention-position?`).  An
+  equality relation's arguments are a mention: rewritten by spelling only, never folded
+  onto a `sameAs` referent (`equality-mention-heads`)."
   [kb visible? term]
   (cond
     (sequential? term)
@@ -863,10 +863,9 @@
        (sequential? (nth term 2))))
 
 (defn- any-mention-position?
-  "Does `term` contain a quoted position at all — a `quoting_function` application, or an
-  attitude?  The gate that keeps the flat reads flat: a KB granting `believes` has marks,
-  but almost every sentence in it quotes nothing, and this answers that with a structural
-  walk and two set lookups per compound head."
+  "Does `term` contain a quoted position at all — a quoting function's application, or an
+  attitude?  The gate that keeps the flat reads flat: almost every sentence quotes nothing,
+  and this answers that with a structural walk and two set lookups per compound head."
   [marks term]
   (boolean
    (when (sequential? term)
@@ -875,7 +874,7 @@
          (some #(any-mention-position? marks %) term)))))
 
 (defn- representative-term-mention
-  "The mention-aware walk.  Inside a **quoted position** — a `quoting_function`'s arguments,
+  "The mention-aware walk.  Inside a **quoted position** — a quoting function's arguments,
   or the proposition a `modal_predicate` attributes to its agent — symbols are rewritten by
   spelling (`rewriteOf`) only, so a quoted term does not fold onto a `sameAs` / `equals`
   referent.  `spelling?` turns on there and stays on all the way down: the whole quoted
@@ -925,16 +924,17 @@
   difference is congruence — with `(sameAs Kilogram Kg)` believed, `(QuantityFn 5
   Kilogram)` and `(QuantityFn 5 Kg)` normalize to one term here and to two there.
 
-  **Mention opacity.** Two declarations make a position a *mention* — a term named as
+  **Mention opacity.** Two kinds of head make a position a *mention* — a term named as
   syntax, rewritten by *spelling* (`rewriteOf`) only and never by a `sameAs` / `equals`
-  identity merge, so a quoted term does not fold onto its referent's class.  A
-  `quoting_function` (`Quote`, `Quasiquote`) quotes its arguments; a `modal_predicate`
+  identity merge, so a quoted term does not fold onto its referent's class.  A quoting
+  function (`Quote`, `Quasiquote`, fixed by the engine: `sx/quoting-functors`) quotes its
+  arguments; a `modal_predicate`
   (`believes`, and whatever else is granted) quotes the **proposition** it attributes,
   because an attitude is opaque: from *Oedipus believes he married Jocasta* and *Jocasta is
   his mother* it does not follow that he believes he married his mother, and the asker's
   merges are not his.  What the agent's *own* context merges does apply, and applies where
-  the projection reads it (`provers/BeliefProjectionProver`).  Gated on `tax/mention-marks`: a
-  KB declaring neither takes the plain walk unchanged, two prop reads at entry.
+  the projection reads it (`provers/BeliefProjectionProver`).  The marks are read once at
+  entry (`tax/mention-marks`); a compound node pays two set lookups for them.
 
   This covers ground congruence, which is what an identity merge does.  The oriented
   equational rewriting `kb/rewrite-term*` applies after it (`rewrite/normalize-sentence`)
@@ -945,34 +945,11 @@
   The mention marks are read unscoped: whether an argument is a mention is a fact
   about the sentence (`tax/mention-marks`)."
   [kb visible? term]
-  (if-let [marks (tax/mention-marks (reasoning/taxonomy kb))]
-    (representative-term-mention kb visible? marks term false)
-    (representative-term-plain kb visible? term)))
-
-(defn- displacements-plain
-  "Every non-variable symbol of `sentence` mapped to its class representative when that
-  differs — the `{old rep}` a plain congruence rewrite records.  Structure‑aware for one
-  reason: an equality relation's arguments are a mention (spelling‑only), so a
-  `sameAs`‑merged term inside a `(sameAs …)` is **not** recorded displaced — matching what
-  `representative-term-plain` rewrites, so `why-not` and the supersession agree with it."
-  [kb visible? sentence]
-  (letfn [(walk [term spelling? acc]
-            (cond
-              (sequential? term)
-              (if (and (not spelling?) (equality-mention-heads (first term)))
-                (reduce #(walk %2 true %1) (walk (first term) false acc) (rest term))
-                (reduce #(walk %2 spelling? %1) acc term))
-              (and (symbol? term) (not (sx/variable? term)))
-              (let [r (if spelling?
-                        (spelling-representative-in kb visible? term)
-                        (representative-in kb visible? term))]
-                (if (not= r term) (assoc acc term r) acc))
-              :else acc))]
-    (walk sentence false {})))
+  (representative-term-mention kb visible? (tax/mention-marks (reasoning/taxonomy kb)) term false))
 
 (defn- displacements-mention
   "Mention-aware collector, the traversal `representative-term-mention` rewrites by: inside
-  a quoted position — a `quoting_function`'s arguments, or a `modal_predicate`'s proposition —
+  a quoted position — a quoting function's arguments, or a `modal_predicate`'s proposition —
   a symbol moves by *spelling* (`rewriteOf`) only, so a quoted term whose referent merged
   under a `sameAs` is **not** recorded displaced.  The `why-not` map then names only the
   terms the rewrite actually moved."
@@ -1009,14 +986,13 @@
 (defn displaced-terms-in
   "The `{old-term representative}` rewrites `sentence` undergoes under `visible?`, computed
   the way `representative-term` actually rewrites it — so a quoted mention held opaque to a
-  `sameAs` is not reported displaced by `why-not`.  Gated on `tax/mention-marks`: a KB declaring
-  no `quoting_function` and no `modal_predicate` takes the flat walk unchanged.
+  `sameAs` is not reported displaced by `why-not`.  An equality relation's arguments are a
+  mention too (spelling-only), so a `sameAs`-merged term inside a `(sameAs …)` is not
+  recorded displaced either.
 
   The mention marks are read unscoped, as `representative-term` reads them."
   [kb visible? sentence]
-  (if-let [marks (tax/mention-marks (reasoning/taxonomy kb))]
-    (displacements-mention kb visible? marks sentence false {})
-    (displacements-plain kb visible? sentence)))
+  (displacements-mention kb visible? (tax/mention-marks (reasoning/taxonomy kb)) sentence false {}))
 
 (defn rewrite-rules-in
   "The believed oriented rewrite rules the reader `visible?` sees (nil: every one).  Every
@@ -2261,12 +2237,16 @@
   `[handle a b]` triples with no sentex at index 2, so it filters with this directly.
 
   **A sentence that quotes takes the mention-aware read instead.**  Inside a quoted
-  position — a `quoting_function`'s arguments, or the proposition an attitude attributes to
+  position — a quoting function's arguments, or the proposition an attitude attributes to
   its agent — a symbol is retired by a *spelling* rename and not by a `sameAs` / `equals`
   identity merge, which makes the flat per-symbol shortcut unsound there and would retire a
-  belief nobody renamed.  Whether the sentence quotes at all is asked first
-  (`any-mention-position?`), so an ordinary sentence in a KB that merely grants `believes`
-  keeps the flat read.
+  belief nobody renamed.  Whether the sentence quotes at all is asked only of a sentence
+  the flat read finds a displaced symbol in, since that is necessary for either read to
+  move it: a symbol a spelling rename moves has its identity representative moved too (a
+  `rewriteOf` loser is never elected, and a component's preferred heads are heads of the
+  class holding it), and an unmerged one is its own representative and its own spelling.
+  So a sentence in normal form answers false on the one `merged?` walk the flat read
+  takes, and never pays for `any-mention-position?`.
 
   **An equality relation's arguments are mentions too** (`equality-mention-heads`): a
   `sameAs` merge does not restate `(not (sameAs A B))`, so the flat read, which would
@@ -2282,16 +2262,18 @@
       (equation? sentence)
       false
 
-      (and marks (any-mention-position? marks sentence))
+      (not (sx/some-symbol? (fn [t]
+                              (and (merged? t) (not (sx/variable? t))
+                                   (not= t (representative-in kb @visible t))))
+                            sentence))
+      false
+
+      (any-mention-position? marks sentence)
       (not= (representative-term-mention kb @visible marks sentence false) sentence)
 
       :else
-      (and (sx/some-symbol? (fn [t]
-                              (and (merged? t) (not (sx/variable? t))
-                                   (not= t (representative-in kb @visible t))))
-                            sentence)
-           (or (not (names-equality-relation? sentence))
-               (not= (representative-term-plain kb @visible sentence) sentence))))))
+      (or (not (names-equality-relation? sentence))
+          (not= (representative-term-plain kb @visible sentence) sentence)))))
 
 (defn without-retired
   "Drop the matches whose stored spelling `view-context` has **retired** — the

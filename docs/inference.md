@@ -2285,7 +2285,7 @@ Built-in provers (`default-provers`, held per-KB in an atom):
   other provers, since a constant or a function application can denote a number. This
   is the extension point for arithmetic / CLP / any calculated relation.
 - **ExpressionKindProver** — `(k (Quote X))`, `k` an expression kind, answered from X's
-  spelling and cited to the `quoting_function` statements and the `genl` path it read
+  spelling and cited to the `termOfUnit` statement and the `genl` path it read
   ([argtypes.md](argtypes.md#what-a-quoted-form-is)). Not complete (50): a stored
   membership answers beside it.
 - **AggregateProver** — the five reductions over a query's solutions:

@@ -73,7 +73,7 @@
     (tu/without-entailing
      (tu/with-terms [Wanda]
        (v/assert kb (list 'animal Wanda) N)
-       (doseq [s [(list 'hasCapability Wanda 'metal) (list 'capabilityType 'fish 'metal)]]
+       (doseq [s [(list 'hasCapability Wanda 'metal_stuff) (list 'capabilityType 'fish 'metal_stuff)]]
          (let [p (first (filter #(= :arg-genl (:type %)) (v/check kb s N)))]
            (is (= :arg-genl (:type p)) (str (pr-str s) " is convicted by genlArg"))
            (is (= 'event (:expected p)) (str (pr-str s) " is convicted against event"))))))))
@@ -122,6 +122,26 @@
     (is (seq (v/sentexes-matching kb '(not (capabilityType penguin flying)) '?ctx))))
   (testing "and at the member, by its own rule"
     (is (seq (v/sentexes-matching kb '(not (hasCapability Tweety flying)) N)))))
+
+(tu/deftest-kb a-life-stage-takes-a-kind-claim-of-its-own
+  ;; One lineage, two stages: the adult flies and the larva does not.  Both stages are
+  ;; kinds of the lineage, and each stage carries its own capability claim.
+  (testing "the stages are kinds of the lineage, named by their stage relation"
+    (is (v/ask? kb '(genl caterpillar lepidopteran) B))
+    (is (v/ask? kb '(genl butterfly lepidopteran) B))
+    (is (v/ask? kb '(larvalFormOf caterpillar lepidopteran) B))
+    (is (v/ask? kb '(adultFormOf butterfly lepidopteran) B)))
+  (testing "never both at once, though one organism is each in turn"
+    (is (v/ask? kb '(diachronicallyDisjoint caterpillar butterfly) B))
+    (is (v/ask? kb '(diachronicallyDisjoint butterfly caterpillar) B) "symmetric")
+    (is (not (true? (v/disjoint? kb 'caterpillar 'butterfly))) "and not timelessly disjoint"))
+  (testing "a timeless disjoint is also a diachronic one"
+    (is (v/ask? kb '(diachronicallyDisjoint quantity situation) B)))
+  (testing "the adult flies"
+    (is (v/ask? kb '(capabilityType butterfly flying) B)))
+  (testing "the larva does not, and the KB says so rather than staying silent"
+    (is (not (v/ask? kb '(capabilityType caterpillar flying) B)))
+    (is (seq (v/sentexes-matching kb '(not (capabilityType caterpillar flying)) '?ctx)))))
 
 (tu/deftest-kb a-claim-about-a-kind-does-not-reach-its-members-on-its-own
   ;; The bridge is a rule, written once and deliberately, because "every bird flies" and
@@ -244,7 +264,10 @@
     '[closedExtentForArg3 2] "the argument value a closed extent is granted for: a term of any kind"}
    (into {} (for [p '[positiveExample negativeExample borderlineExample]]
               {[p 1] "an exemplified term"
-               [p 2] "the example, a sentence written as a term"}))
+               [p 2] "the example, a quoted sentence (Quote …)"}))
+   ;; the string siblings type their text (arg … 2 string) and leave the term untyped
+   (into {} (for [p '[positiveExampleComment negativeExampleComment borderlineExampleComment]]
+              [[p 1] "an exemplified term"]))
    ;; the five aggregation operators: a result variable, a census variable, a sentence body
    (into {} (for [op '[agg/count agg/sum agg/avg agg/min agg/max] i [1 2 3]]
               [[op i] "an operator slot — a variable, a variable and a sentence body"]))
@@ -1171,6 +1194,21 @@
       (v/assert kb (list 'organism PitcherPlant) 'CxUniverse)
       (is (not (tu/stored-in-clash? kb (list 'hollow PitcherPlant) 'CxUniverse))))))
 
+(tu/deftest-kb a-wing-is-never-fur
+  ;; A bat's wing has fur on it, and the fur is part of the wing.  That is parthood, not
+  ;; one thing in both types, so wing and fur are stated disjoint.
+  (is (true? (v/disjoint? kb 'wing 'fur)))
+  (is (= :disjoint (v/subsumption-status kb 'wing 'fur)))
+  (testing "a fur-covered wing is no clash"
+    (tu/with-terms [BatWing BatFur]
+      (v/assert kb (list 'wing BatWing) 'CxUniverse)
+      (v/assert kb (list 'fur BatFur) 'CxUniverse)
+      (is (not (tu/stored-in-clash? kb (list 'partOf BatFur BatWing) 'CxUniverse)))))
+  (testing "one thing in both types clashes"
+    (tu/with-terms [Furwing]
+      (v/assert kb (list 'wing Furwing) 'CxUniverse)
+      (is (tu/stored-in-clash? kb (list 'fur Furwing) 'CxUniverse)))))
+
 (tu/deftest-kb a-biological-thing-can-be-hollow
   ;; A pitcher plant and a lab-grown bladder are biological and hollow.  A cup and a cave
   ;; are hollow and not biological, and a leaf is biological and not hollow.
@@ -1327,9 +1365,9 @@
     [disjoint boolean predicate CxUniverse "boolean genl unrepresented_term, predicate genl relation; unrepresented_term genl linguistic; disjoint linguistic relation"]
     [disjoint character predicate CxUniverse "character genl unrepresented_term, predicate genl relation; unrepresented_term genl linguistic; disjoint linguistic relation"]
     [disjoint glass_stuff stone CxUniverse "disjoint_metatype stuff_type_by_substance"]
-    [disjoint metal glass_stuff CxUniverse "disjoint_metatype stuff_type_by_substance"]
-    [disjoint metal stone CxUniverse "disjoint_metatype stuff_type_by_substance"]
-    [disjoint metal wood CxUniverse "disjoint_metatype stuff_type_by_substance"]
+    [disjoint metal_stuff glass_stuff CxUniverse "disjoint_metatype stuff_type_by_substance"]
+    [disjoint metal_stuff stone CxUniverse "disjoint_metatype stuff_type_by_substance"]
+    [disjoint metal_stuff wood CxUniverse "disjoint_metatype stuff_type_by_substance"]
     [disjoint wood glass_stuff CxUniverse "disjoint_metatype stuff_type_by_substance"]
     [disjoint wood stone CxUniverse "disjoint_metatype stuff_type_by_substance"]
     [genl reifiable_function function CxUniverse "partition function reifiable_function unreifiable_function"]
@@ -1493,10 +1531,7 @@
 (tu/deftest-kb reifiable-and-unreifiable-partition-function
   (is (true? (v/disjoint? kb 'reifiable_function 'unreifiable_function 'CxUniverse)))
   (is (true? (v/genl? kb 'reifiable_function 'function 'CxUniverse)))
-  (is (true? (v/genl? kb 'unreifiable_function 'function 'CxUniverse)))
-  (testing "the separation is not quoting_function's: that mark crosses both parts"
-    (is (not (v/disjoint? kb 'quoting_function 'reifiable_function)))
-    (is (not (v/disjoint? kb 'quoting_function 'unreifiable_function)))))
+  (is (true? (v/genl? kb 'unreifiable_function 'function 'CxUniverse))))
 
 (tu/deftest-kb fixed-and-variable-order-partition-unary-predicate
   (is (true? (v/disjoint? kb 'fixed_order_type 'variable_order_type 'CxUniverse)))
@@ -1578,11 +1613,19 @@
   ;; a plant_class beside tree and flower, so it is apart from each and from oak and rose.
   ;; The seven biology properties life.txt places under biological, organism and animal are
   ;; states and capacities of an organism rather than kinds of one, so they are left out: each
-  ;; crosses the folk taxonomy, and its pairs with it stay unknown.
+  ;; crosses the folk taxonomy, and its pairs with it stay unknown.  Two life stages of one
+  ;; kind (caterpillar and butterfly) are neither: one organism is both, one after the other,
+  ;; so their pair is left unknown on purpose and only pairs of stages of a kind are skipped.
   (let [props   '#{alive dead mortal asleep awake breathes_air warm_blooded}
         org     (set (remove props (filter #(v/genl? kb % 'organism) (v/types kb))))
+        stage-of (fn [s] (set (for [r '[larvalFormOf adultFormOf]
+                                    k org
+                                    :when (v/ask? kb (list r s k) B)]
+                                k)))
+        same-kind-stages? (fn [a b] (boolean (some (stage-of a) (stage-of b))))
         unknown (for [{:keys [a b status]} (:pairs-data (v/disjointness-audit kb))
-                      :when (and (org a) (org b) (= :unknown status))]
+                      :when (and (org a) (org b) (= :unknown status)
+                                 (not (same-kind-stages? a b)))]
                   (set [a b]))]
     (is (every? org folk-species) "every species is an organism")
     (is (true? (v/disjoint? kb 'grass 'oak)) "grass is not a tree, so not an oak")
@@ -1612,18 +1655,75 @@
     (is (= :orthogonal (v/subsumption-status kb 'dog tended)))
     (is (not-any? #(= :forced-conclusion (:violation %)) (v/violations kb)))))
 
-(tu/deftest-kb artifact-is-declared-nowhere-and-the-six-kinds-are-made
+(tu/deftest-kb artifact-is-declared-nowhere-and-the-made-kinds-are-made
   ;; The KB declares no artifact term and no alias for one.  building, clothing,
-  ;; container, furniture, machine and vehicle are kinds of made.
+  ;; container, electronic_device, furniture, machine and vehicle are kinds of made.
   (is (empty? (v/sentexes-matching kb '(comment artifact ?text) '?ctx)))
   (is (empty? (v/sentexes-matching kb '(genl artifact ?type) '?ctx)))
   (is (empty? (v/sentexes-matching kb '(genl ?type artifact) '?ctx)))
   (is (= 1 (count (v/sentexes-matching kb '(comment made ?text) 'CxUniverse))))
-  (doseq [t '[building clothing container furniture machine vehicle]]
+  (doseq [t '[building clothing container electronic_device furniture machine vehicle]]
     (is (true? (v/genl? kb t 'made 'CxUniverse)) (str t " is made")))
-  (doseq [t '[clothing container furniture machine vehicle]]
+  (doseq [t '[clothing container electronic_device furniture machine vehicle]]
     (is (some #(v/premise? kb (:id %)) (v/sentexes-matching kb (list 'genl t 'made) 'CxUniverse))
         (str "(genl " t " made) is stated"))))
+
+(tu/deftest-kb an-electronic-device-is-made-and-overlaps-machine
+  ;; electronic_device is defined by the circuit it contains.  A fan-cooled desktop is a
+  ;; machine and an electronic device, a wind-up clock a machine with no circuit, and a
+  ;; single-board computer an electronic device with no moving part that does work.
+  (is (= 1 (count (v/sentexes-matching kb '(comment electronic_device ?text) 'CxUniverse))))
+  (is (true? (v/genl? kb 'electronic_device 'made 'CxUniverse)))
+  (is (some #(v/premise? kb (:id %))
+            (v/sentexes-matching kb '(orthogonal electronic_device machine) 'CxUniverse))
+      "(orthogonal electronic_device machine) is stated")
+  (is (= 1 (count (v/sentexes-matching
+                   kb '(comment (orthogonal electronic_device machine) ?text) 'CxUniverse)))
+      "the orthogonal sentence carries its witnesses as a comment")
+  (is (= :orthogonal (v/subsumption-status kb 'machine 'electronic_device)))
+  (is (not (v/disjoint? kb 'machine 'electronic_device)))
+  (testing "a term in both types is no clash"
+    (tu/with-terms [Desktop1]
+      (v/assert kb (list 'machine Desktop1) 'CxUniverse)
+      (is (not (tu/stored-in-clash? kb (list 'electronic_device Desktop1) 'CxUniverse)))
+      (is (true? (v/ask? kb (list 'electronic_device Desktop1) 'CxUniverse)))
+      (is (true? (v/ask? kb (list 'machine Desktop1) 'CxUniverse)))))
+  (testing "a machine is not concluded an electronic device, nor the converse"
+    (tu/with-terms [WindUpClock1 BoardComputer1]
+      (v/assert kb (list 'machine WindUpClock1) 'CxUniverse)
+      (v/assert kb (list 'electronic_device BoardComputer1) 'CxUniverse)
+      (is (not (v/ask? kb (list 'electronic_device WindUpClock1) 'CxUniverse)))
+      (is (not (v/ask? kb (list 'machine BoardComputer1) 'CxUniverse)))
+      (is (true? (v/ask? kb (list 'made BoardComputer1) 'CxUniverse)))
+      (is (not (v/ask? kb (list 'person BoardComputer1) 'CxUniverse))
+          "an electronic device is not concluded a person"))))
+
+;; ---- mechanism ----------------------------------------------------------------
+;; mechanism is the common genl of machine and electronic_device, and their shared
+;; separations are stated once on it: a mechanism is never an organism and never stuff.
+
+(tu/deftest-kb mechanism-parents-machine-and-electronic-device
+  (is (= 1 (count (v/sentexes-matching kb '(comment mechanism ?text) 'CxUniverse))))
+  (doseq [t '[machine electronic_device]]
+    (is (some #(v/premise? kb (:id %)) (v/sentexes-matching kb (list 'genl t 'mechanism) 'CxUniverse))
+        (str "(genl " t " mechanism) is stated")))
+  (is (some #(v/premise? kb (:id %)) (v/sentexes-matching kb '(genl mechanism tangible) 'CxUniverse))
+      "(genl mechanism tangible) is stated")
+  (is (not (v/genl? kb 'mechanism 'made 'CxUniverse))
+      "most mechanisms are made, not all: a mechanism is not concluded made")
+  (doseq [t '[organism substance]]
+    (is (some #(v/premise? kb (:id %)) (v/sentexes-matching kb (list 'disjoint 'mechanism t) 'CxUniverse))
+        (str "(disjoint mechanism " t ") is stated"))
+    (doseq [k '[mechanism machine electronic_device]]
+      (is (true? (v/disjoint? kb k t)) (str k " is disjoint with " t))))
+  (is (empty? (v/sentexes-matching kb '(disjoint animal machine) 'CxUniverse))
+      "the animal/machine separation is reached through mechanism, not restated")
+  (is (true? (v/disjoint? kb 'animal 'machine)))
+  (testing "an organism stated a mechanism is a clash"
+    (tu/with-terms [Sheep1]
+      (v/assert kb (list 'organism Sheep1) 'CxUniverse)
+      (v/assert kb (list 'electronic_device Sheep1) 'CxUniverse)
+      (is (tu/stored-in-clash? kb (list 'electronic_device Sheep1) 'CxUniverse)))))
 
 ;; ---- made and natural ------------------------------------------------------
 ;; made and natural partition tangible.  A formation is a natural tangible that nothing

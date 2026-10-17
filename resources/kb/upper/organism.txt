@@ -20,6 +20,13 @@
 ;; separation: folk_species separates every two species, so no organism is a cat and a
 ;; dog, and none is a spider and an owl.
 
+(comment adultFormOf
+         "(adultFormOf ?stage ?kind) means that ?stage is a kind of ?kind in its adult stage: (adultFormOf butterfly lepidopteran) says butterflies are adult lepidopterans. A claim about kinds, like partType: it says what the stage is a stage of and nothing about any particular organism, and (genl ?stage ?kind) is stated beside it, because the organism goes on existing through the change. Companion to larvalFormOf.")
+(binary_predicate adultFormOf)
+(set/monotonic (type_relation_predicate adultFormOf))
+(genlArg adultFormOf 1 organism)
+(genlArg adultFormOf 2 organism)
+
 (comment amphibian "A cold-blooded animal that begins life in water and breathes through its skin.")
 (genl amphibian vertebrate)
 (vertebrate_class amphibian)
@@ -34,7 +41,11 @@
 (genl ant insect)
 (set/monotonic (folk_species ant))
 
-(comment arachnid "An eight-legged animal — a spider, a scorpion, a mite. Not an insect, which has six.")
+(comment arachnid "An eight-legged animal.")
+(positiveExampleComment arachnid "a spider")
+(positiveExampleComment arachnid "a scorpion")
+(positiveExampleComment arachnid "a mite")
+(negativeExampleComment arachnid "an insect, which has six legs")
 (genl arachnid invertebrate)
 (invertebrate_class arachnid)
 
@@ -46,9 +57,18 @@
 (genl bird vertebrate)
 (vertebrate_class bird)
 
+(comment butterfly "A winged insect: the adult stage of a lepidopteran, which was a caterpillar first.")
+(genl butterfly lepidopteran)
+(adultFormOf butterfly lepidopteran)
+
 (comment cat "A domesticated feline mammal; disjoint from dog.")
 (genl cat mammal)
 (set/monotonic (folk_species cat))
+
+(comment caterpillar "The larval stage of a lepidopteran: a soft, many-legged crawler that will become a butterfly or a moth. Not a species of its own, so not a folk_species, and diachronicallyDisjoint from butterfly rather than disjoint: the same organism is a caterpillar and later a butterfly.")
+(genl caterpillar lepidopteran)
+(larvalFormOf caterpillar lepidopteran)
+(diachronicallyDisjoint caterpillar butterfly)
 
 (comment cow "A large domesticated mammal kept for milk and meat.")
 (genl cow mammal)
@@ -74,7 +94,12 @@
 (genl fish vertebrate)
 (vertebrate_class fish)
 
-(comment flower "A plant grown or picked for its blooms: a rose, a daisy, a tulip. A flowering tree such as an oak, and a grass, are not flowers in this folk sense; tree and grass are separate folk classes.")
+(comment flower "A plant grown or picked for its blooms, in the folk sense. Tree and grass are separate folk classes.")
+(positiveExampleComment flower "a rose")
+(positiveExampleComment flower "a daisy")
+(positiveExampleComment flower "a tulip")
+(negativeExampleComment flower "a flowering tree such as an oak")
+(negativeExampleComment flower "a grass")
 (genl flower plant)
 (plant_class flower)
 
@@ -92,7 +117,11 @@
 (set/monotonic (separating folk_biological_class vertebrate_class invertebrate_class plant_class))
 
 (comment folk_species
-         "(folk_species ?type) means that ?type is a species-level kind of organism as everyday speech names it: cat, dog, oak, human. A disjoint_metatype, so no organism is of two species, and never a class-level kind: a species is not a folk_biological_class.")
+         "(folk_species ?type) means that ?type is a species-level kind of organism as everyday speech names it. A disjoint_metatype, so no organism is of two species, and never a class-level kind: a species is not a folk_biological_class.")
+(positiveExample folk_species (Quote (folk_species cat)))
+(positiveExample folk_species (Quote (folk_species dog)))
+(positiveExample folk_species (Quote (folk_species oak)))
+(positiveExample folk_species (Quote (folk_species human)))
 (unary_predicate folk_species)
 (genlArg folk_species 1 organism)
 (metatype folk_species)
@@ -140,7 +169,11 @@
 (genl insect invertebrate)
 (invertebrate_class insect)
 
-(comment invertebrate "An animal without a backbone: an insect, a spider, a snail, a worm.")
+(comment invertebrate "An animal without a backbone.")
+(positiveExampleComment invertebrate "an insect")
+(positiveExampleComment invertebrate "a spider")
+(positiveExampleComment invertebrate "a snail")
+(positiveExampleComment invertebrate "a worm")
 (type invertebrate)
 
 (comment invertebrate_class
@@ -150,6 +183,17 @@
 (metatype invertebrate_class)
 (set/monotonic (disjoint_metatype invertebrate_class))
 (typeGenl invertebrate_class invertebrate)
+
+(comment larvalFormOf
+         "(larvalFormOf ?stage ?kind) means that ?stage is a kind of ?kind in its larval stage: (larvalFormOf caterpillar lepidopteran) says caterpillars are larval lepidopterans. A claim about kinds, like partType: it says what the stage is a stage of and nothing about any particular organism, and (genl ?stage ?kind) is stated beside it, because the organism goes on existing through metamorphosis. Companion to adultFormOf.")
+(binary_predicate larvalFormOf)
+(set/monotonic (type_relation_predicate larvalFormOf))
+(genlArg larvalFormOf 1 organism)
+(genlArg larvalFormOf 2 organism)
+
+(comment lepidopteran "An insect that goes through metamorphosis from caterpillar to winged adult: the butterflies and the moths. The lineage-wide kind, so an organism stays a lepidopteran through every stage. It is the species-level kind here because butterfly and caterpillar name stages of it rather than kinds beside it.")
+(genl lepidopteran insect)
+(set/monotonic (folk_species lepidopteran))
 
 (comment lion "A large wild feline — the strong animal of the Lion-and-Mouse fable.")
 (genl lion mammal)
@@ -182,7 +226,10 @@
 (type plant)
 
 (comment plant_class
-         "(plant_class ?type) means that ?type is one of the folk classes of plant, such as tree, flower and grass. A disjoint_metatype, so its members are pairwise disjoint: an oak is never a rose, and grass is neither. Not a partition of plant, since a fern or a moss is none of the three.")
+         "(plant_class ?type) means that ?type is one of the folk classes of plant. A disjoint_metatype, so its members are pairwise disjoint: an oak is never a rose, and grass is neither. Not a partition of plant, since a fern or a moss is none of the three.")
+(positiveExample plant_class (Quote (plant_class tree)))
+(positiveExample plant_class (Quote (plant_class flower)))
+(positiveExample plant_class (Quote (plant_class grass)))
 (unary_predicate plant_class)
 (genlArg plant_class 1 plant)
 (metatype plant_class)

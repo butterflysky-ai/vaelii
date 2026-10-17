@@ -66,7 +66,8 @@
 (conversionFactor Gram Kilogram 0.001)
 
 (comment greaterInMagnitudeThan
-         "(greaterInMagnitudeThan ?quantity1 ?quantity2) means that ?quantity1 is further from zero than ?quantity2, whichever side of zero each falls on. Between two QUANTITIES, which is what separates it from quantityGreaterThan: that one compares two ground measure terms and is computed from the unit table, where this is a stated claim about quantities nobody has put a figure on — the tap running faster than the drain. It exists for the one ambiguous entry in the sign addition table: a positive and a negative sum to the sign of whichever is larger, and this is what says which. Transitive and asymmetric, a strict order, so a cycle of magnitude claims is a contradiction the KB reports rather than a chain it walks.")
+         "(greaterInMagnitudeThan ?quantity1 ?quantity2) means that ?quantity1 is further from zero than ?quantity2, whichever side of zero each falls on. Between two QUANTITIES, which is what separates it from quantityGreaterThan: that one compares two ground measure terms and is computed from the unit table, where this is a stated claim about quantities nobody has put a figure on. It exists for the one ambiguous entry in the sign addition table: a positive and a negative sum to the sign of whichever is larger, and this is what says which. Transitive and asymmetric, a strict order, so a cycle of magnitude claims is a contradiction the KB reports rather than a chain it walks.")
+(positiveExampleComment greaterInMagnitudeThan "the tap running faster than the drain")
 (binary_predicate greaterInMagnitudeThan)
 (set/monotonic (instance_relation_predicate greaterInMagnitudeThan))
 (arg greaterInMagnitudeThan 1 quantity)
@@ -146,7 +147,9 @@
 (arg qualitativeSum 3 quantity)
 
 (comment quantity
-         "A magnitude that has a sign and can change, such as a water level or the rate a tap runs at. The sign vocabulary relates quantities: signOf and trendOf give one a value, derivativeOf joins a rate to its quantity, and the three qualitative relations and greaterInMagnitudeThan relate two or three of them. A quantity is not a measure: a measure is a figure in a unit, and a quantity is what a measure would measure.")
+         "A magnitude that has a sign and can change. The sign vocabulary relates quantities: signOf and trendOf give one a value, derivativeOf joins a rate to its quantity, and the three qualitative relations and greaterInMagnitudeThan relate two or three of them. A quantity is not a measure: a measure is a figure in a unit, and a quantity is what a measure would measure.")
+(positiveExampleComment quantity "a water level")
+(positiveExampleComment quantity "the rate a tap runs at")
 (genl quantity aspatial)
 ;; A quantity changes over time, so it is temporal.  It causes nothing itself.  A quantity
 ;; is the magnitude, and the water level being 3 m is a fluent about it, so a quantity is
@@ -215,6 +218,7 @@
 
 (comment sameQuantity
          "(sameQuantity ?measure1 ?measure2) means that ?measure1 and ?measure2 are the same quantity once both are normalized to their dimension's base unit. So a thousand grams and one kilogram are the same quantity though they are different terms. Computed by a prover from the dimensionOf and conversionFactor facts, never stored, and never an equality: the equality closure is a partition over symbols and holds no numbers or compounds, so this says two measures agree and not that two names denote one thing.")
+(positiveExample sameQuantity (Quote (sameQuantity (QuantityFn 1000 Gram) (QuantityFn 1 Kilogram))))
 (binary_predicate sameQuantity)
 (set/monotonic (instance_relation_predicate sameQuantity))
 (arg sameQuantity 1 measure)

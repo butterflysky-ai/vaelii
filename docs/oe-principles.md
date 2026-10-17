@@ -125,6 +125,10 @@ A type says what a thing *is*, not what it's for. A type defined by purpose, cap
 
 **Audit:** if a type's comment defines membership by purpose or role, make it a relation (`bodyPartRoleOf ?thing ?body`), put the role's rules on the relation, and type its args by what the fillers are.
 
+**Verb test:** read the verb that defines membership. A process or agency verb (operates, is used, serves, does work) brings purpose in. A stative verb (contains, has as a part, is made of) defines by structure, and the type it defines is rigid.
+
+**Example:** a candidate `device` defined as "operates when powered" admits a brick warming in sunlight and a one-piece whistle. A `tool` defined as "used to perform work" admits a rock used as a hammer. `electronic_device`, "contains an electronic circuit", admits a dead phone and excludes the whistle. `machine`, "has parts that move relative to each other, driven by an energy source", admits a stopped clock.
+
 **Examples:** a type `necessarily_part_of_something` is purpose in disguise. A broad `body_part` meaning "anything that can do the work of a body part" takes in every prosthetic; the kind plus a role relation keeps the two apart.
 
 ## beware entity
@@ -167,7 +171,16 @@ When choosing between a default rule with exceptions and an explicit list of eve
 
 These are considerations, not a gate. The more you'd expect or want the default to reach new, hypothesized and fictional members, the better a default with stated exceptions fits. Where it shouldn't reach them, enumerate the known cases and conclude nothing about new ones.
 
-**Example:** metal is a `solid` by default, with mercury as the stated exception. A newly found, hypothesized or fictional metal should come out solid.
+**Example:** `metal_stuff` is a `solid` by default, with mercury as the stated exception. A newly found, hypothesized or fictional metal should come out solid.
+
+## catbus principle
+*Monotonic until a real fiction needs the overlap*
+**specPrinciple:** default or enumerate
+State a separation `:monotonic` in CxUniverse unless an existing fictional work shows a member of both types. One such example is enough: weaken the CxUniverse statement to default strength and restate it `:monotonic` in CxRealWorld, which fiction contexts do not inherit. A hypothetical example is not enough.
+
+**Example:** the Catbus in *My Neighbor Totoro* is both a cat and a bus, so `(disjoint animal vehicle)` is a default in CxUniverse and monotonic in CxRealWorld.
+
+**Audit:** for every default-strength separation that has a monotonic copy in CxRealWorld, name the fictional work and the member that justify it.
 
 ## no OE calligraphy
 *True and useful, not OE calligraphy*
