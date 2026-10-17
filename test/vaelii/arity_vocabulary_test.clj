@@ -5,17 +5,11 @@
   (:require [clojure.test :refer [is testing use-fixtures]]
             [vaelii.core :as v]
             [vaelii.host.starter :as starter]
-            [vaelii.impl.kb :as kb]
             [vaelii.impl.predicates :as predicates]
             [vaelii.test-util :as tu]))
 
 (use-fixtures :once (tu/loaded starter/load-into))
 (use-fixtures :each (tu/neutral))
-
-(defn- arity-of
-  "The exact length that binds `pred` (`kb/relation-arity`)."
-  [kb pred]
-  (kb/relation-arity kb pred))
 
 (tu/deftest-kb relation-is-the-common-parent
   (is (v/genl? kb 'predicate 'relation))
@@ -28,7 +22,7 @@
   (doseq [mapping '[relationTypeByArity predicateTypeByArity functionTypeByArity]]
     (is (v/isa? kb mapping 'binary_predicate))
     (is (not (v/isa? kb mapping 'unary_predicate)))
-    (is (= 2 (arity-of kb mapping))))
+    (is (= 2 (v/relation-arity kb mapping))))
   (doseq [type '[thing animal tangible fixed_arity]]
     (is (v/isa? kb type 'unary_predicate)))
   (is (v/genl? kb 'predicateTypeByArity 'relationTypeByArity))
@@ -76,10 +70,10 @@
   (testing "the class is the premise"
     (tu/with-terms [chainOf]
       (let [h (v/assert kb (list 'binary chainOf) 'CxUniverse)]
-        (is (= 2 (arity-of kb chainOf)))
+        (is (= 2 (v/relation-arity kb chainOf)))
         (is (empty? (v/sentexes-matching kb (list 'arity chainOf '?n) 'CxUniverse)))
         (v/retract! kb h)
-        (is (nil? (arity-of kb chainOf)))
+        (is (nil? (v/relation-arity kb chainOf)))
         (is (not (v/isa? kb chainOf 'binary))))))
   (testing "an arity no class maps to concludes no class at all"
     (is (v/ask? kb '(arity InstantFn 6) 'CxUniverse))
@@ -383,7 +377,7 @@
         (str "field " position " is declared an integer")))
   (testing "and the ternary calendar constructor carries its class, not six arg rows"
     (is (v/isa? kb 'DayFn 'ternary_function))
-    (is (= 3 (arity-of kb 'DayFn)))))
+    (is (= 3 (v/relation-arity kb 'DayFn)))))
 
 (tu/deftest-kb the-relation-wide-declarations-are-what-the-inert-tuple-test-reads
   ;; The vocabulary is not documentation: a reader decides a tuple against the arity these
@@ -476,7 +470,7 @@
   ;; each is a `:monotonic` disjoint_metatype, which reaches unary_predicate through the
   ;; `:monotonic` edges by at_least_metatype, so the position check refuses a second argument
   (doseq [t '[type_type_by_order stuff_type_by_state_of_matter stuff_type_by_substance]]
-    (is (= 1 (arity-of kb t)) (str t)))
+    (is (= 1 (v/relation-arity kb t)) (str t)))
   (is (= :arg-position
          (:type (ex-data (try (v/assert kb '(arg type_type_by_order 2 thing) 'CxUniverse) nil
                               (catch clojure.lang.ExceptionInfo e e)))))))
@@ -863,7 +857,7 @@
       (v/assert kb (list 'instance_relation_predicate partOfSomething) 'CxUniverse
                 {:strength :monotonic})
       (is (v/isa? kb partOfSomething 'binary_predicate))
-      (is (= 2 (arity-of kb partOfSomething)))
+      (is (= 2 (v/relation-arity kb partOfSomething)))
       (is (v/isa? kb partOfSomething 'fixed_arity))))
   (testing "and every shipped member really is binary"
     (doseq [mark '[instance_relation_predicate type_relation_predicate]]

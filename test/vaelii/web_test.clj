@@ -917,7 +917,7 @@
       (is (str/starts-with? text "<span class=\"sx t-str\">&quot;<span class=\"str-text\">"))
       (is (str/ends-with? text "</span>&quot;</span>")))
     (testing "a formula renders as a sentence, its parens coloured by depth"
-      (is (str/includes? text "<span class=\"rb1\">(</span><a class=\"sx t-pred\" href=\"/term?q=measureInUnit\">")))
+      (is (str/includes? text "<span class=\"rb1\">(</span><a class=\"sx t-pred t-pred-n\" href=\"/term?q=measureInUnit\">")))
     (testing "a variable takes the variable colour"
       (is (str/includes? text "<span class=\"t-var\">?magnitude</span>")))
     (testing "a word spelled as a stored term links as that term, and English stays text"
@@ -1140,6 +1140,17 @@
     (v/assert kb (list 'symmetric close_rel) 'CxUniverse {:chain? false})
     (v/assert kb (list 'genl near_rel close_rel) 'CxUniverse {:chain? false})
     (is (re-find #"<h2>Term <a class=\"sx t-pred\"" (:body (GET "/term" (str "q=" near_rel)))))))
+
+(tu/deftest-kb a-predicate-of-three-or-more-places-takes-the-wider-predicate-colour
+  (tu/with-terms [pairOf tripleOf]
+    (v/assert kb (list 'arity pairOf 2) 'CxUniverse)
+    (v/assert kb (list 'arity tripleOf 3) 'CxUniverse)
+    (is (re-find #"<h2>Term <a class=\"sx t-pred\"" (:body (GET "/term" (str "q=" pairOf)))))
+    (is (re-find #"<h2>Term <a class=\"sx t-pred t-pred-n\"" (:body (GET "/term" (str "q=" tripleOf)))))))
+
+(deftest a-logical-connective-takes-the-connective-colour
+  (doseq [c '[and or not implies]]
+    (is (re-find #"<h2>Term <a class=\"sx t-conn\"" (:body (GET "/term" (str "q=" c)))) (str c))))
 
 (tu/deftest-kb a-hub-draws-its-cap-and-says-what-it-left-out
   (tu/with-terms [hub_type]

@@ -1695,7 +1695,9 @@ A sentence is rendered structurally, not as one opaque string:
   an individual, or the context independently (nested compound subterms are also
   listed individually under a sentex's *Subterms*);
 - terms are **colored by role** — type (pale amber), individual (violet), predicate
-  (yellow-orange), context (blue), literal (white: a number or a string), variable
+  (yellow-orange; red-orange for one whose `relation-arity` is three or more), logical
+  connective (green: a stored `logical_connective` member, as `and`, `or`, `not` and
+  `implies` are), context (blue), literal (white: a number or a string), variable
   (grey). The word `in` between a sentence and its context is white too, and a no-break
   space joins it to the context, so a line never ends between the two. A node of the
   genl taxonomy colors by stored content: a predicate when `relation?` reads it as a relation of two or

@@ -112,6 +112,7 @@
   query-status "[[conn goal context] [conn goal context opts]]",
   query? "[[conn goal] [conn goal context] [conn goal context opts]]",
   readable-sentence "[[conn sx]]",
+  relation-arity "[[conn term]]",
   relation? "[[conn term] [conn term context]]",
   representative "[[conn term] [conn term context]]",
   retract! "[[conn handle]]",
@@ -311,6 +312,7 @@
   register-modal-predicate "[[kb pred] [kb pred context]]",
   reified-term? "[[term]]",
   reindex "[[kb]]",
+  relation-arity "[[kb term]]",
   relation? "[[kb term] [kb term context]]",
   representative "[[kb term] [kb term context]]",
   reset-settle-stats! "[[kb]]",
@@ -463,6 +465,7 @@
    :query-status
    :query?
    :readable-sentence
+   :relation-arity
    :relation?
    :representative
    :retract
@@ -588,6 +591,7 @@
    :query-status
    :query?
    :readable-sentence
+   :relation-arity
    :relation?
    :representative
    :retract

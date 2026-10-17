@@ -89,8 +89,8 @@
   min-genls max-specs
   ;; the same reduction over `genlCx`, for a context's page
   min-context-parents max-context-children
-  ;; whether a `types` node is a relation, by its stored arity, for the term colouring
-  relation?
+  ;; whether a `types` node is a relation, and a predicate's arity, for the term colouring
+  relation? relation-arity
   supporting-justifications dependent-justifications
   ;; which justifications the rule exceptions currently block — the one thing about a
   ;; justification that cannot be read off belief, and so the one a remote reader would

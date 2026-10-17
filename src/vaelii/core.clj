@@ -877,6 +877,12 @@
   ([kb term] (relation? kb term '?ctx))
   ([kb term context] (kb/relation? kb term (when (scoped-read? context) context))))
 
+(defn relation-arity
+  "The exact number of places that binds `term`, its own or one inherited through `genl`,
+  or nil when no exact length binds it (a `variable_arity` relation, or none stored).
+  Read the same at every context.  docs/taxonomy.md, \"Arity\"."
+  [kb term] (kb/relation-arity kb term))
+
 (defn contexts
   "Every context currently in the genlCx hierarchy — the nodes of the closure."
   [kb] (tax/contexts (reasoning/taxonomy kb)))
@@ -8661,7 +8667,7 @@
     :possible-relations
     :premise? :props :provable? :prove :prove-within :provenance
     :qualitative-network :qualitative-scenario :qualitative-scenarios :query
-    :query-plan :query-status :query? :relation? :representative :same-class?
+    :query-plan :query-status :query? :relation? :relation-arity :representative :same-class?
     :search-tree
     :sees? :sentex :sentex-count :sentexes-in-context :sentexes-matching
     :sentexes-with-arg :sentexes-with-functor :settle-stats :specified-violations

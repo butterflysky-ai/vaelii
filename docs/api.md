@@ -443,6 +443,8 @@ default-chain-opts                              ; the bounds a chain run takes w
 (relation? kb term [context])                           ; a stored arity of 2+ or variable_arity,
                                                         ; else an inherited length of 2+:
                                                         ; a `types` node that is a relation, not a type
+(relation-arity kb term)                                ; the exact arity, own or inherited through
+                                                        ; genl, or nil; the same at every context
 (context-up kb c) / (context-down kb c) / (sees? kb k y); genlCx closures + visibility test
 (min-context-parents kb c) / (max-context-children kb c) ; the one-step genlCx parents / children no
                                                         ; other one stands between, read as

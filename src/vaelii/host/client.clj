@@ -759,6 +759,12 @@
   [conn sx]
   (call conn :readable-sentence [sx]))
 
+(defn relation-arity
+  "The exact number of places that binds `term`, its own or one inherited through `genl`,
+  or nil when no exact length binds it (a `variable_arity` relation, or none stored)."
+  [conn term]
+  (call conn :relation-arity [term]))
+
 (defn relation?
   "Is `term` a relation of two or more places by what the KB stores of it, visible from
   `context` (default `?ctx`, every context): an `(arity P n)` declaration or exact-arity

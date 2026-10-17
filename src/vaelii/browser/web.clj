@@ -478,6 +478,12 @@
    ;; renders a term rather than one per request — the wire hands a set back, and the
    ;; `set` below is only for a target that does not.
    :types     (delay (let [t (v/types kb)] (if (set? t) t (set t))))
+   ;; the believed `logical_connective` members, for `term-class`: a closed extent of a
+   ;; handful of rows, read once per page that renders a term
+   :connectives (delay (into #{} (keep (fn [s] (when-not (v/negative? s)
+                                                 (second (:sentence s)))))
+                             (v/sentexes-with-functor kb 'logical_connective
+                                                      {:believed? true})))
    :fragment? (fragment-request? req)
    ;; whether this reader wants only what the KB was told, not what it concluded.  It
    ;; rides the view rather than a parameter because a group's continuation
@@ -495,7 +501,10 @@
    ;; — the map is `(termOfUnit K ?e)`, one probe per constant — so the cache is what
    ;; bounds it at one read per *distinct* constant rendered, however many times the
    ;; page renders it.  Empty and untouched on a KB that has minted none.
-   :nat-exprs     (atom {})})
+   :nat-exprs     (atom {})
+   ;; each predicate's arity, one `v/relation-arity` read per distinct predicate on the
+   ;; page, for `term-class`
+   :arities       (atom {})})
 
 (defn local-kb
   "The in-process KB behind `view`, or nil when the browser reads a remote daemon
@@ -785,27 +794,44 @@
                    (disjoint-pair a b))]
     (-> declared (into induced) (into rostered))))
 
+(defn- arity-of
+  "`t`'s exact arity, or nil, from the per-request cache: one `v/relation-arity` read per
+  distinct predicate on the page."
+  [{:keys [kb arities]} t]
+  (if-let [e (find @arities t)]
+    (val e)
+    (let [n (v/relation-arity kb t)]
+      (swap! arities assoc t n)
+      n)))
+
+(defn- pred-class
+  "`t-pred`, plus `t-pred-n` when `t` takes three or more places by its stored arity."
+  [view t]
+  (if (some-> (arity-of view t) (>= 3)) "t-pred t-pred-n" "t-pred"))
+
 (defn- term-class
-  "The role class of a term, used to color it: type / individual / predicate /
-  context / number / variable.  `v/term-role` supplies the naming role; the view's
-  `types` set overlays it so a node of the taxonomy colors by stored content, as
+  "The role class of a term, used to color it: type / individual / predicate (with
+  `pred-class`'s mark on a ternary or wider one) / connective / context / number /
+  variable.  A connective is a stored `logical_connective` member.
+  `v/term-role` supplies the naming role; the view's `types` set overlays it so a node of the taxonomy colors by stored content, as
   `describe`'s role does: a predicate when `v/relation?` answers for it, else a type.
   The overlay comes **before** the non-symbol fallback, because a type node need not be
   a symbol.  An imported ontology names a type it has no atomic name for with a function
   term (17,211 of the types in the OpenCyc import `docs/kbs.md` measures are compounds),
   and reading that as a number is the whole page in the wrong colour."
-  [{:keys [kb types]} t]
+  [{:keys [kb types connectives] :as view} t]
   (let [role (v/term-role t)]
     (cond
       (= role :variable)  "t-var"
       (= role :number)    "t-num"
       (= role :context)   "t-context"
-      (contains? @types t) (if (v/relation? kb t) "t-pred" "t-type")
+      (contains? @connectives t) "t-conn"
+      (contains? @types t) (if (v/relation? kb t) (pred-class view t) "t-type")
       (not (symbol? t))   "t-num"
       (= role :individual) "t-ind"
-      (= role :predicate) "t-pred"
+      (= role :predicate) (pred-class view t)
       (= role :type)      "t-type"                        ; snake_case not yet in the taxonomy
-      :else               "t-pred")))
+      :else               (pred-class view t))))
 
 ;; ---- reified terms ------------------------------------------------------
 ;;
@@ -1395,7 +1421,8 @@
 (def ^:private legend
   [:p.legend "Terms: "
    [:a.sx.t-type "type"] " · " [:a.sx.t-ind "individual"] " · "
-   [:a.sx.t-pred "predicate"] " · " [:a.sx.t-context "context"] " · "
+   [:a.sx.t-pred "predicate"] " · " [:a.sx.t-pred.t-pred-n "ternary+ predicate"] " · "
+   [:a.sx.t-conn "connective"] " · " [:a.sx.t-context "context"] " · "
    [:a.sx.t-num "literal"] " · " [:span.t-var "?variable"] "."])
 
 (def ^:private badge-legend

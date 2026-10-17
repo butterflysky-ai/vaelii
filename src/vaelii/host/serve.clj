@@ -385,6 +385,7 @@
     :max-context-children (op v/max-context-children)
     :types        (op v/types)
     :relation?    (op v/relation?)
+    :relation-arity (op v/relation-arity)
     :contexts     (op v/contexts)
     :sentex       (op v/sentex)
     :handle-of    (op v/handle-of)

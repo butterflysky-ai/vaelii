@@ -85,12 +85,15 @@
   --err-ink:    #e06c6c;
 
   /* the term roles, off the spectrum below, so light mode's darker steps carry over:
-     pale amber for a type (a unary predicate), yellow-orange for a predicate of two or
-     more places, blue for a context, violet for an individual, and the title ink for a
+     pale amber for a type (a unary predicate), yellow-orange for a binary predicate,
+     red-orange (halfway from that to red) for a predicate of three or more places,
+     green for a logical connective (`and`, `or`, `not`, `implies`), blue for a context, violet for an individual, and the title ink for a
      literal (a number or a string) and for the `in` before a context */
   --t-type:    color-mix(in srgb, var(--rb3) 60%, var(--title));
   --t-ind:     var(--rb8);
   --t-pred:    color-mix(in srgb, var(--rb2) 55%, var(--rb3));
+  --t-pred-n:  color-mix(in srgb, var(--rb1) 50%, var(--t-pred));
+  --t-conn:    var(--rb4);
   --t-context: var(--rb7);
   --t-num:     var(--title);
   --t-var:     #6b7183;
@@ -544,6 +547,8 @@ header.site {
 a.t-type    { --sx-c: var(--t-type); }                   /* dog, physical_object */
 a.t-ind     { --sx-c: var(--t-ind); }                    /* Muffet, Tom          */
 a.t-pred    { --sx-c: var(--t-pred); }                   /* parentOf, genl       */
+a.t-pred-n  { --sx-c: var(--t-pred-n); }                 /* arg, genlArg         */
+a.t-conn    { --sx-c: var(--t-conn); }                   /* and, implies, not    */
 a.t-context { --sx-c: var(--t-context); }                /* CxUniverse           */
 a.t-num     { --sx-c: var(--t-num); }                    /* 1970                 */
 .t-str      { --sx-c: var(--t-num); }                    /* "a string"           */
@@ -551,7 +556,7 @@ a.t-num     { --sx-c: var(--t-num); }                    /* 1970                
 .t-var      { --sx-c: var(--t-var); }                    /* ?x — not a link      */
 /* every sentence part above, and a depth paren (`.rb1`…), is its colour at `--lit` */
 :is(.rb1, .rb2, .rb3, .rb4, .rb5, .rb6, .rb7, .rb8, .rb9, a.t-type, a.t-ind, a.t-pred,
-    a.t-context, a.t-num, .t-str, .cx-in, .t-var) {
+    a.t-conn, a.t-context, a.t-num, .t-str, .cx-in, .t-var) {
   color: color-mix(in srgb, var(--sx-c) var(--lit, 100%), var(--bg));
 }
 /* a string's text is English, so it takes --prose between quotes that keep --mono; a
@@ -1303,6 +1308,8 @@ ul.why > li .tag       { white-space: nowrap; }
 .g-node.t-type    { color: var(--t-type); }
 .g-node.t-ind     { color: var(--t-ind); }
 .g-node.t-pred    { color: var(--t-pred); }
+.g-node.t-pred-n  { color: var(--t-pred-n); }
+.g-node.t-conn    { color: var(--t-conn); }
 .g-node.t-context { color: var(--t-context); }
 .g-node.t-num     { color: var(--t-num); }
 .g-node.t-var     { color: var(--t-var); }

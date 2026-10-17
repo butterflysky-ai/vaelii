@@ -32,6 +32,13 @@ it — `git show v0.16.0:CHANGELOG.md`.
 
 ### Additive
 
+- **`relation-arity` answers a predicate's exact arity, and the browser colours a
+  predicate of three or more places red-orange and a logical connective green.** A
+  connective is a `logical_connective` member: `and`, `or`, `not`, `implies`.
+  `(relation-arity kb 'arg)` is `3`; a `variable_arity` relation, or a term no length
+  binds, answers nil. `vaelii.client` and the daemon serve it. [api.md](docs/api.md),
+  [web.md](docs/web.md).
+
 - **`+with-postgres`, `+with-sqlite` and `+with-foreign` add the published siblings to any
   lein task, the uberjar included.** `lein with-profile +with-postgres browser` opens a
   `:pg-*` KB from this checkout, `lein with-profile +with-postgres,+with-sqlite uberjar`
