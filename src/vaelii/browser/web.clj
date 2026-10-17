@@ -1223,7 +1223,7 @@
 
 (defn- state-tag
   "The belief-state pill for a sentex: IN when the JTMS believes it, else the `why-not`
-  reason (superseded / defeated / inert / unsupported / not-stored), followed for a placed
+  reason (superseded / defeated / excepted / inert / unsupported / not-stored), followed for a placed
   defeat by the declarations its nogood convicts through, and for an inert tuple by the
   grounds of the length it breaks.  The sentex page shows it always; a list row shows only the reason and only when the row is OUT — a believed
   row's dimmed badge already reads as believed.  The one authority `in?` folds every
@@ -1417,10 +1417,12 @@
 (defn- belief-detail
   "When a sentex is stored but OUT, render *why* from `why-not`: the restatement that
   superseded it (an equality merge), the sentexes that contradict a defeated one, or
-  the missing antecedents of an unsupported one.  Nothing for a believed sentex — its
+  the exception that blocks an excepted one, or the missing antecedents of an unsupported
+  one.  Nothing for a believed sentex — its
   proof is the \"Supported by\" section."
   [{:keys [kb] :as view} h]
-  (let [{:keys [reason superseded-by contradicted-by grounds binding denies support]} (v/why-not kb h)]
+  (let [{:keys [reason superseded-by contradicted-by grounds binding denies support rule exception via]}
+        (v/why-not kb h)]
     (case reason
       :superseded
       [:div.belief
@@ -1471,6 +1473,13 @@
                "of a nogood, so a denial of it is stored and never weighed against it."])
             (when (seq declarations)
               [:ul (for [d declarations] [:li "declared by " (handle-ref view d)])]))))]
+      :excepted
+      [:div.belief
+       [:p [:b "Excepted"] " — the rule " (handle-ref view rule) " states its own exception, "
+        [:span.sx (pr-str exception)] ", which holds here"
+        (when (seq via)
+          (list " for the binding from " (interpose ", " (map #(handle-ref view %) via))))
+        "."]]
       :unsupported
       [:div.belief
        [:p [:b "Unsupported"] " — not a premise, and every justification has an OUT argument."]

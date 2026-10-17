@@ -426,30 +426,20 @@
       (is (= #{Tweety} (set (map #(get % '?who)
                                  (v/ask kb (list flies '?who) CxBird))))))))
 
-;; SPEC NOTE — this test cannot be written against today's API and is written in
-;; the form it must take.  `why-not` takes a **handle**, and an excepted
-;; conclusion has none: nothing is stored (decision "the exception is never
-;; stored"), so the question can only be asked of a sentence in a context.  The
-;; doc requires the *answer* but does not name the arity or the reason keyword;
-;; `:excepted` and `:exception` are this suite's choice.  Expect an ArityException
-;; until `why-not` grows the sentence arity.
-
 (tu/deftest-kb why-not-reports-an-excepted-conclusion-as-excepted-not-unsupported
-  (tu/with-terms [bird penguin flies Opus CxBird]
-    (v/assert kb (except-rule (list penguin '?b)
-                              [(list bird '?b)] (list flies '?b))
-              CxBird)
-    (v/assert kb (list bird Opus)    CxBird)
-    (v/assert kb (list penguin Opus) CxBird {:strength :monotonic})
-    (testing "there is no handle to ask about — the conclusion was never stored"
-      (is (nil? (v/handle-of kb (list flies Opus) CxBird))))
-    (let [wn (v/why-not kb (list flies Opus) CxBird)]
-      (testing "the reason names the exception, not a missing support"
-        (is (false? (:believed? wn)))
-        (is (= :excepted (:reason wn))
-            "an excepted conclusion is not :unsupported and not :defeated")
-        (is (= (list penguin Opus) (:exception wn))
-            "the ground exception that held, with the rule's bindings substituted")))))
+  ;; A `:monotonic` blocker leaves no conclusion stored, so only the sentence arity can
+  ;; ask; a `:default` one stores it with a guard defeat, and the handle arity answers too.
+  (doseq [strength [:monotonic :default]]
+    (tu/with-terms [bird penguin flies Opus CxBird]
+      (v/assert kb (except-rule (list penguin '?b) [(list bird '?b)] (list flies '?b)) CxBird)
+      (v/assert kb (list bird Opus) CxBird)
+      (v/assert kb (list penguin Opus) CxBird {:strength strength})
+      (let [h   (v/handle-of kb (list flies Opus) CxBird)
+            wns (cond-> [(v/why-not kb (list flies Opus) CxBird)] h (conj (v/why-not kb h)))]
+        (testing (str strength)
+          (is (= (= :default strength) (some? h)))
+          (is (= (repeat (count wns) [false :excepted (list penguin Opus)])
+                 (map (juxt :believed? :reason :exception) wns))))))))
 
 ;; ---- 11. rebutting dilemmas still coexist -------------------------------
 ;; DECISION (Semantics): "two rules concluding `P` and `¬P` with neither naming the

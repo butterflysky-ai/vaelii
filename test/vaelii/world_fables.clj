@@ -120,8 +120,9 @@
 
 (defn- boy-who-cried-wolf [kb]
   ;; A liar is a narrower kind of speaker than a person.  Nothing is arbitrated here:
-  ;; the belief rule states its own exception with `exceptWhen`, so for a liar it
-  ;; concludes nothing and there is no clash to resolve.  The `genl` edge is what lets
+  ;; the belief rule states its own exception with `exceptWhen`.  `(liar BoyA)` is
+  ;; `:default`, so the conclusion is stored with a guard defeat, and no believed sentence
+  ;; clashes with `(not (believed BoyA))`.  The `genl` edge is what lets
   ;; the exception be stated at the type rather than at every liar individually.
   (v/assert kb '(genl liar person) 'CxCriedWolf)
   ;; what the comment on lied_before says, stated: the quality reading's clash census reads
@@ -136,7 +137,7 @@
   ;; having raised a false alarm is what makes him one
   (v/assert-rule kb '[(lied_before ?x)] '(liar ?x) 'CxCriedWolf {:direction :forward})
   ;; a cry is believed by default — **except** from a liar.  The exception rides on
-  ;; the rule (`exceptWhen`), so for a liar the rule concludes nothing at all.
+  ;; the rule (`exceptWhen`), so for a liar the conclusion is not believed.
   ;;
   ;; This is the harder of the two bundled cases, and deliberately so: `liar` is not
   ;; asserted, it is *derived* by the rule above.  So the exception depends on what

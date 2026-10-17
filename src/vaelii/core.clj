@@ -6837,17 +6837,68 @@
                          (into [] (comp (filter (fn [[_ dc]] (tax/sees? tax c dc))) (map key))
                                (sort-by (comp nm/print-key val) (:declarations r)))))}))
 
+(defn- excepted-argument
+  "The argument for `sentence` in `context` that some excepted rule built and then
+  discarded, or nil.
+
+  This is the backward reading of a blocked firing: take the rules that could conclude
+  the goal's predicate, keep the ones carrying an `exceptWhen`, unify the goal with the
+  consequent to seed the bindings, complete them by joining the antecedents against
+  believed facts, and report the first completion whose exception holds.
+
+  The exception is checked in the **query's** context, which is where the caller is
+  asking from and where a conclusion would have been placed.  The ground exception is
+  returned as a bare sentence when the rule states one conjunct and as a vector when it
+  states several, matching how it was written.
+
+  The completion reported is the **content-least** — the rule's sentence, then the
+  ground exception, then what the join matched — never the first the rule index
+  happened to yield: two excepted rules concluding one goal would otherwise make the
+  whole answer a function of which was asserted first.
+
+  The key is **structural** (`nm/compare-form` through `nm/min-by-content-key`), not a
+  printed one: a caller with an ambient `*print-length*` would elide two long rule
+  sentences to one prefix, collapse the key, and drop the choice back onto the rule
+  index's enumeration — which is handle order, the dependence this ordering exists to
+  remove.  Its third component is what `:via` names, as sentences: two completions of
+  one rule can ground the same exception through different facts, and `:via` is part of
+  the answer, so the tie is broken on what those facts *say* rather than on which
+  join reached the reporting site first."
+  [kb sentence context]
+  (->> (for [rh   (rules/direct-concluders (:index kb) (nm/functor sentence))
+             :let [rsx (p/get-sentex (:records kb) rh)]
+             :when (and rsx (rules/rule? rsx) (reads/watched-rule? (:index kb) rh) (in? kb rh))
+             :let  [rule (chain/rule-view-of kb rh rsx)
+                    b0   (res/unify (:consequent rule) sentence)]
+             :when b0
+             {:keys [bindings handles]} (chain/solve-rule kb (:antecedents rule) b0)
+             except (provers/rule-exceptions kb rh context)
+             :when (chain/exception-holds? kb except bindings context)]
+         (let [ground (mapv #(sx/canon (res/substitute % bindings)) except)]
+           [[(sx/sentence-of rsx) ground
+             (mapv #(:sentence (p/get-sentex (:records kb) %)) handles)]
+            {:rule rh
+             :exception (if (= 1 (count ground)) (first ground) ground)
+             :via (vec handles)}]))
+       (nm/min-by-content-key first)
+       second))
+
 (defn- why-not-handle
   "`why-not` of a stored handle — the original arity, factored out so the sentence
   arity can delegate to it."
   [kb handle]
-  (let [sx   (sentex kb handle)
-        base {:handle handle :sentence (readable-sentence sx) :context (:context sx)}]
+  (let [sx       (sentex kb handle)
+        base     {:handle handle :sentence (readable-sentence sx) :context (:context sx)}
+        excepted (delay (excepted-argument kb (:sentence base) (:context sx)))]
     (cond
       (nil? sx)         (assoc base :believed? false :reason :not-stored)
       ;; belief as the sentex's own context reads it: IN, and not withdrawn there by a
       ;; scoped defeat (`res/believed-at?`)
       (res/believed-at? kb handle (:context sx)) (assoc base :believed? true)
+      ;; a firing a `:default` blocker excepts is stored with a guard defeat
+      ;; (docs/exceptions.md), and excepted is the more specific answer than the rest
+      (some? @excepted)
+      (merge (assoc base :believed? false :reason :excepted) @excepted)
       ;; Checked before `:defeated` and before `:unsupported`, because it is the more
       ;; specific answer and neither of the others is true of it: a superseded
       ;; spelling lost no argument and kept all of its support — it was *restated*
@@ -6921,52 +6972,6 @@
                                   void))
           (assoc base :believed? false :reason :unsupported
                  :premise? (premise? kb handle) :support support))))))
-
-(defn- excepted-argument
-  "The argument for `sentence` in `context` that some excepted rule built and then
-  discarded, or nil.
-
-  This is the backward reading of a blocked firing: take the rules that could conclude
-  the goal's predicate, keep the ones carrying an `exceptWhen`, unify the goal with the
-  consequent to seed the bindings, complete them by joining the antecedents against
-  believed facts, and report the first completion whose exception holds.
-
-  The exception is checked in the **query's** context, which is where the caller is
-  asking from and where a conclusion would have been placed.  The ground exception is
-  returned as a bare sentence when the rule states one conjunct and as a vector when it
-  states several, matching how it was written.
-
-  The completion reported is the **content-least** — the rule's sentence, then the
-  ground exception, then what the join matched — never the first the rule index
-  happened to yield: two excepted rules concluding one goal would otherwise make the
-  whole answer a function of which was asserted first.
-
-  The key is **structural** (`nm/compare-form` through `nm/min-by-content-key`), not a
-  printed one: a caller with an ambient `*print-length*` would elide two long rule
-  sentences to one prefix, collapse the key, and drop the choice back onto the rule
-  index's enumeration — which is handle order, the dependence this ordering exists to
-  remove.  Its third component is what `:via` names, as sentences: two completions of
-  one rule can ground the same exception through different facts, and `:via` is part of
-  the answer, so the tie is broken on what those facts *say* rather than on which
-  join reached the reporting site first."
-  [kb sentence context]
-  (->> (for [rh   (rules/direct-concluders (:index kb) (nm/functor sentence))
-             :let [rsx (p/get-sentex (:records kb) rh)]
-             :when (and rsx (rules/rule? rsx) (reads/watched-rule? (:index kb) rh) (in? kb rh))
-             :let  [rule (chain/rule-view-of kb rh rsx)
-                    b0   (res/unify (:consequent rule) sentence)]
-             :when b0
-             {:keys [bindings handles]} (chain/solve-rule kb (:antecedents rule) b0)
-             except (provers/rule-exceptions kb rh context)
-             :when (chain/exception-holds? kb except bindings context)]
-         (let [ground (mapv #(sx/canon (res/substitute % bindings)) except)]
-           [[(sx/sentence-of rsx) ground
-             (mapv #(:sentence (p/get-sentex (:records kb) %)) handles)]
-            {:rule rh
-             :exception (if (= 1 (count ground)) (first ground) ground)
-             :via (vec handles)}]))
-       (nm/min-by-content-key first)
-       second))
 
 ;; ---- why-not's near misses: the rules that nearly concluded it ------------
 ;; `:not-stored` is the emptiest answer `why-not` has: nothing is stored, so there is no
@@ -7148,7 +7153,7 @@
   | `:inert` | a denial of a literal on the forced-monotonic roster as its own context reads it, or a tuple whose length breaks its functor's, stored and held OUT (docs/nmtms.md). `:binding` names the length the tuple breaks, `{:length n}` or `{:min m}`, the predicate `:via` binds it and the binding handles under `:grounds` (docs/taxonomy.md, \"Arity\"). `:denies` names the literal a denial denies: its `:sentence`, its `:handle` in the same context or nil, whether that context believes it under `:believed?`, and under `:roster` the `:predicate` putting it on the roster, the roster `:kind`, whether the engine's own roster holds it under `:global?`, and the `:declarations` the context sees | `:binding` for a tuple, `:denies` for a denial |
   | `:forced-conclusion` | not a premise, and a supporting justification is a firing held void, at its own context, for concluding a roster literal from antecedents off the roster (docs/nmtms.md). Each `:convicted` entry names the `:rule` and the antecedent predicates `:off-roster` that a `forced_monotonic_predicate` declaration puts on the roster; `:support` lists the other justifications as `:unsupported` does | `:convicted` `:support` |
   | `:unsupported` | not a premise, and every supporting justification has an antecedent that is OUT | `:support` with `:missing` |
-  | `:excepted` | *(sentence arity only)* a rule applied and its `exceptWhen` query held, so it concluded nothing | `:rule` `:exception` `:via` |
+  | `:excepted` | a rule applied and its `exceptWhen` query held: through `:monotonic` facts it concluded nothing, and through a `:default` blocker its conclusion is stored with a guard defeat (docs/exceptions.md) | `:rule` `:exception` `:via` |
   | `:closed-extent` | *(sentence arity only)* nothing stored or derived says so, **and** `(closed_extent_predicate P)` is visible here, or a `(closedExtentForArg P n v)` whose position `n` the sentence fills with `v` — so the KB is not silent about it, it says the extent is complete and this is not in it | — |
 
   A believed handle yields `{:believed? true}` and no `:reason`.  An empty `:support`
@@ -7161,11 +7166,13 @@
   a defeat of the handle (`exc/defeat-member-sets`), including a nogood that does not
   convict at that context.
 
+  A stored-but-disbelieved handle is checked for an exception first: excepted is the
+  more specific answer than the rest.
+
   **The sentence arity** `(why-not kb sentence context)` exists because `exceptWhen`
-  produces an answer no handle can carry: a blocked conclusion is never stored, so
-  there is nothing to pass to the handle arity.  A stored sentence delegates to that
-  arity, except that a stored-but-disbelieved one is checked for an exception first —
-  excepted is the more specific answer than unsupported.  A sentence `context` stores
+  produces an answer no handle can carry: a conclusion blocked through `:monotonic` facts
+  is never stored, so there is nothing to pass to the handle arity.  A stored sentence
+  delegates to that arity.  A sentence `context` stores
   nothing for is looked for in the contexts `context` inherits from, most specific first
   (`inherited-sentex-handle`), since `ask?` and `believed?` answer from those too.  Neither
   stored, inherited nor excepted is `:not-stored`.  It takes an `(ist Ctx S)` sentence, asking after S in Ctx and
@@ -7201,7 +7208,7 @@
    (let [[sentence context] (checked-ist-goal kb sentence context)
          ;; the stored spelling of a ground reifiable NAT is its constant (`handle-of`)
          h (kb/find-sentex-handle kb (nat/maybe-reify-for-read kb sentence context) context)]
-     (if (and h (in? kb h))
+     (if h
        (why-not-handle kb h)
        (if-let [exc (excepted-argument kb sentence context)]
          (merge {:handle h :sentence sentence :context context :believed? false

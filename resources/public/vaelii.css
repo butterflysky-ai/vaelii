@@ -494,6 +494,7 @@ header.site {
 .tag-premise     { background: #6a4bbd; }  /* asserted, not derived             */
 .tag-superseded  { background: #b5651d; }  /* displaced by an equality merge    */
 .tag-defeated    { background: #c0392b; }  /* forced OUT by contradiction       */
+.tag-excepted    { background: #8a6d00; }  /* blocked by the rule's exceptWhen  */
 .tag-unsupported { background: #999;    }  /* no believed justification         */
 .tag-not-stored  { background: #999;    }
 .tag-out         { background: #bbb;    }  /* generic not-believed marker        */

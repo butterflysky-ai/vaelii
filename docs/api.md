@@ -610,16 +610,15 @@ assertable-strengths                            ; #{:monotonic :default}, the se
                                                 ;   + :denies, the literal and its roster)
                                                 ; / :forced-conclusion (+ the rule and its
                                                 ;   antecedent predicates off the roster)
+                                                ; / :excepted (+ the exceptWhen whose :default
+                                                ;   blocker its guard defeat rests on), checked first
                                                 ; / :unsupported (+ the missing antecedents) / :not-stored
-(why-not kb sentence context)                   ; the same reasons, plus the two only this arity
-                                                ; can reach: :excepted (+ the exceptWhen that blocks
-                                                ; it) and :closed-extent (a closed_extent_predicate
-                                                ; grant says the extent is complete and this is not
-                                                ; in it) — neither is ever stored, so
-                                                ; there is no handle to pass.  A stored sentence
-                                                ; delegates to the handle arity, except that a
-                                                ; stored-but-disbelieved one is checked for an
-                                                ; exception first
+(why-not kb sentence context)                   ; the same reasons, plus :closed-extent (a
+                                                ; closed_extent_predicate grant says the extent is
+                                                ; complete and this is not in it) and :excepted for
+                                                ; a conclusion a :monotonic blocker leaves unstored —
+                                                ; there is no handle to pass for either.  A stored
+                                                ; sentence delegates to the handle arity
 (why-not kb sentence context opts)              ; {:nearest n} runs a BOUNDED backward search and
                                                 ; adds :nearest — the n rules that came closest, each
                                                 ; {:rule :rule-sentence :satisfied :missing :bindings}

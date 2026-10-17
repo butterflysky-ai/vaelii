@@ -45,7 +45,7 @@ Under backward chaining the argument is constructed and then reported as excepte
 recorded.
 
 `why-not` therefore needs an arity that takes a **sentence and a context**, not
-just a handle. A refused conclusion is never created, so it has no handle to ask
+just a handle. A conclusion refused through `:monotonic` facts is never created, so it has no handle to ask
 about — the question is only askable of a proposition. It answers `{:reason
 :excepted :rule <handle> :exception <ground sentence> :via <antecedent handles>}`,
 which is the argument the backward chainer built before discarding it.
@@ -1186,8 +1186,10 @@ concludes nothing. Two `exceptWhen`s written together conjoin into one meta-sent
   `settle` runs it over the newly-blocked justifications' conclusions.
 - **Revival.** `retract!` captures the released rules before settling and re-chains
   them, so the re-derivation is visible by the time it returns.
-- **`why-not`** carries a `(kb sentence context)` arity and the `:excepted` reason, which
-  is the only route to a blocked conclusion: it is never stored, so there is no handle.
+- **`why-not`** carries a `(kb sentence context)` arity and the `:excepted` reason. The
+  sentence arity is the only route to a conclusion blocked through `:monotonic` facts,
+  which is never stored. A conclusion stored with a guard defeat answers `:excepted`
+  through the handle arity too (`except_test`).
 - **Stratification.** `wff/negation-cycle` walks the rule dependency graph on every
   rule assert and refuses one that closes a cycle through negation, before anything
   is stored. Per the measurement below it is a *correctness* guard, not an

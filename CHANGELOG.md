@@ -46,6 +46,17 @@ it — `git show v0.16.0:CHANGELOG.md`.
   *Migration:* `scripts/with-foreign.sh <task>` is gone; run `lein with-profile
   +with-foreign <task>`.
 
+### Fix: answers
+
+- **`why-not` of a handle answers `:excepted` for a conclusion stored with a guard
+  defeat.** A conclusion whose `exceptWhen` holds through a `:default` blocker is stored
+  OUT with a guard defeat. `why-not` of its handle answered `:unsupported` with no missing
+  antecedent, and the browser's belief pill read "unsupported". It now answers
+  `:excepted` with `:rule`, `:exception` and `:via`, as the sentence arity does.
+  [exceptions.md](docs/exceptions.md#semantics)
+
+  *Migration:* none. A caller reading `:unsupported` off such a handle reads `:excepted`.
+
 ### Fix: performance
 
 - **A goal on a predicate with many sub-predicates reads only the members that can answer

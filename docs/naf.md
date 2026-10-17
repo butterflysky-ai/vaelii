@@ -602,11 +602,12 @@ defeated `S` — closed-world negation reads current belief, not mere storage.
 - Blocking produces **no nogood**: a blocked conclusion does not exist, so nothing is
   contradictory and nothing is arbitrated. `unknown` is undercutting, like
   `exceptWhen` — not a rebuttal.
-- A blocked conclusion has no handle, so the sentence arity `why-not (kb sentence
-  context)` is the only one that can be asked of it. It reports `:excepted` for an
-  `exceptWhen` block and `:closed-extent` for a positive goal under a visible grant; a
-  conclusion an `(unknown S)` antecedent blocked reads `:not-stored`, nothing having
-  been placed.
+- A conclusion blocked through `:monotonic` facts has no handle, so the sentence arity
+  `why-not (kb sentence context)` is the only one that can be asked of it. It reports
+  `:excepted` for an `exceptWhen` block and `:closed-extent` for a positive goal under a
+  visible grant; a conclusion an `(unknown S)` antecedent blocked reads `:not-stored`,
+  nothing having been placed. A conclusion stored with a guard defeat reads `:excepted`
+  through both arities.
 
 ## Deferred antecedents in every chainer
 
