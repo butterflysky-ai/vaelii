@@ -445,8 +445,9 @@ leaves room for an atypical `pa` outside `pb`, so with `(genl pa pb)` at `:defau
 `:unknown`. A separation's denial takes the same rule ([taxonomy.md](taxonomy.md), *A
 separation answers a denial*). `match1`, `subsuming-unify` and `fanned-match` read the
 one closure, so a stored denial, a backward rule's denial and a forward firing on a
-negated antecedent stop at the same edges. A firing's negated links, and a `supertype`
-nogood's link ([nmtms.md](nmtms.md#the-nogood-families)), are placed only where a path of
+negated antecedent stop at the same edges. A firing's negated links, a guard defeat's
+negated links, a `supertype` nogood's link and a cover nogood's link from a part to a
+denied supertype of it ([nmtms.md](nmtms.md#the-nogood-families)) are placed only where a path of
 `:monotonic` edges is seen: with the edge at `:default` in CxUniverse and at `:monotonic`
 in a context below it, a rule in CxUniverse places its conclusion in that context and not
 in CxUniverse (`chain/placements-over`'s `strict`). A `:monotonic` supporter arriving for

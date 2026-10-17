@@ -1709,7 +1709,9 @@ its separating declarations and the `genl` edges its reading climbs as grounds; 
 `supertype` nogood has the edges alone
 ([A nogood placed as a conclusion](#a-nogood-placed-as-a-conclusion)). A `supertype`
 nogood reads the edges' contrapositive, so it is placed only where the held type reaches
-the denied type at `:monotonic` ([inference.md](inference.md#predicate-subsumption-in-matching)).
+the denied type at `:monotonic` ([inference.md](inference.md#predicate-subsumption-in-matching)),
+and a cover nogood's denial of a supertype of a part denies the part only where the part
+reaches it at `:monotonic`.
 
 **The reports.** `conflicts` and `contradictions` read the placed `contradicts` at the
 read ([The clash reports](#the-clash-reports)): each placed nogood reports its verdict at

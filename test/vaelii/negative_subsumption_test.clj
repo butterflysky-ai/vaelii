@@ -230,6 +230,24 @@
             (v/retract! kb mono)
             (is (not (seen CxSide)) "and the firing leaves with it, though the default supporter stays")))))))
 
+(tu/deftest-kb a-negated-exception-blocks-through-a-monotonic-edge-where-it-is-seen
+  ;; the exception (not (pa ?x)) holds of A through pa ⊑ pb in CxSide, which holds the
+  ;; edge at :monotonic, and not in CxUniverse, which holds it at :default: the guard
+  ;; defeat is placed in CxSide.  With the CxUniverse edge at :monotonic it blocks in both.
+  (doseq [[universe-edge seen] [[:default [true false]] [:monotonic [false false]]]]
+    (tu/with-terms [pa_t pb_t r_t s_t A CxSide]
+      (let [x (symbol "?x")]
+        (v/assert kb (list 'genlCx CxSide 'CxUniverse) 'CxUniverse)
+        (v/assert kb (list 'genl pa_t pb_t) 'CxUniverse {:strength universe-edge})
+        (v/assert kb (list 'genl pa_t pb_t) CxSide {:strength :monotonic})
+        (v/assert kb (list 'exceptWhen (negate (list pa_t x))
+                           (list 'set/defaultRule
+                                 (list 'set/forwardRule (rules/rule-sentence [(list r_t x)] (list s_t x)))))
+                  'CxUniverse)
+        (v/assert kb (list r_t A) 'CxUniverse {:strength :monotonic})
+        (v/assert kb (negate (list pb_t A)) 'CxUniverse {:strength :monotonic})
+        (is (= seen (mapv #(v/ask? kb (list s_t A) %) ['CxUniverse CxSide])) (str universe-edge))))))
+
 (tu/deftest-kb subsuming-unify-honors-consequent-genl-under-a-negation
   (tu/with-terms [fatherOf parentOf loves A B]
     (v/assert kb (list 'genl fatherOf parentOf) 'CxUniverse {:strength :monotonic})

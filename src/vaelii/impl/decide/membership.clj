@@ -526,10 +526,11 @@
 (defn- cover-routes
   "The routes of a cover nogood over the held types `pos` and the denied types `neg`
   (`routes`), read off every stored cover: for each held type `s` and each cover over a
-  whole above it, one route per choice of a denier for each part.  A part a denial of
-  the part or of a supertype of it covers takes the first such denial, its subsumption a
-  link.  Any other part takes each route a declaration separates another held type from
-  it through (`tax/separation-routes`): the route's keys and links join the cover's, its
+  whole above it, one route per choice of a denier for each part.  A part denied itself
+  takes that denial.  Any other part takes each denial of a supertype of it, the
+  subsumption a link and a `:strict-links` (a `:default` edge does not contrapose,
+  docs/inference.md), and each route a declaration separates another held type from it
+  through (`tax/separation-routes`): the route's keys and links join the cover's, its
   links are `:strict-links`, its `[:member m y]` keys are `:strict-keys`, and a mark
   route's separated pair is in `:pairs`.  The placement reads the soundness rule of a
   separation's denial off those three (`chain/route-placements`).  A route is a superset
@@ -541,18 +542,22 @@
            [whole parts] (distinct (tax/covers-over tax s nil))
            [ps kind] (tax/covers-of tax whole)
            :when (= ps parts)
-           :let [per (for [p parts]
-                       (if-let [q (first (filter #(contains? ((:genls-global w) p) %) neg))]
-                         [{:links [[p q]]}]
-                         (for [d pos
-                               :when (not= d s)
-                               r (tax/separation-routes-held tax d p)]
-                           {:keys   (:keys r) :links (:links r)
-                            :strict (filterv #(= :member (first %)) (:keys r))
-                            :pair   (when (:mark? r) (:pair r))})))]
+           :let [per (for [p parts
+                           :let [qs (filter #(contains? ((:genls-global w) p) %) neg)]]
+                       (if (some #{p} qs)
+                         [{:links [[p p]]}]
+                         ;; a denial above the part reads the edge's contrapositive
+                         (concat
+                          (for [q qs] {:links [[p q]] :strict-links [[p q]]})
+                          (for [d pos
+                                :when (not= d s)
+                                r (tax/separation-routes-held tax d p)]
+                            {:keys   (:keys r) :links (:links r)
+                             :strict (filterv #(= :member (first %)) (:keys r))
+                             :pair   (when (:mark? r) (:pair r))}))))]
            :when (every? seq per)
            combo (combinations per)]
-       (let [strict (into [] (mapcat :links) (filter :keys combo))]
+       (let [strict (into [] (mapcat #(or (:strict-links %) (when (:keys %) (:links %)))) combo)]
          (cond-> {:keys  (into #{[:cover [whole parts] kind]} (mapcat :keys) combo)
                   :links (into [] (remove (fn [[a b]] (= a b)))
                                (cons [s whole] (mapcat :links combo)))}
@@ -566,9 +571,10 @@
   [[sub super]] :pair [x y]}`, the flat-cache keys read, the `genl` subsumptions climbed
   and the separated pair.  For a `:cover` one, a cover over a whole above the held type
   with a member denial at or above each part: the cover's key, the subsumption from the
-  held type to the whole and from each part to the first such denial's type, and no
-  pair, and for a part a held type's separation denies, the separation's keys and links
-  with the soundness rule's `:strict-links`, `:strict-keys` and `:pairs` (`cover-routes`).
+  held type to the whole and from each part to a denial's type, that subsumption a
+  `:strict-links` too when the denial is above the part, and no pair, and for a part a
+  held type's separation denies, the separation's keys and links with the soundness
+  rule's `:strict-links`, `:strict-keys` and `:pairs` (`cover-routes`).
   A `:disjoint` one takes each cover route of its two memberships besides, since
   `term-nogoods` keeps a cover refuted by the same two memberships as the one nogood.
   For a `:supertype` one, the subsumption from the held type to the denied type with no

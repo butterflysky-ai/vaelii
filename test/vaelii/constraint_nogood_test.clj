@@ -570,6 +570,25 @@
                                   (v/ask? kb (list dog Rex) 'CxUniverse)
                                   (v/ask? kb denial 'CxUniverse)]))))))))))
 
+(deftest a-denial-of-a-supertype-of-a-part-refutes-a-cover-through-a-monotonic-edge-only-in-every-order
+  ;; (covering w p1 p2), p1 ⊑ q1, (w X), (not (q1 X)) and (not (p2 X)): a :monotonic edge
+  ;; makes (not (q1 X)) deny p1, so the default (w X) loses; a :default edge leaves room
+  ;; for an atypical p1 outside q1, and no nogood forms
+  (doseq [edge  [:monotonic :default]
+          order (permutations [:cover :edge :member :deny])]
+    (tu/with-kb [kb]
+      (tu/with-terms [w p1 p2 q1 X]
+        (let [m      {:strength :monotonic}
+              member (list w X)
+              writes {:cover  #(v/assert kb (list 'covering w p1 p2) 'CxUniverse m)
+                      :edge   #(v/assert kb (list 'genl p1 q1) 'CxUniverse {:strength edge})
+                      :member #(v/assert kb member 'CxUniverse {:strength :default})
+                      :deny   #(do (v/assert kb (list 'not (list q1 X)) 'CxUniverse m)
+                                   (v/assert kb (list 'not (list p2 X)) 'CxUniverse m))}]
+          (doseq [o order] ((writes o)))
+          (testing [edge order]
+            (is (= (= :default edge) (v/ask? kb member 'CxUniverse)))))))))
+
 (tu/deftest-kb a-supertype-nogood-is-placed-where-its-edge-holds-at-monotonic
   ;; dog ⊑ animal at :default in CxUniverse and at :monotonic in CxSide: the default
   ;; (dog Rex) loses to the known-true denial in CxSide alone, and only while the

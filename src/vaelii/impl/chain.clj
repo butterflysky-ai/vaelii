@@ -2361,6 +2361,13 @@
   (when-let [hs (link-witness tax link vantage holding)]
     (when (every? #(= :monotonic (holding (first %))) hs) hs)))
 
+(defn- negated-links
+  "The set of the `links` (`subsumption-links` of `matched`) a negated literal climbed,
+  each an edge's contrapositive, or nil."
+  [kb matched record-of links]
+  (when (seq links)
+    (not-empty (set (subsumption-links kb (filterv #(vector? (first %)) matched) record-of)))))
+
 (defn- subsumption-support
   "A witness for each of a firing's subsumptions, as `[handle ctx]` supporter pairs
   (`tax/reach-support`) — or nil when `vantage` sees no path for one of them.  A nil
@@ -2601,7 +2608,8 @@
   shape) of a firing whose conclusion F is placed in `pctx`, under the settled bindings
   `b`.  For each solution read with no context (`guard-solutions`), each context
   `placements-over` gives for the handles the solution read, over their contexts and
-  `pctx`, with the `genl` pairs its match climbed (`subsumption-links`), where the
+  `pctx`, with the `genl` pairs its match climbed (`subsumption-links`, a negated one
+  witnessed at `:monotonic` only, `negated-links`), where the
   condition holds in the network and through the excepts (`provers/exception-holds?`
   under `tax/*network-belief*`).  `blockers` is the solution's handles, the
   `exceptWhen`'s own handle, and the `genl` and `genlCx` edges `placements-over` names for
@@ -2618,9 +2626,9 @@
         holds? (fn [conds q] (binding [tax/*network-belief* true]
                                (provers/exception-holds? kb conds b q)))
         ;; the `exceptWhen`'s own handle `hs` is no blocker a defeat can hide
-        placed (fn [conds hs links blk]
+        placed (fn [conds hs links strict blk]
                  (let [ctxs   (into [pctx] (comp (keep #(:context (rec %))) (distinct)) blk)
-                       [ps m] (placements-over kb links blk ctxs)]
+                       [ps m] (placements-over kb links blk ctxs nil strict)]
                    (into [] (comp (filter #(or (not own?) (= pctx %)))
                                   (filter #(holds? conds %))
                                   (map (fn [q] (let [bs (into blk (get m q))]
@@ -2630,14 +2638,15 @@
     (for [[cs hs] conds
           {sup :handles matched :matched}
           (distinct (map #(select-keys % [:handles :matched]) (guard-solutions kb cs b cpred)))
-          :let [blk   (into hs sup)
-                links (subsumption-links kb matched rec)
-                base  (placed cs hs links blk)
+          :let [blk    (into hs sup)
+                links  (subsumption-links kb matched rec)
+                strict (negated-links kb matched rec links)
+                base   (placed cs hs links strict blk)
                 bctxs (mapv first base)]
           pl (if own?
                base
                (into base
-                     (comp (mapcat #(placed cs hs links (conj blk %)))
+                     (comp (mapcat #(placed cs hs links strict (conj blk %)))
                            (remove (fn [[q]] (some #(tax/sees? tax q %) bctxs))))
                      (blocker-support-hiders kb blk f)))]
       pl)))
@@ -4219,10 +4228,7 @@
                                                   (when (< i (count facts))
                                                     (if (= h (nth handles i)) (nth facts i) (recur (inc i))))))
                               links     (subsumption-links kb matched record-of)
-                              ;; a negated antecedent's links read an edge's contrapositive
-                              strict    (when (seq links)
-                                          (not-empty (set (subsumption-links kb (filterv #(vector? (first %)) matched)
-                                                                             record-of))))
+                              strict    (negated-links kb matched record-of links)
                               rule      (cond-> rule (some declaration-record? facts) (assoc :inherited? true))]
                           (reduce (fn [acc c]
                                     (into acc (place-conseq kb rule c handles placed all-antes links strict
