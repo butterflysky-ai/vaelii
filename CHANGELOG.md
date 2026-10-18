@@ -47,6 +47,19 @@ it — `git show v0.16.0:CHANGELOG.md`.
   binds, answers nil. `vaelii.client` and the daemon serve it. [api.md](docs/api.md),
   [web.md](docs/web.md).
 
+- **General happening roles admit interrupted occurrences; `invokesTool` is renamed
+  `toolInvoked`.** `actor` relates a happening to a meaningful participant, and
+  `thingPerceived` relates it to what is perceptually taken in. `doneBy`, `performedBy`,
+  `input`, `destroyedInput`, `preservedInput`, `output`, `tangibleOutput` and
+  `intangibleOutput` now declare `happening` rather than `event` in position 1. Participation
+  alone concludes neither intentional doing nor perception. The tool relation retains
+  its invocation-first argument order and `tool_invocation`/`software_tool` bounds.
+
+  *Migration:* update stored tool facts, rules, queries and writers to `toolInvoked`;
+  this change does not migrate a live store. Callers inspecting the eight role domains
+  must expect `happening`; state `event` separately when uninterrupted occurrence is
+  required. Existing participant subtype bounds remain in force.
+
 - **`+with-postgres`, `+with-sqlite` and `+with-foreign` add the published siblings to any
   lein task, the uberjar included.** `lein with-profile +with-postgres browser` opens a
   `:pg-*` KB from this checkout, `lein with-profile +with-postgres,+with-sqlite uberjar`

@@ -190,11 +190,15 @@ entailment is a derived, justified, retractable sentex under truth maintenance.
 constraint-only reading). Entailing changes what a KB *contains*, not only what it
 answers, so the constraint-only reading stays one `binding` away.
 
-**No shipped `arg`-family declaration types an argument `thing`.** Such a declaration
-rejects nothing under the constraint-only reading, and under the entailing one it derives
-only `(thing X)` (`starter_test/no-shipped-declaration-makes-an-argument-a-thing`). A
-`(genlArg P n thing)` declaration says position `n` holds a type, and the constraint-only
-reading convicts an individual there.
+**Unrestricted happening-participant positions carry explicit `thing` bounds.** The
+second slots of `actor`, `thingPerceived`, `doneBy`, `input`, `destroyedInput`,
+`preservedInput` and `output` deliberately admit any thing. Their bounds remain explicit
+on each predicate even when inherited, so a parent's revision cannot silently change a
+child's declared constraint. Such a declaration rejects nothing under the constraint-only
+reading and derives only `(thing X)` under the entailing one. The named exceptions are
+pinned by `starter_test/explicit-unrestricted-happening-participants-are-the-only-thing-slots`;
+other intentionally untyped positions remain rostered. A `(genlArg P n thing)` declaration
+says position `n` holds a type, and the constraint-only reading convicts an individual there.
 
 **Both readings prove the same sentences over the shipped ontology.** A membership or
 `genl` edge an argument declaration in `resources/kb/` derives is written in a KB file
