@@ -20,7 +20,7 @@
 (def ^:private CPT 'CxComputing)
 
 (def ^:private binary-relations
-  '[toolName invokesTool resourceUrl receipt probesPredicate dnsResolvesTo agentHasTool])
+  '[toolName toolInvoked resourceUrl receipt probesPredicate dnsResolvesTo agentHasTool])
 
 (def ^:private ternary-relations
   '[toolInvocationArg toolArgType toolArgComment])
@@ -99,15 +99,15 @@
     (tu/with-entailing
       (v/assert kb (list 'read_only_software_tool Grep) CxDesk)
       (v/assert kb (list 'write_capable_software_tool Remove) CxDesk)
-      (v/assert kb (list 'invokesTool CallOne Grep) CxDesk)
-      (v/assert kb (list 'invokesTool CallTwo Remove) CxDesk)
+      (v/assert kb (list 'toolInvoked CallOne Grep) CxDesk)
+      (v/assert kb (list 'toolInvoked CallTwo Remove) CxDesk)
       (v/assert kb (list 'receipt CallOne Slip) CxDesk)
       (v/assert kb (list 'resourceUrl Clip "https://example.org/clip") CxDesk))
     (testing "a read-only tool is acausal and a write-capable tool is causal"
       (is (v/isa? kb Grep 'acausal CxDesk))
       (is (v/isa? kb Remove 'causal CxDesk))
       (is (v/isa? kb Grep 'intangible CxDesk)))
-    (testing "the first argument of invokesTool is derived a tool_invocation"
+    (testing "the first argument of toolInvoked is derived a tool_invocation"
       (doseq [call [CallOne CallTwo]]
         (is (v/isa? kb call 'tool_invocation CxDesk))
         (is (v/isa? kb call 'event CxDesk))))
@@ -131,7 +131,7 @@
   (tu/with-terms [CxElsewhere Grep CallOne]
     (v/assert kb (list 'genlCx CxElsewhere 'CxWell) 'CxUniverse)
     (v/assert kb (list 'read_only_software_tool Grep) CxElsewhere)
-    (v/assert kb (list 'invokesTool CallOne Grep) CxElsewhere)
+    (v/assert kb (list 'toolInvoked CallOne Grep) CxElsewhere)
     (doseq [ctx [CxElsewhere 'CxWell 'CxUniverse]]
       (testing (str "no other declaration of a computing relation is read in " ctx)
         ;; The exact-arity classes and `functional` are decontextualized marks, so each
@@ -145,10 +145,10 @@
           (is (zero? (declared-positions p ctx)) (str p " in " ctx))
           (is (empty? (v/sentexes-matching kb (list 'comment p '?c) ctx)) (str p " in " ctx)))))
     (testing "the stated fact holds and no argument type is derived from it"
-      (is (holds-ask (list 'invokesTool CallOne Grep) CxElsewhere))
+      (is (holds-ask (list 'toolInvoked CallOne Grep) CxElsewhere))
       (is (not (v/isa? kb CallOne 'tool_invocation CxElsewhere))))
     (testing "a wrongly typed argument is not convicted there"
-      (is (empty? (problem-types (list 'invokesTool CallOne 5) CxElsewhere)))
+      (is (empty? (problem-types (list 'toolInvoked CallOne 5) CxElsewhere)))
       (is (empty? (problem-types (list 'toolName Grep 5) CxElsewhere))))
     (testing "the kinds are the theory's, so no context that does not see it reads a placement"
       (doseq [ctx [CxElsewhere 'CxWell 'CxUniverse] k kinds]
@@ -169,16 +169,16 @@
     (v/assert kb (list 'tool_invocation CallTwo) CxDesk)
     (v/assert kb (list 'stone Pebble) CxDesk)
     (testing "a well-typed sentence draws no problem"
-      (is (empty? (problem-types (list 'invokesTool CallOne Grep) CxDesk)))
+      (is (empty? (problem-types (list 'toolInvoked CallOne Grep) CxDesk)))
       (is (empty? (problem-types (list 'toolName Grep "grep") CxDesk)))
       (is (empty? (problem-types (list 'dnsResolvesTo "example.org" "192.0.2.1") CxDesk)))
       (is (empty? (problem-types (list 'probesPredicate Grep 'parentOf) CxDesk)))
       (is (empty? (problem-types (list 'toolArgType Grep "pattern" 'string) CxDesk))))
-    (testing "invokesTool takes a software tool in position 2"
-      (is (= [:arg-type] (problem-types (list 'invokesTool CallOne Pebble) CxDesk))
+    (testing "toolInvoked takes a software tool in position 2"
+      (is (= [:arg-type] (problem-types (list 'toolInvoked CallOne Pebble) CxDesk))
           "a stone is tangible and a software tool is intangible")
-      (is (= [:arg-type] (problem-types (list 'invokesTool CallOne 5) CxDesk)))
-      (is (= [:arg-type] (problem-types (list 'invokesTool CallOne "grep") CxDesk))))
+      (is (= [:arg-type] (problem-types (list 'toolInvoked CallOne 5) CxDesk)))
+      (is (= [:arg-type] (problem-types (list 'toolInvoked CallOne "grep") CxDesk))))
     (testing "receipt takes a tool receipt in position 2"
       (is (= [:arg-type] (problem-types (list 'receipt CallOne CallTwo) CxDesk))
           "a tool invocation is disjoint from a tool receipt"))

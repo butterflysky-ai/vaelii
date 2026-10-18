@@ -348,84 +348,106 @@
  (implies (and (causes ?cause ?effect))
           (instantNotAfter (StartFn ?cause) (StartFn ?effect))))
 
-;; --- doneBy / performedBy: an event's doer -----------------------------------
+;; --- actor / thingPerceived: a happening's participants ---------------------
+(comment actor "(actor ?happening ?participant) means that ?participant participates meaningfully in ?happening.")
+(binary_predicate actor)
+(set/monotonic (instance_relation_predicate actor))
+(arg actor 1 happening)
+(arg actor 2 thing)
+
+(comment thingPerceived "(thingPerceived ?happening ?thing) means that ?thing is what is perceptually taken in during ?happening.")
+(binary_predicate thingPerceived)
+(set/monotonic (instance_relation_predicate thingPerceived))
+(arg thingPerceived 1 happening)
+(arg thingPerceived 2 thing)
+(genl thingPerceived actor)
+
+;; --- doneBy / performedBy: a happening's doer -------------------------------
 (comment doneBy
-         "(doneBy ?event ?doer) means that ?doer brought about ?event, intentionally or not. The doer can be any thing — a person, an animal, a machine, a process — so the second position declares no type: agent names a registered participant rather than something that can act, and no type below thing covers every doer. performedBy is the intentional case.")
+         "(doneBy ?happening ?doer) means that ?doer brought about ?happening, intentionally or not.")
 (binary_predicate doneBy)
 (set/monotonic (instance_relation_predicate doneBy))
-(arg doneBy 1 event)
+(arg doneBy 1 happening)
+(arg doneBy 2 thing)
+(genl doneBy actor)
 
 (comment performedBy
-         "(performedBy ?event ?doer) means that ?doer intentionally initiated ?event. Specializes doneBy through a genl edge, so every performing is a doing and a doing is not concluded a performing.")
+         "(performedBy ?happening ?doer) means that ?doer intentionally initiated ?happening.")
 (binary_predicate performedBy)
 (set/monotonic (instance_relation_predicate performedBy))
-(arg performedBy 1 event)
+(arg performedBy 1 happening)
 (genl performedBy doneBy)
 
-;; --- input / output: what went into an event and what it left behind -----------
-;; Each relation takes the event first, as every relation over an event does.  Each states
+;; --- input / output: what went into a happening and what it left behind -----
+;; Each relation takes the happening first. Each states
 ;; binary_predicate beside instance_relation_predicate.  The arity check holds out a fact
 ;; of the wrong length only where binary_predicate is stated, and the genl edge from
 ;; instance_relation_predicate does not reach that check.  CxChange states when an input
-;; and an output exist relative to their event, in time.txt's point relations.
-(comment input "(input ?event ?thing) means that ?thing went into ?event. An instrument the event used and left unchanged is not an input. Contrast output.")
+;; and an output exist relative to their happening, in time.txt's point relations.
+(comment input "(input ?happening ?thing) means that ?thing went into ?happening. An instrument the happening used and left unchanged is not an input.")
 (positiveExampleComment input "the lettuce in a salad")
 (positiveExampleComment input "the ore in smelting")
 (positiveExampleComment input "the plank in sawing")
 (negativeExampleComment input "the knife or the saw, an instrument the event used and left unchanged")
 (binary_predicate input)
 (set/monotonic (instance_relation_predicate input))
-(arg input 1 event)
+(arg input 1 happening)
+(arg input 2 thing)
+(genl input actor)
 (termsRelated input output)
 
-(comment destroyedInput "(destroyedInput ?event ?thing) means that ?thing went into ?event and ceased to exist there.")
+(comment destroyedInput "(destroyedInput ?happening ?thing) means that ?thing went into ?happening and ceased to exist there.")
 (positiveExampleComment destroyedInput "the ore in smelting")
 (positiveExampleComment destroyedInput "the plank in sawing")
 (positiveExampleComment destroyedInput "the egg in an omelet")
 (negativeExampleComment destroyedInput "the lettuce in a salad, an input but not a destroyed one")
 (binary_predicate destroyedInput)
 (set/monotonic (instance_relation_predicate destroyedInput))
-(arg destroyedInput 1 event)
+(arg destroyedInput 1 happening)
+(arg destroyedInput 2 thing)
 (genl destroyedInput input)
 
-(comment preservedInput "(preservedInput ?event ?thing) means that ?thing went into ?event and still exists when ?event ends: the lettuce in a salad, the thread in a woven cloth.")
+(comment preservedInput "(preservedInput ?happening ?thing) means that ?thing went into ?happening and still exists when ?happening ends, e.g. the lettuce in a salad, the thread in a woven cloth.")
 (binary_predicate preservedInput)
 (set/monotonic (instance_relation_predicate preservedInput))
-(arg preservedInput 1 event)
+(arg preservedInput 1 happening)
+(arg preservedInput 2 thing)
 (genl preservedInput input)
 ;; No thing is both a destroyed and a preserved input of one event.  The KB does not
 ;; state the disjointness, because a separation over two relations constrains no tuple.
 
 (comment output
-         "(output ?event ?thing) means that ?event gave ?thing the form or content it has, as something it left behind. Whether that was the point of the event does not matter.")
+         "(output ?happening ?thing) means that ?happening gave ?thing the form or content it has, as something it left behind. Whether that was the point of the happening does not matter.")
 (positiveExampleComment output "a chair from its making")
 (positiveExampleComment output "sawdust from sawing")
 (positiveExampleComment output "a footprint from a step")
 (positiveExampleComment output "a file from a program run")
 (binary_predicate output)
 (set/monotonic (instance_relation_predicate output))
-(arg output 1 event)
+(arg output 1 happening)
+(arg output 2 thing)
+(genl output actor)
 
 (comment tangibleOutput
-         "(tangibleOutput ?event ?thing) means that ?thing is a tangible output of ?event.")
+         "(tangibleOutput ?happening ?thing) means that ?thing is a tangible output of ?happening.")
 (positiveExampleComment tangibleOutput "a chair from its making")
 (positiveExampleComment tangibleOutput "steel from smelting")
 (positiveExampleComment tangibleOutput "sawdust from sawing")
 (positiveExampleComment tangibleOutput "a footprint from a step")
 (binary_predicate tangibleOutput)
 (set/monotonic (instance_relation_predicate tangibleOutput))
-(arg tangibleOutput 1 event)
+(arg tangibleOutput 1 happening)
 (arg tangibleOutput 2 tangible)
 (genl tangibleOutput output)
 
 (comment intangibleOutput
-         "(intangibleOutput ?event ?thing) means that ?thing is an intangible output of ?event.")
+         "(intangibleOutput ?happening ?thing) means that ?thing is an intangible output of ?happening.")
 (positiveExampleComment intangibleOutput "a file from a program run")
 (positiveExampleComment intangibleOutput "a receipt from a tool call")
 (positiveExampleComment intangibleOutput "a recorded measurement from an observation")
 (binary_predicate intangibleOutput)
 (set/monotonic (instance_relation_predicate intangibleOutput))
-(arg intangibleOutput 1 event)
+(arg intangibleOutput 1 happening)
 (arg intangibleOutput 2 intangible)
 (genl intangibleOutput output)
 

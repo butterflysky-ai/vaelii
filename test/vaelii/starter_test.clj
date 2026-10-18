@@ -286,11 +286,17 @@
       (is (v/ask? kb (list 'physical_dimension dimension) c) (str dimension))
       (is (nil? (v/handle-of kb (list 'thing unit) c)) (str unit)))))
 
-(deftest no-shipped-declaration-makes-an-argument-a-thing
-  ;; `genlArg … thing` is not in the roster: it says the position holds a type
+(deftest explicit-unrestricted-happening-participants-are-the-only-thing-slots
+  ;; These participant positions deliberately admit any thing. Explicit per-predicate
+  ;; bounds are a named exception to the otherwise redundant-root-declaration rule.
+  ;; `genlArg … thing` is not in this audit: it says the position holds a type.
   (let [declares #{'arg 'arg1 'arg2 'arg3 'arg4 'arg5 'args 'argAndRest 'quotedArg}
-        bare     #(if (and (seq? %) (= 'set/monotonic (first %))) (second %) %)]
-    (is (empty? (for [[c s] (authored-sentences)
-                      :let  [s (bare s)]
-                      :when (and (seq? s) (declares (first s)) (= 'thing (last s)))]
-                  [c s])))))
+        bare     #(if (and (seq? %) (= 'set/monotonic (first %))) (second %) %)
+        allowed  '#{(arg actor 2 thing) (arg thingPerceived 2 thing)
+                    (arg doneBy 2 thing) (arg input 2 thing)
+                    (arg destroyedInput 2 thing) (arg preservedInput 2 thing)
+                    (arg output 2 thing)}]
+    (is (= allowed (set (for [[_ s] (authored-sentences)
+                              :let [s (bare s)]
+                              :when (and (seq? s) (declares (first s)) (= 'thing (last s)))]
+                          s))))))

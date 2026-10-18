@@ -159,11 +159,11 @@
 (arg probesPredicate 2 predicate)
 
 ;; ---- invocations and receipts --------------------------------------------
-(comment invokesTool "(invokesTool ?invocation ?tool) means that ?invocation is a call of ?tool.")
-(binary_predicate invokesTool)
-(set/monotonic (instance_relation_predicate invokesTool))
-(arg invokesTool 1 tool_invocation)
-(arg invokesTool 2 software_tool)
+(comment toolInvoked "(toolInvoked ?invocation ?tool) means that ?invocation is a call of ?tool.")
+(binary_predicate toolInvoked)
+(set/monotonic (instance_relation_predicate toolInvoked))
+(arg toolInvoked 1 tool_invocation)
+(arg toolInvoked 2 software_tool)
 
 (comment toolInvocationArg "(toolInvocationArg ?invocation ?key ?value) means that ?invocation passed the argument named ?key with the value ?value, in the text form the call carried, e.g. the key pattern with the value written for one run.")
 (ternary_predicate toolInvocationArg)
